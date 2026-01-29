@@ -568,7 +568,18 @@ const App: React.FC = () => {
         />;
 
       case 'documents':
-        return <DriverDocuments currentUser={currentUser} />;
+        // Vue chauffeur : DocumentManager filtré sur ses documents uniquement
+        return <DocumentManager 
+            documents={companyDocuments}
+            acknowledgments={documentAcknowledgments}
+            users={users}
+            currentUser={currentUser}
+            onAddDocument={handleAddCompanyDocument}
+            onUpdateDocument={handleUpdateCompanyDocument}
+            onDeleteDocument={handleDeleteCompanyDocument}
+            onAcknowledge={handleAcknowledgeDocument}
+            viewMode="employee"
+        />;
 
       case 'ai_advisor':
         return <AIAdvisor 
@@ -769,6 +780,7 @@ const App: React.FC = () => {
             isCollapsed={isSidebarCollapsed}
             currentUser={currentUser}
             onLogout={handleLogout}
+            pendingDocsCount={pendingDocumentsCount}
           />
         </div>
 

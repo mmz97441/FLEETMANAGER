@@ -9,16 +9,20 @@ service cloud.firestore {
     // Users: lecture pour les connectés, écriture pour les admins ou soi-même
     match /users/{userId} {
       allow read: if request.auth != null;
-      // Permettre à un utilisateur fraîchement créé de lier son profil
-      allow create: if request.auth != null && request.auth.uid == userId;
+      // Création: admin/direction peut créer n'importe quel profil, ou l'utilisateur peut créer le sien
+      allow create: if request.auth != null && (
+        request.auth.uid == userId ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['Admin', 'Président', 'President', 'Directeur', 'Directeur Exploitation', 'Secrétariat']
+      );
       allow update: if request.auth != null && (
         request.auth.uid == userId ||
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['Admin', 'Président', 'Directeur Exploitation', 'Secrétariat']
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['Admin', 'Président', 'President', 'Directeur', 'Directeur Exploitation', 'Secrétariat']
       );
       // Suppression : admins ou migration de profil (même email)
       allow delete: if request.auth != null && (
         // L'utilisateur supprime son ancien profil avec un email différent du UID
-        resource.data.email == request.auth.token.email
+        resource.data.email == request.auth.token.email ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['Admin', 'Président', 'President', 'Directeur', 'Directeur Exploitation']
       );
     }
     

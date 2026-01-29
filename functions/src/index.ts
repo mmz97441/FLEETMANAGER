@@ -593,17 +593,21 @@ export const validateInvitationToken = functions
 
 /**
  * Active un compte utilisateur avec un token d'invitation
- * - Crée le compte Firebase Auth
- * - Migre le profil Firestore
- * - Marque l'invitation comme utilisée
- * - Retourne un custom token pour auto-login
+ * FLUX ROBUSTE PRODUCTION:
+ * 1. Valide le token d'invitation
+ * 2. Crée le compte Firebase Auth
+ * 3. Migre OU reconstruit le profil Firestore avec l'UID Auth
+ * 4. Marque l'invitation comme utilisée
+ * 5. Log d'audit
  */
 export const activateAccount = functions
   .region("europe-west1")
   .https.onCall(async (data) => {
     const { token, password } = data;
 
-    // Validations
+    // ========================================
+    // VALIDATIONS
+    // ========================================
     if (!token || typeof token !== "string") {
       throw new functions.https.HttpsError(
         "invalid-argument",
@@ -619,7 +623,11 @@ export const activateAccount = functions
     }
 
     try {
-      // 1. Trouver et valider l'invitation
+      // ========================================
+      // ÉTAPE 1: TROUVER ET VALIDER L'INVITATION
+      // ========================================
+      console.log(`🔍 Recherche invitation pour token: ${token.substring(0, 8)}...`);
+      
       const snapshot = await db
         .collection("invitations")
         .where("token", "==", token)
@@ -636,10 +644,12 @@ export const activateAccount = functions
       const invitationDoc = snapshot.docs[0];
       const invitation = invitationDoc.data();
 
+      console.log(`📧 Invitation trouvée pour: ${invitation.email}`);
+
       if (invitation.used) {
         throw new functions.https.HttpsError(
           "already-exists",
-          "Ce lien a déjà été utilisé"
+          "Ce lien a déjà été utilisé. Connectez-vous avec votre email et mot de passe."
         );
       }
 
@@ -648,71 +658,144 @@ export const activateAccount = functions
       if (now > expiresAt) {
         throw new functions.https.HttpsError(
           "deadline-exceeded",
-          "Ce lien a expiré"
+          "Ce lien a expiré. Demandez une nouvelle invitation à votre administrateur."
         );
       }
 
-      // 2. Créer le compte Firebase Auth
+      // ========================================
+      // ÉTAPE 2: CRÉER LE COMPTE FIREBASE AUTH
+      // ========================================
+      console.log(`🔐 Création du compte Auth pour: ${invitation.email}`);
+      
       let authUser;
       try {
         authUser = await auth.createUser({
-          email: invitation.email,
+          email: invitation.email.toLowerCase().trim(),
           password: password,
-          emailVerified: true, // On considère l'email vérifié car il a reçu l'invitation
+          emailVerified: true, // Email vérifié car il a reçu l'invitation
         });
         console.log(`✅ Compte Auth créé: ${authUser.uid}`);
       } catch (authError: any) {
         if (authError.code === "auth/email-already-exists") {
-          throw new functions.https.HttpsError(
-            "already-exists",
-            "Ce compte existe déjà. Utilisez 'Mot de passe oublié' pour vous connecter."
-          );
+          // L'utilisateur existe déjà dans Auth - peut-être une activation partielle précédente
+          console.warn(`⚠️ Compte Auth existe déjà pour: ${invitation.email}`);
+          
+          // Récupérer l'UID existant
+          const existingUser = await auth.getUserByEmail(invitation.email.toLowerCase().trim());
+          
+          // Vérifier si le profil Firestore existe
+          const existingProfile = await db.collection("users").doc(existingUser.uid).get();
+          
+          if (existingProfile.exists) {
+            // Le compte est déjà complètement activé
+            throw new functions.https.HttpsError(
+              "already-exists",
+              "Ce compte existe déjà. Utilisez 'Mot de passe oublié' si vous avez oublié votre mot de passe."
+            );
+          }
+          
+          // Le compte Auth existe mais pas le profil - on continue avec cet UID
+          authUser = existingUser;
+          console.log(`🔄 Utilisation du compte Auth existant: ${authUser.uid}`);
+        } else {
+          throw authError;
         }
-        throw authError;
       }
 
-      // 3. Migrer le profil Firestore vers le bon UID
-      const oldUserDoc = await db.collection("users").doc(invitation.userId).get();
+      // ========================================
+      // ÉTAPE 3: CRÉER/MIGRER LE PROFIL FIRESTORE
+      // ========================================
+      console.log(`📝 Migration/Création du profil Firestore...`);
       
-      if (oldUserDoc.exists) {
-        const userData = oldUserDoc.data();
+      // Vérifier si le profil existe déjà avec le bon UID (double activation)
+      const existingNewProfile = await db.collection("users").doc(authUser.uid).get();
+      if (existingNewProfile.exists) {
+        console.log(`✅ Profil existe déjà avec le bon UID: ${authUser.uid}`);
+      } else {
+        // Chercher le profil original
+        const oldUserDoc = await db.collection("users").doc(invitation.userId).get();
         
-        // Créer le nouveau document avec l'Auth UID
-        await db.collection("users").doc(authUser.uid).set({
-          ...userData,
-          id: authUser.uid,
-          email: invitation.email.toLowerCase().trim(),
-          activatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
+        if (oldUserDoc.exists) {
+          // MIGRATION: Copier le profil existant vers le nouvel UID
+          const userData = oldUserDoc.data();
+          
+          await db.collection("users").doc(authUser.uid).set({
+            ...userData,
+            id: authUser.uid,
+            email: invitation.email.toLowerCase().trim(),
+            activatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            status: "active",
+          });
 
-        // Supprimer l'ancien document
-        await db.collection("users").doc(invitation.userId).delete();
-        
-        console.log(`✅ Profil migré de ${invitation.userId} vers ${authUser.uid}`);
+          // Supprimer l'ancien document
+          await db.collection("users").doc(invitation.userId).delete();
+          
+          console.log(`✅ Profil migré de ${invitation.userId} vers ${authUser.uid}`);
+        } else {
+          // RECONSTRUCTION: Créer le profil depuis les données de l'invitation
+          console.warn(`⚠️ Profil original ${invitation.userId} non trouvé - Reconstruction...`);
+          
+          // Construire le profil complet depuis l'invitation
+          const reconstructedProfile = {
+            id: authUser.uid,
+            email: invitation.email.toLowerCase().trim(),
+            firstName: invitation.firstName || "",
+            lastName: invitation.lastName || "",
+            role: invitation.role || "Chauffeur",
+            activatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            createdAt: invitation.createdAt || new Date().toISOString(),
+            status: "active",
+            // Champs par défaut pour un nouvel utilisateur
+            phone: "",
+            assignedVehicleId: null,
+            companyName: "",
+          };
+          
+          // Valider que les champs essentiels sont présents
+          if (!reconstructedProfile.firstName || !reconstructedProfile.lastName) {
+            console.error(`❌ Données insuffisantes pour reconstruire le profil`);
+            throw new functions.https.HttpsError(
+              "failed-precondition",
+              "Les informations de profil sont manquantes. Contactez votre administrateur."
+            );
+          }
+          
+          await db.collection("users").doc(authUser.uid).set(reconstructedProfile);
+          
+          console.log(`✅ Profil reconstruit pour ${authUser.uid}: ${reconstructedProfile.firstName} ${reconstructedProfile.lastName}`);
+        }
       }
 
-      // 4. Marquer l'invitation comme utilisée
+      // ========================================
+      // ÉTAPE 4: MARQUER L'INVITATION COMME UTILISÉE
+      // ========================================
       await invitationDoc.ref.update({
         used: true,
         usedAt: new Date().toISOString(),
         authUid: authUser.uid,
+        activationSuccess: true,
       });
 
-      console.log(`✅ Compte activé pour: ${invitation.email}`);
+      console.log(`✅ Compte activé avec succès pour: ${invitation.email}`);
 
-      // 5. Log d'audit
+      // ========================================
+      // ÉTAPE 5: LOG D'AUDIT
+      // ========================================
       await db.collection("audit_logs").add({
         action: "ACCOUNT_ACTIVATED",
         userId: authUser.uid,
         email: invitation.email,
         invitedBy: invitation.invitedBy,
+        invitedByName: invitation.invitedByName,
+        originalUserId: invitation.userId,
+        reconstructed: !await db.collection("users").doc(invitation.userId).get().then(d => d.exists),
         activatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
       return {
         success: true,
         email: invitation.email,
-        message: "Compte activé avec succès !",
+        message: "Compte activé avec succès ! Vous pouvez maintenant vous connecter.",
       };
 
     } catch (error: any) {

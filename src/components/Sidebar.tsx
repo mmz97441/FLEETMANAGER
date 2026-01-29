@@ -16,6 +16,7 @@ interface SidebarProps {
   isCollapsed: boolean;
   currentUser: User;
   onLogout: () => void;
+  pendingDocsCount?: number; // Nombre de documents en attente de signature
 }
 
 // Structure de menu basée sur les permissions
@@ -25,6 +26,7 @@ type NavItem = {
   icon: React.ElementType;
   permission?: PermissionKey;        // Permission requise (nouvelle méthode)
   permissions?: PermissionKey[];     // OU plusieurs permissions (any)
+  badgeKey?: string;                 // Clé pour afficher un badge
 };
 
 type NavGroup = {
@@ -34,9 +36,10 @@ type NavGroup = {
   items: NavItem[];
   permission?: PermissionKey;
   permissions?: PermissionKey[];
+  badgeKey?: string;
 };
 
-const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapsed, currentUser, onLogout }) => {
+const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapsed, currentUser, onLogout, pendingDocsCount = 0 }) => {
   const [openGroups, setOpenGroups] = useState<string[]>(['flotte', 'equipe']);
   
   // Hook des permissions
@@ -100,13 +103,14 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
       label: 'Équipe',
       icon: Users,
       permissions: [Permission.DRIVERS_VIEW, Permission.ABSENCES_VIEW_OWN, Permission.DOCS_VIEW_OWN],
+      badgeKey: 'docs', // Badge sur le groupe si docs en attente
       items: [
         { id: 'drivers', label: 'Chauffeurs', icon: Users, permission: Permission.DRIVERS_VIEW },
         { id: 'leaves', label: 'Congés', icon: Palmtree, permission: Permission.ABSENCES_VIEW_OWN },
         { id: 'absences', label: 'Absences', icon: CalendarDays, permission: Permission.ABSENCES_VIEW_OWN },
-        { id: 'company_docs', label: 'Documents', icon: FileSignature, permission: Permission.DOCS_VIEW_ALL },
+        { id: 'company_docs', label: 'Documents', icon: FileSignature, permission: Permission.DOCS_VIEW_ALL, badgeKey: 'docs' },
         // Vue spéciale chauffeur pour ses propres documents
-        { id: 'documents', label: 'Mes Documents', icon: FileCheck, permission: Permission.DOCS_VIEW_OWN },
+        { id: 'documents', label: 'Mes Documents', icon: FileCheck, permission: Permission.DOCS_VIEW_OWN, badgeKey: 'docs' },
       ]
     },
 
@@ -263,6 +267,13 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
         {menuStructure.map((item) => {
           if (!checkAccess(item)) return null;
 
+          // Fonction pour obtenir le badge count
+          const getBadgeCount = (badgeKey?: string): number => {
+            if (!badgeKey) return 0;
+            if (badgeKey === 'docs') return pendingDocsCount;
+            return 0;
+          };
+
           // === RENDER GROUPE (Accordion) ===
           if ('items' in item) {
             const visibleSubItems = item.items.filter(sub => checkAccess(sub));
@@ -270,6 +281,9 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
 
             const isOpen = openGroups.includes(item.id);
             const isActiveGroup = visibleSubItems.some(sub => sub.id === currentView);
+            
+            // Badge du groupe = somme des badges des sous-items visibles (ou badge propre du groupe)
+            const groupBadge = getBadgeCount(item.badgeKey);
 
             return (
               <div key={item.id} className="px-3">
@@ -281,14 +295,36 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
                     }`}
                   >
                     <div className="flex items-center gap-3">
-                      <item.icon size={20} />
+                      <div className="relative">
+                        <item.icon size={20} />
+                        {/* Badge sur l'icône du groupe (quand fermé) */}
+                        {!isOpen && groupBadge > 0 && (
+                          <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold min-w-[16px] h-4 flex items-center justify-center rounded-full px-1 animate-pulse">
+                            {groupBadge}
+                          </span>
+                        )}
+                      </div>
                       <span className="font-semibold text-sm">{item.label}</span>
                     </div>
-                    {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                    <div className="flex items-center gap-2">
+                      {/* Badge à côté de la flèche (quand fermé) */}
+                      {!isOpen && groupBadge > 0 && (
+                        <span className="bg-red-500 text-white text-[10px] font-bold min-w-[18px] h-[18px] flex items-center justify-center rounded-full px-1">
+                          {groupBadge}
+                        </span>
+                      )}
+                      {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                    </div>
                   </button>
                 ) : (
-                  <div className="flex justify-center mb-2 mt-4 pb-2 border-b border-slate-800">
+                  <div className="flex justify-center mb-2 mt-4 pb-2 border-b border-slate-800 relative">
                     <item.icon size={20} className="text-slate-500" />
+                    {/* Badge en mode collapsed */}
+                    {groupBadge > 0 && (
+                      <span className="absolute -top-1 right-2 bg-red-500 text-white text-[9px] font-bold min-w-[16px] h-4 flex items-center justify-center rounded-full px-1 animate-pulse">
+                        {groupBadge}
+                      </span>
+                    )}
                   </div>
                 )}
 
@@ -296,12 +332,14 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
                 <div className={`space-y-1 overflow-hidden transition-all duration-300 ${isOpen || isCollapsed ? 'max-h-[500px] opacity-100' : 'max-h-0 opacity-0'}`}>
                   {visibleSubItems.map(subItem => {
                     const isActive = currentView === subItem.id;
+                    const itemBadge = getBadgeCount(subItem.badgeKey);
+                    
                     return (
                       <button
                         key={subItem.id}
                         onClick={() => onChangeView(subItem.id)}
                         title={isCollapsed ? subItem.label : ''}
-                        className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 group relative
+                        className={`w-full flex items-center justify-between gap-3 px-3 py-2 rounded-lg transition-all duration-200 group relative
                           ${!isCollapsed ? 'pl-10' : 'justify-center'} 
                           ${isActive 
                             ? 'bg-brand-600 text-white shadow-lg shadow-brand-900/50' 
@@ -309,12 +347,30 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
                           }
                         `}
                       >
-                        {isCollapsed ? (
-                          <subItem.icon size={20} className={isActive ? 'text-white' : 'text-slate-400 group-hover:text-white'} />
-                        ) : (
-                          <div className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-white' : 'bg-slate-600 group-hover:bg-slate-400'}`}></div>
+                        <div className="flex items-center gap-3">
+                          {isCollapsed ? (
+                            <div className="relative">
+                              <subItem.icon size={20} className={isActive ? 'text-white' : 'text-slate-400 group-hover:text-white'} />
+                              {/* Badge en mode collapsed */}
+                              {itemBadge > 0 && (
+                                <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold min-w-[14px] h-[14px] flex items-center justify-center rounded-full px-0.5 animate-pulse">
+                                  {itemBadge}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <div className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-white' : 'bg-slate-600 group-hover:bg-slate-400'}`}></div>
+                          )}
+                          {!isCollapsed && <span className="font-medium text-sm">{subItem.label}</span>}
+                        </div>
+                        {/* Badge à droite de l'item */}
+                        {!isCollapsed && itemBadge > 0 && (
+                          <span className={`text-[10px] font-bold min-w-[18px] h-[18px] flex items-center justify-center rounded-full px-1 ${
+                            isActive ? 'bg-white text-brand-600' : 'bg-red-500 text-white animate-pulse'
+                          }`}>
+                            {itemBadge}
+                          </span>
                         )}
-                        {!isCollapsed && <span className="font-medium text-sm">{subItem.label}</span>}
                       </button>
                     );
                   })}

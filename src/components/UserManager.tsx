@@ -220,30 +220,60 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
       if (!pendingAction || !currentUser) return;
 
       if (pendingAction.type === 'ADD' && onAddUser) {
-          // 1. Créer le profil utilisateur dans Firestore
-          await onAddUser(pendingAction.data);
+          const userData = pendingAction.data;
           
-          // 2. Créer l'invitation avec token
           try {
+            // ============================================================
+            // FLUX ROBUSTE DE CRÉATION UTILISATEUR
+            // ============================================================
+            
+            // ÉTAPE 1: Créer le profil utilisateur dans Firestore
+            console.log('📝 Étape 1/4: Création du profil Firestore...');
+            await onAddUser(userData);
+            
+            // ÉTAPE 2: Vérifier que le profil a bien été créé
+            console.log('🔍 Étape 2/4: Vérification du profil...');
+            const { doc, getDoc } = await import('firebase/firestore');
+            const { db } = await import('../firebaseConfig');
+            
+            // Attendre un peu pour la propagation Firestore
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            const userDocRef = doc(db, 'users', userData.id);
+            const userDocSnap = await getDoc(userDocRef);
+            
+            if (!userDocSnap.exists()) {
+              throw new Error(`Le profil utilisateur n'a pas été créé correctement (ID: ${userData.id})`);
+            }
+            console.log('✅ Profil vérifié dans Firestore');
+            
+            // ÉTAPE 3: Créer l'invitation avec TOUTES les infos du profil
+            console.log('📧 Étape 3/4: Création de l\'invitation...');
             const { token, expiresAt } = await createInvitation(
-              pendingAction.data.email,
-              pendingAction.data.id,
+              userData.email,
+              userData.id,
               {
                 id: currentUser.id,
                 name: `${currentUser.firstName} ${currentUser.lastName}`
+              },
+              // Copie complète des infos pour reconstruction si nécessaire
+              {
+                firstName: userData.firstName,
+                lastName: userData.lastName,
+                role: userData.role
               }
             );
             
-            // 3. Générer l'URL d'activation
+            // ÉTAPE 4: Envoyer l'email d'invitation
+            console.log('✉️ Étape 4/4: Envoi de l\'email...');
             const activationUrl = getActivationUrl(token);
             
-            // 4. Envoyer l'email d'invitation avec le lien
             await sendUserInvitationEmail(
               {
-                email: pendingAction.data.email,
-                firstName: pendingAction.data.firstName,
-                lastName: pendingAction.data.lastName,
-                role: pendingAction.data.role
+                email: userData.email,
+                firstName: userData.firstName,
+                lastName: userData.lastName,
+                role: userData.role
               },
               {
                 firstName: currentUser.firstName,
@@ -253,9 +283,15 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
               expiresAt
             );
             
-            console.log('✅ Invitation créée et email envoyé à', pendingAction.data.email);
-          } catch (emailError) {
-            console.error('❌ Erreur création invitation:', emailError);
+            console.log('✅ Utilisateur créé avec succès:', userData.email);
+            
+          } catch (error: any) {
+            console.error('❌ Erreur création utilisateur:', error);
+            alert(`Erreur lors de la création de l'utilisateur: ${error.message}\n\nVeuillez réessayer.`);
+            // Ne pas fermer la modale en cas d'erreur
+            setIsConfirmOpen(false);
+            setPendingAction(null);
+            return;
           }
       } 
       else if (pendingAction.type === 'UPDATE' && onUpdateUser) {

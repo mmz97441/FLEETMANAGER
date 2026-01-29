@@ -190,12 +190,15 @@ export const subscribeToUserProfile = (uid: string, callback: (user: User | null
     });
 };
 
-export const createUserProfile = async (user: User) => {
+export const createUserProfile = async (user: User): Promise<boolean> => {
     try {
         const { id, ...data } = user;
         await setDoc(doc(db, "users", id), cleanFirestoreData(data));
+        console.log(`✅ Profil créé: users/${id}`);
+        return true;
     } catch (e) {
-        console.error("Error creating user profile:", e);
+        console.error("❌ Erreur création profil:", e);
+        throw e; // Propager l'erreur pour que l'appelant puisse la gérer
     }
 };
 

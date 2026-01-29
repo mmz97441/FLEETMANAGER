@@ -36,6 +36,10 @@ export interface Invitation {
   expiresAt: string;
   used: boolean;
   usedAt?: string;
+  // Infos du profil pour le fallback (si le profil original est perdu)
+  firstName?: string;
+  lastName?: string;
+  role?: string;
 }
 
 export interface InvitationValidation {
@@ -92,7 +96,8 @@ const getExpirationDate = (days: number = 7): string => {
 export const createInvitation = async (
   email: string,
   userId: string,
-  invitedBy: { id: string; name: string }
+  invitedBy: { id: string; name: string },
+  userInfo?: { firstName?: string; lastName?: string; role?: string }
 ): Promise<{ token: string; expiresAt: string }> => {
   // Normaliser l'email
   const normalizedEmail = email.toLowerCase().trim();
@@ -122,7 +127,13 @@ export const createInvitation = async (
     invitedByName: invitedBy.name,
     createdAt: new Date().toISOString(),
     expiresAt,
-    used: false
+    used: false,
+    // Stocker les infos du profil pour le fallback
+    ...(userInfo && {
+      firstName: userInfo.firstName,
+      lastName: userInfo.lastName,
+      role: userInfo.role
+    })
   };
   
   await addDoc(collection(db, "invitations"), invitation);

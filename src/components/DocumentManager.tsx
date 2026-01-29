@@ -23,6 +23,7 @@ interface DocumentManagerProps {
   onUpdateDocument: (doc: CompanyDocument) => Promise<void>;
   onDeleteDocument: (id: string) => Promise<void>;
   onAcknowledge: (ack: DocumentAcknowledgment) => Promise<void>;
+  viewMode?: 'admin' | 'employee'; // Mode d'affichage : admin (gestion) ou employee (lecture seule)
 }
 
 // Helper pour normaliser les rôles (gardé pour le filtrage des documents par rôle cible)
@@ -41,14 +42,18 @@ const normalizeRole = (role: string | UserRole): UserRole => {
 
 const DocumentManager: React.FC<DocumentManagerProps> = ({
   documents, acknowledgments, users, currentUser,
-  onAddDocument, onUpdateDocument, onDeleteDocument, onAcknowledge
+  onAddDocument, onUpdateDocument, onDeleteDocument, onAcknowledge,
+  viewMode = 'admin'
 }) => {
   // === PERMISSIONS ===
   const { hasPermission } = usePermissions();
   
+  // En mode employee, on désactive les fonctions d'administration
+  const isEmployeeMode = viewMode === 'employee';
+  
   const canViewOwn = hasPermission(Permission.DOCS_VIEW_OWN);
-  const canViewAll = hasPermission(Permission.DOCS_VIEW_ALL);
-  const canManage = hasPermission(Permission.DOCS_MANAGE);
+  const canViewAll = hasPermission(Permission.DOCS_VIEW_ALL) && !isEmployeeMode;
+  const canManage = hasPermission(Permission.DOCS_MANAGE) && !isEmployeeMode;
   const canAcknowledge = hasPermission(Permission.DOCS_ACKNOWLEDGE);
   
   // Pour le filtrage des documents par rôle cible
@@ -330,7 +335,7 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
         <div>
           <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
             <FileSignature className="text-brand-600" />
-            Documents & Règlements
+            {isEmployeeMode ? 'Mes Documents' : 'Documents & Règlements'}
           </h2>
           <p className="text-slate-500 text-sm mt-1">
             {pendingDocuments.length > 0 
