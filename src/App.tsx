@@ -1,0 +1,833 @@
+
+import React, { useState, useMemo, useEffect } from 'react';
+// @ts-ignore
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import { auth } from "./firebaseConfig";
+import Sidebar from './components/Sidebar';
+import Dashboard from './components/Dashboard';
+import { VehicleList } from './components/VehicleList';
+import DriverList from './components/DriverList';
+import { FuelManager } from './components/FuelManager';
+import MaintenanceManager from './components/MaintenanceManager';
+import IssueManager from './components/IssueManager';
+import UserManager from './components/UserManager';
+import DriverDocuments from './components/DriverDocuments';
+import AIAdvisor from './components/AIAdvisor';
+import FleetMap from './components/FleetMap';
+import ClientPortal from './components/ClientPortal';
+import QuoteManager from './components/QuoteManager';
+import AbsenceManager from './components/AbsenceManager';
+import DocumentManager from './components/DocumentManager';
+import Settings from './components/Settings'; // New Import
+import ErrorBoundary from './components/ErrorBoundary'; // New Import
+import MobileNavBar from './components/MobileNavBar';
+import VehicleDetail from './components/VehicleDetail';
+import Login from './components/Login';
+import ActivateAccount from './components/ActivateAccount';
+import { Menu, Loader2, WifiOff } from 'lucide-react';
+
+// FIREBASE SERVICES
+import { 
+  subscribeToVehicles, 
+  addVehicleToFirestore, 
+  updateVehicleInFirestore, 
+  deleteVehicleFromFirestore,
+  subscribeToFuelLogs,
+  addFuelLogToFirestore,
+  subscribeToMaintenance,
+  subscribeToIssues,
+  addIssueToFirestore,
+  updateIssueInFirestore,
+  subscribeToUsers,
+  getUserProfile, 
+  subscribeToUserProfile, 
+  createUserProfile,
+  updateUserProfile,
+  deleteUserProfile,
+  subscribeToLeaves,
+  addLeaveToFirestore,
+  updateLeaveInFirestore,
+  deleteLeaveFromFirestore,
+  subscribeToAbsences,
+  addAbsenceToFirestore,
+  updateAbsenceInFirestore,
+  deleteAbsenceFromFirestore,
+  uploadAbsenceDocument,
+  subscribeToQuotes,
+  addQuoteToFirestore,
+  updateQuoteInFirestore,
+  linkAuthToProfile,
+  subscribeToCompanyDocuments,
+  addCompanyDocumentToFirestore,
+  updateCompanyDocumentInFirestore,
+  deleteCompanyDocumentFromFirestore,
+  subscribeToDocumentAcknowledgments,
+  addDocumentAcknowledgmentToFirestore
+} from './services/firestore';
+
+import { 
+  ViewState, User, UserRole, Vehicle, FuelLog, MaintenanceLog, 
+  Issue, LeaveRequest, QuoteRequest, QuoteStatus, IssueStatus,
+  CompanyDocument, DocumentAcknowledgment, Absence, AbsenceDocument, AbsenceType
+} from './types';
+
+import { PermissionsProvider } from './usePermissions';
+import PermissionsManager from './components/PermissionsManager';
+
+const App: React.FC = () => {
+  // --- AUTH STATE ---
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+
+  // Navigation
+  const [currentView, setCurrentView] = useState<ViewState>('dashboard');
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  // Network State
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+
+  // Data (Initialisé vide, rempli par Firebase)
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [fuelLogs, setFuelLogs] = useState<FuelLog[]>([]);
+  const [maintenanceLogs, setMaintenanceLogs] = useState<MaintenanceLog[]>([]);
+  const [issues, setIssues] = useState<Issue[]>([]);
+  const [users, setUsers] = useState<User[]>([]); 
+  const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
+  const [absences, setAbsences] = useState<Absence[]>([]);
+  const [quotes, setQuotes] = useState<QuoteRequest[]>([]);
+  const [companyDocuments, setCompanyDocuments] = useState<CompanyDocument[]>([]);
+  const [documentAcknowledgments, setDocumentAcknowledgments] = useState<DocumentAcknowledgment[]>([]);
+
+  // Selection for Detail Views
+  const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
+  const [targetIssueVehicleId, setTargetIssueVehicleId] = useState<string | null>(null);
+
+  // --- ONLINE / OFFLINE DETECTION ---
+  useEffect(() => {
+      const handleOnline = () => setIsOffline(false);
+      const handleOffline = () => setIsOffline(true);
+      window.addEventListener('online', handleOnline);
+      window.addEventListener('offline', handleOffline);
+      return () => {
+          window.removeEventListener('online', handleOnline);
+          window.removeEventListener('offline', handleOffline);
+      };
+  }, []);
+
+  // --- 1. AUTHENTICATION & PROFILE LISTENER ---
+  useEffect(() => {
+    let unsubscribeProfile: (() => void) | null = null;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser: any) => {
+      setIsAuthLoading(true);
+      
+      if (firebaseUser) {
+        try {
+            // ETAPE 1 : VÉRIFICATION D'ACCÈS
+            // On vérifie si le profil existe via son UID.
+            let existingProfile = await getUserProfile(firebaseUser.uid);
+
+            // LOGIQUE DE RÉCUPÉRATION (Recovery)
+            if (!existingProfile && firebaseUser.email) {
+                console.log("Profil introuvable par UID. Tentative de récupération par email...");
+                try {
+                    await linkAuthToProfile(firebaseUser.email, firebaseUser.uid);
+                    existingProfile = await getUserProfile(firebaseUser.uid);
+                } catch (recoveryError) {
+                    console.error("Échec de la récupération automatique du profil :", recoveryError);
+                }
+            }
+
+            if (existingProfile) {
+                // ACCÈS AUTORISÉ
+                setCurrentUser(existingProfile);
+
+                // REDIRECTION SÉCURITÉ CLIENT
+                // Si l'utilisateur est un client, on le force vers le tableau de bord client
+                const role = String(existingProfile.role || '').toLowerCase();
+                if (role.includes('client')) {
+                    setCurrentView('client_dashboard');
+                }
+                // Si l'utilisateur est un stagiaire, pas de tableau de bord - redirect vers véhicules
+                if (role.includes('stag')) {
+                    setCurrentView('vehicles');
+                }
+
+                // ETAPE 2 : ABONNEMENT TEMPS RÉEL
+                if (unsubscribeProfile) unsubscribeProfile();
+                
+                unsubscribeProfile = subscribeToUserProfile(firebaseUser.uid, (updatedProfile) => {
+                    if (updatedProfile) {
+                        setCurrentUser(prev => {
+                            if (JSON.stringify(prev) === JSON.stringify(updatedProfile)) return prev;
+                            return updatedProfile;
+                        });
+                        // Vérification continue du rôle en temps réel
+                        const updatedRole = String(updatedProfile.role || '').toLowerCase();
+                        if (updatedRole.includes('client') && !['client_dashboard', 'client_list', 'client_team', 'help', 'settings'].includes(currentView)) {
+                             setCurrentView('client_dashboard');
+                        }
+                        // Stagiaire ne peut pas accéder au dashboard
+                        if (updatedRole.includes('stag') && currentView === 'dashboard') {
+                             setCurrentView('vehicles');
+                        }
+                    } else {
+                        signOut(auth);
+                        setCurrentUser(null);
+                    }
+                });
+            } else {
+                console.error("Aucun profil trouvé pour cet utilisateur (UID: " + firebaseUser.uid + "). Accès refusé.");
+                await signOut(auth);
+                setCurrentUser(null);
+                alert("Votre compte n'est pas associé à un profil autorisé. Contactez l'administrateur si vous pensez qu'il s'agit d'une erreur.");
+            }
+
+        } catch (error) {
+            console.error("Erreur critique lors du chargement du profil:", error);
+            await signOut(auth);
+        } finally {
+            setIsAuthLoading(false);
+        }
+      } else {
+        setCurrentUser(null);
+        if (unsubscribeProfile) {
+            unsubscribeProfile();
+            unsubscribeProfile = null;
+        }
+        setIsAuthLoading(false);
+      }
+    });
+
+    return () => {
+        unsubscribeAuth();
+        if (unsubscribeProfile) unsubscribeProfile();
+    };
+  }, []);
+
+  // --- 2. DATA SUBSCRIPTIONS (Only if logged in) ---
+  useEffect(() => {
+    if (!currentUser) return;
+
+    // SECURE: We pass currentUser to filter data server-side (for Users and Quotes)
+    const unsubscribeVehicles = subscribeToVehicles(setVehicles);
+    const unsubscribeFuel = subscribeToFuelLogs(setFuelLogs);
+    const unsubscribeMaint = subscribeToMaintenance(setMaintenanceLogs);
+    const unsubscribeIssues = subscribeToIssues(setIssues);
+    const unsubscribeUsers = subscribeToUsers(currentUser, setUsers);
+    const unsubscribeLeaves = subscribeToLeaves(setLeaves);
+    const unsubscribeAbsences = subscribeToAbsences(setAbsences);
+    const unsubscribeQuotes = subscribeToQuotes(currentUser, setQuotes);
+    const unsubscribeDocs = subscribeToCompanyDocuments(setCompanyDocuments);
+    const unsubscribeAcks = subscribeToDocumentAcknowledgments(setDocumentAcknowledgments);
+
+    return () => {
+      unsubscribeVehicles();
+      unsubscribeFuel();
+      unsubscribeMaint();
+      unsubscribeIssues();
+      unsubscribeUsers();
+      unsubscribeLeaves();
+      unsubscribeAbsences();
+      unsubscribeQuotes();
+      unsubscribeDocs();
+      unsubscribeAcks();
+    };
+  }, [currentUser?.id, currentUser?.role]);
+
+  // --- DERIVED STATE ---
+  const selectedVehicle = useMemo(() => 
+    vehicles.find(v => v.id === selectedVehicleId) || null
+  , [vehicles, selectedVehicleId]);
+
+  // Calcul des documents en attente de signature pour l'utilisateur courant
+  const pendingDocumentsCount = useMemo(() => {
+    if (!currentUser) return 0;
+    
+    // Helper pour normaliser les rôles
+    const normalizeRole = (role: string | UserRole): UserRole => {
+      const r = String(role).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      if (r.includes('admin')) return UserRole.ADMIN;
+      if (r.includes('presiden')) return UserRole.PRESIDENT;
+      if (r.includes('direction') || r.includes('directeur')) return UserRole.DIRECTOR;
+      if (r.includes('secret')) return UserRole.SECRETARY;
+      if (r.includes('chauff') || r.includes('driver')) return UserRole.DRIVER;
+      if (r.includes('mecan') || r.includes('mech')) return UserRole.MECHANIC;
+      if (r.includes('client')) return UserRole.CLIENT;
+      return role as UserRole;
+    };
+    
+    const effectiveRole = normalizeRole(currentUser.role);
+    
+    // Documents concernant l'utilisateur
+    const myDocs = companyDocuments.filter(doc => {
+      if (!doc.isActive) return false;
+      if (doc.targetRoles.length === 0) return true;
+      return doc.targetRoles.includes(effectiveRole);
+    });
+    
+    // Documents non signés
+    return myDocs.filter(doc => {
+      const ack = documentAcknowledgments.find(a => 
+        a.documentId === doc.id && 
+        a.userId === currentUser.id &&
+        a.documentVersion === doc.version
+      );
+      if (!ack) return true;
+      if (doc.requiresSignature && ack.status !== 'SIGNED') return true;
+      return false;
+    }).length;
+  }, [companyDocuments, documentAcknowledgments, currentUser]);
+
+  // --- HANDLERS ---
+  
+  const handleViewChange = (view: ViewState) => {
+    if (view !== 'issues') {
+        setTargetIssueVehicleId(null);
+    }
+    setCurrentView(view);
+    setIsMobileMenuOpen(false);
+  };
+
+  const handleNavigateToVehicleIssues = (vehicleId: string) => {
+      setTargetIssueVehicleId(vehicleId);
+      setCurrentView('issues');
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+    } catch (error) {
+      console.error("Logout failed", error);
+    }
+  };
+
+  // Vehicles
+  const handleAddVehicle = async (vehicle: Vehicle) => {
+    await addVehicleToFirestore(vehicle);
+  };
+  const handleUpdateVehicle = async (vehicle: Vehicle) => {
+    await updateVehicleInFirestore(vehicle);
+  };
+  const handleDeleteVehicle = async (id: string) => {
+    await deleteVehicleFromFirestore(id);
+  };
+  const handleSelectVehicle = (id: string) => {
+    setSelectedVehicleId(id);
+  };
+  const closeVehicleDetail = () => {
+    setSelectedVehicleId(null);
+  };
+
+  // Fuel
+  const handleAddFuelLog = async (log: FuelLog) => {
+    await addFuelLogToFirestore(log);
+  };
+
+  // Maintenance
+  const handleAddMaintenance = async (log: MaintenanceLog) => {
+    console.log("Add Maintenance not fully implemented in firestore service yet", log);
+  };
+
+  // Issues
+  const handleAddIssue = async (issue: Issue) => {
+    setIssues(prev => [issue, ...prev]); 
+    await addIssueToFirestore(issue);
+  };
+
+  const handleResolveIssue = async (id: string, details?: any) => {
+    setIssues(prev => prev.map(i => i.id === id ? { ...i, ...details } : i));
+    const issueToUpdate = issues.find(i => i.id === id);
+    if (issueToUpdate) {
+        const updatedIssue = { ...issueToUpdate, ...details };
+        await updateIssueInFirestore(updatedIssue);
+    }
+  };
+
+  // Users
+  const handleAddUser = async (newUser: User) => {
+    await createUserProfile(newUser);
+  };
+
+  const handleUpdateUser = async (updatedUser: User) => {
+    setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
+    await updateUserProfile(updatedUser);
+  };
+
+  const handleDeleteUser = async (userId: string, email?: string) => {
+    // Optimistic update
+    setUsers(prev => prev.filter(u => u.id !== userId));
+    
+    // Trouver l'email si non fourni
+    const userEmail = email || users.find(u => u.id === userId)?.email;
+    
+    try {
+      // Essayer d'utiliser la Cloud Function (suppression complète)
+      const { deleteUserCompletely } = await import('./services/cloudFunctions');
+      const result = await deleteUserCompletely(userId, userEmail || '');
+      
+      if (!result.success) {
+        console.warn('Suppression partielle:', result.message);
+      }
+    } catch (error) {
+      // Fallback: supprimer seulement le profil Firestore
+      // (la Cloud Function n'est peut-être pas encore déployée)
+      console.warn('Cloud Function non disponible, suppression Firestore uniquement');
+      await deleteUserProfile(userId);
+    }
+  };
+
+  // Leaves
+  const handleAddLeave = async (leave: LeaveRequest) => {
+    await addLeaveToFirestore(leave);
+  };
+  const handleUpdateLeave = async (leave: LeaveRequest) => {
+    await updateLeaveInFirestore(leave);
+  };
+  const handleDeleteLeave = async (id: string) => {
+    await deleteLeaveFromFirestore(id);
+  };
+
+  // Absences (nouveau système)
+  const handleAddAbsence = async (absence: Absence) => {
+    await addAbsenceToFirestore(absence);
+  };
+  const handleUpdateAbsence = async (absence: Absence) => {
+    await updateAbsenceInFirestore(absence);
+  };
+  const handleDeleteAbsence = async (id: string) => {
+    await deleteAbsenceFromFirestore(id);
+  };
+  const handleUploadAbsenceDocument = async (absenceId: string, file: File, docType: AbsenceDocument['type']): Promise<string> => {
+    return await uploadAbsenceDocument(absenceId, file, docType);
+  };
+
+  // Quotes
+  const handleAddQuote = async (quote: QuoteRequest) => {
+    await addQuoteToFirestore(quote);
+  };
+  const handleUpdateQuoteStatus = async (id: string, status: QuoteStatus) => {
+    const quote = quotes.find(q => q.id === id);
+    if (quote) {
+      await updateQuoteInFirestore({ ...quote, status });
+    }
+  };
+  const handleUpdateQuote = async (quote: QuoteRequest) => {
+    await updateQuoteInFirestore(quote);
+  };
+
+  // Company Documents (Ordres de service, Règlement intérieur...)
+  const handleAddCompanyDocument = async (doc: CompanyDocument) => {
+    await addCompanyDocumentToFirestore(doc);
+  };
+  const handleUpdateCompanyDocument = async (doc: CompanyDocument) => {
+    await updateCompanyDocumentInFirestore(doc);
+  };
+  const handleDeleteCompanyDocument = async (id: string) => {
+    await deleteCompanyDocumentFromFirestore(id);
+  };
+  const handleAcknowledgeDocument = async (ack: DocumentAcknowledgment) => {
+    await addDocumentAcknowledgmentToFirestore(ack);
+  };
+  
+  // Client Team
+  const handleAddTeamMember = (user: User) => {
+      // Force le rôle CLIENT et la société du créateur pour la sécurité
+      const safeUser = {
+          ...user,
+          role: UserRole.CLIENT,
+          companyName: currentUser?.companyName // Héritage strict
+      };
+      handleAddUser(safeUser);
+  };
+  const handleUpdateTeamMember = (user: User) => {
+      handleUpdateUser(user);
+  };
+  const handleDeleteTeamMember = (userId: string) => {
+      handleDeleteUser(userId);
+  };
+
+  // --- RENDER ---
+
+  if (isAuthLoading) {
+      return (
+          <div className="h-screen w-screen flex flex-col items-center justify-center bg-slate-50 text-slate-400">
+              <Loader2 size={48} className="animate-spin text-brand-600 mb-4" />
+              <p className="font-medium animate-pulse">Chargement de FleetGenius...</p>
+          </div>
+      );
+  }
+
+  // Vérifier si c'est une page d'activation avec token
+  const urlParams = new URLSearchParams(window.location.search);
+  const activationToken = urlParams.get('token');
+  
+  // Si token présent ET pas encore connecté → afficher page d'activation
+  if (activationToken && !currentUser) {
+    return (
+      <ActivateAccount 
+        token={activationToken} 
+        onSuccess={() => {
+          // Nettoyer l'URL après activation réussie
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }}
+      />
+    );
+  }
+
+  if (!currentUser) {
+      return <Login />;
+  }
+
+  const renderContent = () => {
+    switch (currentView) {
+      case 'dashboard':
+        return <Dashboard 
+            vehicles={vehicles} 
+            logs={fuelLogs} 
+            maintenanceLogs={maintenanceLogs}
+            issues={issues}
+            quotes={quotes}
+            leaves={leaves}
+            absences={absences}
+            currentUser={currentUser}
+            users={users}
+            pendingDocuments={pendingDocumentsCount}
+            onNavigate={handleViewChange}
+        />;
+      
+      case 'vehicles':
+        return <VehicleList 
+            vehicles={vehicles}
+            users={users}
+            issues={issues} 
+            currentUser={currentUser}
+            logs={fuelLogs}
+            maintenanceLogs={maintenanceLogs}
+            onAddVehicle={handleAddVehicle}
+            onUpdateVehicle={handleUpdateVehicle}
+            onDeleteVehicle={handleDeleteVehicle}
+            onSelectVehicle={handleSelectVehicle}
+            onViewIncidents={handleNavigateToVehicleIssues}
+        />;
+
+      case 'drivers':
+        return <DriverList 
+            users={users}
+            vehicles={vehicles}
+            leaves={leaves}
+            currentUser={currentUser}
+            onUpdateUser={handleUpdateUser}
+        />;
+
+      case 'fuel':
+        return <FuelManager 
+            logs={fuelLogs}
+            vehicles={vehicles}
+            users={users}
+            currentUser={currentUser}
+            onAddLog={handleAddFuelLog}
+        />;
+
+      case 'maintenance':
+        return <MaintenanceManager 
+            logs={maintenanceLogs}
+            vehicles={vehicles}
+            currentUserRole={currentUser.role}
+            onAddMaintenance={handleAddMaintenance}
+        />;
+
+      case 'issues':
+        return <IssueManager 
+            issues={issues}
+            vehicles={vehicles}
+            users={users}
+            currentUser={currentUser}
+            maintenanceLogs={maintenanceLogs}
+            onAddIssue={handleAddIssue}
+            onResolveIssue={handleResolveIssue}
+            onAddMaintenance={handleAddMaintenance}
+            preselectedVehicleId={targetIssueVehicleId}
+        />;
+
+      case 'users':
+        return <UserManager 
+            users={users}
+            currentUser={currentUser}
+            onAddUser={handleAddUser}
+            onUpdateUser={handleUpdateUser}
+            onDeleteUser={handleDeleteUser}
+        />;
+
+      case 'permissions':
+        return <PermissionsManager 
+            users={users}
+            currentUser={currentUser}
+        />;
+
+      case 'documents':
+        return <DriverDocuments currentUser={currentUser} />;
+
+      case 'ai_advisor':
+        return <AIAdvisor 
+            vehicles={vehicles}
+            users={users}
+            logs={fuelLogs}
+            maintenanceLogs={maintenanceLogs}
+        />;
+      
+      case 'map':
+        return <FleetMap 
+            vehicles={vehicles} 
+            onVehicleSelect={handleSelectVehicle} 
+        />;
+
+      case 'leaves':
+        // Vue "Congés" = AbsenceManager pré-filtré sur Congés Payés
+        return <AbsenceManager 
+            absences={absences}
+            users={users}
+            currentUser={currentUser}
+            onAddAbsence={handleAddAbsence}
+            onUpdateAbsence={handleUpdateAbsence}
+            onDeleteAbsence={handleDeleteAbsence}
+            onUploadDocument={handleUploadAbsenceDocument}
+            onUpdateUserBalance={handleUpdateUser}
+            defaultTypeFilter={AbsenceType.CP}
+            customTitle="Gestion des Congés"
+        />;
+
+      case 'absences':
+        return <AbsenceManager 
+            absences={absences}
+            users={users}
+            currentUser={currentUser}
+            onAddAbsence={handleAddAbsence}
+            onUpdateAbsence={handleUpdateAbsence}
+            onDeleteAbsence={handleDeleteAbsence}
+            onUploadDocument={handleUploadAbsenceDocument}
+            onUpdateUserBalance={handleUpdateUser}
+        />;
+
+      case 'company_docs':
+        return <DocumentManager 
+            documents={companyDocuments}
+            acknowledgments={documentAcknowledgments}
+            users={users}
+            currentUser={currentUser}
+            onAddDocument={handleAddCompanyDocument}
+            onUpdateDocument={handleUpdateCompanyDocument}
+            onDeleteDocument={handleDeleteCompanyDocument}
+            onAcknowledge={handleAcknowledgeDocument}
+        />;
+
+      case 'quotes':
+        return <QuoteManager 
+            quotes={quotes}
+            onUpdateQuote={handleUpdateQuote}
+        />;
+
+      case 'settings':
+        return <Settings 
+            currentUser={currentUser}
+            onUpdateUser={handleUpdateUser}
+        />;
+
+      // === NOUVELLES VUES ADMINISTRATION & PARAMÈTRES ===
+      case 'company_settings':
+        return (
+          <div className="p-8">
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8 text-center">
+              <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <span className="text-3xl">🏢</span>
+              </div>
+              <h2 className="text-2xl font-bold text-slate-800 mb-2">Paramètres Entreprise</h2>
+              <p className="text-slate-500 mb-4">Configuration de l'identité de l'entreprise (nom, logo, SIRET, TVA...)</p>
+              <span className="inline-block px-3 py-1 bg-amber-100 text-amber-700 text-sm font-bold rounded-full">À venir</span>
+            </div>
+          </div>
+        );
+
+      case 'activity_logs':
+        return (
+          <div className="p-8">
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8 text-center">
+              <div className="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <span className="text-3xl">📋</span>
+              </div>
+              <h2 className="text-2xl font-bold text-slate-800 mb-2">Logs d'activité</h2>
+              <p className="text-slate-500 mb-4">Historique des actions effectuées par les utilisateurs (audit trail)</p>
+              <span className="inline-block px-3 py-1 bg-indigo-100 text-indigo-700 text-sm font-bold rounded-full">À venir</span>
+            </div>
+          </div>
+        );
+
+      case 'notifications_settings':
+        return (
+          <div className="p-8">
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8 text-center">
+              <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <span className="text-3xl">🔔</span>
+              </div>
+              <h2 className="text-2xl font-bold text-slate-800 mb-2">Notifications</h2>
+              <p className="text-slate-500 mb-4">Configurer les alertes email, seuils carburant, rappels contrôle technique...</p>
+              <span className="inline-block px-3 py-1 bg-blue-100 text-blue-700 text-sm font-bold rounded-full">À venir</span>
+            </div>
+          </div>
+        );
+
+      case 'import_export':
+        return (
+          <div className="p-8">
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8 text-center">
+              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <span className="text-3xl">📥</span>
+              </div>
+              <h2 className="text-2xl font-bold text-slate-800 mb-2">Imports / Exports</h2>
+              <p className="text-slate-500 mb-4">Exporter vos données en Excel, importer un historique...</p>
+              <span className="inline-block px-3 py-1 bg-green-100 text-green-700 text-sm font-bold rounded-full">À venir</span>
+            </div>
+          </div>
+        );
+
+      case 'client_dashboard':
+      case 'client_list':
+      case 'client_team':
+      case 'help':
+        // Sécurité : On filtre strictement les utilisateurs visibles par le client
+        const companyTeam = users.filter(u => 
+            u.companyName === currentUser.companyName && 
+            (u.role === UserRole.CLIENT || String(u.role).toLowerCase().includes('client'))
+        );
+        
+        return <ClientPortal 
+            activeView={currentView}
+            currentUser={currentUser}
+            quotes={quotes}
+            companyUsers={companyTeam}
+            onAddQuote={handleAddQuote}
+            onUpdateQuoteStatus={handleUpdateQuoteStatus}
+            onAddTeamMember={handleAddTeamMember}
+            onUpdateTeamMember={handleUpdateTeamMember}
+            onDeleteTeamMember={handleDeleteTeamMember}
+        />;
+
+      default:
+        // Par défaut, si c'est un client on affiche le portail, sinon le dashboard flotte
+        if (currentUser.role === UserRole.CLIENT) {
+             const team = users.filter(u => u.companyName === currentUser.companyName && u.role === UserRole.CLIENT);
+             return <ClientPortal 
+                activeView="client_dashboard"
+                currentUser={currentUser}
+                quotes={quotes}
+                companyUsers={team}
+                onAddQuote={handleAddQuote}
+                onUpdateQuoteStatus={handleUpdateQuoteStatus}
+                onAddTeamMember={handleAddTeamMember}
+                onUpdateTeamMember={handleUpdateTeamMember}
+                onDeleteTeamMember={handleDeleteTeamMember}
+            />;
+        }
+        return <Dashboard 
+            vehicles={vehicles} 
+            logs={fuelLogs} 
+            maintenanceLogs={maintenanceLogs}
+            issues={issues}
+            quotes={quotes}
+            leaves={leaves}
+            absences={absences}
+            currentUser={currentUser}
+            users={users}
+            pendingDocuments={pendingDocumentsCount}
+            onNavigate={handleViewChange}
+        />;
+    }
+  };
+
+  return (
+    <ErrorBoundary>
+      <PermissionsProvider currentUser={currentUser}>
+      <div className="flex h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden">
+        
+        {/* NETWORK STATUS BANNER */}
+        {isOffline && (
+            <div className="fixed top-0 left-0 right-0 bg-red-600 text-white text-center text-xs font-bold py-1 z-[1000] flex items-center justify-center gap-2 animate-pulse">
+                <WifiOff size={12} /> MODE HORS-LIGNE - Les modifications ne seront pas sauvegardées
+            </div>
+        )}
+
+        {/* Sidebar */}
+        <div className={`fixed inset-y-0 left-0 z-50 transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} lg:relative lg:translate-x-0 transition-transform duration-300 ease-in-out`}>
+          <Sidebar 
+            currentView={currentView}
+            onChangeView={handleViewChange}
+            isCollapsed={isSidebarCollapsed}
+            currentUser={currentUser}
+            onLogout={handleLogout}
+          />
+        </div>
+
+        {isMobileMenuOpen && (
+          <div 
+            className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+            onClick={() => setIsMobileMenuOpen(false)}
+          ></div>
+        )}
+
+        {/* Main Content */}
+        <div className="flex-1 flex flex-col h-screen overflow-hidden w-full relative">
+          <div className="bg-white border-b border-slate-200 p-4 flex items-center justify-between lg:hidden shrink-0">
+              <button onClick={() => setIsMobileMenuOpen(true)} className="text-slate-600">
+                  <Menu size={24} />
+              </button>
+              <div className="flex flex-col items-center">
+                  <span className="font-bold text-lg text-slate-800">FleetGenius</span>
+                  <span className="text-[10px] font-bold text-brand-600 uppercase tracking-wide">{currentUser.role}</span>
+              </div>
+              <div className="w-6">
+                {currentUser.avatarUrl && <img src={currentUser.avatarUrl} className="w-6 h-6 rounded-full border border-slate-200" />}
+              </div> 
+          </div>
+
+          <div className="hidden lg:flex items-center p-4 absolute top-0 left-0 z-10">
+              <button 
+                  onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+                  className="bg-white p-2 rounded-lg shadow-sm border border-slate-200 text-slate-500 hover:text-brand-600 transition-colors"
+              >
+                  <Menu size={20} />
+              </button>
+          </div>
+
+          <main className="flex-1 overflow-y-auto p-4 lg:p-8 custom-scrollbar pt-14 lg:pt-20 pb-20 lg:pb-8">
+              <div className="max-w-7xl mx-auto h-full">
+                  {renderContent()}
+              </div>
+          </main>
+        </div>
+
+        {selectedVehicle && (
+          <VehicleDetail 
+              vehicle={selectedVehicle} 
+              logs={fuelLogs} 
+              maintenanceLogs={maintenanceLogs} 
+              onClose={closeVehicleDetail} 
+          />
+        )}
+
+        {/* Mobile Nav n'est affiché que si on n'est pas Client (car menu différent) */}
+        {currentUser.role !== UserRole.CLIENT && (
+            <MobileNavBar 
+              currentView={currentView} 
+              onChangeView={handleViewChange}
+              onOpenMenu={() => setIsMobileMenuOpen(true)}
+            />
+        )}
+
+      </div>
+      </PermissionsProvider>
+    </ErrorBoundary>
+  );
+};
+
+export default App;

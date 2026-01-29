@@ -1,0 +1,210 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* === SYSTÈME DE THÈME ADAPTATIF === */
+:root {
+  /* Couleurs de base - Mode Clair */
+  --bg-primary: #f8fafc;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f1f5f9;
+  --bg-hover: #e2e8f0;
+  
+  --text-primary: #1e293b;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  
+  --border-color: #e2e8f0;
+  --border-light: #f1f5f9;
+  
+  --shadow-color: rgba(0, 0, 0, 0.1);
+  
+  /* Brand colors restent identiques */
+  --brand-50: #f0f9ff;
+  --brand-100: #e0f2fe;
+  --brand-500: #0ea5e9;
+  --brand-600: #0284c7;
+  --brand-700: #0369a1;
+}
+
+/* Mode Sombre - S'active automatiquement selon le système */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-primary: #0f172a;
+    --bg-secondary: #1e293b;
+    --bg-tertiary: #334155;
+    --bg-hover: #475569;
+    
+    --text-primary: #f1f5f9;
+    --text-secondary: #cbd5e1;
+    --text-muted: #94a3b8;
+    
+    --border-color: #334155;
+    --border-light: #1e293b;
+    
+    --shadow-color: rgba(0, 0, 0, 0.4);
+    
+    --brand-50: #0c4a6e;
+    --brand-100: #075985;
+  }
+}
+
+/* Application des variables */
+body {
+  font-family: 'Inter', sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* === OVERRIDES TAILWIND POUR DARK MODE === */
+
+/* Backgrounds */
+@media (prefers-color-scheme: dark) {
+  .bg-white {
+    background-color: var(--bg-secondary) !important;
+  }
+  .bg-slate-50, .bg-slate-100 {
+    background-color: var(--bg-tertiary) !important;
+  }
+  .bg-slate-200 {
+    background-color: #475569 !important;
+  }
+  
+  /* Textes */
+  .text-slate-900, .text-slate-800 {
+    color: var(--text-primary) !important;
+  }
+  .text-slate-700, .text-slate-600 {
+    color: var(--text-secondary) !important;
+  }
+  .text-slate-500, .text-slate-400 {
+    color: var(--text-muted) !important;
+  }
+  
+  /* Bordures */
+  .border-slate-100, .border-slate-200, .border-slate-300 {
+    border-color: var(--border-color) !important;
+  }
+  
+  /* Inputs */
+  input, textarea, select {
+    background-color: var(--bg-tertiary) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-primary) !important;
+  }
+  input::placeholder, textarea::placeholder {
+    color: var(--text-muted) !important;
+  }
+  
+  /* Cards et conteneurs */
+  .shadow-sm, .shadow-md, .shadow-lg, .shadow-xl, .shadow-2xl {
+    box-shadow: 0 4px 6px -1px var(--shadow-color), 0 2px 4px -2px var(--shadow-color) !important;
+  }
+  
+  /* Hovers */
+  .hover\:bg-slate-50:hover, .hover\:bg-slate-100:hover {
+    background-color: var(--bg-hover) !important;
+  }
+  .hover\:bg-white:hover {
+    background-color: var(--bg-tertiary) !important;
+  }
+  
+  /* Sidebar spécifique */
+  .bg-slate-900 {
+    background-color: #020617 !important;
+  }
+  
+  /* Modals backdrop */
+  .bg-black\/60 {
+    background-color: rgba(0, 0, 0, 0.8) !important;
+  }
+  
+  /* Tables */
+  table {
+    background-color: var(--bg-secondary);
+  }
+  th {
+    background-color: var(--bg-tertiary) !important;
+    color: var(--text-secondary) !important;
+  }
+  tr:hover {
+    background-color: var(--bg-tertiary) !important;
+  }
+  
+  /* Badges colorés - ajuster pour meilleure lisibilité */
+  .bg-green-50, .bg-green-100 {
+    background-color: rgba(34, 197, 94, 0.2) !important;
+  }
+  .bg-red-50, .bg-red-100 {
+    background-color: rgba(239, 68, 68, 0.2) !important;
+  }
+  .bg-orange-50, .bg-orange-100 {
+    background-color: rgba(249, 115, 22, 0.2) !important;
+  }
+  .bg-blue-50, .bg-blue-100 {
+    background-color: rgba(59, 130, 246, 0.2) !important;
+  }
+  .bg-purple-50, .bg-purple-100 {
+    background-color: rgba(168, 85, 247, 0.2) !important;
+  }
+  .bg-amber-50, .bg-amber-100 {
+    background-color: rgba(245, 158, 11, 0.2) !important;
+  }
+  
+  /* Brand backgrounds */
+  .bg-brand-50, .bg-brand-100 {
+    background-color: rgba(14, 165, 233, 0.2) !important;
+  }
+  
+  /* Graphiques Recharts */
+  .recharts-cartesian-grid line {
+    stroke: var(--border-color) !important;
+  }
+  .recharts-text {
+    fill: var(--text-muted) !important;
+  }
+  .recharts-tooltip-wrapper .recharts-default-tooltip {
+    background-color: var(--bg-secondary) !important;
+    border-color: var(--border-color) !important;
+  }
+}
+
+/* Custom Scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: var(--text-muted);
+  border-radius: 20px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: var(--text-secondary);
+}
+
+/* Map specific override */
+.leaflet-container {
+  z-index: 0;
+  font-family: 'Inter', sans-serif;
+}
+
+.custom-div-icon {
+  background: transparent;
+  border: none;
+}
+
+/* Animation pulse lente pour alertes */
+@keyframes pulse-slow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.85; }
+}
+.animate-pulse-slow {
+  animation: pulse-slow 3s ease-in-out infinite;
+}
