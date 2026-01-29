@@ -3,18 +3,20 @@
  */
 
 import React from 'react';
-import { CheckCircle2, Wrench, AlertTriangle, PauseCircle, Loader } from 'lucide-react';
+import { CheckCircle2, Wrench, AlertTriangle, PauseCircle, Loader, XOctagon, ArrowRightLeft } from 'lucide-react';
 import { VehicleStatus } from '../../types';
 
 interface VehicleStatusBadgeProps {
   status: VehicleStatus;
   isRepairing?: boolean;
+  isReplacement?: boolean;  // Nouveau: véhicule de remplacement
   size?: 'sm' | 'md';
 }
 
 const VehicleStatusBadge: React.FC<VehicleStatusBadgeProps> = ({ 
   status, 
   isRepairing = false,
+  isReplacement = false,
   size = 'md'
 }) => {
   const sizeClasses = {
@@ -26,6 +28,15 @@ const VehicleStatusBadge: React.FC<VehicleStatusBadgeProps> = ({
   const s = sizeClasses[size];
 
   const getConfig = () => {
+    // Si c'est un véhicule de remplacement, afficher un badge spécial
+    if (isReplacement) {
+      return {
+        label: 'Remplacement',
+        icon: ArrowRightLeft,
+        className: 'bg-amber-100 text-amber-700 border-amber-200'
+      };
+    }
+    
     switch (status) {
       case VehicleStatus.ACTIVE:
         return {
@@ -51,6 +62,12 @@ const VehicleStatusBadge: React.FC<VehicleStatusBadgeProps> = ({
           label: 'Au repos',
           icon: PauseCircle,
           className: 'bg-slate-100 text-slate-600 border-slate-200'
+        };
+      case VehicleStatus.IMMOBILIZED:
+        return {
+          label: 'Immobilisé',
+          icon: XOctagon,
+          className: 'bg-red-100 text-red-700 border-red-300 animate-pulse'
         };
       default:
         return {

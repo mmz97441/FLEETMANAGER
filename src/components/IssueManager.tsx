@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { Issue, Vehicle, User, IssueStatus, UserRole, MaintenanceLog, InvoiceLine, IssueLog } from '../types';
+import { Issue, Vehicle, User, IssueStatus, UserRole, MaintenanceLog, InvoiceLine, IssueLog, VehicleStatus } from '../types';
 import { 
   AlertCircle, Plus, AlertTriangle, CheckCircle, Clock, Filter, Calendar, X, Wrench, 
   Save, MessageSquare, ShieldAlert, User as UserIcon, ArrowUpDown, Receipt, Euro, 
@@ -13,6 +13,8 @@ import Modal from './shared/Modal';
 import ConfirmModal from './ConfirmModal';
 import { updateIssueInFirestore, uploadImageToStorage } from '../services/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { doc, updateDoc } from 'firebase/firestore';
+import { db } from '../firebaseConfig';
 import { 
   sendIncidentCreatedEmail, 
   sendIncidentResponseEmail, 
@@ -164,7 +166,11 @@ const IssueManager: React.FC<IssueManagerProps> = ({
   const [newIssue, setNewIssue] = useState({
     vehicleId: '',
     description: '',
-    priority: 'Medium' as 'Low' | 'Medium' | 'High'
+    priority: 'Medium' as 'Low' | 'Medium' | 'High',
+    // Nouveaux champs immobilisation
+    vehicleImmobilized: false,
+    immobilizedLocation: '',
+    needsTowing: false
   });
 
   const [replyForm, setReplyForm] = useState({
@@ -380,10 +386,27 @@ const IssueManager: React.FC<IssueManagerProps> = ({
         date: new Date().toISOString(), 
         status: IssueStatus.NEW,
         logs: [],
-        photos: uploadedUrls
+        photos: uploadedUrls,
+        // Nouveaux champs immobilisation
+        vehicleImmobilized: newIssue.vehicleImmobilized,
+        immobilizedLocation: newIssue.vehicleImmobilized ? newIssue.immobilizedLocation : undefined,
+        needsTowing: newIssue.vehicleImmobilized ? newIssue.needsTowing : undefined
       };
       
       await onAddIssue(issue);
+      
+      // 🚨 SI VÉHICULE IMMOBILISÉ: mettre à jour le statut du véhicule
+      if (newIssue.vehicleImmobilized) {
+        const vehicle = vehicles.find(v => v.id === newIssue.vehicleId);
+        if (vehicle) {
+          await updateDoc(doc(db, 'vehicles', vehicle.id), {
+            status: VehicleStatus.IMMOBILIZED,
+            immobilizedDate: new Date().toISOString(),
+            immobilizedReason: newIssue.description,
+            immobilizedLocation: newIssue.immobilizedLocation || null
+          });
+        }
+      }
       
       // 📧 ENVOI EMAIL AUX ADMINS/MÉCANICIENS
       const vehicle = vehicles.find(v => v.id === newIssue.vehicleId);
@@ -398,7 +421,14 @@ const IssueManager: React.FC<IssueManagerProps> = ({
       }
       
       setIsReportModalOpen(false);
-      setNewIssue({ vehicleId: accessibleVehicles.length === 1 ? accessibleVehicles[0].id : '', description: '', priority: 'Medium' });
+      setNewIssue({ 
+        vehicleId: accessibleVehicles.length === 1 ? accessibleVehicles[0].id : '', 
+        description: '', 
+        priority: 'Medium',
+        vehicleImmobilized: false,
+        immobilizedLocation: '',
+        needsTowing: false
+      });
       setSelectedFiles([]);
     } catch (error) {
       console.error("Erreur création incident:", error);
@@ -680,7 +710,7 @@ const IssueManager: React.FC<IssueManagerProps> = ({
           </div>
 
           <button
-            onClick={() => { setNewIssue({ vehicleId: accessibleVehicles.length === 1 ? accessibleVehicles[0].id : '', description: '', priority: 'Medium' }); setSelectedFiles([]); setIsReportModalOpen(true); }}
+            onClick={() => { setNewIssue({ vehicleId: accessibleVehicles.length === 1 ? accessibleVehicles[0].id : '', description: '', priority: 'Medium', vehicleImmobilized: false, immobilizedLocation: '', needsTowing: false }); setSelectedFiles([]); setIsReportModalOpen(true); }}
             className="bg-slate-900 hover:bg-black text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 shadow-lg"
           >
             <Plus size={18} /> Signaler un incident
@@ -1039,6 +1069,65 @@ const IssueManager: React.FC<IssueManagerProps> = ({
               placeholder="Décrivez le problème rencontré..."
               required
             />
+          </div>
+
+          {/* === SECTION IMMOBILISATION === */}
+          <div className={`p-4 rounded-xl border transition-all ${
+            newIssue.vehicleImmobilized 
+              ? 'bg-red-50 border-red-300' 
+              : 'bg-slate-50 border-slate-200'
+          }`}>
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={newIssue.vehicleImmobilized}
+                onChange={e => setNewIssue({ ...newIssue, vehicleImmobilized: e.target.checked })}
+                className="w-5 h-5 rounded border-slate-300 text-red-600 focus:ring-red-500"
+              />
+              <div className="flex-1">
+                <span className={`font-bold ${newIssue.vehicleImmobilized ? 'text-red-700' : 'text-slate-700'}`}>
+                  🚨 Véhicule immobilisé
+                </span>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Le véhicule ne peut pas rouler (panne sur route, accident...)
+                </p>
+              </div>
+            </label>
+            
+            {/* Champs additionnels si immobilisé */}
+            {newIssue.vehicleImmobilized && (
+              <div className="mt-4 pt-4 border-t border-red-200 space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-red-700 mb-2">
+                    📍 Où est le véhicule ?
+                  </label>
+                  <input
+                    type="text"
+                    value={newIssue.immobilizedLocation}
+                    onChange={e => setNewIssue({ ...newIssue, immobilizedLocation: e.target.value })}
+                    placeholder="Adresse, repères, coordonnées GPS..."
+                    className="w-full px-4 py-2.5 border border-red-300 rounded-xl focus:ring-2 focus:ring-red-500 outline-none bg-white"
+                  />
+                </div>
+                
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newIssue.needsTowing}
+                    onChange={e => setNewIssue({ ...newIssue, needsTowing: e.target.checked })}
+                    className="w-5 h-5 rounded border-red-300 text-red-600 focus:ring-red-500"
+                  />
+                  <div>
+                    <span className="font-semibold text-red-700">
+                      🚗 Besoin de dépannage / remorquage
+                    </span>
+                    <p className="text-xs text-red-500">
+                      Cochez si le véhicule doit être remorqué
+                    </p>
+                  </div>
+                </label>
+              </div>
+            )}
           </div>
 
           {/* Photos - RECOMMANDÉ */}

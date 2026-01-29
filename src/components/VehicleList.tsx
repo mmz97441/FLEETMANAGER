@@ -11,12 +11,15 @@
  * - Statut dynamique basé sur incidents/maintenances
  * - Échéances personnalisées
  * - Champs spécifiques Poids Lourd
+ * - Gestion des véhicules de remplacement
  */
 
 import React, { useState } from 'react';
-import { Vehicle, User, FuelLog, MaintenanceLog, Issue } from '../types';
+import { Vehicle, User, FuelLog, MaintenanceLog, Issue, VehicleStatus, VehicleOwnership, ReplacementSource } from '../types';
 import { useVehicles } from '../hooks/useVehicles';
 import { useVehicleForm } from '../hooks/useVehicleForm';
+import { doc, updateDoc } from 'firebase/firestore';
+import { db } from '../firebaseConfig';
 
 // Composants modulaires
 import VehicleStats from './vehicles/VehicleStats';
@@ -26,6 +29,7 @@ import VehicleCard from './vehicles/VehicleCard';
 import VehicleFormModal from './vehicles/VehicleFormModal';
 import ConfirmModal from './ConfirmModal';
 import AssignmentModal from './AssignmentModal';
+import ReplacementModal, { ReplacementData } from './ReplacementModal';
 
 // === PROPS ===
 interface VehicleListProps {
@@ -63,12 +67,82 @@ export const VehicleList: React.FC<VehicleListProps> = ({
     vehicle: Vehicle | null;
   }>({ isOpen: false, vehicle: null });
 
+  // État pour le modal de remplacement
+  const [replacementModal, setReplacementModal] = useState<{
+    isOpen: boolean;
+    vehicle: Vehicle | null;
+  }>({ isOpen: false, vehicle: null });
+
   const openAssignmentModal = (vehicle: Vehicle) => {
     setAssignmentModal({ isOpen: true, vehicle });
   };
 
   const closeAssignmentModal = () => {
     setAssignmentModal({ isOpen: false, vehicle: null });
+  };
+
+  const openReplacementModal = (vehicle: Vehicle) => {
+    setReplacementModal({ isOpen: true, vehicle });
+  };
+
+  const closeReplacementModal = () => {
+    setReplacementModal({ isOpen: false, vehicle: null });
+  };
+
+  // Handler pour confirmer un remplacement
+  const handleConfirmReplacement = async (data: ReplacementData) => {
+    if (!replacementModal.vehicle) return;
+    
+    const immobilizedVehicle = replacementModal.vehicle;
+    
+    if (data.useExistingVehicle && data.existingVehicleId) {
+      // Utiliser un véhicule existant du parc
+      const existingVehicle = vehicles.find(v => v.id === data.existingVehicleId);
+      if (!existingVehicle) throw new Error('Véhicule non trouvé');
+      
+      // Mettre à jour le véhicule existant comme remplacement
+      await updateDoc(doc(db, 'vehicles', existingVehicle.id), {
+        isReplacement: true,
+        replacesVehicleId: immobilizedVehicle.id,
+        replacementSource: ReplacementSource.INTERNAL,
+        replacementStartDate: data.startDate,
+        replacementEndDate: data.endDate || null,
+        assignedDriverId: data.assignedDriverId || existingVehicle.assignedDriverId
+      });
+      
+      // Mettre à jour le véhicule immobilisé
+      await updateDoc(doc(db, 'vehicles', immobilizedVehicle.id), {
+        currentReplacementId: existingVehicle.id
+      });
+      
+    } else if (data.newVehicle) {
+      // Créer un nouveau véhicule de remplacement
+      const newVehicleId = 'v-repl-' + Date.now();
+      const newVehicle: Vehicle = {
+        id: newVehicleId,
+        plate: data.newVehicle.plate,
+        model: data.newVehicle.model,
+        type: 'Van',  // Par défaut
+        status: VehicleStatus.ACTIVE,
+        currentMileage: 0,
+        ownership: VehicleOwnership.REPLACEMENT,
+        isReplacement: true,
+        replacesVehicleId: immobilizedVehicle.id,
+        replacementSource: data.newVehicle.source,
+        replacementProvider: data.newVehicle.provider,
+        replacementStartDate: data.startDate,
+        replacementEndDate: data.endDate || undefined,
+        replacementDailyCost: data.newVehicle.dailyCost,
+        assignedDriverId: data.assignedDriverId
+      };
+      
+      await onAddVehicle(newVehicle);
+      
+      // Mettre à jour le véhicule immobilisé
+      await updateDoc(doc(db, 'vehicles', immobilizedVehicle.id), {
+        currentReplacementId: newVehicleId
+      });
+    }
   };
   
   // === HOOK: Logique métier véhicules ===
@@ -184,11 +258,13 @@ export const VehicleList: React.FC<VehicleListProps> = ({
                     maintenanceLogs={maintenanceLogs}
                     driverName={getDriverName(vehicle.id)}
                     showActions={canManage}
+                    allVehicles={vehicles}
                     onSelect={() => onSelectVehicle?.(vehicle.id)}
                     onViewIncidents={() => onViewIncidents?.(vehicle.id)}
                     onEdit={() => openEdit(vehicle)}
                     onDelete={() => requestDelete(vehicle)}
                     onAssignDriver={() => openAssignmentModal(vehicle)}
+                    onAssignReplacement={() => openReplacementModal(vehicle)}
                   />
                 ))}
               </tbody>
@@ -234,10 +310,12 @@ export const VehicleList: React.FC<VehicleListProps> = ({
               maintenanceLogs={maintenanceLogs}
               driverName={getDriverName(vehicle.id)}
               showActions={canManage}
+              allVehicles={vehicles}
               onSelect={() => onSelectVehicle?.(vehicle.id)}
               onViewIncidents={() => onViewIncidents?.(vehicle.id)}
               onEdit={() => openEdit(vehicle)}
               onAssignDriver={() => openAssignmentModal(vehicle)}
+              onAssignReplacement={() => openReplacementModal(vehicle)}
             />
           ))}
           
@@ -302,6 +380,18 @@ export const VehicleList: React.FC<VehicleListProps> = ({
           closeAssignmentModal();
         }}
       />
+
+      {/* Modal de remplacement */}
+      {replacementModal.vehicle && (
+        <ReplacementModal
+          isOpen={replacementModal.isOpen}
+          onClose={closeReplacementModal}
+          immobilizedVehicle={replacementModal.vehicle}
+          availableVehicles={vehicles}
+          users={users}
+          onConfirm={handleConfirmReplacement}
+        />
+      )}
     </div>
   );
 };

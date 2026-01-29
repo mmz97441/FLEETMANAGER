@@ -3,7 +3,23 @@ export enum VehicleStatus {
   ACTIVE = 'En Service',
   MAINTENANCE = 'Maintenance',
   IDLE = 'Disponible',
-  ISSUE = 'Problème Signalé'
+  ISSUE = 'Problème Signalé',
+  IMMOBILIZED = 'Immobilisé'  // Nouveau: panne sur route, en attente de réparation
+}
+
+// Type de véhicule (propriété vs remplacement)
+export enum VehicleOwnership {
+  OWNED = 'Propriété',
+  LEASED = 'Location longue durée',
+  REPLACEMENT = 'Remplacement temporaire'  // Location courte durée, prêt, etc.
+}
+
+// Source du véhicule de remplacement
+export enum ReplacementSource {
+  INTERNAL = 'Véhicule interne',       // Autre véhicule du parc
+  RENTAL = 'Location',                  // Hertz, Europcar, etc.
+  LOAN = 'Prêt partenaire',            // Prêté par un confrère
+  OTHER = 'Autre'
 }
 
 export enum FuelType {
@@ -120,6 +136,22 @@ export interface Vehicle {
   chronotachygraphDate?: string;
   speedLimiterDate?: string;
   customDeadlines?: CustomDeadline[];
+  
+  // === NOUVEAUX CHAMPS: Remplacement ===
+  ownership?: VehicleOwnership;           // Type de propriété
+  isReplacement?: boolean;                // Est-ce un véhicule de remplacement ?
+  replacesVehicleId?: string;             // ID du véhicule qu'il remplace
+  replacementSource?: ReplacementSource;  // Source (location, prêt, etc.)
+  replacementProvider?: string;           // Nom du loueur/prêteur (ex: "HERTZ")
+  replacementStartDate?: string;          // Date début remplacement
+  replacementEndDate?: string;            // Date fin prévue/effective
+  replacementDailyCost?: number;          // Coût journalier de la location
+  
+  // Pour les véhicules immobilisés
+  immobilizedDate?: string;               // Date d'immobilisation
+  immobilizedReason?: string;             // Raison (panne, accident, etc.)
+  immobilizedLocation?: string;           // Localisation si en panne sur route
+  currentReplacementId?: string;          // ID du véhicule de remplacement actuel
 }
 
 export interface FuelLog {
@@ -135,6 +167,8 @@ export interface FuelLog {
   station?: string;
   receiptUrl?: string;
   isRentalEntry?: boolean;
+  // === NOUVEAU: Imputation des coûts ===
+  imputedToVehicleId?: string;  // Si remplacement, ID du véhicule remplacé pour imputation comptable
 }
 
 export interface InvoiceLine {
@@ -161,6 +195,8 @@ export interface MaintenanceLog {
   linkedIssueId?: string;      // Lien vers l'incident source
   invoiceUrl?: string;         // Photo de la facture
   completedDate?: string;      // Date de fin de réparation
+  // === NOUVEAU: Imputation des coûts ===
+  imputedToVehicleId?: string;  // Si remplacement, ID du véhicule remplacé pour imputation comptable
 }
 
 export enum IssueStatus {
@@ -199,6 +235,13 @@ export interface Issue {
   repairLines?: InvoiceLine[]; // Détail des lignes de facture
   invoiceUrl?: string;         // Photo de la facture (obligatoire à la clôture)
   linkedMaintenanceId?: string; // Lien vers la MaintenanceLog créée
+  
+  // === NOUVEAUX CHAMPS: Immobilisation ===
+  vehicleImmobilized?: boolean;           // Le véhicule est-il immobilisé ?
+  immobilizedLocation?: string;           // Où est le véhicule ? (adresse, GPS)
+  needsTowing?: boolean;                  // Besoin de dépannage/remorquage ?
+  towingRequested?: boolean;              // Dépannage demandé ?
+  towingCompany?: string;                 // Société de dépannage
 }
 
 // === GESTION DES ABSENCES (REFONTE COMPLÈTE) ===

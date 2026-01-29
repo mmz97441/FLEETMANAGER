@@ -3,8 +3,8 @@
  */
 
 import React from 'react';
-import { Truck, AlertCircle, Edit, Trash2, User as UserIcon, Plus } from 'lucide-react';
-import { Vehicle, Issue, MaintenanceLog } from '../../types';
+import { Truck, AlertCircle, Edit, Trash2, User as UserIcon, Plus, ArrowRightLeft, MapPin } from 'lucide-react';
+import { Vehicle, Issue, MaintenanceLog, VehicleStatus } from '../../types';
 import { 
   getEffectiveStatus, 
   getMaintenanceHealth, 
@@ -19,11 +19,13 @@ interface VehicleRowProps {
   maintenanceLogs: MaintenanceLog[];
   driverName: string | null;
   showActions: boolean;
+  allVehicles?: Vehicle[];  // Pour trouver le véhicule de remplacement/remplacé
   onSelect?: () => void;
   onViewIncidents?: () => void;
   onEdit: () => void;
   onDelete: () => void;
-  onAssignDriver?: () => void; // Nouveau
+  onAssignDriver?: () => void;
+  onAssignReplacement?: () => void;  // Nouveau: affecter un remplacement
 }
 
 const VehicleRow: React.FC<VehicleRowProps> = ({
@@ -32,11 +34,13 @@ const VehicleRow: React.FC<VehicleRowProps> = ({
   maintenanceLogs,
   driverName,
   showActions,
+  allVehicles = [],
   onSelect,
   onViewIncidents,
   onEdit,
   onDelete,
-  onAssignDriver
+  onAssignDriver,
+  onAssignReplacement
 }) => {
   const health = getMaintenanceHealth(vehicle);
   const ctDate = vehicle.technicalControlDate ? new Date(vehicle.technicalControlDate) : null;
@@ -44,6 +48,16 @@ const VehicleRow: React.FC<VehicleRowProps> = ({
   const activeIssues = getActiveIssuesCount(vehicle.id, issues);
   const { status: effectiveStatus, isRepairing } = getEffectiveStatus(vehicle, issues, maintenanceLogs);
   const hasDriver = !!getDriverId(vehicle);
+  
+  // Infos de remplacement
+  const isImmobilized = vehicle.status === VehicleStatus.IMMOBILIZED || effectiveStatus === VehicleStatus.IMMOBILIZED;
+  const isReplacement = vehicle.isReplacement;
+  const replacementVehicle = vehicle.currentReplacementId 
+    ? allVehicles.find(v => v.id === vehicle.currentReplacementId)
+    : null;
+  const replacedVehicle = vehicle.replacesVehicleId
+    ? allVehicles.find(v => v.id === vehicle.replacesVehicleId)
+    : null;
 
   const formatVehicleType = (type: string) => {
     switch (type) {
@@ -55,17 +69,30 @@ const VehicleRow: React.FC<VehicleRowProps> = ({
 
   return (
     <tr 
-      className="hover:bg-slate-50/80 transition-colors group cursor-pointer" 
+      className={`hover:bg-slate-50/80 transition-colors group cursor-pointer ${
+        isImmobilized ? 'bg-red-50/50' : ''
+      } ${isReplacement ? 'bg-amber-50/50' : ''}`}
       onClick={onSelect}
     >
       {/* Identité véhicule */}
       <td className="px-6 py-4">
         <div className="flex items-center gap-3 relative">
-          <div className="bg-slate-100 p-2 rounded-lg text-slate-500 group-hover:bg-white group-hover:shadow-sm transition-all border border-transparent group-hover:border-slate-200 relative">
+          <div className={`p-2 rounded-lg transition-all border relative ${
+            isImmobilized 
+              ? 'bg-red-100 text-red-600 border-red-200' 
+              : isReplacement
+                ? 'bg-amber-100 text-amber-600 border-amber-200'
+                : 'bg-slate-100 text-slate-500 border-transparent group-hover:bg-white group-hover:shadow-sm group-hover:border-slate-200'
+          }`}>
             <Truck size={20} />
             {activeIssues > 0 && (
               <div className="absolute -top-1 -right-1 w-4 h-4 bg-red-600 rounded-full flex items-center justify-center text-[10px] text-white font-bold border-2 border-white animate-pulse">
                 {activeIssues}
+              </div>
+            )}
+            {isImmobilized && !activeIssues && (
+              <div className="absolute -top-1 -right-1 w-4 h-4 bg-red-600 rounded-full flex items-center justify-center border-2 border-white animate-pulse">
+                <span className="text-white text-[8px]">!</span>
               </div>
             )}
           </div>
@@ -81,8 +108,43 @@ const VehicleRow: React.FC<VehicleRowProps> = ({
                   Incident
                 </span>
               )}
+              {isReplacement && (
+                <span className="bg-amber-100 text-amber-700 px-1.5 rounded text-[10px] uppercase font-bold border border-amber-200">
+                  Remplacement
+                </span>
+              )}
             </div>
             <div className="text-xs text-slate-500 font-medium">{vehicle.model}</div>
+            
+            {/* Indicateur de remplacement */}
+            {isImmobilized && replacementVehicle && (
+              <div className="mt-1 flex items-center gap-1 text-[10px] text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                <ArrowRightLeft size={10} />
+                Remplacé par {replacementVehicle.plate}
+              </div>
+            )}
+            {isImmobilized && !replacementVehicle && showActions && onAssignReplacement && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onAssignReplacement(); }}
+                className="mt-1 flex items-center gap-1 text-[10px] text-red-600 bg-red-50 px-2 py-0.5 rounded-full border border-red-200 hover:bg-red-100 transition-colors"
+              >
+                <Plus size={10} />
+                Affecter remplacement
+              </button>
+            )}
+            {isReplacement && replacedVehicle && (
+              <div className="mt-1 flex items-center gap-1 text-[10px] text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
+                <ArrowRightLeft size={10} />
+                Remplace {replacedVehicle.plate}
+              </div>
+            )}
+            {vehicle.immobilizedLocation && isImmobilized && (
+              <div className="mt-1 flex items-center gap-1 text-[10px] text-red-500">
+                <MapPin size={10} />
+                {vehicle.immobilizedLocation}
+              </div>
+            )}
+            
             {/* Section chauffeur cliquable */}
             {showActions && onAssignDriver ? (
               <button
@@ -124,7 +186,7 @@ const VehicleRow: React.FC<VehicleRowProps> = ({
 
       {/* Statut */}
       <td className="px-6 py-4 text-center">
-        <VehicleStatusBadge status={effectiveStatus} isRepairing={isRepairing} />
+        <VehicleStatusBadge status={effectiveStatus} isRepairing={isRepairing} isReplacement={isReplacement} />
       </td>
 
       {/* Barre d'usure */}

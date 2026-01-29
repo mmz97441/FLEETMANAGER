@@ -24,6 +24,7 @@ import MobileNavBar from './components/MobileNavBar';
 import VehicleDetail from './components/VehicleDetail';
 import Login from './components/Login';
 import ActivateAccount from './components/ActivateAccount';
+import HelpCenter from './components/HelpCenter';
 import { Menu, Loader2, WifiOff } from 'lucide-react';
 
 // FIREBASE SERVICES
@@ -694,7 +695,6 @@ const App: React.FC = () => {
       case 'client_dashboard':
       case 'client_list':
       case 'client_team':
-      case 'help':
         // Sécurité : On filtre strictement les utilisateurs visibles par le client
         const companyTeam = users.filter(u => 
             u.companyName === currentUser.companyName && 
@@ -712,6 +712,10 @@ const App: React.FC = () => {
             onUpdateTeamMember={handleUpdateTeamMember}
             onDeleteTeamMember={handleDeleteTeamMember}
         />;
+
+      case 'help':
+        // Centre d'aide - accessible à tous les utilisateurs
+        return <HelpCenter currentUser={currentUser} />;
 
       default:
         // Par défaut, si c'est un client on affiche le portail, sinon le dashboard flotte

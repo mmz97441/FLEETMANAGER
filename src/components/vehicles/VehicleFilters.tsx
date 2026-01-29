@@ -81,7 +81,9 @@ const VehicleFilters: React.FC<VehicleFiltersProps> = ({
             <option value={VehicleStatus.ACTIVE}>En service</option>
             <option value={VehicleStatus.MAINTENANCE}>Maintenance</option>
             <option value={VehicleStatus.ISSUE}>En alerte</option>
+            <option value={VehicleStatus.IMMOBILIZED}>Immobilisé</option>
             <option value={VehicleStatus.IDLE}>Au repos</option>
+            <option value="replacement">Remplacements</option>
           </select>
         </div>
       </div>

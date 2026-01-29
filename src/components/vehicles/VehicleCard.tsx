@@ -3,7 +3,7 @@
  */
 
 import React from 'react';
-import { Truck, Gauge, AlertTriangle, Edit, User as UserIcon, Plus } from 'lucide-react';
+import { Truck, Gauge, AlertTriangle, Edit, User as UserIcon, Plus, ArrowRightLeft, MapPin } from 'lucide-react';
 import { Vehicle, VehicleStatus, Issue, MaintenanceLog } from '../../types';
 import { 
   getEffectiveStatus, 
@@ -19,10 +19,12 @@ interface VehicleCardProps {
   maintenanceLogs: MaintenanceLog[];
   driverName: string | null;
   showActions: boolean;
+  allVehicles?: Vehicle[];
   onSelect?: () => void;
   onViewIncidents?: () => void;
   onEdit: () => void;
-  onAssignDriver?: () => void; // Nouveau
+  onAssignDriver?: () => void;
+  onAssignReplacement?: () => void;
 }
 
 const VehicleCard: React.FC<VehicleCardProps> = ({
@@ -31,18 +33,32 @@ const VehicleCard: React.FC<VehicleCardProps> = ({
   maintenanceLogs,
   driverName,
   showActions,
+  allVehicles = [],
   onSelect,
   onViewIncidents,
   onEdit,
-  onAssignDriver
+  onAssignDriver,
+  onAssignReplacement
 }) => {
   const health = getMaintenanceHealth(vehicle);
   const activeIssues = getActiveIssuesCount(vehicle.id, issues);
   const { status: effectiveStatus, isRepairing } = getEffectiveStatus(vehicle, issues, maintenanceLogs);
   const hasDriver = !!getDriverId(vehicle);
+  
+  // Infos de remplacement
+  const isImmobilized = vehicle.status === VehicleStatus.IMMOBILIZED || effectiveStatus === VehicleStatus.IMMOBILIZED;
+  const isReplacement = vehicle.isReplacement;
+  const replacementVehicle = vehicle.currentReplacementId 
+    ? allVehicles.find(v => v.id === vehicle.currentReplacementId)
+    : null;
+  const replacedVehicle = vehicle.replacesVehicleId
+    ? allVehicles.find(v => v.id === vehicle.replacesVehicleId)
+    : null;
 
   // Couleur de la barre latérale selon le statut
   const getBorderColor = () => {
+    if (isImmobilized) return 'bg-red-600';
+    if (isReplacement) return 'bg-amber-500';
     if (effectiveStatus === VehicleStatus.ACTIVE) return 'bg-emerald-500';
     if (effectiveStatus === VehicleStatus.MAINTENANCE || isRepairing) return 'bg-orange-500';
     if (effectiveStatus === VehicleStatus.ISSUE) return 'bg-red-500';
@@ -71,12 +87,55 @@ const VehicleCard: React.FC<VehicleCardProps> = ({
       {/* Header */}
       <div className="flex justify-between items-start mb-4 pl-3">
         <div className="flex items-center gap-3">
-          <div className="bg-slate-50 p-2.5 rounded-xl text-slate-600 border border-slate-100">
+          <div className={`p-2.5 rounded-xl border ${
+            isImmobilized 
+              ? 'bg-red-50 text-red-600 border-red-200' 
+              : isReplacement
+                ? 'bg-amber-50 text-amber-600 border-amber-200'
+                : 'bg-slate-50 text-slate-600 border-slate-100'
+          }`}>
             <Truck size={24} />
           </div>
           <div>
-            <h3 className="font-mono font-bold text-lg text-slate-900">{vehicle.plate}</h3>
+            <div className="flex items-center gap-2">
+              <h3 className="font-mono font-bold text-lg text-slate-900">{vehicle.plate}</h3>
+              {isReplacement && (
+                <span className="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded text-[10px] font-bold border border-amber-200">
+                  REMPLACEMENT
+                </span>
+              )}
+            </div>
             <p className="text-xs text-slate-500 font-medium">{vehicle.model}</p>
+            
+            {/* Indicateurs de remplacement */}
+            {isImmobilized && replacementVehicle && (
+              <div className="mt-1 flex items-center gap-1 text-[10px] text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                <ArrowRightLeft size={10} />
+                Remplacé par {replacementVehicle.plate}
+              </div>
+            )}
+            {isImmobilized && !replacementVehicle && showActions && onAssignReplacement && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onAssignReplacement(); }}
+                className="mt-1 flex items-center gap-1 text-[10px] text-red-600 bg-red-50 px-2 py-0.5 rounded-full border border-red-200 hover:bg-red-100 transition-colors"
+              >
+                <Plus size={10} />
+                Affecter remplacement
+              </button>
+            )}
+            {isReplacement && replacedVehicle && (
+              <div className="mt-1 flex items-center gap-1 text-[10px] text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
+                <ArrowRightLeft size={10} />
+                Remplace {replacedVehicle.plate}
+              </div>
+            )}
+            {vehicle.immobilizedLocation && isImmobilized && (
+              <div className="mt-1 flex items-center gap-1 text-[10px] text-red-500">
+                <MapPin size={10} />
+                {vehicle.immobilizedLocation}
+              </div>
+            )}
+            
             {/* Section chauffeur cliquable */}
             {showActions && onAssignDriver ? (
               <button
@@ -107,7 +166,7 @@ const VehicleCard: React.FC<VehicleCardProps> = ({
             ) : null}
           </div>
         </div>
-        <VehicleStatusBadge status={effectiveStatus} isRepairing={isRepairing} size="sm" />
+        <VehicleStatusBadge status={effectiveStatus} isRepairing={isRepairing} isReplacement={isReplacement} size="sm" />
       </div>
 
       {/* Contenu */}

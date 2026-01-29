@@ -16,6 +16,8 @@ export interface VehicleStats {
   active: number;
   maintenance: number;
   issues: number;
+  immobilized: number;  // Nouveau: véhicules immobilisés
+  replacements: number; // Nouveau: véhicules de remplacement
   totalKm: number;
 }
 
@@ -54,6 +56,11 @@ export const getEffectiveStatus = (
   issues: Issue[], 
   maintenanceLogs: MaintenanceLog[]
 ): EffectiveStatus => {
+  // 0. Si véhicule explicitement immobilisé
+  if (vehicle.status === VehicleStatus.IMMOBILIZED) {
+    return { status: VehicleStatus.IMMOBILIZED, isRepairing: false };
+  }
+  
   // 1. Maintenance active (Logs "Pending") ?
   const hasActiveMaintenance = maintenanceLogs.some(
     m => m.vehicleId === vehicle.id && m.status === 'Pending'
@@ -67,6 +74,10 @@ export const getEffectiveStatus = (
     i => i.vehicleId === vehicle.id && i.status !== IssueStatus.RESOLVED
   );
   if (activeIssue) {
+    // Si l'incident a immobilisé le véhicule
+    if (activeIssue.vehicleImmobilized) {
+      return { status: VehicleStatus.IMMOBILIZED, isRepairing: false };
+    }
     // Si l'incident est "En réparation" (IN_PROGRESS) → MAINTENANCE
     if (activeIssue.status === IssueStatus.IN_PROGRESS) {
       return { status: VehicleStatus.MAINTENANCE, isRepairing: true };
@@ -231,12 +242,20 @@ export const useVehicles = ({
     let active = 0;
     let maintenance = 0;
     let issuesCount = 0;
+    let immobilized = 0;
+    let replacements = 0;
     
     accessibleVehicles.forEach(v => {
+      // Compteur remplacements
+      if (v.isReplacement) {
+        replacements++;
+      }
+      
       const { status } = getEffectiveStatus(v, issues, maintenanceLogs);
       if (status === VehicleStatus.ACTIVE) active++;
       if (status === VehicleStatus.MAINTENANCE) maintenance++;
       if (status === VehicleStatus.ISSUE) issuesCount++;
+      if (status === VehicleStatus.IMMOBILIZED) immobilized++;
     });
 
     // Ajouter les alertes d'échéance maintenance
@@ -251,7 +270,9 @@ export const useVehicles = ({
       total: accessibleVehicles.length, 
       active, 
       maintenance, 
-      issues: issuesCount, 
+      issues: issuesCount,
+      immobilized,
+      replacements,
       totalKm 
     };
   }, [accessibleVehicles, issues, maintenanceLogs]);
@@ -267,6 +288,12 @@ export const useVehicles = ({
       
       // Filtre basé sur le statut EFFECTIF
       const { status } = getEffectiveStatus(v, issues, maintenanceLogs);
+      
+      // Filtre spécial "replacement" pour les véhicules de remplacement
+      if (filterStatus === 'replacement') {
+        return matchesSearch && v.isReplacement === true;
+      }
+      
       const matchesStatus = filterStatus === 'all' || status === filterStatus;
       
       return matchesSearch && matchesStatus;

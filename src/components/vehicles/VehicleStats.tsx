@@ -3,12 +3,12 @@
  */
 
 import React from 'react';
-import { Truck, CheckCircle2, Wrench, AlertTriangle } from 'lucide-react';
+import { Truck, CheckCircle2, Wrench, AlertTriangle, XOctagon } from 'lucide-react';
 import { VehicleStats as VehicleStatsType } from '../../hooks/useVehicles';
 
 interface VehicleStatsProps {
   stats: VehicleStatsType;
-  onStatClick?: (stat: 'total' | 'active' | 'maintenance' | 'issues') => void;
+  onStatClick?: (stat: 'total' | 'active' | 'maintenance' | 'issues' | 'immobilized') => void;
 }
 
 const VehicleStats: React.FC<VehicleStatsProps> = ({ stats, onStatClick }) => {
@@ -41,18 +41,28 @@ const VehicleStats: React.FC<VehicleStatsProps> = ({ stats, onStatClick }) => {
       valueColor: 'text-orange-600'
     },
     {
+      key: 'immobilized' as const,
+      label: 'Immobilisés',
+      value: stats.immobilized,
+      icon: XOctagon,
+      bgColor: 'bg-red-50',
+      iconColor: 'text-red-600',
+      valueColor: 'text-red-600',
+      pulse: stats.immobilized > 0  // Animation si > 0
+    },
+    {
       key: 'issues' as const,
       label: 'Alertes',
       value: stats.issues,
       icon: AlertTriangle,
-      bgColor: 'bg-red-50',
-      iconColor: 'text-red-600',
-      valueColor: 'text-red-600'
+      bgColor: 'bg-amber-50',
+      iconColor: 'text-amber-600',
+      valueColor: 'text-amber-600'
     }
   ];
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
       {cards.map(card => (
         <div 
           key={card.key}
@@ -61,6 +71,7 @@ const VehicleStats: React.FC<VehicleStatsProps> = ({ stats, onStatClick }) => {
             bg-white p-4 rounded-2xl shadow-sm border border-slate-100 
             flex items-center justify-between
             ${onStatClick ? 'cursor-pointer hover:shadow-md transition-shadow' : ''}
+            ${card.pulse ? 'animate-pulse' : ''}
           `}
         >
           <div>
