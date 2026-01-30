@@ -361,6 +361,51 @@ export const addFuelLogToFirestore = async (log: FuelLog) => {
   await addDoc(collection(db, "fuel_logs"), cleanFirestoreData(dataToSave));
 };
 
+// Mise à jour d'un plein de carburant
+export const updateFuelLogInFirestore = async (log: FuelLog) => {
+  // L'ID Firestore est stocké dans log.firestoreId ou on le cherche
+  const logId = (log as any).firestoreId || log.id;
+  
+  if (!logId || logId.startsWith('f-')) {
+    // Si c'est un ID temporaire (f-xxx), il faut trouver le document par date/vehicleId
+    const q = query(
+      collection(db, "fuel_logs"),
+      where("vehicleId", "==", log.vehicleId),
+      where("date", "==", log.date)
+    );
+    const snapshot = await getDocs(q);
+    
+    if (snapshot.empty) {
+      throw new Error('Plein de carburant non trouvé dans la base de données');
+    }
+    
+    const docRef = doc(db, "fuel_logs", snapshot.docs[0].id);
+    await updateDoc(docRef, cleanFirestoreData({
+      cost: log.cost,
+      mileage: log.mileage,
+      liters: log.volume,
+      adBlueLiters: log.adBlueVolume || 0,
+      adBlueCost: log.adBlueCost || 0,
+      lastModifiedAt: (log as any).lastModifiedAt || new Date().toISOString(),
+      lastModifiedBy: (log as any).lastModifiedBy || '',
+      lastModifiedByName: (log as any).lastModifiedByName || ''
+    }));
+  } else {
+    // On a l'ID Firestore directement
+    const docRef = doc(db, "fuel_logs", logId);
+    await updateDoc(docRef, cleanFirestoreData({
+      cost: log.cost,
+      mileage: log.mileage,
+      liters: log.volume,
+      adBlueLiters: log.adBlueVolume || 0,
+      adBlueCost: log.adBlueCost || 0,
+      lastModifiedAt: (log as any).lastModifiedAt || new Date().toISOString(),
+      lastModifiedBy: (log as any).lastModifiedBy || '',
+      lastModifiedByName: (log as any).lastModifiedByName || ''
+    }));
+  }
+};
+
 // --- ISSUES (INCIDENTS) ---
 export const subscribeToIssues = (callback: (data: Issue[]) => void) => {
   const q = collection(db, "issues");

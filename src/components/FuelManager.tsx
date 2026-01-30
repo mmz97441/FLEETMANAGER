@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { FuelLog, Vehicle, User, UserRole } from '../types';
-import { Droplet, Plus, TrendingUp, DollarSign, Calendar, Filter, X, Save, Car, ChevronDown, ChevronUp, Route, Gauge, Download, Eye, FileText, User as UserIcon, Search, Check, ExternalLink, Lock, Camera, Upload, AlertCircle } from 'lucide-react';
+import { Droplet, Plus, TrendingUp, DollarSign, Calendar, Filter, X, Save, Car, ChevronDown, ChevronUp, Route, Gauge, Download, Eye, FileText, User as UserIcon, Search, Check, ExternalLink, Lock, Camera, Upload, AlertCircle, Edit2 } from 'lucide-react';
 import Modal from './shared/Modal';
 import ConfirmModal from './ConfirmModal';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -13,9 +13,10 @@ interface FuelManagerProps {
   users: User[];
   currentUser: User;
   onAddLog: (log: FuelLog) => Promise<void>;
+  onUpdateLog?: (log: FuelLog) => Promise<void>;
 }
 
-export const FuelManager: React.FC<FuelManagerProps> = ({ logs, vehicles, users, currentUser, onAddLog }) => {
+export const FuelManager: React.FC<FuelManagerProps> = ({ logs, vehicles, users, currentUser, onAddLog, onUpdateLog }) => {
   
   // === PERMISSIONS ===
   const { hasPermission } = usePermissions();
@@ -71,6 +72,19 @@ export const FuelManager: React.FC<FuelManagerProps> = ({ logs, vehicles, users,
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [showAdBlue, setShowAdBlue] = useState(false); 
   
+  // EDIT MODAL STATE
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingLog, setEditingLog] = useState<FuelLog | null>(null);
+  const [editForm, setEditForm] = useState({
+    mileage: '' as any,
+    volume: '' as any,
+    cost: '' as any,
+    adBlueVolume: '' as any,
+    adBlueCost: '' as any
+  });
+  const [editMileageError, setEditMileageError] = useState<string | null>(null);
+  const [isEditSaving, setIsEditSaving] = useState(false);
+  
   // CONFIRMATION STATE
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [pendingLog, setPendingLog] = useState<FuelLog | null>(null);
@@ -80,6 +94,10 @@ export const FuelManager: React.FC<FuelManagerProps> = ({ logs, vehicles, users,
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
+  
+  // VALIDATION KM STATE
+  const [mileageError, setMileageError] = useState<string | null>(null);
+  const [mileageWarning, setMileageWarning] = useState<string | null>(null);
 
   const [newLog, setNewLog] = useState({
       vehicleId: '',
@@ -90,6 +108,116 @@ export const FuelManager: React.FC<FuelManagerProps> = ({ logs, vehicles, users,
       adBlueVolume: '' as any,
       adBlueCost: '' as any
   });
+
+  // === VALIDATION KILOMÉTRAGE ===
+  // Récupère le dernier kilométrage connu pour un véhicule
+  const getLastMileageForVehicle = (vehicleId: string): number | null => {
+    if (!vehicleId) return null;
+    
+    const vehicleLogs = logs
+      .filter(l => l.vehicleId === vehicleId)
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    
+    if (vehicleLogs.length === 0) {
+      // Pas de logs, vérifier le km initial du véhicule
+      const vehicle = vehicles.find(v => v.id === vehicleId);
+      return vehicle?.mileage || null;
+    }
+    
+    return vehicleLogs[0].mileage;
+  };
+
+  // Valide le kilométrage saisi
+  const validateMileage = (mileageStr: string, vehicleId: string): { valid: boolean; error?: string; warning?: string } => {
+    const mileage = Number(mileageStr);
+    
+    // Vérifications de base
+    if (isNaN(mileage) || mileage < 0) {
+      return { valid: false, error: 'Le kilométrage doit être un nombre positif' };
+    }
+    
+    // Limite absolue (aucun véhicule ne dépasse 2 millions de km)
+    if (mileage > 2000000) {
+      return { valid: false, error: '⚠️ Kilométrage impossible (max 2 000 000 km). Vérifiez votre saisie.' };
+    }
+    
+    // Limite haute pour camions (1 million km max réaliste)
+    if (mileage > 1000000) {
+      return { valid: true, warning: '⚠️ Kilométrage très élevé. Êtes-vous sûr ?' };
+    }
+    
+    const lastMileage = getLastMileageForVehicle(vehicleId);
+    
+    if (lastMileage !== null) {
+      // Le km ne peut pas être inférieur au dernier relevé
+      if (mileage < lastMileage) {
+        return { 
+          valid: false, 
+          error: `❌ Le kilométrage ne peut pas être inférieur au dernier relevé (${lastMileage.toLocaleString()} km)` 
+        };
+      }
+      
+      // Différence depuis le dernier plein
+      const diff = mileage - lastMileage;
+      
+      // Plus de 1500 km depuis le dernier plein = BLOQUÉ
+      if (diff > 1500) {
+        return { 
+          valid: false, 
+          error: `❌ +${diff.toLocaleString()} km depuis le dernier plein. Maximum autorisé : 1 500 km. Vérifiez votre saisie.` 
+        };
+      }
+      
+      // Plus de 1200 km = warning (proche de la limite)
+      if (diff > 1200) {
+        return { 
+          valid: true, 
+          warning: `⚠️ +${diff.toLocaleString()} km depuis le dernier plein (proche de la limite de 1 500 km)` 
+        };
+      }
+    }
+    
+    return { valid: true };
+  };
+
+  // Handler pour le changement de kilométrage avec validation temps réel
+  const handleMileageChange = (value: string) => {
+    setNewLog(prev => ({ ...prev, mileage: value }));
+    setMileageError(null);
+    setMileageWarning(null);
+    
+    if (value && newLog.vehicleId) {
+      const validation = validateMileage(value, newLog.vehicleId);
+      if (!validation.valid && validation.error) {
+        setMileageError(validation.error);
+      } else if (validation.warning) {
+        setMileageWarning(validation.warning);
+      }
+    }
+  };
+
+  // Handler pour le changement de véhicule (re-valide le km si déjà saisi)
+  const handleVehicleChange = (vehicleId: string) => {
+    setNewLog(prev => ({ ...prev, vehicleId }));
+    setMileageError(null);
+    setMileageWarning(null);
+    
+    // Pré-remplir avec le dernier km connu + suggestion
+    const lastMileage = getLastMileageForVehicle(vehicleId);
+    if (lastMileage && !newLog.mileage) {
+      // Ne pas pré-remplir, mais afficher une indication
+    }
+    
+    // Re-valider si km déjà saisi
+    if (newLog.mileage && vehicleId) {
+      const validation = validateMileage(newLog.mileage, vehicleId);
+      if (!validation.valid && validation.error) {
+        setMileageError(validation.error);
+      } else if (validation.warning) {
+        setMileageWarning(validation.warning);
+      }
+    }
+  };
 
   useEffect(() => {
       if (accessibleVehicles.length === 1) {
@@ -242,13 +370,29 @@ export const FuelManager: React.FC<FuelManagerProps> = ({ logs, vehicles, users,
   const handleRequestSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
       
-      // Vérifier que la photo est présente (OBLIGATOIRE)
+      // Reset erreurs
+      setPhotoError(null);
+      setMileageError(null);
+      
+      // === VALIDATION 1: PHOTO OBLIGATOIRE ===
       if (!receiptPhoto) {
-        setPhotoError('La photo du bon d\'essence est obligatoire');
+        setPhotoError('📸 La photo du ticket est OBLIGATOIRE pour valider le plein');
         return;
       }
       
-      if (!newLog.vehicleId || !newLog.mileage || !newLog.volume || !newLog.cost) return;
+      // === VALIDATION 2: CHAMPS REQUIS ===
+      if (!newLog.vehicleId || !newLog.mileage || !newLog.volume || !newLog.cost) {
+        return;
+      }
+      
+      // === VALIDATION 3: KILOMÉTRAGE ===
+      const mileageValidation = validateMileage(newLog.mileage, newLog.vehicleId);
+      if (!mileageValidation.valid) {
+        setMileageError(mileageValidation.error || 'Kilométrage invalide');
+        return;
+      }
+      
+      // Si warning mais valide, on continue (l'utilisateur a été prévenu)
 
       setIsUploading(true);
       
@@ -305,6 +449,118 @@ export const FuelManager: React.FC<FuelManagerProps> = ({ logs, vehicles, users,
       }
       setIsConfirmOpen(false);
       setPendingLog(null);
+  };
+
+  // === FONCTIONS D'ÉDITION ===
+  
+  // Vérifie si l'utilisateur peut modifier ce log
+  const canEditThisLog = (log: FuelLog): boolean => {
+    if (!onUpdateLog) return false;
+    
+    const userRole = String(currentUser.role || '').toLowerCase();
+    
+    // Président, Directeur, Secrétariat peuvent tout modifier
+    if (userRole.includes('président') || userRole.includes('president') || 
+        userRole.includes('directeur') || userRole.includes('direction') ||
+        userRole.includes('secrétariat') || userRole.includes('secretariat') ||
+        userRole.includes('admin')) {
+      return true;
+    }
+    
+    // Le chauffeur peut modifier ses propres pleins
+    const vehicle = vehicles.find(v => v.id === log.vehicleId);
+    if (vehicle) {
+      const driverId = vehicle.assignedDriverId || vehicle.driverId;
+      if (driverId === currentUser.id) {
+        return true;
+      }
+    }
+    
+    return false;
+  };
+
+  // Ouvre le modal d'édition
+  const handleOpenEdit = (log: FuelLog) => {
+    setEditingLog(log);
+    setEditForm({
+      mileage: log.mileage.toString(),
+      volume: log.volume.toString(),
+      cost: log.cost.toString(),
+      adBlueVolume: log.adBlueVolume?.toString() || '',
+      adBlueCost: log.adBlueCost?.toString() || ''
+    });
+    setEditMileageError(null);
+    setIsEditModalOpen(true);
+  };
+
+  // Valide le km pour l'édition (moins strict car correction)
+  const validateEditMileage = (mileageStr: string): { valid: boolean; error?: string } => {
+    const mileage = Number(mileageStr);
+    
+    if (isNaN(mileage) || mileage < 0) {
+      return { valid: false, error: 'Le kilométrage doit être un nombre positif' };
+    }
+    
+    if (mileage > 2000000) {
+      return { valid: false, error: '⚠️ Kilométrage impossible (max 2 000 000 km)' };
+    }
+    
+    return { valid: true };
+  };
+
+  // Handler changement km en édition
+  const handleEditMileageChange = (value: string) => {
+    setEditForm(prev => ({ ...prev, mileage: value }));
+    setEditMileageError(null);
+    
+    if (value) {
+      const validation = validateEditMileage(value);
+      if (!validation.valid) {
+        setEditMileageError(validation.error || 'Erreur');
+      }
+    }
+  };
+
+  // Sauvegarde les modifications
+  const handleSaveEdit = async () => {
+    if (!editingLog || !onUpdateLog) return;
+    
+    // Validation
+    const validation = validateEditMileage(editForm.mileage);
+    if (!validation.valid) {
+      setEditMileageError(validation.error || 'Erreur');
+      return;
+    }
+    
+    if (!editForm.mileage || !editForm.volume || !editForm.cost) {
+      return;
+    }
+    
+    setIsEditSaving(true);
+    
+    try {
+      const updatedLog: FuelLog = {
+        ...editingLog,
+        mileage: Number(editForm.mileage),
+        volume: Number(editForm.volume),
+        cost: Number(editForm.cost),
+        adBlueVolume: editForm.adBlueVolume ? Number(editForm.adBlueVolume) : undefined,
+        adBlueCost: editForm.adBlueCost ? Number(editForm.adBlueCost) : undefined,
+        // Ajouter un flag de modification
+        lastModifiedAt: new Date().toISOString(),
+        lastModifiedBy: currentUser.id,
+        lastModifiedByName: `${currentUser.firstName} ${currentUser.lastName}`
+      };
+      
+      await onUpdateLog(updatedLog);
+      setIsEditModalOpen(false);
+      setEditingLog(null);
+    } catch (error) {
+      console.error('Erreur modification:', error);
+      alert('Erreur lors de la modification');
+    } finally {
+      setIsEditSaving(false);
+    }
   };
 
   const downloadCSV = () => {
@@ -671,6 +927,22 @@ export const FuelManager: React.FC<FuelManagerProps> = ({ logs, vehicles, users,
                                         <FileText size={18} />
                                     </span>
                                 )}
+                                
+                                {/* Bouton Modifier */}
+                                {canEditThisLog(log) && (
+                                    <button
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            handleOpenEdit(log);
+                                        }}
+                                        className="text-amber-500 hover:text-amber-700 hover:bg-amber-50 p-2 rounded-full transition-all transform hover:scale-110 shadow-sm cursor-pointer ml-1"
+                                        title="Modifier ce plein"
+                                    >
+                                        <Edit2 size={16} strokeWidth={2.5} />
+                                    </button>
+                                )}
                             </td>
                         </tr>
                     )})}
@@ -740,16 +1012,50 @@ export const FuelManager: React.FC<FuelManagerProps> = ({ logs, vehicles, users,
                         {/* Main Fuel Data */}
                         <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 space-y-4">
                              <div>
-                                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Kilométrage Compteur</label>
+                                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                                   Kilométrage Compteur
+                                 </label>
+                                 
+                                 {/* Indication du dernier km connu */}
+                                 {newLog.vehicleId && getLastMileageForVehicle(newLog.vehicleId) && (
+                                   <p className="text-xs text-slate-500 mb-2 flex items-center gap-1">
+                                     <Gauge size={12} />
+                                     Dernier relevé : <span className="font-bold text-slate-700">{getLastMileageForVehicle(newLog.vehicleId)?.toLocaleString()} km</span>
+                                   </p>
+                                 )}
+                                 
                                  <input 
                                     type="number"
                                     required
                                     min="0"
+                                    max="2000000"
                                     placeholder="Ex: 125 000"
-                                    className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none text-slate-900 font-bold tracking-widest text-lg bg-white placeholder:font-normal placeholder:text-slate-400 placeholder:text-sm"
+                                    className={`w-full px-4 py-3 border rounded-xl focus:ring-2 outline-none text-slate-900 font-bold tracking-widest text-lg bg-white placeholder:font-normal placeholder:text-slate-400 placeholder:text-sm ${
+                                      mileageError 
+                                        ? 'border-red-400 focus:ring-red-500 bg-red-50' 
+                                        : mileageWarning 
+                                          ? 'border-orange-400 focus:ring-orange-500 bg-orange-50'
+                                          : 'border-slate-300 focus:ring-brand-500'
+                                    }`}
                                     value={newLog.mileage}
-                                    onChange={(e) => setNewLog({...newLog, mileage: e.target.value})}
+                                    onChange={(e) => handleMileageChange(e.target.value)}
                                 />
+                                
+                                {/* Erreur km */}
+                                {mileageError && (
+                                  <p className="mt-2 text-sm text-red-600 font-medium flex items-start gap-2 bg-red-50 p-2 rounded-lg">
+                                    <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
+                                    {mileageError}
+                                  </p>
+                                )}
+                                
+                                {/* Warning km */}
+                                {mileageWarning && !mileageError && (
+                                  <p className="mt-2 text-sm text-orange-600 font-medium flex items-start gap-2 bg-orange-50 p-2 rounded-lg">
+                                    <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
+                                    {mileageWarning}
+                                  </p>
+                                )}
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
@@ -883,9 +1189,9 @@ export const FuelManager: React.FC<FuelManagerProps> = ({ logs, vehicles, users,
                         <div className="pt-4">
                             <button 
                                 type="submit"
-                                disabled={isUploading || !receiptPhoto}
+                                disabled={isUploading || !receiptPhoto || !!mileageError}
                                 className={`w-full py-4 text-white rounded-xl font-bold text-lg transition-all shadow-xl shadow-slate-200 flex items-center justify-center gap-2 transform active:scale-[0.98] ${
-                                  isUploading || !receiptPhoto
+                                  isUploading || !receiptPhoto || !!mileageError
                                     ? 'bg-slate-400 cursor-not-allowed'
                                     : 'bg-slate-900 hover:bg-black'
                                 }`}
@@ -903,7 +1209,12 @@ export const FuelManager: React.FC<FuelManagerProps> = ({ logs, vehicles, users,
                             </button>
                             {!receiptPhoto && !photoError && (
                               <p className="text-center text-xs text-slate-400 mt-2">
-                                Ajoutez la photo du bon pour activer le bouton
+                                📸 Ajoutez la photo du bon pour activer le bouton
+                              </p>
+                            )}
+                            {mileageError && (
+                              <p className="text-center text-xs text-red-500 mt-2">
+                                ⚠️ Corrigez le kilométrage pour continuer
                               </p>
                             )}
                         </div>
@@ -920,6 +1231,158 @@ export const FuelManager: React.FC<FuelManagerProps> = ({ logs, vehicles, users,
             type="success"
             confirmLabel="Valider"
         />
+
+        {/* EDIT MODAL */}
+        <Modal
+          isOpen={isEditModalOpen}
+          onClose={() => setIsEditModalOpen(false)}
+          title="Modifier le plein"
+          subtitle={editingLog ? `Plein du ${new Date(editingLog.date).toLocaleDateString('fr-FR')}` : ''}
+          size="md"
+          headerIcon={<Edit2 size={20} />}
+        >
+          {editingLog && (
+            <div className="space-y-5">
+              {/* Info véhicule */}
+              <div className="bg-slate-50 p-4 rounded-xl">
+                <p className="text-sm text-slate-500">Véhicule</p>
+                <p className="font-bold text-slate-800">
+                  {(() => {
+                    const v = vehicles.find(v => v.id === editingLog.vehicleId);
+                    return v ? `${v.plate} - ${v.brand} ${v.model}` : editingLog.vehicleId;
+                  })()}
+                </p>
+              </div>
+              
+              {/* Kilométrage */}
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                  Kilométrage Compteur
+                </label>
+                <input 
+                  type="number"
+                  min="0"
+                  max="2000000"
+                  className={`w-full px-4 py-3 border rounded-xl focus:ring-2 outline-none text-slate-900 font-bold tracking-widest text-lg bg-white ${
+                    editMileageError 
+                      ? 'border-red-400 focus:ring-red-500 bg-red-50' 
+                      : 'border-slate-300 focus:ring-brand-500'
+                  }`}
+                  value={editForm.mileage}
+                  onChange={(e) => handleEditMileageChange(e.target.value)}
+                />
+                {editMileageError && (
+                  <p className="mt-2 text-sm text-red-600 font-medium flex items-start gap-2">
+                    <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
+                    {editMileageError}
+                  </p>
+                )}
+              </div>
+              
+              {/* Volume et Coût */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Volume (L)</label>
+                  <input 
+                    type="number" 
+                    step="0.01" 
+                    min="0" 
+                    className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none text-slate-900 font-bold bg-white"
+                    value={editForm.volume}
+                    onChange={(e) => setEditForm({...editForm, volume: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Coût (€)</label>
+                  <input 
+                    type="number" 
+                    step="0.01" 
+                    min="0" 
+                    className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none text-slate-900 font-bold bg-white"
+                    value={editForm.cost}
+                    onChange={(e) => setEditForm({...editForm, cost: e.target.value})}
+                  />
+                </div>
+              </div>
+              
+              {/* AdBlue (optionnel) */}
+              {(editForm.adBlueVolume || editForm.adBlueCost) && (
+                <div className="grid grid-cols-2 gap-4 p-4 bg-sky-50 rounded-xl border border-sky-100">
+                  <div>
+                    <label className="block text-xs font-bold text-sky-700 uppercase tracking-wider mb-1.5">AdBlue (L)</label>
+                    <input 
+                      type="number" 
+                      step="0.01" 
+                      min="0" 
+                      className="w-full px-3 py-2 border border-sky-300 rounded-lg focus:ring-2 focus:ring-sky-500 outline-none text-sm text-slate-900 font-bold bg-white"
+                      value={editForm.adBlueVolume}
+                      onChange={(e) => setEditForm({...editForm, adBlueVolume: e.target.value})}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-sky-700 uppercase tracking-wider mb-1.5">AdBlue (€)</label>
+                    <input 
+                      type="number" 
+                      step="0.01" 
+                      min="0" 
+                      className="w-full px-3 py-2 border border-sky-300 rounded-lg focus:ring-2 focus:ring-sky-500 outline-none text-sm text-slate-900 font-bold bg-white"
+                      value={editForm.adBlueCost}
+                      onChange={(e) => setEditForm({...editForm, adBlueCost: e.target.value})}
+                    />
+                  </div>
+                </div>
+              )}
+              
+              {/* Photo existante */}
+              {editingLog.receiptUrl && (
+                <div className="bg-green-50 p-3 rounded-xl border border-green-200">
+                  <p className="text-xs font-medium text-green-700 mb-2 flex items-center gap-1">
+                    <Check size={14} /> Photo du ticket existante
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => window.open(editingLog.receiptUrl, '_blank')}
+                    className="text-sm text-green-600 hover:text-green-800 underline flex items-center gap-1"
+                  >
+                    <Eye size={14} /> Voir la photo
+                  </button>
+                </div>
+              )}
+              
+              {/* Boutons */}
+              <div className="flex gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setIsEditModalOpen(false)}
+                  className="flex-1 py-3 px-4 border border-slate-300 rounded-xl text-slate-700 font-medium hover:bg-slate-50 transition-colors"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveEdit}
+                  disabled={isEditSaving || !!editMileageError || !editForm.mileage || !editForm.volume || !editForm.cost}
+                  className={`flex-1 py-3 px-4 rounded-xl text-white font-bold flex items-center justify-center gap-2 transition-colors ${
+                    isEditSaving || !!editMileageError || !editForm.mileage || !editForm.volume || !editForm.cost
+                      ? 'bg-slate-400 cursor-not-allowed'
+                      : 'bg-amber-500 hover:bg-amber-600'
+                  }`}
+                >
+                  {isEditSaving ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      Enregistrement...
+                    </>
+                  ) : (
+                    <>
+                      <Save size={18} /> Enregistrer
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+        </Modal>
 
     </div>
   );

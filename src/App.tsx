@@ -35,6 +35,7 @@ import {
   deleteVehicleFromFirestore,
   subscribeToFuelLogs,
   addFuelLogToFirestore,
+  updateFuelLogInFirestore,
   subscribeToMaintenance,
   subscribeToIssues,
   addIssueToFirestore,
@@ -326,6 +327,10 @@ const App: React.FC = () => {
     await addFuelLogToFirestore(log);
   };
 
+  const handleUpdateFuelLog = async (log: FuelLog) => {
+    await updateFuelLogInFirestore(log);
+  };
+
   // Maintenance
   const handleAddMaintenance = async (log: MaintenanceLog) => {
     console.log("Add Maintenance not fully implemented in firestore service yet", log);
@@ -529,6 +534,7 @@ const App: React.FC = () => {
             users={users}
             currentUser={currentUser}
             onAddLog={handleAddFuelLog}
+            onUpdateLog={handleUpdateFuelLog}
         />;
 
       case 'maintenance':
