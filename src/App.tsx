@@ -330,14 +330,14 @@ const App: React.FC = () => {
 
   // Afficher l'alerte au chargement si documents en attente
   useEffect(() => {
-    if (currentUser && pendingDocumentsList.length > 0 && !documentAlertDismissed && !isLoading) {
+    if (currentUser && pendingDocumentsList.length > 0 && !documentAlertDismissed) {
       // Délai pour laisser l'app se charger
       const timer = setTimeout(() => {
         setShowDocumentAlert(true);
       }, 1500);
       return () => clearTimeout(timer);
     }
-  }, [currentUser, pendingDocumentsList.length, documentAlertDismissed, isLoading]);
+  }, [currentUser, pendingDocumentsList.length, documentAlertDismissed]);
 
   // --- HANDLERS ---
   
