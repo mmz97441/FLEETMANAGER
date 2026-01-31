@@ -110,6 +110,23 @@ export const Permission = {
   LOGS_VIEW: 'logs.view',
   IMPORT_EXPORT_ACCESS: 'import_export.access',
 
+  // --- MISSIONS & TOURNÉES ---
+  MISSIONS_VIEW: 'missions.view',
+  MISSIONS_VIEW_ALL: 'missions.view.all',
+  MISSIONS_VIEW_OWN: 'missions.view.own',
+  MISSIONS_CREATE: 'missions.create',
+  MISSIONS_EDIT: 'missions.edit',
+  MISSIONS_DELETE: 'missions.delete',
+  MISSIONS_DISPATCH: 'missions.dispatch',
+  MISSIONS_IMPORT: 'missions.import',
+  MISSIONS_OPTIMIZE: 'missions.optimize',
+  PACKAGES_VIEW: 'packages.view',
+  PACKAGES_SCAN: 'packages.scan',
+  PACKAGES_POD: 'packages.pod',
+  PACKAGES_TRANSFER: 'packages.transfer',
+  HUBS_VIEW: 'hubs.view',
+  HUBS_MANAGE: 'hubs.manage',
+
   // --- PORTAIL CLIENT ---
   CLIENT_DASHBOARD: 'client.dashboard',
   CLIENT_REQUESTS_VIEW_OWN: 'client.requests.view.own',
@@ -279,6 +296,28 @@ export const PERMISSION_CATEGORIES: PermissionCategory[] = [
     ]
   },
   {
+    id: 'missions',
+    label: 'Missions & Tournées',
+    icon: '🚚',
+    permissions: [
+      { key: Permission.MISSIONS_VIEW, label: 'Voir les missions', description: '' },
+      { key: Permission.MISSIONS_VIEW_ALL, label: 'Voir TOUTES les missions', description: '' },
+      { key: Permission.MISSIONS_VIEW_OWN, label: 'Voir SA mission uniquement', description: '' },
+      { key: Permission.MISSIONS_CREATE, label: 'Créer une mission', description: '' },
+      { key: Permission.MISSIONS_EDIT, label: 'Modifier une mission', description: '' },
+      { key: Permission.MISSIONS_DELETE, label: 'Supprimer/annuler une mission', description: '' },
+      { key: Permission.MISSIONS_DISPATCH, label: 'Dispatcher aux chauffeurs', description: '' },
+      { key: Permission.MISSIONS_IMPORT, label: 'Importer fichiers clients', description: '' },
+      { key: Permission.MISSIONS_OPTIMIZE, label: 'Lancer optimisation GMPRO', description: '' },
+      { key: Permission.PACKAGES_VIEW, label: 'Voir les colis', description: '' },
+      { key: Permission.PACKAGES_SCAN, label: 'Scanner les colis', description: '' },
+      { key: Permission.PACKAGES_POD, label: 'Enregistrer preuve de livraison', description: '' },
+      { key: Permission.PACKAGES_TRANSFER, label: 'Transférer des colis', description: '' },
+      { key: Permission.HUBS_VIEW, label: 'Voir les hubs', description: '' },
+      { key: Permission.HUBS_MANAGE, label: 'Gérer les hubs', description: '' },
+    ]
+  },
+  {
     id: 'tools',
     label: 'Outils & Paramètres',
     icon: '🤖',
@@ -400,6 +439,18 @@ export const DEFAULT_ROLE_TEMPLATES: Record<UserRole, PermissionKey[]> = {
     Permission.SETTINGS_COMPANY,
     Permission.LOGS_VIEW,
     Permission.IMPORT_EXPORT_ACCESS,
+    // Missions & Tournées (complet)
+    Permission.MISSIONS_VIEW,
+    Permission.MISSIONS_VIEW_ALL,
+    Permission.MISSIONS_CREATE,
+    Permission.MISSIONS_EDIT,
+    Permission.MISSIONS_DELETE,
+    Permission.MISSIONS_DISPATCH,
+    Permission.MISSIONS_IMPORT,
+    Permission.MISSIONS_OPTIMIZE,
+    Permission.PACKAGES_VIEW,
+    Permission.HUBS_VIEW,
+    Permission.HUBS_MANAGE,
   ],
 
   [UserRole.DIRECTOR]: [
@@ -470,6 +521,19 @@ export const DEFAULT_ROLE_TEMPLATES: Record<UserRole, PermissionKey[]> = {
     Permission.AI_ACCESS,
     Permission.SETTINGS_ACCESS,
     Permission.IMPORT_EXPORT_ACCESS,
+    // Missions & Tournées (complet)
+    Permission.MISSIONS_VIEW,
+    Permission.MISSIONS_VIEW_ALL,
+    Permission.MISSIONS_CREATE,
+    Permission.MISSIONS_EDIT,
+    Permission.MISSIONS_DELETE,
+    Permission.MISSIONS_DISPATCH,
+    Permission.MISSIONS_IMPORT,
+    Permission.MISSIONS_OPTIMIZE,
+    Permission.PACKAGES_VIEW,
+    Permission.PACKAGES_TRANSFER,
+    Permission.HUBS_VIEW,
+    Permission.HUBS_MANAGE,
   ],
 
   [UserRole.SECRETARY]: [
@@ -541,6 +605,16 @@ export const DEFAULT_ROLE_TEMPLATES: Record<UserRole, PermissionKey[]> = {
     Permission.AI_ACCESS,
     Permission.SETTINGS_ACCESS,
     Permission.IMPORT_EXPORT_ACCESS,
+    // Missions & Tournées (import et dispatch)
+    Permission.MISSIONS_VIEW,
+    Permission.MISSIONS_VIEW_ALL,
+    Permission.MISSIONS_CREATE,
+    Permission.MISSIONS_EDIT,
+    Permission.MISSIONS_DISPATCH,
+    Permission.MISSIONS_IMPORT,
+    Permission.MISSIONS_OPTIMIZE,
+    Permission.PACKAGES_VIEW,
+    Permission.HUBS_VIEW,
   ],
 
   [UserRole.DRIVER]: [
@@ -564,6 +638,13 @@ export const DEFAULT_ROLE_TEMPLATES: Record<UserRole, PermissionKey[]> = {
     // Documents
     Permission.DOCS_VIEW_OWN,
     Permission.DOCS_ACKNOWLEDGE,
+    // Missions (sa mission uniquement)
+    Permission.MISSIONS_VIEW,
+    Permission.MISSIONS_VIEW_OWN,
+    Permission.PACKAGES_VIEW,
+    Permission.PACKAGES_SCAN,
+    Permission.PACKAGES_POD,
+    Permission.PACKAGES_TRANSFER,
   ],
 
   [UserRole.MECHANIC]: [

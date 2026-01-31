@@ -5,7 +5,8 @@ import {
   AlertCircle, HelpCircle, LogOut, ShieldCheck, Building2,
   FileCheck, CalendarDays, ChevronDown, ChevronRight,
   ShoppingBag, Euro, List, Settings as SettingsIcon, FileSignature,
-  UserCog, Bell, Download, ClipboardList, Palmtree, Shield
+  UserCog, Bell, Download, ClipboardList, Palmtree, Shield,
+  Route, Package, MapPin
 } from 'lucide-react';
 import { ViewState, User, UserRole } from '../types';
 import { usePermissions, Permission, PermissionKey } from '../usePermissions';
@@ -93,6 +94,16 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
       items: [
         { id: 'quotes', label: 'Demandes & Devis', icon: FileCheck, permission: Permission.QUOTES_VIEW },
       ]
+    },
+
+    // ─────────────────────────────────────────────────────
+    // 🚚 MISSIONS - Tournées et livraisons
+    // ─────────────────────────────────────────────────────
+    { 
+      id: 'missions', 
+      label: 'Missions', 
+      icon: Route, 
+      permission: Permission.MISSIONS_VIEW
     },
 
     // ─────────────────────────────────────────────────────

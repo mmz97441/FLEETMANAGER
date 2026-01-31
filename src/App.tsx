@@ -19,6 +19,8 @@ import QuoteManager from './components/QuoteManager';
 import AbsenceManager from './components/AbsenceManager';
 import DocumentManager from './components/DocumentManager';
 import DocumentAlertModal from './components/DocumentAlertModal';
+import ActivityLogs from './components/ActivityLogs';
+import MissionManager from './components/MissionManager';
 import Settings from './components/Settings'; // New Import
 import ErrorBoundary from './components/ErrorBoundary'; // New Import
 import MobileNavBar from './components/MobileNavBar';
@@ -67,6 +69,9 @@ import {
   subscribeToDocumentAcknowledgments,
   addDocumentAcknowledgmentToFirestore
 } from './services/firestore';
+
+import { logActivity } from './services/activityLogService';
+import { ActivityAction, ActivityCategory } from './types';
 
 import { 
   ViewState, User, UserRole, Vehicle, FuelLog, MaintenanceLog, 
@@ -360,12 +365,34 @@ const App: React.FC = () => {
   // Vehicles
   const handleAddVehicle = async (vehicle: Vehicle) => {
     await addVehicleToFirestore(vehicle);
+    if (currentUser) {
+      logActivity(currentUser, ActivityAction.VEHICLE_CREATED, {
+        targetType: 'vehicle',
+        targetId: vehicle.id,
+        targetName: `${vehicle.plate} - ${vehicle.brand} ${vehicle.model}`
+      });
+    }
   };
   const handleUpdateVehicle = async (vehicle: Vehicle) => {
     await updateVehicleInFirestore(vehicle);
+    if (currentUser) {
+      logActivity(currentUser, ActivityAction.VEHICLE_UPDATED, {
+        targetType: 'vehicle',
+        targetId: vehicle.id,
+        targetName: `${vehicle.plate} - ${vehicle.brand} ${vehicle.model}`
+      });
+    }
   };
   const handleDeleteVehicle = async (id: string) => {
+    const vehicle = vehicles.find(v => v.id === id);
     await deleteVehicleFromFirestore(id);
+    if (currentUser && vehicle) {
+      logActivity(currentUser, ActivityAction.VEHICLE_DELETED, {
+        targetType: 'vehicle',
+        targetId: id,
+        targetName: `${vehicle.plate} - ${vehicle.brand} ${vehicle.model}`
+      });
+    }
   };
   const handleSelectVehicle = (id: string) => {
     setSelectedVehicleId(id);
@@ -377,10 +404,32 @@ const App: React.FC = () => {
   // Fuel
   const handleAddFuelLog = async (log: FuelLog) => {
     await addFuelLogToFirestore(log);
+    if (currentUser) {
+      const vehicle = vehicles.find(v => v.id === log.vehicleId);
+      logActivity(currentUser, ActivityAction.FUEL_CREATED, {
+        targetType: 'fuel',
+        targetId: log.id,
+        targetName: vehicle ? `${vehicle.plate} - ${log.volume}L` : `${log.volume}L`,
+        details: {
+          metadata: { volume: log.volume, cost: log.cost, mileage: log.mileage }
+        }
+      });
+    }
   };
 
   const handleUpdateFuelLog = async (log: FuelLog) => {
     await updateFuelLogInFirestore(log);
+    if (currentUser) {
+      const vehicle = vehicles.find(v => v.id === log.vehicleId);
+      logActivity(currentUser, ActivityAction.FUEL_UPDATED, {
+        targetType: 'fuel',
+        targetId: log.id,
+        targetName: vehicle ? `${vehicle.plate} - ${log.volume}L` : `${log.volume}L`,
+        details: {
+          metadata: { volume: log.volume, cost: log.cost, mileage: log.mileage }
+        }
+      });
+    }
   };
 
   // Maintenance
@@ -392,6 +441,14 @@ const App: React.FC = () => {
   const handleAddIssue = async (issue: Issue) => {
     setIssues(prev => [issue, ...prev]); 
     await addIssueToFirestore(issue);
+    if (currentUser) {
+      const vehicle = vehicles.find(v => v.id === issue.vehicleId);
+      logActivity(currentUser, ActivityAction.ISSUE_CREATED, {
+        targetType: 'issue',
+        targetId: issue.id,
+        targetName: vehicle ? `${vehicle.plate} - ${issue.title}` : issue.title
+      });
+    }
   };
 
   const handleResolveIssue = async (id: string, details?: any) => {
@@ -400,25 +457,48 @@ const App: React.FC = () => {
     if (issueToUpdate) {
         const updatedIssue = { ...issueToUpdate, ...details };
         await updateIssueInFirestore(updatedIssue);
+        if (currentUser) {
+          const vehicle = vehicles.find(v => v.id === issueToUpdate.vehicleId);
+          logActivity(currentUser, ActivityAction.ISSUE_RESOLVED, {
+            targetType: 'issue',
+            targetId: id,
+            targetName: vehicle ? `${vehicle.plate} - ${issueToUpdate.title}` : issueToUpdate.title
+          });
+        }
     }
   };
 
   // Users
   const handleAddUser = async (newUser: User) => {
     await createUserProfile(newUser);
+    if (currentUser) {
+      logActivity(currentUser, ActivityAction.USER_CREATED, {
+        targetType: 'user',
+        targetId: newUser.id,
+        targetName: `${newUser.firstName} ${newUser.lastName} (${newUser.role})`
+      });
+    }
   };
 
   const handleUpdateUser = async (updatedUser: User) => {
     setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
     await updateUserProfile(updatedUser);
+    if (currentUser) {
+      logActivity(currentUser, ActivityAction.USER_UPDATED, {
+        targetType: 'user',
+        targetId: updatedUser.id,
+        targetName: `${updatedUser.firstName} ${updatedUser.lastName}`
+      });
+    }
   };
 
   const handleDeleteUser = async (userId: string, email?: string) => {
     // Optimistic update
     setUsers(prev => prev.filter(u => u.id !== userId));
     
-    // Trouver l'email si non fourni
-    const userEmail = email || users.find(u => u.id === userId)?.email;
+    // Trouver l'utilisateur avant suppression pour le log
+    const userToDelete = users.find(u => u.id === userId);
+    const userEmail = email || userToDelete?.email;
     
     try {
       // Essayer d'utiliser la Cloud Function (suppression complète)
@@ -433,6 +513,15 @@ const App: React.FC = () => {
       // (la Cloud Function n'est peut-être pas encore déployée)
       console.warn('Cloud Function non disponible, suppression Firestore uniquement');
       await deleteUserProfile(userId);
+    }
+    
+    // Log après suppression
+    if (currentUser && userToDelete) {
+      logActivity(currentUser, ActivityAction.USER_DELETED, {
+        targetType: 'user',
+        targetId: userId,
+        targetName: `${userToDelete.firstName} ${userToDelete.lastName} (${userToDelete.role})`
+      });
     }
   };
 
@@ -450,6 +539,14 @@ const App: React.FC = () => {
   // Absences (nouveau système)
   const handleAddAbsence = async (absence: Absence) => {
     await addAbsenceToFirestore(absence);
+    if (currentUser) {
+      const user = users.find(u => u.id === absence.userId);
+      logActivity(currentUser, ActivityAction.ABSENCE_CREATED, {
+        targetType: 'absence',
+        targetId: absence.id,
+        targetName: user ? `${user.firstName} ${user.lastName} - ${absence.type}` : absence.type
+      });
+    }
   };
   const handleUpdateAbsence = async (absence: Absence) => {
     await updateAbsenceInFirestore(absence);
@@ -464,11 +561,28 @@ const App: React.FC = () => {
   // Quotes
   const handleAddQuote = async (quote: QuoteRequest) => {
     await addQuoteToFirestore(quote);
+    if (currentUser) {
+      logActivity(currentUser, ActivityAction.QUOTE_CREATED, {
+        targetType: 'quote',
+        targetId: quote.id,
+        targetName: `Devis ${quote.id.slice(-6)} - ${quote.clientName}`
+      });
+    }
   };
   const handleUpdateQuoteStatus = async (id: string, status: QuoteStatus) => {
     const quote = quotes.find(q => q.id === id);
     if (quote) {
       await updateQuoteInFirestore({ ...quote, status });
+      if (currentUser) {
+        const action = status === QuoteStatus.ACCEPTED ? ActivityAction.QUOTE_APPROVED 
+                     : status === QuoteStatus.REJECTED ? ActivityAction.QUOTE_REJECTED 
+                     : ActivityAction.QUOTE_UPDATED;
+        logActivity(currentUser, action, {
+          targetType: 'quote',
+          targetId: id,
+          targetName: `Devis ${id.slice(-6)} - ${quote.clientName}`
+        });
+      }
     }
   };
   const handleUpdateQuote = async (quote: QuoteRequest) => {
@@ -478,15 +592,46 @@ const App: React.FC = () => {
   // Company Documents (Ordres de service, Règlement intérieur...)
   const handleAddCompanyDocument = async (doc: CompanyDocument) => {
     await addCompanyDocumentToFirestore(doc);
+    if (currentUser) {
+      logActivity(currentUser, ActivityAction.DOCUMENT_CREATED, {
+        targetType: 'document',
+        targetId: doc.id,
+        targetName: doc.title
+      });
+    }
   };
   const handleUpdateCompanyDocument = async (doc: CompanyDocument) => {
     await updateCompanyDocumentInFirestore(doc);
+    if (currentUser) {
+      logActivity(currentUser, ActivityAction.DOCUMENT_UPDATED, {
+        targetType: 'document',
+        targetId: doc.id,
+        targetName: doc.title
+      });
+    }
   };
   const handleDeleteCompanyDocument = async (id: string) => {
+    const doc = companyDocuments.find(d => d.id === id);
     await deleteCompanyDocumentFromFirestore(id);
+    if (currentUser && doc) {
+      logActivity(currentUser, ActivityAction.DOCUMENT_DELETED, {
+        targetType: 'document',
+        targetId: id,
+        targetName: doc.title
+      });
+    }
   };
   const handleAcknowledgeDocument = async (ack: DocumentAcknowledgment) => {
     await addDocumentAcknowledgmentToFirestore(ack);
+    if (currentUser) {
+      const doc = companyDocuments.find(d => d.id === ack.documentId);
+      const action = ack.status === 'SIGNED' ? ActivityAction.DOCUMENT_SIGNED : ActivityAction.DOCUMENT_READ;
+      logActivity(currentUser, action, {
+        targetType: 'document',
+        targetId: ack.documentId,
+        targetName: doc?.title || ack.documentId
+      });
+    }
   };
   
   // Client Team
@@ -721,16 +866,19 @@ const App: React.FC = () => {
 
       case 'activity_logs':
         return (
-          <div className="p-8">
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8 text-center">
-              <div className="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <span className="text-3xl">📋</span>
-              </div>
-              <h2 className="text-2xl font-bold text-slate-800 mb-2">Logs d'activité</h2>
-              <p className="text-slate-500 mb-4">Historique des actions effectuées par les utilisateurs (audit trail)</p>
-              <span className="inline-block px-3 py-1 bg-indigo-100 text-indigo-700 text-sm font-bold rounded-full">À venir</span>
-            </div>
-          </div>
+          <ActivityLogs 
+            users={users}
+            currentUser={currentUser}
+          />
+        );
+
+      case 'missions':
+        return (
+          <MissionManager
+            currentUser={currentUser}
+            users={users}
+            vehicles={vehicles}
+          />
         );
 
       case 'notifications_settings':

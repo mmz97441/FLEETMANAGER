@@ -534,6 +534,7 @@ export type ViewState =
   // Nouvelles vues Administration & Paramètres
   | 'company_settings'
   | 'activity_logs'
+  | 'missions'
   | 'notifications_settings'
   | 'import_export';
 
@@ -556,4 +557,534 @@ export interface SavedAddress {
   usageCount?: number;      // Nombre d'utilisations (pour tri par pertinence)
   createdAt: string;
   updatedAt: string;
+}
+
+// ============================================================================
+// LOGS D'ACTIVITÉ (AUDIT TRAIL)
+// ============================================================================
+
+export enum ActivityAction {
+  // Utilisateurs
+  USER_CREATED = 'USER_CREATED',
+  USER_UPDATED = 'USER_UPDATED',
+  USER_DELETED = 'USER_DELETED',
+  USER_ACTIVATED = 'USER_ACTIVATED',
+  USER_DEACTIVATED = 'USER_DEACTIVATED',
+  USER_LOGIN = 'USER_LOGIN',
+  USER_LOGOUT = 'USER_LOGOUT',
+  
+  // Véhicules
+  VEHICLE_CREATED = 'VEHICLE_CREATED',
+  VEHICLE_UPDATED = 'VEHICLE_UPDATED',
+  VEHICLE_DELETED = 'VEHICLE_DELETED',
+  VEHICLE_ASSIGNED = 'VEHICLE_ASSIGNED',
+  VEHICLE_UNASSIGNED = 'VEHICLE_UNASSIGNED',
+  VEHICLE_IMMOBILIZED = 'VEHICLE_IMMOBILIZED',
+  VEHICLE_REACTIVATED = 'VEHICLE_REACTIVATED',
+  
+  // Carburant
+  FUEL_CREATED = 'FUEL_CREATED',
+  FUEL_UPDATED = 'FUEL_UPDATED',
+  FUEL_DELETED = 'FUEL_DELETED',
+  
+  // Maintenance
+  MAINTENANCE_CREATED = 'MAINTENANCE_CREATED',
+  MAINTENANCE_UPDATED = 'MAINTENANCE_UPDATED',
+  MAINTENANCE_COMPLETED = 'MAINTENANCE_COMPLETED',
+  
+  // Incidents
+  ISSUE_CREATED = 'ISSUE_CREATED',
+  ISSUE_RESOLVED = 'ISSUE_RESOLVED',
+  ISSUE_UPDATED = 'ISSUE_UPDATED',
+  
+  // Documents
+  DOCUMENT_CREATED = 'DOCUMENT_CREATED',
+  DOCUMENT_UPDATED = 'DOCUMENT_UPDATED',
+  DOCUMENT_DELETED = 'DOCUMENT_DELETED',
+  DOCUMENT_SIGNED = 'DOCUMENT_SIGNED',
+  DOCUMENT_READ = 'DOCUMENT_READ',
+  
+  // Absences / Congés
+  ABSENCE_CREATED = 'ABSENCE_CREATED',
+  ABSENCE_APPROVED = 'ABSENCE_APPROVED',
+  ABSENCE_REJECTED = 'ABSENCE_REJECTED',
+  ABSENCE_CANCELLED = 'ABSENCE_CANCELLED',
+  
+  // Devis
+  QUOTE_CREATED = 'QUOTE_CREATED',
+  QUOTE_UPDATED = 'QUOTE_UPDATED',
+  QUOTE_APPROVED = 'QUOTE_APPROVED',
+  QUOTE_REJECTED = 'QUOTE_REJECTED',
+  
+  // Système
+  SYSTEM_SETTINGS_UPDATED = 'SYSTEM_SETTINGS_UPDATED',
+  PERMISSIONS_UPDATED = 'PERMISSIONS_UPDATED',
+  DATA_EXPORTED = 'DATA_EXPORTED',
+  DATA_IMPORTED = 'DATA_IMPORTED'
+}
+
+export enum ActivityCategory {
+  USERS = 'Utilisateurs',
+  VEHICLES = 'Véhicules',
+  FUEL = 'Carburant',
+  MAINTENANCE = 'Maintenance',
+  ISSUES = 'Incidents',
+  DOCUMENTS = 'Documents',
+  ABSENCES = 'Absences',
+  QUOTES = 'Devis',
+  SYSTEM = 'Système'
+}
+
+export interface ActivityLog {
+  id: string;
+  
+  // Qui
+  userId: string;
+  userName: string;
+  userRole: string;
+  
+  // Quoi
+  action: ActivityAction;
+  category: ActivityCategory;
+  description: string;         // Description lisible: "Jean Dupont a créé un plein de 45L"
+  
+  // Sur quoi (optionnel selon l'action)
+  targetType?: 'user' | 'vehicle' | 'fuel' | 'maintenance' | 'issue' | 'document' | 'absence' | 'quote' | 'mission' | 'package';
+  targetId?: string;
+  targetName?: string;         // Ex: "AB-123-CD" pour un véhicule
+  
+  // Détails (données avant/après pour les modifications)
+  details?: {
+    before?: Record<string, any>;
+    after?: Record<string, any>;
+    changes?: string[];        // Liste des champs modifiés
+    metadata?: Record<string, any>;
+  };
+  
+  // Contexte
+  ipAddress?: string;
+  userAgent?: string;
+  
+  // Quand
+  createdAt: string;
+}
+
+// ============================================================================
+// HUBS (Points de concentration)
+// ============================================================================
+
+export interface Hub {
+  id: string;
+  name: string;                    // "Hub Nord"
+  zone: Zone;                      // NORD, SUD, EST, OUEST
+  address: string;
+  city: string;
+  postalCode: string;
+  coordinates?: { lat: number; lng: number };
+  assignedPostalCodes: string[];   // Codes postaux rattachés à ce hub
+  isActive: boolean;
+  contactPhone?: string;
+  openingTime?: string;            // "07:00"
+  closingTime?: string;            // "18:00"
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ============================================================================
+// COLIS (Package)
+// ============================================================================
+
+export enum PackageStatus {
+  PENDING = 'En attente',          // Importé, pas encore collecté
+  COLLECTED = 'Collecté',          // Enlevé chez le client expéditeur
+  AT_HUB = 'Au hub',               // Arrivé au hub, en attente de tri
+  SORTED = 'Trié',                 // Assigné à une zone
+  IN_TRANSIT = 'En transit',       // Dans une navette inter-hubs
+  LOADED = 'Chargé',               // Dans le véhicule de livraison
+  IN_DELIVERY = 'En livraison',    // Chauffeur en route
+  DELIVERED = 'Livré',             // POD enregistré
+  FAILED = 'Échec',                // Tentative échouée
+  RETURNED = 'Retourné'            // Retour hub après échec
+}
+
+export const PACKAGE_STATUS_COLORS: Record<PackageStatus, { bg: string; text: string }> = {
+  [PackageStatus.PENDING]: { bg: 'bg-slate-100', text: 'text-slate-700' },
+  [PackageStatus.COLLECTED]: { bg: 'bg-blue-100', text: 'text-blue-700' },
+  [PackageStatus.AT_HUB]: { bg: 'bg-indigo-100', text: 'text-indigo-700' },
+  [PackageStatus.SORTED]: { bg: 'bg-purple-100', text: 'text-purple-700' },
+  [PackageStatus.IN_TRANSIT]: { bg: 'bg-cyan-100', text: 'text-cyan-700' },
+  [PackageStatus.LOADED]: { bg: 'bg-amber-100', text: 'text-amber-700' },
+  [PackageStatus.IN_DELIVERY]: { bg: 'bg-orange-100', text: 'text-orange-700' },
+  [PackageStatus.DELIVERED]: { bg: 'bg-green-100', text: 'text-green-700' },
+  [PackageStatus.FAILED]: { bg: 'bg-red-100', text: 'text-red-700' },
+  [PackageStatus.RETURNED]: { bg: 'bg-rose-100', text: 'text-rose-700' }
+};
+
+export interface PackageMovement {
+  timestamp: string;
+  action: 'IMPORTED' | 'COLLECTED' | 'HUB_ARRIVAL' | 'SORTED' | 'LOADED' | 'TRANSFERRED' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'FAILED' | 'RETURNED';
+  vehicleId?: string;
+  vehiclePlate?: string;
+  driverId?: string;
+  driverName?: string;
+  hubId?: string;
+  hubName?: string;
+  location?: { lat: number; lng: number };
+  notes?: string;
+}
+
+export interface Package {
+  id: string;                      // ID FleetGenius
+  
+  // Infos client expéditeur
+  clientId: string;                // Lien vers User (role=CLIENT)
+  clientName: string;              // "PREM BPA"
+  importBatchId: string;           // ID de l'import Excel
+  
+  // Infos commande (du fichier client)
+  externalId: string;              // "C0004911-15087911"
+  orderNumber: string;             // "15087911" → code barre
+  barcode?: string;                // Code barre si différent de orderNumber
+  
+  // Destination
+  address: string;
+  city: string;
+  postalCode: string;
+  zone: Zone;                      // Détectée automatiquement
+  coordinates?: { lat: number; lng: number };
+  floor?: number;
+  hasElevator?: boolean;
+  contactName: string;
+  contactPhone?: string;
+  
+  // Contraintes
+  timeWindowStart?: string;        // "08:00"
+  timeWindowEnd?: string;          // "10:00"
+  serviceTime: number;             // Minutes sur place (défaut 5)
+  comment?: string;                // "Facture", "BL"
+  
+  // Dimensions (optionnel)
+  volume?: number;
+  weight?: number;
+  
+  // État actuel
+  status: PackageStatus;
+  currentHubId?: string;
+  currentVehicleId?: string;
+  currentDriverId?: string;
+  missionId?: string;
+  stopId?: string;
+  
+  // Tracking
+  movements: PackageMovement[];    // Historique complet
+  
+  // POD
+  pod?: ProofOfDelivery;
+  failureReason?: FailureReason;
+  failureNotes?: string;
+  
+  // Timestamps
+  createdAt: string;
+  updatedAt: string;
+}
+
+export enum FailureReason {
+  ABSENT = 'Destinataire absent',
+  WRONG_ADDRESS = 'Adresse erronée',
+  REFUSED = 'Refusé par destinataire',
+  DAMAGED = 'Colis endommagé',
+  ACCESS_DENIED = 'Accès impossible',
+  CLOSED = 'Établissement fermé',
+  OTHER = 'Autre'
+}
+
+// ============================================================================
+// MISSION (Tournée d'un véhicule)
+// ============================================================================
+
+export enum MissionType {
+  COLLECTION = 'Collecte',         // Enlèvement chez clients
+  DELIVERY = 'Livraison',          // Distribution
+  MIXED = 'Mixte',                 // Collecte + Livraison
+  TRANSFER = 'Navette'             // Inter-hubs
+}
+
+export enum MissionStatus {
+  DRAFT = 'Brouillon',             // En préparation
+  OPTIMIZED = 'Optimisé',          // GMPRO a calculé
+  DISPATCHED = 'Dispatché',        // Envoyé au chauffeur
+  IN_PROGRESS = 'En cours',        // Chauffeur a démarré
+  COMPLETED = 'Terminé',           // Tous les stops faits
+  CANCELLED = 'Annulé'
+}
+
+export const MISSION_STATUS_COLORS: Record<MissionStatus, { bg: string; text: string; dot: string }> = {
+  [MissionStatus.DRAFT]: { bg: 'bg-slate-100', text: 'text-slate-700', dot: 'bg-slate-400' },
+  [MissionStatus.OPTIMIZED]: { bg: 'bg-blue-100', text: 'text-blue-700', dot: 'bg-blue-500' },
+  [MissionStatus.DISPATCHED]: { bg: 'bg-purple-100', text: 'text-purple-700', dot: 'bg-purple-500' },
+  [MissionStatus.IN_PROGRESS]: { bg: 'bg-orange-100', text: 'text-orange-700', dot: 'bg-orange-500' },
+  [MissionStatus.COMPLETED]: { bg: 'bg-green-100', text: 'text-green-700', dot: 'bg-green-500' },
+  [MissionStatus.CANCELLED]: { bg: 'bg-red-100', text: 'text-red-700', dot: 'bg-red-500' }
+};
+
+export enum StopStatus {
+  PENDING = 'En attente',
+  ARRIVED = 'Arrivé',
+  COMPLETED = 'Terminé',
+  SKIPPED = 'Passé',
+  FAILED = 'Échec'
+}
+
+export interface MissionStop {
+  id: string;
+  sequence: number;                // Ordre dans la tournée (défini par GMPRO)
+  
+  // Type
+  type: 'PICKUP' | 'DELIVERY' | 'HUB';
+  
+  // Lieu
+  address: string;
+  city: string;
+  postalCode: string;
+  coordinates?: { lat: number; lng: number };
+  floor?: number;
+  hasElevator?: boolean;
+  
+  // Contact
+  contactName: string;
+  contactPhone?: string;
+  
+  // Colis liés
+  packageIds: string[];
+  packageCount: number;
+  
+  // Contraintes
+  timeWindowStart?: string;
+  timeWindowEnd?: string;
+  serviceTime: number;             // Minutes sur place
+  notes?: string;
+  
+  // Exécution
+  status: StopStatus;
+  arrivalTime?: string;
+  completionTime?: string;
+  arrivalCoordinates?: { lat: number; lng: number };
+  
+  // ETA calculé par GMPRO
+  estimatedArrival?: string;
+  estimatedDeparture?: string;
+  distanceFromPrevious?: number;   // km
+  durationFromPrevious?: number;   // minutes
+}
+
+export interface Mission {
+  id: string;
+  
+  // Type et zone
+  type: MissionType;
+  zone: Zone;
+  hubId: string;
+  hubName: string;
+  
+  // Date
+  date: string;                    // "2026-01-31"
+  
+  // Affectation
+  vehicleId?: string;
+  vehiclePlate?: string;
+  driverId?: string;
+  driverName?: string;
+  
+  // Stops
+  stops: MissionStop[];
+  
+  // Métriques GMPRO
+  totalDistance?: number;          // km
+  estimatedDuration?: number;      // minutes
+  totalPackages: number;
+  
+  // Exécution
+  status: MissionStatus;
+  startedAt?: string;
+  completedAt?: string;
+  
+  // Compteurs temps réel
+  completedStops: number;
+  failedStops: number;
+  deliveredPackages: number;
+  failedPackages: number;
+  
+  // Qui a créé/dispatché
+  createdBy: string;
+  createdByName: string;
+  dispatchedBy?: string;
+  dispatchedByName?: string;
+  dispatchedAt?: string;
+  
+  // Timestamps
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ============================================================================
+// POD (Preuve de livraison)
+// ============================================================================
+
+export interface ProofOfDelivery {
+  packageId: string;
+  missionId: string;
+  stopId: string;
+  
+  // Qui a livré
+  driverId: string;
+  driverName: string;
+  vehicleId: string;
+  vehiclePlate: string;
+  
+  // Réceptionnaire
+  recipientName?: string;
+  
+  // Preuves
+  signatureUrl?: string;           // URL Storage
+  photoUrls: string[];             // URLs des photos
+  
+  // Localisation
+  coordinates: { lat: number; lng: number };
+  
+  // Horodatage
+  timestamp: string;
+  
+  // Commentaire
+  notes?: string;
+}
+
+// ============================================================================
+// TRANSFERT (Échange entre chauffeurs)
+// ============================================================================
+
+export enum TransferReason {
+  PROXIMITY = 'Proximité',
+  BREAKDOWN = 'Panne véhicule',
+  OVERLOAD = 'Surcharge',
+  ABSENCE = 'Absence chauffeur',
+  REBALANCING = 'Rééquilibrage',
+  OTHER = 'Autre'
+}
+
+export enum TransferStatus {
+  PENDING = 'En attente',
+  CONFIRMED = 'Confirmé',
+  REJECTED = 'Refusé',
+  CANCELLED = 'Annulé'
+}
+
+export interface PackageTransfer {
+  id: string;
+  
+  // Colis transférés
+  packageIds: string[];
+  packageCount: number;
+  
+  // De qui à qui
+  fromDriverId: string;
+  fromDriverName: string;
+  fromVehicleId: string;
+  fromVehiclePlate: string;
+  fromMissionId?: string;
+  
+  toDriverId: string;
+  toDriverName: string;
+  toVehicleId: string;
+  toVehiclePlate: string;
+  toMissionId?: string;
+  
+  // Où et quand
+  location?: { lat: number; lng: number };
+  address?: string;
+  timestamp: string;
+  
+  // Raison
+  reason: TransferReason;
+  notes?: string;
+  
+  // Signatures
+  fromSignatureUrl?: string;
+  toSignatureUrl?: string;
+  
+  // Validation
+  status: TransferStatus;
+  confirmedAt?: string;
+  
+  // Timestamps
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ============================================================================
+// IMPORT BATCH (Lot d'import fichier client)
+// ============================================================================
+
+export enum ImportBatchStatus {
+  PROCESSING = 'En traitement',
+  COMPLETED = 'Terminé',
+  PARTIALLY_DISPATCHED = 'Partiellement dispatché',
+  FULLY_DISPATCHED = 'Entièrement dispatché',
+  ERROR = 'Erreur'
+}
+
+export interface ImportBatchError {
+  row: number;
+  field?: string;
+  message: string;
+}
+
+export interface ImportBatchZoneBreakdown {
+  zone: Zone;
+  count: number;
+  packageIds: string[];
+  hubId?: string;
+  hubName?: string;
+  dispatched: boolean;
+  missionIds?: string[];
+}
+
+export interface ImportBatch {
+  id: string;
+  
+  // Client expéditeur
+  clientId: string;
+  clientName: string;
+  
+  // Fichier
+  fileName: string;
+  fileUrl?: string;
+  tourName?: string;               // Ex: "PREM" du fichier
+  
+  // Résultat
+  totalRows: number;
+  successCount: number;
+  errorCount: number;
+  errors: ImportBatchError[];
+  
+  // Répartition par zone
+  zoneBreakdown: ImportBatchZoneBreakdown[];
+  
+  // Qui et quand
+  importedBy: string;
+  importedByName: string;
+  importedAt: string;
+  
+  // Statut
+  status: ImportBatchStatus;
+}
+
+// ============================================================================
+// MAPPING CODES POSTAUX → ZONES (Configuration)
+// ============================================================================
+
+export interface PostalCodeMapping {
+  postalCode: string;              // "97400"
+  zone: Zone;                      // NORD
+  city: string;                    // "Saint-Denis"
+  hubId?: string;                  // Hub par défaut pour ce code postal
 }
