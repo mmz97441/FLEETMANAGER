@@ -23,6 +23,7 @@ import {
 import { importExcelFile, validateExcelFormat } from '../services/importService';
 import { logActivity } from '../services/activityLogService';
 import { ActivityAction } from '../types';
+import { usePermissions, Permission } from '../usePermissions';
 import Modal from './shared/Modal';
 import {
   Truck, Package as PackageIcon, MapPin, Upload, Calendar, Clock,
@@ -117,10 +118,11 @@ const MissionManager: React.FC<MissionManagerProps> = ({
     [packages, selectedDate]
   );
 
-  // Permissions
-  const canImport = [UserRole.PRESIDENT, UserRole.DIRECTOR, UserRole.SECRETARY].includes(currentUser.role as UserRole);
-  const canDispatch = [UserRole.PRESIDENT, UserRole.DIRECTOR, UserRole.SECRETARY].includes(currentUser.role as UserRole);
-  const canManageHubs = [UserRole.PRESIDENT, UserRole.DIRECTOR].includes(currentUser.role as UserRole);
+  // Permissions via le hook
+  const { hasPermission } = usePermissions();
+  const canImport = hasPermission(Permission.MISSIONS_IMPORT);
+  const canDispatch = hasPermission(Permission.MISSIONS_DISPATCH);
+  const canManageHubs = hasPermission(Permission.HUBS_MANAGE);
 
   // Handlers
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
