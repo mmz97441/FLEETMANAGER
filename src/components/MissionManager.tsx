@@ -18,6 +18,10 @@ import {
   calculateMissionStats,
   getAvailableDriversForZone,
   getDriversWithVehicles,
+  addHub,
+  updateHub,
+  deleteHub,
+  DEFAULT_POSTAL_CODE_MAPPINGS,
   MissionStats
 } from '../services/missionService';
 import { importExcelFile, validateExcelFormat } from '../services/importService';
@@ -30,7 +34,7 @@ import {
   Users, CheckCircle, XCircle, AlertTriangle, Filter, Search,
   ChevronRight, ChevronDown, Download, RefreshCw, Play, Pause,
   Eye, Edit, Trash2, Plus, FileSpreadsheet, Route, Loader2,
-  Building2, Navigation, BarChart3, TrendingUp, ArrowRight
+  Building2, Navigation, BarChart3, TrendingUp, ArrowRight, Phone
 } from 'lucide-react';
 
 interface MissionManagerProps {
@@ -65,6 +69,23 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   const [selectedClient, setSelectedClient] = useState<string>('');
   const [isImporting, setIsImporting] = useState(false);
   const [importResult, setImportResult] = useState<any>(null);
+  
+  // Gestion des hubs
+  const [showHubModal, setShowHubModal] = useState(false);
+  const [editingHub, setEditingHub] = useState<Hub | null>(null);
+  const [isSavingHub, setIsSavingHub] = useState(false);
+  const [hubToDelete, setHubToDelete] = useState<Hub | null>(null);
+  const [hubForm, setHubForm] = useState({
+    name: '',
+    zone: '' as Zone | '',
+    address: '',
+    city: '',
+    postalCode: '',
+    contactPhone: '',
+    openingTime: '07:00',
+    closingTime: '18:00',
+    assignedPostalCodes: '' // Séparés par virgule
+  });
 
   // Charger les données
   useEffect(() => {
@@ -188,6 +209,144 @@ const MissionManager: React.FC<MissionManagerProps> = ({
     setImportFile(null);
     setSelectedClient('');
     setImportResult(null);
+  };
+
+  // === GESTION DES HUBS ===
+  
+  const openHubModal = (hub?: Hub) => {
+    if (hub) {
+      // Mode édition
+      setEditingHub(hub);
+      setHubForm({
+        name: hub.name,
+        zone: hub.zone,
+        address: hub.address,
+        city: hub.city,
+        postalCode: hub.postalCode,
+        contactPhone: hub.contactPhone || '',
+        openingTime: hub.openingTime || '07:00',
+        closingTime: hub.closingTime || '18:00',
+        assignedPostalCodes: hub.assignedPostalCodes?.join(', ') || ''
+      });
+    } else {
+      // Mode création
+      setEditingHub(null);
+      setHubForm({
+        name: '',
+        zone: '',
+        address: '',
+        city: '',
+        postalCode: '',
+        contactPhone: '',
+        openingTime: '07:00',
+        closingTime: '18:00',
+        assignedPostalCodes: ''
+      });
+    }
+    setShowHubModal(true);
+  };
+
+  const closeHubModal = () => {
+    setShowHubModal(false);
+    setEditingHub(null);
+  };
+
+  const handleHubFormChange = (field: string, value: string) => {
+    setHubForm(prev => ({ ...prev, [field]: value }));
+    
+    // Auto-remplir les codes postaux selon la zone sélectionnée
+    if (field === 'zone' && value && !editingHub) {
+      const zoneCodes = DEFAULT_POSTAL_CODE_MAPPINGS
+        .filter(m => m.zone === value)
+        .map(m => m.postalCode);
+      setHubForm(prev => ({ ...prev, assignedPostalCodes: zoneCodes.join(', ') }));
+    }
+  };
+
+  const handleSaveHub = async () => {
+    if (!hubForm.name || !hubForm.zone || !hubForm.address || !hubForm.city || !hubForm.postalCode) {
+      return;
+    }
+    
+    setIsSavingHub(true);
+    
+    try {
+      const hubData = {
+        name: hubForm.name,
+        zone: hubForm.zone as Zone,
+        address: hubForm.address,
+        city: hubForm.city,
+        postalCode: hubForm.postalCode,
+        contactPhone: hubForm.contactPhone || undefined,
+        openingTime: hubForm.openingTime,
+        closingTime: hubForm.closingTime,
+        assignedPostalCodes: hubForm.assignedPostalCodes
+          .split(',')
+          .map(cp => cp.trim())
+          .filter(cp => cp.length > 0),
+        isActive: true
+      };
+      
+      if (editingHub) {
+        // Mise à jour
+        await updateHub({ ...editingHub, ...hubData });
+        logActivity(currentUser, ActivityAction.ITEM_UPDATED, {
+          targetType: 'mission',
+          targetId: editingHub.id,
+          targetName: hubData.name,
+          details: { metadata: { zone: hubData.zone } }
+        });
+      } else {
+        // Création
+        const hubId = await addHub(hubData);
+        logActivity(currentUser, ActivityAction.ITEM_CREATED, {
+          targetType: 'mission',
+          targetId: hubId,
+          targetName: hubData.name,
+          details: { metadata: { zone: hubData.zone } }
+        });
+      }
+      
+      closeHubModal();
+    } catch (error) {
+      console.error('Erreur sauvegarde hub:', error);
+    }
+    
+    setIsSavingHub(false);
+  };
+
+  const handleDeleteHub = async () => {
+    if (!hubToDelete) return;
+    
+    try {
+      await deleteHub(hubToDelete.id);
+      logActivity(currentUser, ActivityAction.ITEM_DELETED, {
+        targetType: 'mission',
+        targetId: hubToDelete.id,
+        targetName: hubToDelete.name,
+        details: { metadata: { zone: hubToDelete.zone } }
+      });
+      setHubToDelete(null);
+    } catch (error) {
+      console.error('Erreur suppression hub:', error);
+    }
+  };
+
+  const toggleHubActive = async (hub: Hub) => {
+    try {
+      await updateHub({ ...hub, isActive: !hub.isActive });
+      logActivity(currentUser, ActivityAction.STATUS_CHANGED, {
+        targetType: 'mission',
+        targetId: hub.id,
+        targetName: hub.name,
+        details: { 
+          before: { isActive: hub.isActive },
+          after: { isActive: !hub.isActive }
+        }
+      });
+    } catch (error) {
+      console.error('Erreur toggle hub:', error);
+    }
   };
 
   // Render tabs
@@ -672,21 +831,39 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   // Render Hubs
   const renderHubs = () => (
     <div className="space-y-6">
-      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-        <p className="text-amber-800 text-sm">
-          <strong>Configuration des Hubs :</strong> Cette section permet de définir les points de concentration 
-          et d'associer les codes postaux à chaque zone. Pour ajouter ou modifier un hub, contactez l'administrateur.
-        </p>
+      {/* Header avec bouton Ajouter */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-bold text-slate-800">Points de concentration</h2>
+          <p className="text-sm text-slate-500">
+            Gérez vos hubs et les codes postaux associés à chaque zone
+          </p>
+        </div>
+        <button
+          onClick={() => openHubModal()}
+          className="inline-flex items-center gap-2 px-4 py-2.5 bg-brand-500 text-white rounded-xl font-medium hover:bg-brand-600 transition-colors"
+        >
+          <Plus size={18} />
+          Ajouter un hub
+        </button>
       </div>
       
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {/* Liste des hubs */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {hubs.length === 0 ? (
-          <div className="col-span-2 bg-white rounded-xl border border-slate-200 p-8 text-center">
-            <Building2 size={48} className="mx-auto text-slate-300 mb-3" />
-            <p className="text-slate-500 mb-4">Aucun hub configuré</p>
-            <p className="text-sm text-slate-400">
-              Les hubs seront créés lors de la première configuration de l'application.
+          <div className="col-span-2 bg-white rounded-xl border border-slate-200 p-12 text-center">
+            <Building2 size={56} className="mx-auto text-slate-300 mb-4" />
+            <h3 className="text-lg font-bold text-slate-700 mb-2">Aucun hub configuré</h3>
+            <p className="text-slate-500 mb-6 max-w-md mx-auto">
+              Les hubs sont les points de concentration où vos chauffeurs récupèrent et trient les colis avant livraison.
             </p>
+            <button
+              onClick={() => openHubModal()}
+              className="inline-flex items-center gap-2 px-6 py-3 bg-brand-500 text-white rounded-xl font-medium hover:bg-brand-600 transition-colors"
+            >
+              <Plus size={18} />
+              Créer votre premier hub
+            </button>
           </div>
         ) : (
           hubs.map(hub => {
@@ -694,53 +871,329 @@ const MissionManager: React.FC<MissionManagerProps> = ({
             const zoneDrivers = users.filter(u => u.role === UserRole.DRIVER && u.zone === hub.zone && !u.isDisabled);
             
             return (
-              <div key={hub.id} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+              <div key={hub.id} className={`bg-white rounded-xl border-2 overflow-hidden transition-all ${hub.isActive ? 'border-slate-200' : 'border-red-200 opacity-60'}`}>
+                {/* Header avec zone */}
                 <div className={`${colors.bg} px-4 py-3 border-b ${colors.border}`}>
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className={`w-3 h-3 rounded-full ${colors.dot}`} />
-                      <h3 className={`font-bold ${colors.text}`}>{hub.name}</h3>
+                    <div className="flex items-center gap-3">
+                      <div className={`w-10 h-10 rounded-lg ${colors.dot} bg-opacity-20 flex items-center justify-center`}>
+                        <Building2 size={20} className={colors.text} />
+                      </div>
+                      <div>
+                        <h3 className={`font-bold ${colors.text}`}>{hub.name}</h3>
+                        <span className={`text-xs font-medium ${colors.text} opacity-75`}>Zone {hub.zone}</span>
+                      </div>
                     </div>
-                    {!hub.isActive && (
-                      <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs font-medium rounded-full">
-                        Inactif
-                      </span>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {!hub.isActive && (
+                        <span className="px-2 py-1 bg-red-500 text-white text-xs font-bold rounded-lg">
+                          Inactif
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
                 
-                <div className="p-4 space-y-3">
-                  <div>
-                    <p className="text-xs font-bold text-slate-500 uppercase mb-1">Adresse</p>
-                    <p className="text-sm text-slate-700">{hub.address}</p>
-                    <p className="text-sm text-slate-500">{hub.postalCode} {hub.city}</p>
-                  </div>
-                  
-                  <div className="flex items-center gap-4">
+                {/* Contenu */}
+                <div className="p-4 space-y-4">
+                  {/* Adresse */}
+                  <div className="flex items-start gap-3">
+                    <MapPin size={18} className="text-slate-400 mt-0.5 shrink-0" />
                     <div>
-                      <p className="text-xs font-bold text-slate-500 uppercase mb-1">Chauffeurs</p>
-                      <p className="text-lg font-bold text-slate-800">{zoneDrivers.length}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs font-bold text-slate-500 uppercase mb-1">Codes postaux</p>
-                      <p className="text-lg font-bold text-slate-800">{hub.assignedPostalCodes?.length || 0}</p>
+                      <p className="text-sm font-medium text-slate-700">{hub.address}</p>
+                      <p className="text-sm text-slate-500">{hub.postalCode} {hub.city}</p>
                     </div>
                   </div>
                   
-                  {hub.openingTime && hub.closingTime && (
-                    <div>
-                      <p className="text-xs font-bold text-slate-500 uppercase mb-1">Horaires</p>
-                      <p className="text-sm text-slate-700">
-                        {hub.openingTime} - {hub.closingTime}
-                      </p>
+                  {/* Téléphone */}
+                  {hub.contactPhone && (
+                    <div className="flex items-center gap-3">
+                      <Phone size={18} className="text-slate-400 shrink-0" />
+                      <p className="text-sm text-slate-700">{hub.contactPhone}</p>
                     </div>
                   )}
+                  
+                  {/* Horaires */}
+                  {hub.openingTime && hub.closingTime && (
+                    <div className="flex items-center gap-3">
+                      <Clock size={18} className="text-slate-400 shrink-0" />
+                      <p className="text-sm text-slate-700">{hub.openingTime} - {hub.closingTime}</p>
+                    </div>
+                  )}
+                  
+                  {/* Stats */}
+                  <div className="flex gap-4 pt-2">
+                    <div className="flex-1 bg-slate-50 rounded-lg p-3 text-center">
+                      <p className="text-2xl font-bold text-slate-800">{zoneDrivers.length}</p>
+                      <p className="text-xs text-slate-500">Chauffeurs</p>
+                    </div>
+                    <div className="flex-1 bg-slate-50 rounded-lg p-3 text-center">
+                      <p className="text-2xl font-bold text-slate-800">{hub.assignedPostalCodes?.length || 0}</p>
+                      <p className="text-xs text-slate-500">Codes postaux</p>
+                    </div>
+                  </div>
+                  
+                  {/* Codes postaux (affichage condensé) */}
+                  {hub.assignedPostalCodes && hub.assignedPostalCodes.length > 0 && (
+                    <div className="pt-2 border-t border-slate-100">
+                      <p className="text-xs font-bold text-slate-500 uppercase mb-2">Codes postaux desservis</p>
+                      <div className="flex flex-wrap gap-1">
+                        {hub.assignedPostalCodes.slice(0, 8).map(cp => (
+                          <span key={cp} className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs rounded">
+                            {cp}
+                          </span>
+                        ))}
+                        {hub.assignedPostalCodes.length > 8 && (
+                          <span className="px-2 py-0.5 bg-slate-200 text-slate-600 text-xs rounded font-medium">
+                            +{hub.assignedPostalCodes.length - 8}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                
+                {/* Actions */}
+                <div className="px-4 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
+                  <button
+                    onClick={() => toggleHubActive(hub)}
+                    className={`text-sm font-medium ${hub.isActive ? 'text-orange-600 hover:text-orange-700' : 'text-green-600 hover:text-green-700'}`}
+                  >
+                    {hub.isActive ? 'Désactiver' : 'Activer'}
+                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => openHubModal(hub)}
+                      className="p-2 text-slate-500 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors"
+                      title="Modifier"
+                    >
+                      <Edit size={18} />
+                    </button>
+                    <button
+                      onClick={() => setHubToDelete(hub)}
+                      className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      title="Supprimer"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  </div>
                 </div>
               </div>
             );
           })
         )}
       </div>
+      
+      {/* Info codes postaux */}
+      {hubs.length > 0 && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+          <p className="text-blue-800 text-sm">
+            <strong>💡 Astuce :</strong> Les codes postaux déterminent automatiquement la zone de livraison des colis importés. 
+            Assurez-vous que chaque code postal de La Réunion est assigné à un hub.
+          </p>
+        </div>
+      )}
+
+      {/* Modal création/édition hub */}
+      <Modal
+        isOpen={showHubModal}
+        onClose={closeHubModal}
+        title={editingHub ? `Modifier ${editingHub.name}` : 'Nouveau hub'}
+        size="lg"
+        headerIcon={<Building2 size={20} />}
+      >
+        <div className="space-y-5">
+          {/* Nom et Zone */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1.5">
+                Nom du hub <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={hubForm.name}
+                onChange={(e) => handleHubFormChange('name', e.target.value)}
+                placeholder="Ex: Dépôt Nord Saint-Denis"
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1.5">
+                Zone <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={hubForm.zone}
+                onChange={(e) => handleHubFormChange('zone', e.target.value)}
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none bg-white"
+              >
+                <option value="">Sélectionner une zone</option>
+                {Object.values(Zone).map(zone => (
+                  <option key={zone} value={zone}>{zone}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Adresse */}
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1.5">
+              Adresse complète <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={hubForm.address}
+              onChange={(e) => handleHubFormChange('address', e.target.value)}
+              placeholder="Ex: 15 rue du Commerce, ZI Cambaie"
+              className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
+            />
+          </div>
+
+          {/* Ville et Code postal */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1.5">
+                Ville <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={hubForm.city}
+                onChange={(e) => handleHubFormChange('city', e.target.value)}
+                placeholder="Ex: Saint-Denis"
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1.5">
+                Code postal <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={hubForm.postalCode}
+                onChange={(e) => handleHubFormChange('postalCode', e.target.value)}
+                placeholder="Ex: 97400"
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
+              />
+            </div>
+          </div>
+
+          {/* Téléphone et Horaires */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1.5">
+                Téléphone
+              </label>
+              <input
+                type="tel"
+                value={hubForm.contactPhone}
+                onChange={(e) => handleHubFormChange('contactPhone', e.target.value)}
+                placeholder="0262 XX XX XX"
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1.5">
+                Ouverture
+              </label>
+              <input
+                type="time"
+                value={hubForm.openingTime}
+                onChange={(e) => handleHubFormChange('openingTime', e.target.value)}
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1.5">
+                Fermeture
+              </label>
+              <input
+                type="time"
+                value={hubForm.closingTime}
+                onChange={(e) => handleHubFormChange('closingTime', e.target.value)}
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
+              />
+            </div>
+          </div>
+
+          {/* Codes postaux couverts */}
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1.5">
+              Codes postaux couverts par ce hub
+            </label>
+            <textarea
+              value={hubForm.assignedPostalCodes}
+              onChange={(e) => handleHubFormChange('assignedPostalCodes', e.target.value)}
+              placeholder="97400, 97490, 97419, 97417 (séparés par des virgules)"
+              rows={3}
+              className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none resize-none font-mono text-sm"
+            />
+            <p className="text-xs text-slate-500 mt-1.5">
+              Lors de l'import des colis, les adresses seront automatiquement rattachées à ce hub selon leur code postal.
+            </p>
+          </div>
+
+          {/* Boutons */}
+          <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
+            <button
+              onClick={closeHubModal}
+              className="px-5 py-2.5 text-slate-700 font-medium hover:bg-slate-100 rounded-xl transition-colors"
+            >
+              Annuler
+            </button>
+            <button
+              onClick={handleSaveHub}
+              disabled={isSavingHub || !hubForm.name || !hubForm.zone || !hubForm.address || !hubForm.city || !hubForm.postalCode}
+              className="flex items-center gap-2 px-6 py-2.5 bg-brand-500 text-white rounded-xl font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {isSavingHub ? (
+                <>
+                  <Loader2 size={18} className="animate-spin" />
+                  Enregistrement...
+                </>
+              ) : (
+                <>
+                  <CheckCircle size={18} />
+                  {editingHub ? 'Enregistrer les modifications' : 'Créer le hub'}
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal confirmation suppression */}
+      <Modal
+        isOpen={!!hubToDelete}
+        onClose={() => setHubToDelete(null)}
+        title="Supprimer ce hub ?"
+        size="sm"
+        headerIcon={<AlertTriangle size={20} className="text-red-500" />}
+      >
+        <div className="space-y-4">
+          <p className="text-slate-600">
+            Voulez-vous vraiment supprimer le hub <strong className="text-slate-800">{hubToDelete?.name}</strong> ?
+          </p>
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+            <p className="text-sm text-amber-800">
+              ⚠️ Cette action est irréversible. Les {hubToDelete?.assignedPostalCodes?.length || 0} codes postaux associés ne seront plus rattachés à aucun hub.
+            </p>
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              onClick={() => setHubToDelete(null)}
+              className="px-4 py-2 text-slate-700 font-medium hover:bg-slate-100 rounded-xl transition-colors"
+            >
+              Annuler
+            </button>
+            <button
+              onClick={handleDeleteHub}
+              className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-xl font-medium hover:bg-red-600 transition-colors"
+            >
+              <Trash2 size={16} />
+              Supprimer définitivement
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 
@@ -922,6 +1375,220 @@ const MissionManager: React.FC<MissionManagerProps> = ({
             )}
           </div>
         </div>
+      </Modal>
+
+      {/* Modal Hub (Création/Édition) */}
+      <Modal
+        isOpen={showHubModal}
+        onClose={closeHubModal}
+        title={editingHub ? `Modifier ${editingHub.name}` : 'Nouveau hub'}
+        size="lg"
+        headerIcon={<Building2 size={20} />}
+      >
+        <div className="space-y-5">
+          {/* Nom et Zone */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1">
+                Nom du hub <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={hubForm.name}
+                onChange={(e) => handleHubFormChange('name', e.target.value)}
+                placeholder="Ex: Hub Nord Saint-Denis"
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1">
+                Zone <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={hubForm.zone}
+                onChange={(e) => handleHubFormChange('zone', e.target.value)}
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none bg-white"
+              >
+                <option value="">Sélectionner une zone</option>
+                {Object.values(Zone).map(zone => (
+                  <option key={zone} value={zone}>{zone}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Adresse */}
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1">
+              Adresse <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={hubForm.address}
+              onChange={(e) => handleHubFormChange('address', e.target.value)}
+              placeholder="Ex: 15 Rue du Commerce, ZI Chaudron"
+              className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
+            />
+          </div>
+
+          {/* Ville et Code postal */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1">
+                Ville <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={hubForm.city}
+                onChange={(e) => handleHubFormChange('city', e.target.value)}
+                placeholder="Ex: Saint-Denis"
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1">
+                Code postal <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={hubForm.postalCode}
+                onChange={(e) => handleHubFormChange('postalCode', e.target.value)}
+                placeholder="Ex: 97400"
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
+              />
+            </div>
+          </div>
+
+          {/* Téléphone et Horaires */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1">
+                Téléphone
+              </label>
+              <input
+                type="tel"
+                value={hubForm.contactPhone}
+                onChange={(e) => handleHubFormChange('contactPhone', e.target.value)}
+                placeholder="0262 XX XX XX"
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1">
+                Ouverture
+              </label>
+              <input
+                type="time"
+                value={hubForm.openingTime}
+                onChange={(e) => handleHubFormChange('openingTime', e.target.value)}
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1">
+                Fermeture
+              </label>
+              <input
+                type="time"
+                value={hubForm.closingTime}
+                onChange={(e) => handleHubFormChange('closingTime', e.target.value)}
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
+              />
+            </div>
+          </div>
+
+          {/* Codes postaux assignés */}
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1">
+              Codes postaux desservis
+            </label>
+            <textarea
+              value={hubForm.assignedPostalCodes}
+              onChange={(e) => handleHubFormChange('assignedPostalCodes', e.target.value)}
+              placeholder="97400, 97490, 97419..."
+              rows={3}
+              className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none resize-none"
+            />
+            <p className="text-xs text-slate-500 mt-1">
+              Séparez les codes postaux par des virgules. Ces codes déterminent quels colis seront routés vers ce hub.
+            </p>
+          </div>
+
+          {/* Info auto-fill */}
+          {!editingHub && hubForm.zone && (
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
+              <p className="text-blue-800 text-sm">
+                💡 Les codes postaux par défaut de la zone <strong>{hubForm.zone}</strong> ont été pré-remplis. 
+                Vous pouvez les modifier selon vos besoins.
+              </p>
+            </div>
+          )}
+
+          {/* Actions */}
+          <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
+            <button
+              onClick={closeHubModal}
+              className="px-4 py-2 text-slate-700 font-medium hover:bg-slate-100 rounded-xl transition-colors"
+            >
+              Annuler
+            </button>
+            <button
+              onClick={handleSaveHub}
+              disabled={!hubForm.name || !hubForm.zone || !hubForm.address || !hubForm.city || !hubForm.postalCode || isSavingHub}
+              className="flex items-center gap-2 px-6 py-2 bg-brand-500 text-white rounded-xl font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {isSavingHub ? (
+                <>
+                  <Loader2 size={18} className="animate-spin" />
+                  Enregistrement...
+                </>
+              ) : (
+                <>
+                  <CheckCircle size={18} />
+                  {editingHub ? 'Mettre à jour' : 'Créer le hub'}
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal Confirmation Suppression */}
+      <Modal
+        isOpen={!!hubToDelete}
+        onClose={() => setHubToDelete(null)}
+        title="Supprimer ce hub ?"
+        size="sm"
+        headerIcon={<Trash2 size={20} className="text-red-500" />}
+      >
+        {hubToDelete && (
+          <div className="space-y-4">
+            <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+              <p className="text-red-800">
+                Vous êtes sur le point de supprimer le hub <strong>{hubToDelete.name}</strong> (Zone {hubToDelete.zone}).
+              </p>
+              <p className="text-red-700 text-sm mt-2">
+                ⚠️ Cette action est irréversible. Les codes postaux associés ne seront plus rattachés à aucun hub.
+              </p>
+            </div>
+            
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                onClick={() => setHubToDelete(null)}
+                className="px-4 py-2 text-slate-700 font-medium hover:bg-slate-100 rounded-xl transition-colors"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={handleDeleteHub}
+                className="flex items-center gap-2 px-6 py-2 bg-red-500 text-white rounded-xl font-medium hover:bg-red-600 transition-colors"
+              >
+                <Trash2 size={18} />
+                Supprimer
+              </button>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );
