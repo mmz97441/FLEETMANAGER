@@ -111,5 +111,54 @@ service cloud.firestore {
       allow write: if request.auth != null && 
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['Président', 'Secrétariat'];
     }
+    
+    // ============================================
+    // MODULE MISSIONS
+    // ============================================
+    
+    // Hubs (points de concentration)
+    match /hubs/{hubId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['Admin', 'Président', 'President', 'Directeur', 'Directeur Exploitation'];
+    }
+    
+    // Packages (colis)
+    match /packages/{packageId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+    
+    // Missions (tournées)
+    match /missions/{missionId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+    
+    // Import batches (historique des imports)
+    match /import_batches/{batchId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+    
+    // Package transfers (transferts entre chauffeurs)
+    match /package_transfers/{transferId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+    
+    // Postal code mappings (configuration zones)
+    match /postal_code_mappings/{mappingId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['Admin', 'Président', 'President', 'Directeur', 'Directeur Exploitation'];
+    }
+    
+    // Activity logs (logs d'activité)
+    match /activity_logs/{logId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update, delete: if false;
+    }
   }
 }
