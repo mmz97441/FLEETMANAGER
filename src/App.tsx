@@ -18,6 +18,7 @@ import ClientPortal from './components/ClientPortal';
 import QuoteManager from './components/QuoteManager';
 import AbsenceManager from './components/AbsenceManager';
 import DocumentManager from './components/DocumentManager';
+import DocumentAlertModal from './components/DocumentAlertModal';
 import Settings from './components/Settings'; // New Import
 import ErrorBoundary from './components/ErrorBoundary'; // New Import
 import MobileNavBar from './components/MobileNavBar';
@@ -281,6 +282,57 @@ const App: React.FC = () => {
       return false;
     }).length;
   }, [companyDocuments, documentAcknowledgments, currentUser]);
+
+  // Liste complète des documents en attente (pour le modal d'alerte)
+  const pendingDocumentsList = useMemo(() => {
+    if (!currentUser) return [];
+    
+    const normalizeRole = (role: string | UserRole): UserRole => {
+      const r = String(role).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      if (r.includes('admin')) return UserRole.ADMIN;
+      if (r.includes('presiden')) return UserRole.PRESIDENT;
+      if (r.includes('direction') || r.includes('directeur')) return UserRole.DIRECTOR;
+      if (r.includes('secret')) return UserRole.SECRETARY;
+      if (r.includes('chauff') || r.includes('driver')) return UserRole.DRIVER;
+      if (r.includes('mecan') || r.includes('mech')) return UserRole.MECHANIC;
+      if (r.includes('client')) return UserRole.CLIENT;
+      return role as UserRole;
+    };
+    
+    const effectiveRole = normalizeRole(currentUser.role);
+    
+    const myDocs = companyDocuments.filter(doc => {
+      if (!doc.isActive) return false;
+      if (doc.targetRoles.length === 0) return true;
+      return doc.targetRoles.includes(effectiveRole);
+    });
+    
+    return myDocs.filter(doc => {
+      const ack = documentAcknowledgments.find(a => 
+        a.documentId === doc.id && 
+        a.userId === currentUser.id &&
+        a.documentVersion === doc.version
+      );
+      if (!ack) return true;
+      if (doc.requiresSignature && ack.status !== 'SIGNED') return true;
+      return false;
+    });
+  }, [companyDocuments, documentAcknowledgments, currentUser]);
+
+  // State pour le modal d'alerte documents
+  const [showDocumentAlert, setShowDocumentAlert] = useState(false);
+  const [documentAlertDismissed, setDocumentAlertDismissed] = useState(false);
+
+  // Afficher l'alerte au chargement si documents en attente
+  useEffect(() => {
+    if (currentUser && pendingDocumentsList.length > 0 && !documentAlertDismissed && !isLoading) {
+      // Délai pour laisser l'app se charger
+      const timer = setTimeout(() => {
+        setShowDocumentAlert(true);
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [currentUser, pendingDocumentsList.length, documentAlertDismissed, isLoading]);
 
   // --- HANDLERS ---
   
@@ -845,6 +897,22 @@ const App: React.FC = () => {
               onOpenMenu={() => setIsMobileMenuOpen(true)}
             />
         )}
+
+        {/* MODAL ALERTE DOCUMENTS NON SIGNÉS */}
+        <DocumentAlertModal
+          isOpen={showDocumentAlert}
+          onClose={() => {
+            setShowDocumentAlert(false);
+            setDocumentAlertDismissed(true);
+          }}
+          onGoToDocuments={() => {
+            setShowDocumentAlert(false);
+            setDocumentAlertDismissed(true);
+            setCurrentView('documents');
+          }}
+          pendingDocuments={pendingDocumentsList}
+          currentUser={currentUser}
+        />
 
       </div>
       </PermissionsProvider>

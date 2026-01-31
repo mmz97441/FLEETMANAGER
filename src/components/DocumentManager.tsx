@@ -870,71 +870,152 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
           <div className="space-y-3">
             <div className="bg-slate-50 p-3 rounded-xl">
               <h4 className="font-bold text-slate-800 text-sm line-clamp-1">{selectedDocument.title}</h4>
-              <p className="text-xs text-slate-500">Version {selectedDocument.version}</p>
+              <p className="text-xs text-slate-500">Version {selectedDocument.version} • Créé le {new Date(selectedDocument.createdAt).toLocaleDateString('fr-FR')}</p>
             </div>
             
             {(() => {
               const stats = getDocumentStats(selectedDocument);
+              const percentage = stats.total > 0 ? Math.round((stats.signed / stats.total) * 100) : 0;
+              
               return (
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="bg-blue-50 p-2 sm:p-3 rounded-xl text-center">
-                    <p className="text-xl sm:text-2xl font-bold text-blue-600">{stats.total}</p>
-                    <p className="text-[10px] sm:text-xs text-blue-700 font-medium">Concernés</p>
+                <>
+                  {/* Barre de progression */}
+                  <div className="bg-slate-100 rounded-xl p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium text-slate-700">Progression</span>
+                      <span className={`text-sm font-bold ${percentage === 100 ? 'text-green-600' : 'text-amber-600'}`}>
+                        {percentage}%
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-200 rounded-full h-3">
+                      <div 
+                        className={`h-3 rounded-full transition-all duration-500 ${
+                          percentage === 100 ? 'bg-green-500' : percentage > 50 ? 'bg-amber-500' : 'bg-red-500'
+                        }`}
+                        style={{ width: `${percentage}%` }}
+                      />
+                    </div>
                   </div>
-                  <div className="bg-green-50 p-2 sm:p-3 rounded-xl text-center">
-                    <p className="text-xl sm:text-2xl font-bold text-green-600">{stats.signed}</p>
-                    <p className="text-[10px] sm:text-xs text-green-700 font-medium">Signés</p>
+                  
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="bg-blue-50 p-2 sm:p-3 rounded-xl text-center">
+                      <p className="text-xl sm:text-2xl font-bold text-blue-600">{stats.total}</p>
+                      <p className="text-[10px] sm:text-xs text-blue-700 font-medium">Concernés</p>
+                    </div>
+                    <div className="bg-green-50 p-2 sm:p-3 rounded-xl text-center">
+                      <p className="text-xl sm:text-2xl font-bold text-green-600">{stats.signed}</p>
+                      <p className="text-[10px] sm:text-xs text-green-700 font-medium">Signés</p>
+                    </div>
+                    <div className="bg-orange-50 p-2 sm:p-3 rounded-xl text-center">
+                      <p className="text-xl sm:text-2xl font-bold text-orange-600">{stats.pending}</p>
+                      <p className="text-[10px] sm:text-xs text-orange-700 font-medium">En attente</p>
+                    </div>
                   </div>
-                  <div className="bg-orange-50 p-2 sm:p-3 rounded-xl text-center">
-                    <p className="text-xl sm:text-2xl font-bold text-orange-600">{stats.pending}</p>
-                    <p className="text-[10px] sm:text-xs text-orange-700 font-medium">En attente</p>
-                  </div>
-                </div>
+                </>
               );
             })()}
             
             <div className="space-y-1.5">
-              <h4 className="font-bold text-slate-700 text-sm">Détail par utilisateur</h4>
-              {users
-                .filter(u => {
-                  if (selectedDocument.targetRoles.length === 0) return true;
-                  return selectedDocument.targetRoles.includes(normalizeRole(u.role));
-                })
-                .map(u => {
-                  const ack = acknowledgments.find(a => 
-                    a.documentId === selectedDocument.id &&
-                      a.userId === u.id &&
-                      a.documentVersion === selectedDocument.version
-                    );
+              <div className="flex items-center justify-between">
+                <h4 className="font-bold text-slate-700 text-sm">Détail par utilisateur</h4>
+                <button
+                  onClick={() => {
+                    // Export CSV
+                    const targetUsers = users.filter(u => {
+                      if (selectedDocument.targetRoles.length === 0) return true;
+                      return selectedDocument.targetRoles.includes(normalizeRole(u.role));
+                    });
                     
-                    return (
-                      <div key={u.id} className="flex items-center justify-between p-2 sm:p-3 bg-white rounded-lg border border-slate-200">
-                        <div className="min-w-0 flex-1">
-                          <p className="font-medium text-slate-800 text-sm truncate">{u.firstName} {u.lastName}</p>
-                          <p className="text-xs text-slate-500">{u.role}</p>
-                        </div>
-                        <div className="text-right">
-                          {ack ? (
-                            <div>
-                              <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-bold ${
-                                ack.status === 'SIGNED' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
-                              }`}>
-                                {ack.status === 'SIGNED' ? <CheckCircle size={12} /> : <Eye size={12} />}
-                                {ack.status === 'SIGNED' ? 'Signé' : 'Lu'}
+                    const rows = targetUsers.map(u => {
+                      const ack = acknowledgments.find(a => 
+                        a.documentId === selectedDocument.id &&
+                        a.userId === u.id &&
+                        a.documentVersion === selectedDocument.version
+                      );
+                      return [
+                        `${u.firstName} ${u.lastName}`,
+                        u.role,
+                        ack ? (ack.status === 'SIGNED' ? 'SIGNÉ' : 'LU') : 'EN ATTENTE',
+                        ack?.signedAt ? new Date(ack.signedAt).toLocaleString('fr-FR') : (ack?.readAt ? new Date(ack.readAt).toLocaleString('fr-FR') : '-'),
+                        ack?.signatureHash || '-'
+                      ];
+                    });
+                    
+                    const csv = [
+                      ['Nom', 'Rôle', 'Statut', 'Date/Heure', 'Signature Hash'],
+                      ...rows
+                    ].map(r => r.join(';')).join('\n');
+                    
+                    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `suivi-signatures-${selectedDocument.title.replace(/[^a-z0-9]/gi, '_')}-${new Date().toISOString().split('T')[0]}.csv`;
+                    a.click();
+                  }}
+                  className="flex items-center gap-1 text-xs text-brand-600 hover:text-brand-800 font-medium"
+                >
+                  <Download size={14} /> Exporter
+                </button>
+              </div>
+              
+              <div className="max-h-[300px] overflow-y-auto space-y-1.5">
+                {users
+                  .filter(u => {
+                    if (selectedDocument.targetRoles.length === 0) return true;
+                    return selectedDocument.targetRoles.includes(normalizeRole(u.role));
+                  })
+                  .sort((a, b) => {
+                    // Trier : en attente d'abord, puis par nom
+                    const ackA = acknowledgments.find(x => x.documentId === selectedDocument.id && x.userId === a.id && x.documentVersion === selectedDocument.version);
+                    const ackB = acknowledgments.find(x => x.documentId === selectedDocument.id && x.userId === b.id && x.documentVersion === selectedDocument.version);
+                    if (!ackA && ackB) return -1;
+                    if (ackA && !ackB) return 1;
+                    return `${a.lastName}`.localeCompare(`${b.lastName}`);
+                  })
+                  .map(u => {
+                    const ack = acknowledgments.find(a => 
+                      a.documentId === selectedDocument.id &&
+                        a.userId === u.id &&
+                        a.documentVersion === selectedDocument.version
+                      );
+                      
+                      return (
+                        <div key={u.id} className={`flex items-center justify-between p-2 sm:p-3 rounded-lg border ${
+                          !ack ? 'bg-orange-50 border-orange-200' : ack.status === 'SIGNED' ? 'bg-green-50 border-green-200' : 'bg-white border-slate-200'
+                        }`}>
+                          <div className="min-w-0 flex-1">
+                            <p className="font-medium text-slate-800 text-sm truncate">{u.firstName} {u.lastName}</p>
+                            <p className="text-xs text-slate-500">{u.role}</p>
+                          </div>
+                          <div className="text-right">
+                            {ack ? (
+                              <div>
+                                <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-bold ${
+                                  ack.status === 'SIGNED' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
+                                }`}>
+                                  {ack.status === 'SIGNED' ? <CheckCircle size={12} /> : <Eye size={12} />}
+                                  {ack.status === 'SIGNED' ? 'Signé' : 'Lu'}
+                                </span>
+                                <p className="text-[10px] text-slate-500 mt-1">
+                                  {new Date(ack.signedAt || ack.readAt).toLocaleString('fr-FR')}
+                                </p>
+                                {ack.status === 'SIGNED' && ack.signatureHash && (
+                                  <p className="text-[9px] text-slate-400 font-mono truncate max-w-[120px]" title={ack.signatureHash}>
+                                    #{ack.signatureHash.substring(0, 12)}...
+                                  </p>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-bold bg-orange-100 text-orange-700 animate-pulse">
+                                <Clock size={12} /> En attente
                               </span>
-                              <p className="text-[10px] text-slate-500 mt-1">
-                                {new Date(ack.signedAt || ack.readAt).toLocaleString()}
-                              </p>
-                            </div>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-bold bg-orange-100 text-orange-700">
-                              <Clock size={12} /> En attente
-                            </span>
-                          )}
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+              </div>
             </div>
           </div>
         )}

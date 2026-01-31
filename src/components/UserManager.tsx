@@ -1,13 +1,14 @@
 
 import React, { useState, useMemo } from 'react';
 import { User, UserRole } from '../types';
-import { Users, Plus, Shield, User as UserIcon, Settings, Briefcase, Truck, Edit, Save, X, Trash2, Mail, Search, Filter, LayoutGrid, List, Building2, UserPlus, AlertTriangle, CheckCircle, Calendar, HeartPulse, Send, Ban, RefreshCw, Key, MoreVertical, GraduationCap, Lock } from 'lucide-react';
+import { Users, Plus, Shield, User as UserIcon, Settings, Briefcase, Truck, Edit, Save, X, Trash2, Mail, Search, Filter, LayoutGrid, List, Building2, UserPlus, AlertTriangle, CheckCircle, Calendar, HeartPulse, Send, Ban, RefreshCw, Key, MoreVertical, GraduationCap, Lock, AlertCircle } from 'lucide-react';
 import Modal from './shared/Modal';
 import ConfirmModal from './ConfirmModal';
 import { sendUserInvitationEmail } from '../services/emailService';
 import { createInvitation, getActivationUrl, resendInvitation } from '../services/invitationService';
 import { toggleUserStatus, forcePasswordReset } from '../services/cloudFunctions';
 import { usePermissions, Permission } from '../usePermissions';
+import { validateName, validateEmail, validatePhone, ValidationResult } from '../utils/validation';
 
 interface UserManagerProps {
   users: User[];
@@ -63,6 +64,77 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
       medicalVisitDate: '',
       companyName: ''
   });
+
+  // VALIDATION ERRORS STATE
+  const [formErrors, setFormErrors] = useState<{
+    firstName?: string;
+    lastName?: string;
+    email?: string;
+    phone?: string;
+    companyName?: string;
+  }>({});
+
+  // Validation en temps réel
+  const handleFieldChange = (field: keyof typeof formData, value: string) => {
+    setFormData({ ...formData, [field]: value });
+    
+    // Valider en temps réel
+    let validation: ValidationResult = { valid: true };
+    
+    switch (field) {
+      case 'firstName':
+        validation = validateName(value, 'prénom');
+        break;
+      case 'lastName':
+        validation = validateName(value, 'nom');
+        break;
+      case 'email':
+        if (value.length > 0) validation = validateEmail(value);
+        break;
+      case 'phone':
+        if (value.length > 0) validation = validatePhone(value);
+        break;
+    }
+    
+    setFormErrors(prev => ({
+      ...prev,
+      [field]: validation.valid ? undefined : validation.error
+    }));
+    
+    // Si valide et formaté, appliquer le format
+    if (validation.valid && validation.formatted && field !== 'email') {
+      // Ne pas auto-formater pendant la saisie pour l'email
+    }
+  };
+
+  // Validation complète avant soumission
+  const validateForm = (): boolean => {
+    const errors: typeof formErrors = {};
+    
+    const firstNameResult = validateName(formData.firstName || '', 'prénom');
+    if (!firstNameResult.valid) errors.firstName = firstNameResult.error;
+    
+    const lastNameResult = validateName(formData.lastName || '', 'nom');
+    if (!lastNameResult.valid) errors.lastName = lastNameResult.error;
+    
+    const emailResult = validateEmail(formData.email || '');
+    if (!emailResult.valid) errors.email = emailResult.error;
+    
+    // Vérifier si l'email existe déjà
+    if (emailResult.valid && !editingUser) {
+      const existingUser = users.find(u => u.email?.toLowerCase() === formData.email?.toLowerCase());
+      if (existingUser) {
+        errors.email = "Cet email est déjà utilisé par un autre compte";
+      }
+    }
+    
+    if (formData.role === UserRole.CLIENT && !formData.companyName?.trim()) {
+      errors.companyName = "Le nom de la société est obligatoire pour un client";
+    }
+    
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
 
   // --- HELPER: NORMALISATION DES RÔLES ---
   const normalizeRole = (role: string | undefined) => {
@@ -166,12 +238,14 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
           fcoDate: '',
           medicalVisitDate: ''
       });
+      setFormErrors({}); // Reset erreurs
       setIsModalOpen(true);
   };
 
   const handleOpenEdit = (user: User) => {
       setEditingUser(user);
       setFormData({ ...user });
+      setFormErrors({}); // Reset erreurs
       setIsModalOpen(true);
   };
 
@@ -182,10 +256,23 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
 
   const handleFormSubmit = (e: React.FormEvent) => {
       e.preventDefault();
+      
+      // Validation complète
+      if (!validateForm()) {
+        return;
+      }
+      
       if (!formData.email || !formData.firstName || !formData.lastName) return;
 
       // Normaliser l'email (lowercase, trim)
       const normalizedEmail = formData.email.toLowerCase().trim();
+      
+      // Formater les noms
+      const firstNameResult = validateName(formData.firstName, 'prénom');
+      const lastNameResult = validateName(formData.lastName, 'nom');
+      
+      const formattedFirstName = firstNameResult.formatted || formData.firstName;
+      const formattedLastName = lastNameResult.formatted || formData.lastName;
 
       // VÉRIFICATION : Email déjà existant ?
       const emailExists = users.some(u => 
@@ -194,21 +281,23 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
       );
 
       if (emailExists) {
-        alert(`⚠️ L'email "${normalizedEmail}" est déjà utilisé par un autre utilisateur.`);
+        setFormErrors(prev => ({ ...prev, email: "Cet email est déjà utilisé par un autre compte" }));
         return;
       }
 
       if (editingUser) {
           // UPDATE
-          setPendingAction({ type: 'UPDATE', data: { ...editingUser, ...formData, email: normalizedEmail } });
+          setPendingAction({ type: 'UPDATE', data: { ...editingUser, ...formData, firstName: formattedFirstName, lastName: formattedLastName, email: normalizedEmail } });
       } else {
           // ADD
           const newUser: User = {
               ...formData as User,
+              firstName: formattedFirstName,
+              lastName: formattedLastName,
               email: normalizedEmail,
               id: `u-${Date.now()}`,
               // Avatar par défaut si non fourni
-              avatarUrl: formData.avatarUrl || `https://ui-avatars.com/api/?name=${formData.firstName}+${formData.lastName}&background=random`
+              avatarUrl: formData.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(formattedFirstName)}+${encodeURIComponent(formattedLastName)}&background=random`
           };
           setPendingAction({ type: 'ADD', data: newUser });
       }
@@ -876,25 +965,86 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
                             <div className="border-t border-slate-100 pt-4 space-y-4">
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
-                                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Prénom</label>
-                                        <input required type="text" className="w-full px-4 py-2.5 border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-brand-500 text-slate-900 font-bold" value={formData.firstName} onChange={e => setFormData({...formData, firstName: e.target.value})} />
+                                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Prénom <span className="text-red-500">*</span></label>
+                                        <input 
+                                            required 
+                                            type="text" 
+                                            className={`w-full px-4 py-2.5 border rounded-xl outline-none focus:ring-2 text-slate-900 font-bold ${
+                                              formErrors.firstName 
+                                                ? 'border-red-400 focus:ring-red-500 bg-red-50' 
+                                                : 'border-slate-300 focus:ring-brand-500'
+                                            }`} 
+                                            value={formData.firstName} 
+                                            onChange={e => handleFieldChange('firstName', e.target.value)}
+                                            onBlur={e => {
+                                              // Formater au blur
+                                              const result = validateName(e.target.value, 'prénom');
+                                              if (result.valid && result.formatted) {
+                                                setFormData(prev => ({ ...prev, firstName: result.formatted }));
+                                              }
+                                            }}
+                                        />
+                                        {formErrors.firstName && (
+                                          <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                                            <AlertCircle size={12} /> {formErrors.firstName}
+                                          </p>
+                                        )}
                                     </div>
                                     <div>
-                                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nom</label>
-                                        <input required type="text" className="w-full px-4 py-2.5 border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-brand-500 text-slate-900 font-bold" value={formData.lastName} onChange={e => setFormData({...formData, lastName: e.target.value})} />
+                                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nom <span className="text-red-500">*</span></label>
+                                        <input 
+                                            required 
+                                            type="text" 
+                                            className={`w-full px-4 py-2.5 border rounded-xl outline-none focus:ring-2 text-slate-900 font-bold ${
+                                              formErrors.lastName 
+                                                ? 'border-red-400 focus:ring-red-500 bg-red-50' 
+                                                : 'border-slate-300 focus:ring-brand-500'
+                                            }`} 
+                                            value={formData.lastName} 
+                                            onChange={e => handleFieldChange('lastName', e.target.value)}
+                                            onBlur={e => {
+                                              const result = validateName(e.target.value, 'nom');
+                                              if (result.valid && result.formatted) {
+                                                setFormData(prev => ({ ...prev, lastName: result.formatted }));
+                                              }
+                                            }}
+                                        />
+                                        {formErrors.lastName && (
+                                          <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                                            <AlertCircle size={12} /> {formErrors.lastName}
+                                          </p>
+                                        )}
                                     </div>
                                 </div>
                                 
                                 <div>
-                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Email Professionnel</label>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Email Professionnel <span className="text-red-500">*</span></label>
                                     <input 
-                                        required type="email" 
-                                        disabled={!!editingUser} // Email non modifiable en édition simple (auth firebase)
-                                        className={`w-full px-4 py-2.5 border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-brand-500 text-slate-900 font-medium ${editingUser ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : ''}`} 
+                                        required 
+                                        type="email" 
+                                        disabled={!!editingUser}
+                                        className={`w-full px-4 py-2.5 border rounded-xl outline-none focus:ring-2 text-slate-900 font-medium ${
+                                          editingUser 
+                                            ? 'bg-slate-100 text-slate-500 cursor-not-allowed border-slate-300' 
+                                            : formErrors.email 
+                                              ? 'border-red-400 focus:ring-red-500 bg-red-50' 
+                                              : 'border-slate-300 focus:ring-brand-500'
+                                        }`} 
                                         value={formData.email} 
-                                        onChange={e => setFormData({...formData, email: e.target.value})} 
+                                        onChange={e => handleFieldChange('email', e.target.value)}
+                                        onBlur={e => {
+                                          const result = validateEmail(e.target.value);
+                                          if (result.valid && result.formatted) {
+                                            setFormData(prev => ({ ...prev, email: result.formatted }));
+                                          }
+                                        }}
                                     />
-                                    {!editingUser && <p className="text-xs text-slate-500 mt-1">L'utilisateur recevra une invitation par email.</p>}
+                                    {formErrors.email && (
+                                      <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                                        <AlertCircle size={12} /> {formErrors.email}
+                                      </p>
+                                    )}
+                                    {!editingUser && !formErrors.email && <p className="text-xs text-slate-500 mt-1">L'utilisateur recevra une invitation par email.</p>}
                                 </div>
                             </div>
 
