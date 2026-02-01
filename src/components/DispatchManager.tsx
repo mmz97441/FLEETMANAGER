@@ -1,7 +1,10 @@
 /**
- * DISPATCH MANAGER
+ * DISPATCH MANAGER — Multi-véhicules
  * 
- * Interface pour créer des missions optimisées et les dispatcher aux chauffeurs
+ * 1. Sélectionner un secteur (Nord/Sud/Est/Ouest)
+ * 2. Sélectionner les chauffeurs disponibles
+ * 3. Optimiser → GMPRO répartit les colis sur N chauffeurs
+ * 4. Dispatcher toutes les tournées d'un coup
  */
 
 import React, { useState, useMemo } from 'react';
@@ -10,7 +13,7 @@ import {
   Mission, MissionStatus, MissionType, MissionStop, StopStatus,
   ZONE_COLORS
 } from '../types';
-import { optimizeRoute, isGMPROConfigured, getGoogleMapsApiKey } from '../services/gmproService';
+import { optimizeMultiVehicle, isGMPROConfigured, getGoogleMapsApiKey, TourResult, OptimizationResult, DriverVehicle } from '../services/gmproService';
 import { addMission, updatePackageStatus } from '../services/missionService';
 import { logActivity } from '../services/activityLogService';
 import { ActivityAction } from '../types';
@@ -18,7 +21,7 @@ import Modal from './shared/Modal';
 import {
   Route, Package as PackageIcon, MapPin, Users, Truck, Play,
   CheckCircle, Loader2, AlertTriangle, Zap, Clock, Navigation,
-  ChevronRight, User as UserIcon, RefreshCw
+  ChevronRight, User as UserIcon, ChevronDown, ChevronUp
 } from 'lucide-react';
 
 interface DispatchManagerProps {
@@ -51,20 +54,15 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
 }) => {
   // États
   const [selectedZone, setSelectedZone] = useState<Zone | null>(null);
-  const [selectedDriver, setSelectedDriver] = useState<string>('');
-  const [selectedHubId, setSelectedHubId] = useState<string>(''); // Hub de départ
+  const [selectedDriverIds, setSelectedDriverIds] = useState<Set<string>>(new Set());
+  const [selectedHubId, setSelectedHubId] = useState<string>('');
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [isDispatching, setIsDispatching] = useState(false);
-  const [optimizedStops, setOptimizedStops] = useState<MissionStop[]>([]);
-  const [optimizationResult, setOptimizationResult] = useState<{
-    success: boolean;
-    totalDistance: number;
-    estimatedDuration: number;
-    error?: string;
-  } | null>(null);
+  const [optimResult, setOptimResult] = useState<OptimizationResult | null>(null);
+  const [expandedTour, setExpandedTour] = useState<number | null>(null);
   const [showDispatchModal, setShowDispatchModal] = useState(false);
   
-  // Filtrer les colis en attente (tous les colis non assignés, quelle que soit la date)
+  // Filtrer les colis en attente
   const pendingPackages = useMemo(() => 
     packages.filter(p => p.status === PackageStatus.PENDING),
     [packages]
@@ -76,27 +74,16 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
     
     for (const zone of Object.values(Zone)) {
       const zonePackages = pendingPackages.filter(p => p.zone === zone);
+      const uniqueStops = new Set(zonePackages.map(p => `${p.address}|${p.postalCode}`));
       
-      // Compter les stops uniques (groupés par adresse)
-      const uniqueStops = new Set(
-        zonePackages.map(p => `${p.address}|${p.postalCode}`)
-      );
-      
-      // Trouver le hub de cette zone
-      // D'abord chercher par zone, sinon chercher un hub dont les codes postaux couvrent cette zone
       let hub = hubs.find(h => h.zone === zone && h.isActive) || null;
       if (!hub) {
-        // Chercher un hub actif qui contient les codes postaux de cette zone
         const zoneCPs = zonePackages.map(p => p.postalCode);
         hub = hubs.find(h => 
-          h.isActive && 
-          h.assignedPostalCodes?.some(cp => zoneCPs.includes(cp))
+          h.isActive && h.assignedPostalCodes?.some(cp => zoneCPs.includes(cp))
         ) || null;
       }
       
-      // Chauffeurs disponibles pour cette zone
-      // - Chauffeurs assignés à cette zone
-      // - OU tous les chauffeurs si personne n'a de zone assignée (démarrage)
       const driversWithZone = users.filter(u => 
         u.role === UserRole.DRIVER && !u.isDisabled && u.zone === zone
       );
@@ -107,8 +94,6 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
         u.role === UserRole.DRIVER && !u.isDisabled && u.zone
       );
       
-      // Si aucun chauffeur n'a de zone → tous sont disponibles partout
-      // Sinon, seuls ceux de la zone + ceux sans zone (polyvalents)
       const availableDrivers = anyDriverHasZone
         ? users.filter(u => u.role === UserRole.DRIVER && !u.isDisabled && (u.zone === zone || !u.zone))
         : allDrivers;
@@ -126,220 +111,187 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
     return stats.filter(s => s.packageCount > 0);
   }, [pendingPackages, hubs, users]);
   
-  // Zone sélectionnée avec ses stats
   const selectedZoneStats = useMemo(() => 
     zoneStats.find(s => s.zone === selectedZone) || null,
     [zoneStats, selectedZone]
   );
   
-  // Véhicule du chauffeur sélectionné
-  const selectedVehicle = useMemo(() => {
-    if (!selectedDriver) return null;
-    return vehicles.find(v => (v.assignedDriverId === selectedDriver || v.driverId === selectedDriver) && (v.status === VehicleStatus.ACTIVE || v.status === VehicleStatus.IDLE)) || null;
-  }, [selectedDriver, vehicles]);
-  
-  // Hub de départ sélectionné
   const departureHub = useMemo(() => {
     if (selectedHubId) return hubs.find(h => h.id === selectedHubId) || null;
-    // Par défaut: le premier hub actif
     return hubs.find(h => h.isActive) || null;
   }, [selectedHubId, hubs]);
   
-  // Hubs actifs disponibles
   const activeHubs = useMemo(() => hubs.filter(h => h.isActive), [hubs]);
   
-  // Optimiser la tournée
-  const handleOptimize = async () => {
+  // Trouver le véhicule d'un chauffeur
+  const getDriverVehicle = (driverId: string): Vehicle | undefined => {
+    return vehicles.find(v => 
+      (v.assignedDriverId === driverId || v.driverId === driverId) && 
+      (v.status === VehicleStatus.ACTIVE || v.status === VehicleStatus.IDLE)
+    );
+  };
+  
+  // Toggle sélection chauffeur
+  const toggleDriver = (driverId: string) => {
+    setSelectedDriverIds(prev => {
+      const next = new Set(prev);
+      if (next.has(driverId)) next.delete(driverId);
+      else next.add(driverId);
+      return next;
+    });
+    // Reset résultat si on change les chauffeurs
+    setOptimResult(null);
+  };
+  
+  // Sélectionner/désélectionner tous
+  const toggleAllDrivers = () => {
     if (!selectedZoneStats) return;
+    if (selectedDriverIds.size === selectedZoneStats.availableDrivers.length) {
+      setSelectedDriverIds(new Set());
+    } else {
+      setSelectedDriverIds(new Set(selectedZoneStats.availableDrivers.map(d => d.id)));
+    }
+    setOptimResult(null);
+  };
+  
+  // Construire les paires chauffeur/véhicule
+  const selectedDriversVehicles = useMemo((): DriverVehicle[] => {
+    if (!selectedZoneStats) return [];
+    return Array.from(selectedDriverIds)
+      .map(id => {
+        const driver = selectedZoneStats.availableDrivers.find(d => d.id === id);
+        if (!driver) return null;
+        return { driver, vehicle: getDriverVehicle(id) };
+      })
+      .filter(Boolean) as DriverVehicle[];
+  }, [selectedDriverIds, selectedZoneStats, vehicles]);
+  
+  // ============================================================================
+  // OPTIMISER LES TOURNÉES
+  // ============================================================================
+  
+  const handleOptimize = async () => {
+    if (!selectedZoneStats || selectedDriversVehicles.length === 0 || !departureHub) return;
     
     setIsOptimizing(true);
-    setOptimizationResult(null);
+    setOptimResult(null);
+    setExpandedTour(null);
     
     try {
       const apiKey = getGoogleMapsApiKey();
       
-      if (!apiKey || !departureHub) {
-        // Mode fallback sans optimisation (pas de clé API ou pas de hub)
-        const stops = createSimpleStops(selectedZoneStats.packages);
-        setOptimizedStops(stops);
-        setOptimizationResult({
-          success: true,
-          totalDistance: stops.length * 5,
-          estimatedDuration: stops.length * 15,
-          error: !departureHub 
-            ? 'Aucun hub de départ - ordre par défaut' 
-            : 'API non configurée - ordre par défaut'
-        });
-      } else {
-        const result = await optimizeRoute(
-          selectedZoneStats.packages,
-          departureHub,
-          selectedDate,
-          apiKey
-        );
-        
-        if (result.stops.length > 0) {
-          setOptimizedStops(result.stops);
-          setOptimizationResult({
-            success: result.success,
-            totalDistance: result.totalDistance,
-            estimatedDuration: result.estimatedDuration,
-            error: result.error
-          });
-        } else {
-          // Fallback si l'optimisation n'a retourné aucun stop
-          const stops = createSimpleStops(selectedZoneStats.packages);
-          setOptimizedStops(stops);
-          setOptimizationResult({
-            success: true,
-            totalDistance: stops.length * 5,
-            estimatedDuration: stops.length * 15,
-            error: result.error || 'Optimisation impossible — ordre par défaut'
-          });
-        }
+      const result = await optimizeMultiVehicle(
+        selectedZoneStats.packages,
+        selectedDriversVehicles,
+        departureHub,
+        selectedDate,
+        apiKey
+      );
+      
+      setOptimResult(result);
+      
+      // Ouvrir le premier tour par défaut
+      if (result.tours.length > 0) {
+        setExpandedTour(0);
       }
+      
     } catch (error) {
       console.error('Optimization error:', error);
-      // Fallback
-      const stops = createSimpleStops(selectedZoneStats.packages);
-      setOptimizedStops(stops);
-      setOptimizationResult({
+      setOptimResult({
         success: false,
-        totalDistance: stops.length * 5,
-        estimatedDuration: stops.length * 15,
-        error: 'Erreur d\'optimisation - ordre par défaut'
+        tours: [],
+        totalDistance: 0,
+        totalDuration: 0,
+        totalPackages: 0,
+        skippedShipments: 0,
+        error: error instanceof Error ? error.message : 'Erreur inconnue',
+        method: 'fallback'
       });
     }
     
     setIsOptimizing(false);
   };
   
-  // Créer des stops simples (sans optimisation)
-  const createSimpleStops = (packages: Package[]): MissionStop[] => {
-    const groups = new Map<string, Package[]>();
-    
-    for (const pkg of packages) {
-      const key = `${pkg.address}|${pkg.postalCode}|${pkg.city}`;
-      if (!groups.has(key)) {
-        groups.set(key, []);
-      }
-      groups.get(key)!.push(pkg);
-    }
-    
-    const stops: MissionStop[] = [];
-    let sequence = 1;
-    
-    for (const [, pkgs] of groups) {
-      const firstPkg = pkgs[0];
-      stops.push({
-        id: `stop-${Date.now()}-${sequence}`,
-        sequence,
-        type: 'DELIVERY',
-        address: firstPkg.address,
-        city: firstPkg.city,
-        postalCode: firstPkg.postalCode,
-        coordinates: firstPkg.coordinates,
-        floor: firstPkg.floor,
-        hasElevator: firstPkg.hasElevator,
-        contactName: firstPkg.contactName,
-        contactPhone: firstPkg.contactPhone,
-        packageIds: pkgs.map(p => p.id),
-        packageCount: pkgs.length,
-        timeWindowStart: firstPkg.timeWindowStart,
-        timeWindowEnd: firstPkg.timeWindowEnd,
-        serviceTime: Math.max(5, pkgs.length * 5),
-        status: StopStatus.PENDING
-      });
-      sequence++;
-    }
-    
-    return stops;
-  };
+  // ============================================================================
+  // DISPATCHER TOUTES LES TOURNÉES
+  // ============================================================================
   
-  // Dispatcher la mission
-  const handleDispatch = async () => {
-    if (!selectedZoneStats || !selectedDriver || optimizedStops.length === 0) return;
+  const handleDispatchAll = async () => {
+    if (!optimResult || optimResult.tours.length === 0 || !selectedZoneStats) return;
     
     setIsDispatching(true);
     
     try {
-      const driver = users.find(u => u.id === selectedDriver);
-      
-      if (!driver) {
-        throw new Error('Chauffeur non trouvé');
-      }
-      
-      // Créer la mission
-      const totalPkgs = optimizedStops.reduce((sum, s) => sum + s.packageCount, 0);
-      const hub = selectedZoneStats.hub;
-      const mission: Omit<Mission, 'id' | 'createdAt' | 'updatedAt'> = {
-        date: selectedDate,
-        zone: selectedZone!,
-        hubId: hub?.id || departureHub?.id || '',
-        hubName: hub?.name || departureHub?.name || 'Départ direct',
-        type: MissionType.DELIVERY,
-        status: MissionStatus.DISPATCHED,
-        driverId: driver.id,
-        driverName: `${driver.firstName} ${driver.lastName}`,
-        vehicleId: selectedVehicle?.id,
-        vehiclePlate: selectedVehicle?.plate,
-        stops: optimizedStops,
-        totalPackages: totalPkgs,
-        completedStops: 0,
-        failedStops: 0,
-        deliveredPackages: 0,
-        failedPackages: 0,
-        totalDistance: optimizationResult?.totalDistance || 0,
-        estimatedDuration: optimizationResult?.estimatedDuration || 0,
-        createdBy: currentUser.id,
-        createdByName: `${currentUser.firstName} ${currentUser.lastName}`,
-        dispatchedBy: currentUser.id,
-        dispatchedByName: `${currentUser.firstName} ${currentUser.lastName}`,
-        dispatchedAt: new Date().toISOString()
-      };
-      
-      const missionId = await addMission(mission);
-      
-      // Mettre à jour le statut des colis
-      const packageIds = optimizedStops.flatMap(s => s.packageIds);
-      for (const pkgId of packageIds) {
-        // Trouver le stop de ce colis pour lier stopId
-        const stop = optimizedStops.find(s => s.packageIds.includes(pkgId));
-        await updatePackageStatus(pkgId, PackageStatus.SORTED, {
-          action: 'SORTED',
-          driverId: driver.id,
-          driverName: `${driver.firstName} ${driver.lastName}`,
-          notes: `Dispatché dans mission ${selectedZone}`
-        }, {
-          missionId,
-          stopId: stop?.id,
-          currentDriverId: driver.id,
-          currentVehicleId: selectedVehicle?.id
+      for (const tour of optimResult.tours) {
+        const hub = selectedZoneStats.hub || departureHub;
+        
+        const mission: Omit<Mission, 'id' | 'createdAt' | 'updatedAt'> = {
+          date: selectedDate,
+          zone: selectedZone!,
+          hubId: hub?.id || '',
+          hubName: hub?.name || 'Départ direct',
+          type: MissionType.DELIVERY,
+          status: MissionStatus.DISPATCHED,
+          driverId: tour.driverId,
+          driverName: tour.driverName,
+          vehicleId: tour.vehicleId,
+          vehiclePlate: tour.vehiclePlate,
+          stops: tour.stops,
+          totalPackages: tour.packageCount,
+          completedStops: 0,
+          failedStops: 0,
+          deliveredPackages: 0,
+          failedPackages: 0,
+          totalDistance: tour.totalDistance,
+          estimatedDuration: tour.estimatedDuration,
+          createdBy: currentUser.id,
+          createdByName: `${currentUser.firstName} ${currentUser.lastName}`,
+          dispatchedBy: currentUser.id,
+          dispatchedByName: `${currentUser.firstName} ${currentUser.lastName}`,
+          dispatchedAt: new Date().toISOString()
+        };
+        
+        const missionId = await addMission(mission);
+        
+        // Mettre à jour le statut des colis
+        const packageIds = tour.stops.flatMap(s => s.packageIds);
+        for (const pkgId of packageIds) {
+          const stop = tour.stops.find(s => s.packageIds.includes(pkgId));
+          await updatePackageStatus(pkgId, PackageStatus.SORTED, {
+            action: 'SORTED',
+            driverId: tour.driverId,
+            driverName: tour.driverName,
+            notes: `Dispatché mission ${selectedZone} - ${tour.driverName}`
+          }, {
+            missionId,
+            stopId: stop?.id,
+            currentDriverId: tour.driverId,
+            currentVehicleId: tour.vehicleId
+          });
+        }
+        
+        logActivity(currentUser, ActivityAction.ITEM_CREATED, {
+          targetType: 'mission',
+          targetId: missionId,
+          targetName: `Mission ${selectedZone} — ${tour.driverName}`,
+          details: {
+            metadata: {
+              zone: selectedZone,
+              driver: tour.driverName,
+              stops: tour.stops.length,
+              packages: packageIds.length,
+              distance: tour.totalDistance
+            }
+          }
         });
       }
-      
-      // Logger l'activité
-      logActivity(currentUser, ActivityAction.ITEM_CREATED, {
-        targetType: 'mission',
-        targetId: missionId,
-        targetName: `Mission ${selectedZone}`,
-        details: {
-          metadata: {
-            zone: selectedZone,
-            driver: driver.firstName + ' ' + driver.lastName,
-            stops: optimizedStops.length,
-            packages: packageIds.length
-          }
-        }
-      });
       
       // Reset
       setShowDispatchModal(false);
       setSelectedZone(null);
-      setSelectedDriver('');
+      setSelectedDriverIds(new Set());
       setSelectedHubId('');
-      setOptimizedStops([]);
-      setOptimizationResult(null);
+      setOptimResult(null);
       
       onMissionCreated();
       
@@ -350,27 +302,32 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
     setIsDispatching(false);
   };
   
-  // Ouvrir le modal de dispatch
+  // Ouvrir le modal
   const openDispatchModal = (zone: Zone) => {
     setSelectedZone(zone);
-    setSelectedDriver('');
-    // Pré-sélectionner le hub de départ: celui de la zone si existe, sinon le premier hub actif
+    const zStat = zoneStats.find(s => s.zone === zone);
+    // Pré-sélectionner tous les chauffeurs
+    setSelectedDriverIds(new Set(zStat?.availableDrivers.map(d => d.id) || []));
     const zoneHub = hubs.find(h => h.zone === zone && h.isActive);
     const firstHub = hubs.find(h => h.isActive);
     setSelectedHubId(zoneHub?.id || firstHub?.id || '');
-    setOptimizedStops([]);
-    setOptimizationResult(null);
+    setOptimResult(null);
+    setExpandedTour(null);
     setShowDispatchModal(true);
   };
+  
+  // ============================================================================
+  // RENDU
+  // ============================================================================
   
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-bold text-slate-800">Dispatch des missions</h2>
+          <h2 className="text-lg font-bold text-slate-800">Dispatch multi-tournées</h2>
           <p className="text-sm text-slate-500">
-            Créez et optimisez les tournées par zone, puis assignez aux chauffeurs
+            Optimisez et répartissez les livraisons sur plusieurs chauffeurs par secteur
           </p>
         </div>
       </div>
@@ -390,7 +347,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
             const colors = ZONE_COLORS[stat.zone];
             const hasHub = !!stat.hub;
             const hasDrivers = stat.availableDrivers.length > 0;
-            const canDispatch = hasDrivers; // On peut dispatcher même sans hub
+            const canDispatch = hasDrivers;
             
             return (
               <div
@@ -402,20 +359,16 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
                 }`}
                 onClick={() => canDispatch && openDispatchModal(stat.zone)}
               >
-                {/* Header zone */}
                 <div className={`${colors.bg} px-4 py-3 border-b ${colors.border}`}>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <div className={`w-3 h-3 rounded-full ${colors.dot}`} />
                       <span className={`font-bold ${colors.text}`}>{stat.zone}</span>
                     </div>
-                    {canDispatch && (
-                      <ChevronRight size={18} className={colors.text} />
-                    )}
+                    {canDispatch && <ChevronRight size={18} className={colors.text} />}
                   </div>
                 </div>
                 
-                {/* Stats */}
                 <div className="p-4 space-y-3">
                   <div className="flex justify-between items-center">
                     <div className="flex items-center gap-2 text-slate-600">
@@ -443,7 +396,6 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
                     </span>
                   </div>
                   
-                  {/* Hub info */}
                   {hasHub ? (
                     <div className="flex items-center gap-2 text-green-600 text-xs bg-green-50 rounded-lg p-2">
                       <CheckCircle size={14} />
@@ -463,12 +415,11 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
                   )}
                 </div>
                 
-                {/* Action */}
                 {canDispatch && (
                   <div className="px-4 py-3 bg-slate-50 border-t border-slate-100">
                     <button className="w-full flex items-center justify-center gap-2 text-brand-600 font-medium text-sm hover:text-brand-700">
                       <Zap size={16} />
-                      Créer mission
+                      Optimiser {stat.availableDrivers.length} tournées
                     </button>
                   </div>
                 )}
@@ -478,186 +429,245 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
         </div>
       )}
       
-      {/* Modal Dispatch */}
+      {/* Modal Dispatch Multi-tournées */}
       <Modal
         isOpen={showDispatchModal}
         onClose={() => setShowDispatchModal(false)}
-        title={`Créer mission - Zone ${selectedZone}`}
+        title={`Dispatch — Zone ${selectedZone}`}
         size="lg"
         headerIcon={<Route size={20} />}
       >
         {selectedZoneStats && (
-          <div className="space-y-6">
-            {/* Résumé */}
-            <div className="grid grid-cols-3 gap-4">
-              <div className="bg-slate-50 rounded-xl p-4 text-center">
-                <PackageIcon size={24} className="mx-auto text-slate-400 mb-2" />
+          <div className="space-y-5">
+            {/* Résumé zone */}
+            <div className="grid grid-cols-3 gap-3">
+              <div className="bg-slate-50 rounded-xl p-3 text-center">
+                <PackageIcon size={20} className="mx-auto text-slate-400 mb-1" />
                 <p className="text-2xl font-bold text-slate-800">{selectedZoneStats.packageCount}</p>
                 <p className="text-xs text-slate-500">Colis</p>
               </div>
-              <div className="bg-slate-50 rounded-xl p-4 text-center">
-                <MapPin size={24} className="mx-auto text-slate-400 mb-2" />
+              <div className="bg-slate-50 rounded-xl p-3 text-center">
+                <MapPin size={20} className="mx-auto text-slate-400 mb-1" />
                 <p className="text-2xl font-bold text-slate-800">{selectedZoneStats.stopCount}</p>
                 <p className="text-xs text-slate-500">Stops</p>
               </div>
-              <div className="bg-slate-50 rounded-xl p-4 text-center">
-                <Clock size={24} className="mx-auto text-slate-400 mb-2" />
-                <p className="text-2xl font-bold text-slate-800">
-                  {optimizationResult ? `~${Math.round(optimizationResult.estimatedDuration / 60)}h` : '-'}
-                </p>
-                <p className="text-xs text-slate-500">Durée estimée</p>
+              <div className="bg-slate-50 rounded-xl p-3 text-center">
+                <Users size={20} className="mx-auto text-slate-400 mb-1" />
+                <p className="text-2xl font-bold text-slate-800">{selectedDriverIds.size}</p>
+                <p className="text-xs text-slate-500">Chauffeurs</p>
               </div>
             </div>
             
-            {/* Étape 1: Hub de départ */}
+            {/* Hub de départ */}
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-2">
-                1. Hub de départ (dépôt) <span className="text-red-500">*</span>
+                Hub de départ
               </label>
               {activeHubs.length === 0 ? (
                 <div className="flex items-center gap-2 text-amber-600 text-sm bg-amber-50 rounded-xl p-3">
                   <AlertTriangle size={16} />
-                  <span>Aucun hub configuré. Créez un hub dans l'onglet Hubs pour activer l'optimisation.</span>
+                  <span>Aucun hub configuré</span>
                 </div>
               ) : (
                 <select
                   value={selectedHubId}
-                  onChange={(e) => setSelectedHubId(e.target.value)}
-                  className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none bg-white"
+                  onChange={(e) => { setSelectedHubId(e.target.value); setOptimResult(null); }}
+                  className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none bg-white text-sm"
                 >
                   {activeHubs.map(hub => (
                     <option key={hub.id} value={hub.id}>
-                      {hub.name} — {hub.address}, {hub.city} (Zone {hub.zone})
+                      {hub.name} — {hub.city} (Zone {hub.zone})
                     </option>
                   ))}
                 </select>
               )}
-              {departureHub && (
-                <div className="mt-2 flex items-center gap-2 text-sm text-blue-600 bg-blue-50 rounded-lg p-2">
-                  <MapPin size={16} />
-                  <span>Départ: {departureHub.address}, {departureHub.postalCode} {departureHub.city}</span>
-                </div>
-              )}
             </div>
             
-            {/* Étape 2: Sélectionner un chauffeur */}
+            {/* Sélection chauffeurs */}
             <div>
-              <label className="block text-sm font-bold text-slate-700 mb-2">
-                2. Sélectionner un chauffeur <span className="text-red-500">*</span>
-              </label>
-              <select
-                value={selectedDriver}
-                onChange={(e) => setSelectedDriver(e.target.value)}
-                className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none bg-white"
-              >
-                <option value="">Choisir un chauffeur...</option>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-bold text-slate-700">
+                  Chauffeurs ({selectedDriverIds.size}/{selectedZoneStats.availableDrivers.length})
+                </label>
+                <button
+                  onClick={toggleAllDrivers}
+                  className="text-xs text-brand-600 hover:text-brand-700 font-medium"
+                >
+                  {selectedDriverIds.size === selectedZoneStats.availableDrivers.length 
+                    ? 'Tout désélectionner' 
+                    : 'Tout sélectionner'}
+                </button>
+              </div>
+              
+              <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 max-h-48 overflow-y-auto">
                 {selectedZoneStats.availableDrivers.map(driver => {
-                  const vehicle = vehicles.find(v => (v.assignedDriverId === driver.id || v.driverId === driver.id) && (v.status === VehicleStatus.ACTIVE || v.status === VehicleStatus.IDLE));
+                  const vehicle = getDriverVehicle(driver.id);
+                  const isSelected = selectedDriverIds.has(driver.id);
+                  
                   return (
-                    <option key={driver.id} value={driver.id}>
-                      {driver.firstName} {driver.lastName}
-                      {vehicle ? ` - ${vehicle.plate}` : ' (sans véhicule)'}
-                    </option>
+                    <label
+                      key={driver.id}
+                      className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${
+                        isSelected ? 'bg-brand-50' : 'hover:bg-slate-50'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleDriver(driver.id)}
+                        className="w-4 h-4 text-brand-600 rounded border-slate-300 focus:ring-brand-500"
+                      />
+                      <UserIcon size={16} className={isSelected ? 'text-brand-600' : 'text-slate-400'} />
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-sm font-medium truncate ${isSelected ? 'text-brand-800' : 'text-slate-700'}`}>
+                          {driver.firstName} {driver.lastName}
+                        </p>
+                      </div>
+                      {vehicle ? (
+                        <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+                          {vehicle.plate}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-amber-500">Sans véhicule</span>
+                      )}
+                    </label>
                   );
                 })}
-              </select>
-              
-              {selectedDriver && selectedVehicle && (
-                <div className="mt-2 flex items-center gap-2 text-sm text-green-600 bg-green-50 rounded-lg p-2">
-                  <Truck size={16} />
-                  <span>Véhicule: {selectedVehicle.plate}</span>
-                </div>
-              )}
+              </div>
             </div>
             
-            {/* Étape 3: Optimiser */}
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-2">
-                3. Optimiser la tournée
-              </label>
-              
-              <button
-                onClick={handleOptimize}
-                disabled={isOptimizing || !selectedDriver}
-                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-brand-500 to-blue-500 text-white rounded-xl font-medium hover:from-brand-600 hover:to-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-              >
-                {isOptimizing ? (
-                  <>
-                    <Loader2 size={18} className="animate-spin" />
-                    Optimisation en cours...
-                  </>
-                ) : (
-                  <>
-                    <Zap size={18} />
-                    {isGMPROConfigured() ? 'Optimiser avec Google GMPRO' : 'Calculer l\'itinéraire'}
-                  </>
-                )}
-              </button>
-              
-              {/* Résultat optimisation */}
-              {optimizationResult && (
-                <div className={`mt-3 p-4 rounded-xl ${
-                  optimizationResult.success ? 'bg-green-50 border border-green-200' : 'bg-amber-50 border border-amber-200'
+            {/* Bouton Optimiser */}
+            <button
+              onClick={handleOptimize}
+              disabled={isOptimizing || selectedDriverIds.size === 0 || !departureHub}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-brand-500 to-blue-500 text-white rounded-xl font-medium hover:from-brand-600 hover:to-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+            >
+              {isOptimizing ? (
+                <>
+                  <Loader2 size={18} className="animate-spin" />
+                  Optimisation en cours ({selectedDriverIds.size} véhicules)...
+                </>
+              ) : (
+                <>
+                  <Zap size={18} />
+                  Optimiser {selectedDriverIds.size} tournée{selectedDriverIds.size > 1 ? 's' : ''}
+                </>
+              )}
+            </button>
+            
+            {/* Résultats multi-tournées */}
+            {optimResult && (
+              <div className="space-y-3">
+                {/* Résumé global */}
+                <div className={`p-4 rounded-xl ${
+                  optimResult.method === 'gmpro' 
+                    ? 'bg-green-50 border border-green-200' 
+                    : 'bg-amber-50 border border-amber-200'
                 }`}>
-                  <div className="flex items-center gap-2 mb-2">
-                    {optimizationResult.success ? (
+                  <div className="flex items-center gap-2 mb-3">
+                    {optimResult.method === 'gmpro' ? (
                       <CheckCircle size={18} className="text-green-600" />
                     ) : (
                       <AlertTriangle size={18} className="text-amber-600" />
                     )}
-                    <span className={`font-medium ${optimizationResult.success ? 'text-green-800' : 'text-amber-800'}`}>
-                      {optimizationResult.success ? 'Tournée optimisée !' : 'Optimisation partielle'}
+                    <span className={`font-bold ${
+                      optimResult.method === 'gmpro' ? 'text-green-800' : 'text-amber-800'
+                    }`}>
+                      {optimResult.tours.length} tournée{optimResult.tours.length > 1 ? 's' : ''} {
+                        optimResult.method === 'gmpro' ? 'optimisée' : 'répartie'
+                      }{optimResult.tours.length > 1 ? 's' : ''}
+                    </span>
+                    <span className={`ml-auto text-xs px-2 py-0.5 rounded-full ${
+                      optimResult.method === 'gmpro' 
+                        ? 'bg-green-200 text-green-800' 
+                        : 'bg-amber-200 text-amber-800'
+                    }`}>
+                      {optimResult.method === 'gmpro' ? 'GMPRO' : 'Fallback'}
                     </span>
                   </div>
                   
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <span className="text-slate-500">Distance:</span>
-                      <span className="ml-2 font-bold text-slate-800">
-                        {optimizationResult.totalDistance.toFixed(1)} km
-                      </span>
+                  <div className="grid grid-cols-3 gap-3 text-sm">
+                    <div className="text-center">
+                      <p className="text-slate-500">Distance totale</p>
+                      <p className="font-bold text-slate-800">{optimResult.totalDistance} km</p>
                     </div>
-                    <div>
-                      <span className="text-slate-500">Durée:</span>
-                      <span className="ml-2 font-bold text-slate-800">
-                        {Math.round(optimizationResult.estimatedDuration)} min
-                      </span>
+                    <div className="text-center">
+                      <p className="text-slate-500">Durée totale</p>
+                      <p className="font-bold text-slate-800">
+                        {Math.floor(optimResult.totalDuration / 60)}h{String(optimResult.totalDuration % 60).padStart(2, '0')}
+                      </p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-slate-500">Colis</p>
+                      <p className="font-bold text-slate-800">{optimResult.totalPackages}</p>
                     </div>
                   </div>
                   
-                  {optimizationResult.error && (
-                    <p className="mt-2 text-xs text-amber-700">{optimizationResult.error}</p>
+                  {optimResult.error && (
+                    <p className="mt-2 text-xs text-amber-700">{optimResult.error}</p>
                   )}
                 </div>
-              )}
-            </div>
-            
-            {/* Aperçu des stops */}
-            {optimizedStops.length > 0 && (
-              <div>
-                <label className="block text-sm font-bold text-slate-700 mb-2">
-                  Aperçu de la tournée ({optimizedStops.length} stops)
-                </label>
-                <div className="max-h-48 overflow-y-auto border border-slate-200 rounded-xl">
-                  {optimizedStops.map((stop, i) => (
-                    <div 
-                      key={stop.id}
-                      className={`flex items-center gap-3 px-4 py-2 ${i > 0 ? 'border-t border-slate-100' : ''}`}
-                    >
-                      <div className="w-6 h-6 rounded-full bg-brand-500 text-white text-xs font-bold flex items-center justify-center shrink-0">
-                        {stop.sequence}
+                
+                {/* Détail par tournée */}
+                <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-200">
+                  {optimResult.tours.map((tour, idx) => (
+                    <div key={idx}>
+                      {/* En-tête tournée */}
+                      <div
+                        className="flex items-center gap-3 px-4 py-3 bg-white hover:bg-slate-50 cursor-pointer"
+                        onClick={() => setExpandedTour(expandedTour === idx ? null : idx)}
+                      >
+                        <div className="w-8 h-8 rounded-full bg-brand-500 text-white text-sm font-bold flex items-center justify-center shrink-0">
+                          {idx + 1}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-bold text-slate-800 truncate">
+                            {tour.driverName}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {tour.vehiclePlate || 'Sans véhicule'} • {tour.stops.length} stops • {tour.packageCount} colis
+                          </p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className="text-sm font-bold text-slate-700">{tour.totalDistance} km</p>
+                          <p className="text-xs text-slate-500">~{tour.estimatedDuration} min</p>
+                        </div>
+                        {expandedTour === idx ? (
+                          <ChevronUp size={16} className="text-slate-400" />
+                        ) : (
+                          <ChevronDown size={16} className="text-slate-400" />
+                        )}
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-slate-800 truncate">
-                          {stop.contactName}
-                        </p>
-                        <p className="text-xs text-slate-500 truncate">
-                          {stop.address}, {stop.city}
-                        </p>
-                      </div>
-                      <div className="text-xs text-slate-500 shrink-0">
-                        {stop.packageCount} colis
-                      </div>
+                      
+                      {/* Détail des stops */}
+                      {expandedTour === idx && (
+                        <div className="bg-slate-50 border-t border-slate-100">
+                          {/* Départ hub */}
+                          <div className="flex items-center gap-3 px-4 py-2 text-xs text-slate-500">
+                            <div className="w-5 h-5 rounded-full bg-blue-500 text-white text-[10px] font-bold flex items-center justify-center">H</div>
+                            <span>Départ: {departureHub?.name || 'Hub'}</span>
+                          </div>
+                          
+                          {tour.stops.map((stop, si) => (
+                            <div key={stop.id} className="flex items-center gap-3 px-4 py-2 border-t border-slate-100">
+                              <div className="w-5 h-5 rounded-full bg-brand-400 text-white text-[10px] font-bold flex items-center justify-center shrink-0">
+                                {stop.sequence}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-medium text-slate-700 truncate">{stop.contactName}</p>
+                                <p className="text-[11px] text-slate-400 truncate">{stop.address}, {stop.postalCode} {stop.city}</p>
+                              </div>
+                              <span className="text-[11px] text-slate-500 shrink-0">{stop.packageCount} col.</span>
+                            </div>
+                          ))}
+                          
+                          {/* Retour hub */}
+                          <div className="flex items-center gap-3 px-4 py-2 border-t border-slate-100 text-xs text-slate-500">
+                            <div className="w-5 h-5 rounded-full bg-blue-500 text-white text-[10px] font-bold flex items-center justify-center">H</div>
+                            <span>Retour: {departureHub?.name || 'Hub'}</span>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -665,7 +675,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
             )}
             
             {/* Actions */}
-            <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
+            <div className="flex justify-end gap-3 pt-3 border-t border-slate-200">
               <button
                 onClick={() => setShowDispatchModal(false)}
                 className="px-4 py-2 text-slate-700 font-medium hover:bg-slate-100 rounded-xl transition-colors"
@@ -673,8 +683,8 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
                 Annuler
               </button>
               <button
-                onClick={handleDispatch}
-                disabled={!selectedDriver || optimizedStops.length === 0 || isDispatching}
+                onClick={handleDispatchAll}
+                disabled={!optimResult || optimResult.tours.length === 0 || isDispatching}
                 className="flex items-center gap-2 px-6 py-2 bg-green-500 text-white rounded-xl font-medium hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {isDispatching ? (
@@ -685,7 +695,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
                 ) : (
                   <>
                     <Play size={18} />
-                    Dispatcher la mission
+                    Dispatcher {optimResult?.tours.length || 0} tournée{(optimResult?.tours.length || 0) > 1 ? 's' : ''}
                   </>
                 )}
               </button>

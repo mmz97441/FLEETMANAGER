@@ -169,6 +169,87 @@ export const forcePasswordReset = async (
 };
 
 // ============================================================================
+// OPTIMISATION DE TOURNÉES MULTI-VÉHICULES (GMPRO via Cloud Function)
+// ============================================================================
+
+export interface GMPROModel {
+  shipments: Array<{
+    deliveries: Array<{
+      arrivalLocation: { latLng: { latitude: number; longitude: number } };
+      duration: string;
+      timeWindows?: Array<{ startTime: string; endTime: string }>;
+    }>;
+    label: string;
+  }>;
+  vehicles: Array<{
+    startLocation: { latLng: { latitude: number; longitude: number } };
+    endLocation: { latLng: { latitude: number; longitude: number } };
+    label: string;
+  }>;
+  globalStartTime: string;
+  globalEndTime: string;
+}
+
+export interface GMPROResult {
+  routes?: Array<{
+    vehicleIndex: number;
+    visits?: Array<{
+      shipmentIndex: number;
+      startTime?: string;
+      detour?: string;
+    }>;
+    metrics?: {
+      totalDuration?: string;
+      travelDuration?: string;
+      travelDistanceMeters?: number;
+    };
+    routeTotalCost?: number;
+  }>;
+  totalCost?: number;
+  metrics?: {
+    skippedMandatoryShipmentCount?: number;
+  };
+}
+
+/**
+ * Appelle Google Route Optimization API via Cloud Function
+ * Répartit M livraisons sur N véhicules de façon optimale
+ */
+export const optimizeToursCF = async (
+  model: GMPROModel
+): Promise<GMPROResult> => {
+  try {
+    console.log(`🚛 Appel GMPRO: ${model.shipments.length} livraisons, ${model.vehicles.length} véhicules`);
+    
+    const optimizeFunction = httpsCallable<
+      { model: GMPROModel },
+      GMPROResult
+    >(functions, "optimizeTours");
+
+    const result = await optimizeFunction({ model });
+    
+    console.log("✅ GMPRO résultat:", result.data);
+    return result.data;
+    
+  } catch (error: any) {
+    console.error("❌ Erreur optimisation tournées:", error);
+    
+    // Extraire le message d'erreur Firebase Functions
+    let errorMessage = "Erreur lors de l'optimisation des tournées";
+    
+    if (error.code === "functions/internal") {
+      errorMessage = error.message || "Erreur serveur GMPRO";
+    } else if (error.code === "functions/unauthenticated") {
+      errorMessage = "Vous devez être connecté";
+    } else if (error.message) {
+      errorMessage = error.message;
+    }
+    
+    throw new Error(errorMessage);
+  }
+};
+
+// ============================================================================
 // VALIDATION TOKEN D'INVITATION (Public - pour activation)
 // ============================================================================
 

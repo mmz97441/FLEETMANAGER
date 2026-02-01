@@ -1,71 +1,51 @@
 /**
- * SERVICE GMPRO - Google Route Optimization API
+ * SERVICE D'OPTIMISATION DE TOURNÉES
  * 
- * Optimise les tournées de livraison en calculant l'ordre optimal des stops
+ * Utilise Google Route Optimization API (GMPRO) via Cloud Function
+ * pour répartir les livraisons sur plusieurs véhicules de façon optimale.
+ * 
+ * Flow: Frontend → Cloud Function (OAuth2) → GMPRO → Routes optimisées
  */
 
-import { Package, Zone, Hub, MissionStop, StopStatus } from '../types';
+import { Package, Hub, User, Vehicle, MissionStop, StopStatus } from '../types';
+import { optimizeToursCF, GMPROModel, GMPROResult } from './cloudFunctions';
 
-// Types pour l'API GMPRO
-interface GMPROLocation {
-  latLng: {
-    latitude: number;
-    longitude: number;
-  };
-}
+// ============================================================================
+// TYPES
+// ============================================================================
 
-interface GMPROTimeWindow {
-  startTime: string; // Format ISO
-  endTime: string;
-}
-
-interface GMPROShipment {
-  deliveries: Array<{
-    arrivalLocation: GMPROLocation;
-    duration: string; // Format "300s" pour 5 minutes
-    timeWindows?: GMPROTimeWindow[];
-  }>;
-  label: string;
-}
-
-interface GMPROVehicle {
-  startLocation: GMPROLocation;
-  endLocation: GMPROLocation;
-  label: string;
-}
-
-interface GMPRORequest {
-  model: {
-    shipments: GMPROShipment[];
-    vehicles: GMPROVehicle[];
-    globalStartTime: string;
-    globalEndTime: string;
-  };
-}
-
-interface GMPROVisit {
-  shipmentIndex: number;
-  startTime: string;
-}
-
-interface GMPRORoute {
+export interface TourResult {
   vehicleIndex: number;
-  visits: GMPROVisit[];
-  metrics?: {
-    totalDuration: string;
-    travelDuration: string;
-    travelDistanceMeters: number;
-  };
+  driverId: string;
+  driverName: string;
+  vehicleId?: string;
+  vehiclePlate?: string;
+  stops: MissionStop[];
+  totalDistance: number;      // km
+  estimatedDuration: number;  // minutes
+  packageCount: number;
 }
 
-interface GMPROResponse {
-  routes: GMPRORoute[];
-  metrics?: {
-    totalCost: number;
-  };
+export interface OptimizationResult {
+  success: boolean;
+  tours: TourResult[];
+  totalDistance: number;
+  totalDuration: number;
+  totalPackages: number;
+  skippedShipments: number;
+  error?: string;
+  method: 'gmpro' | 'fallback';
 }
 
-// Géocodage avec l'API Google Geocoding
+export interface DriverVehicle {
+  driver: User;
+  vehicle?: Vehicle;
+}
+
+// ============================================================================
+// GÉOCODAGE
+// ============================================================================
+
 export const geocodeAddress = async (
   address: string,
   city: string,
@@ -74,12 +54,9 @@ export const geocodeAddress = async (
 ): Promise<{ lat: number; lng: number } | null> => {
   try {
     const fullAddress = `${address}, ${postalCode} ${city}, La Réunion, France`;
-    const encodedAddress = encodeURIComponent(fullAddress);
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(fullAddress)}&key=${apiKey}`;
     
-    const response = await fetch(
-      `https://maps.googleapis.com/maps/api/geocode/json?address=${encodedAddress}&key=${apiKey}`
-    );
-    
+    const response = await fetch(url);
     const data = await response.json();
     
     if (data.status === 'OK' && data.results.length > 0) {
@@ -87,7 +64,7 @@ export const geocodeAddress = async (
       return { lat: location.lat, lng: location.lng };
     }
     
-    console.warn(`Geocoding failed for: ${fullAddress}`, data.status);
+    console.warn(`Geocoding échoué pour: ${fullAddress}`, data.status);
     return null;
   } catch (error) {
     console.error('Geocoding error:', error);
@@ -95,142 +72,148 @@ export const geocodeAddress = async (
   }
 };
 
-// Géocoder plusieurs adresses en batch
-export const geocodePackages = async (
+// Géocoder les packages qui n'ont pas de coordonnées
+const geocodePackages = async (
   packages: Package[],
   apiKey: string
 ): Promise<Map<string, { lat: number; lng: number }>> => {
   const results = new Map<string, { lat: number; lng: number }>();
   
-  // Éviter les doublons d'adresses
+  const needsGeocoding = packages.filter(p => !p.coordinates);
+  if (needsGeocoding.length === 0) return results;
+  
+  // Dédupliquer par adresse
   const uniqueAddresses = new Map<string, Package>();
-  for (const pkg of packages) {
-    const key = `${pkg.address}|${pkg.postalCode}|${pkg.city}`;
+  for (const pkg of needsGeocoding) {
+    const key = `${pkg.address.toLowerCase().trim()}|${pkg.postalCode}|${pkg.city.toLowerCase().trim()}`;
     if (!uniqueAddresses.has(key)) {
       uniqueAddresses.set(key, pkg);
     }
   }
   
-  // Géocoder chaque adresse unique (avec délai pour éviter rate limiting)
   for (const [key, pkg] of uniqueAddresses) {
-    // Si le package a déjà des coordonnées, les utiliser
-    if (pkg.coordinates) {
-      results.set(key, pkg.coordinates);
-      continue;
-    }
-    
     const coords = await geocodeAddress(pkg.address, pkg.city, pkg.postalCode, apiKey);
     if (coords) {
       results.set(key, coords);
     }
-    
-    // Petit délai pour éviter le rate limiting (100ms)
-    await new Promise(resolve => setTimeout(resolve, 100));
   }
   
   return results;
 };
 
-// Regrouper les packages par adresse (plusieurs colis = 1 stop)
-export const groupPackagesByStop = (
-  packages: Package[]
-): Map<string, Package[]> => {
+// ============================================================================
+// GROUPEMENT DES COLIS PAR STOP
+// ============================================================================
+
+interface StopGroup {
+  key: string;
+  packages: Package[];
+  coords?: { lat: number; lng: number };
+  contactName: string;
+}
+
+const groupPackagesByStop = (
+  packages: Package[],
+  geocodedAddresses: Map<string, { lat: number; lng: number }>
+): StopGroup[] => {
   const groups = new Map<string, Package[]>();
   
   for (const pkg of packages) {
-    const key = `${pkg.address.toLowerCase().trim()}|${pkg.postalCode}|${pkg.city.toLowerCase().trim()}`;
-    
+    const key = `${pkg.address}|${pkg.postalCode}|${pkg.city}`;
     if (!groups.has(key)) {
       groups.set(key, []);
     }
     groups.get(key)!.push(pkg);
   }
   
-  return groups;
+  const stopGroups: StopGroup[] = [];
+  
+  for (const [key, pkgs] of groups) {
+    const firstPkg = pkgs[0];
+    const addressKey = `${firstPkg.address.toLowerCase().trim()}|${firstPkg.postalCode}|${firstPkg.city.toLowerCase().trim()}`;
+    const coords = geocodedAddresses.get(addressKey) || firstPkg.coordinates;
+    
+    stopGroups.push({
+      key,
+      packages: pkgs,
+      coords,
+      contactName: firstPkg.contactName
+    });
+  }
+  
+  return stopGroups;
 };
 
-// Convertir l'heure locale en ISO pour GMPRO
+// ============================================================================
+// CONVERSION HORAIRE
+// ============================================================================
+
 const timeToISO = (time: string, date: string): string => {
-  // time format: "08:00", date format: "2026-01-31"
-  return `${date}T${time}:00Z`;
+  return `${date}T${time}:00+04:00`;
 };
 
-// Parser la durée GMPRO ("3600s") en minutes
-const parseDuration = (duration: string): number => {
-  const seconds = parseInt(duration.replace('s', ''));
-  return Math.round(seconds / 60);
-};
+// ============================================================================
+// OPTIMISATION MULTI-VÉHICULES (GMPRO via Cloud Function)
+// ============================================================================
 
-// Appeler l'API Route Optimization
-export const optimizeRoute = async (
+/**
+ * Optimise les tournées pour N chauffeurs avec M colis
+ */
+export const optimizeMultiVehicle = async (
   packages: Package[],
+  driversVehicles: DriverVehicle[],
   hub: Hub,
   date: string,
   apiKey: string
-): Promise<{
-  success: boolean;
-  stops: MissionStop[];
-  totalDistance: number;
-  estimatedDuration: number;
-  error?: string;
-}> => {
+): Promise<OptimizationResult> => {
   try {
-    // 1. Géocoder les adresses si nécessaire
+    // 1. Géocoder les adresses
     const geocodedAddresses = await geocodePackages(packages, apiKey);
     
     // 2. Regrouper par stop
-    const stopGroups = groupPackagesByStop(packages);
+    const stopGroups = groupPackagesByStop(packages, geocodedAddresses);
     
-    // 3. Coordonnées du hub (point de départ et d'arrivée)
+    // 3. Coordonnées du hub
     let hubCoords = hub.coordinates;
     if (!hubCoords) {
-      const geocoded = await geocodeAddress(hub.address, hub.city, hub.postalCode, apiKey);
-      if (!geocoded) {
-        // Fallback: créer la route sans optimisation géographique
-        const stopMapping: Array<{ key: string; packages: Package[] }> = [];
-        for (const [key, pkgs] of stopGroups) {
-          stopMapping.push({ key, packages: pkgs });
-        }
-        const fallback = createFallbackRoute(stopMapping, { lat: 0, lng: 0 });
-        return {
-          ...fallback,
-          error: 'Adresse du hub non géocodée — tournée non optimisée (ordre par défaut)'
-        };
+      hubCoords = await geocodeAddress(hub.address, hub.city, hub.postalCode, apiKey);
+      if (!hubCoords) {
+        console.warn('Hub non géocodé, fallback');
+        return createFallbackOptimization(stopGroups, driversVehicles, null);
       }
-      hubCoords = geocoded;
     }
     
-    // 4. Construire les shipments
-    const shipments: GMPROShipment[] = [];
-    const stopMapping: Array<{ key: string; packages: Package[] }> = [];
+    // 4. Filtrer les stops sans coordonnées
+    const validStops = stopGroups.filter(sg => sg.coords);
+    const skippedStops = stopGroups.filter(sg => !sg.coords);
     
-    for (const [key, pkgs] of stopGroups) {
-      const firstPkg = pkgs[0];
-      const addressKey = `${firstPkg.address.toLowerCase().trim()}|${firstPkg.postalCode}|${firstPkg.city.toLowerCase().trim()}`;
-      const coords = geocodedAddresses.get(addressKey) || firstPkg.coordinates;
+    if (skippedStops.length > 0) {
+      console.warn(`${skippedStops.length} stops sans coordonnées ignorés`);
+    }
+    
+    if (validStops.length === 0) {
+      return {
+        success: false, tours: [], totalDistance: 0, totalDuration: 0,
+        totalPackages: 0, skippedShipments: 0,
+        error: 'Aucun stop avec coordonnées valides', method: 'fallback'
+      };
+    }
+    
+    // 5. Construire la requête GMPRO
+    const shipments = validStops.map((sg, idx) => {
+      const serviceTime = Math.max(5, sg.packages.length * 5);
+      const firstPkg = sg.packages[0];
       
-      if (!coords) {
-        console.warn(`Skipping stop without coordinates: ${firstPkg.address}`);
-        continue;
-      }
-      
-      // Calculer le temps de service (5 min par colis, min 5 min)
-      const serviceTime = Math.max(5, pkgs.length * 5);
-      
-      const shipment: GMPROShipment = {
+      const shipment: GMPROModel['shipments'][0] = {
         deliveries: [{
           arrivalLocation: {
-            latLng: {
-              latitude: coords.lat,
-              longitude: coords.lng
-            }
+            latLng: { latitude: sg.coords!.lat, longitude: sg.coords!.lng }
           },
           duration: `${serviceTime * 60}s`
         }],
-        label: `Stop ${shipments.length + 1}: ${firstPkg.contactName} (${pkgs.length} colis)`
+        label: `Stop ${idx + 1}: ${sg.contactName} (${sg.packages.length} colis)`
       };
       
-      // Ajouter les fenêtres horaires si définies
       if (firstPkg.timeWindowStart && firstPkg.timeWindowEnd) {
         shipment.deliveries[0].timeWindows = [{
           startTime: timeToISO(firstPkg.timeWindowStart, date),
@@ -238,248 +221,268 @@ export const optimizeRoute = async (
         }];
       }
       
-      shipments.push(shipment);
-      stopMapping.push({ key, packages: pkgs });
-    }
+      return shipment;
+    });
     
-    if (shipments.length === 0) {
-      return {
-        success: false,
-        stops: [],
-        totalDistance: 0,
-        estimatedDuration: 0,
-        error: 'Aucun stop valide à optimiser'
-      };
-    }
+    const vehicles = driversVehicles.map((dv) => ({
+      startLocation: {
+        latLng: { latitude: hubCoords!.lat, longitude: hubCoords!.lng }
+      },
+      endLocation: {
+        latLng: { latitude: hubCoords!.lat, longitude: hubCoords!.lng }
+      },
+      label: `${dv.driver.firstName} ${dv.driver.lastName}${dv.vehicle ? ` (${dv.vehicle.plate})` : ''}`
+    }));
     
-    // 5. Construire la requête GMPRO
-    const request: GMPRORequest = {
-      model: {
-        shipments,
-        vehicles: [{
-          startLocation: {
-            latLng: {
-              latitude: hubCoords.lat,
-              longitude: hubCoords.lng
-            }
-          },
-          endLocation: {
-            latLng: {
-              latitude: hubCoords.lat,
-              longitude: hubCoords.lng
-            }
-          },
-          label: `Véhicule ${hub.zone}`
-        }],
-        globalStartTime: timeToISO(hub.openingTime || '07:00', date),
-        globalEndTime: timeToISO(hub.closingTime || '20:00', date)
-      }
+    const model: GMPROModel = {
+      shipments,
+      vehicles,
+      globalStartTime: timeToISO(hub.openingTime || '07:00', date),
+      globalEndTime: timeToISO(hub.closingTime || '20:00', date)
     };
     
-    // 6. Appeler l'API
-    const response = await fetch(
-      `https://routeoptimization.googleapis.com/v1/projects/${getProjectId()}:optimizeTours`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-          'X-Goog-Api-Key': apiKey
-        },
-        body: JSON.stringify(request)
+    // 6. Appeler GMPRO via Cloud Function
+    console.log(`📡 GMPRO: ${shipments.length} stops → ${vehicles.length} véhicules`);
+    
+    let gmproResult: GMPROResult;
+    try {
+      gmproResult = await optimizeToursCF(model);
+    } catch (err: any) {
+      console.error('GMPRO échoué:', err.message);
+      return createFallbackOptimization(stopGroups, driversVehicles, hubCoords);
+    }
+    
+    // 7. Parser les résultats
+    if (!gmproResult.routes || gmproResult.routes.length === 0) {
+      return createFallbackOptimization(stopGroups, driversVehicles, hubCoords);
+    }
+    
+    const tours: TourResult[] = [];
+    
+    for (const route of gmproResult.routes) {
+      const vehicleIdx = route.vehicleIndex || 0;
+      const dv = driversVehicles[vehicleIdx];
+      
+      if (!dv || !route.visits || route.visits.length === 0) continue;
+      
+      const stops: MissionStop[] = [];
+      let tourPackageCount = 0;
+      
+      for (let i = 0; i < route.visits.length; i++) {
+        const visit = route.visits[i];
+        const sg = validStops[visit.shipmentIndex];
+        if (!sg) continue;
+        
+        const firstPkg = sg.packages[0];
+        
+        stops.push({
+          id: `stop-${Date.now()}-${vehicleIdx}-${i}`,
+          sequence: i + 1,
+          type: 'DELIVERY',
+          address: firstPkg.address,
+          city: firstPkg.city,
+          postalCode: firstPkg.postalCode,
+          coordinates: sg.coords,
+          floor: firstPkg.floor,
+          hasElevator: firstPkg.hasElevator,
+          contactName: firstPkg.contactName,
+          contactPhone: firstPkg.contactPhone,
+          packageIds: sg.packages.map(p => p.id),
+          packageCount: sg.packages.length,
+          timeWindowStart: firstPkg.timeWindowStart,
+          timeWindowEnd: firstPkg.timeWindowEnd,
+          serviceTime: Math.max(5, sg.packages.length * 5),
+          status: StopStatus.PENDING,
+          estimatedArrival: visit.startTime
+        });
+        
+        tourPackageCount += sg.packages.length;
       }
-    );
-    
-    if (!response.ok) {
-      const errorData = await response.json();
-      console.error('GMPRO API error:', errorData);
       
-      // Fallback: retourner les stops dans l'ordre d'origine
-      return createFallbackRoute(stopMapping, hubCoords);
+      const distanceKm = route.metrics?.travelDistanceMeters
+        ? route.metrics.travelDistanceMeters / 1000
+        : estimateDistanceForStops(stops, hubCoords!);
+      
+      const durationMin = route.metrics?.travelDuration
+        ? parseInt(route.metrics.travelDuration.replace('s', '')) / 60
+        : estimateDurationForStops(stops, hubCoords!);
+      
+      tours.push({
+        vehicleIndex: vehicleIdx,
+        driverId: dv.driver.id,
+        driverName: `${dv.driver.firstName} ${dv.driver.lastName}`,
+        vehicleId: dv.vehicle?.id,
+        vehiclePlate: dv.vehicle?.plate,
+        stops,
+        totalDistance: Math.round(distanceKm * 10) / 10,
+        estimatedDuration: Math.round(durationMin),
+        packageCount: tourPackageCount
+      });
     }
     
-    const data: GMPROResponse = await response.json();
+    const skippedCount = gmproResult.metrics?.skippedMandatoryShipmentCount || 0;
     
-    // 7. Parser la réponse et créer les MissionStops
-    if (!data.routes || data.routes.length === 0 || !data.routes[0].visits) {
-      return createFallbackRoute(stopMapping, hubCoords);
-    }
+    return {
+      success: true,
+      tours,
+      totalDistance: Math.round(tours.reduce((s, t) => s + t.totalDistance, 0) * 10) / 10,
+      totalDuration: Math.round(tours.reduce((s, t) => s + t.estimatedDuration, 0)),
+      totalPackages: tours.reduce((s, t) => s + t.packageCount, 0),
+      skippedShipments: skippedCount,
+      method: 'gmpro',
+      error: skippedCount > 0 ? `${skippedCount} livraison(s) non assignée(s)` : undefined
+    };
     
-    const route = data.routes[0];
-    const stops: MissionStop[] = [];
+  } catch (error) {
+    console.error('Erreur optimisation:', error);
+    return {
+      success: false, tours: [], totalDistance: 0, totalDuration: 0,
+      totalPackages: 0, skippedShipments: 0,
+      error: error instanceof Error ? error.message : 'Erreur inconnue',
+      method: 'fallback'
+    };
+  }
+};
+
+// ============================================================================
+// FALLBACK: RÉPARTITION GÉOGRAPHIQUE
+// ============================================================================
+
+const createFallbackOptimization = (
+  stopGroups: StopGroup[],
+  driversVehicles: DriverVehicle[],
+  hubCoords: { lat: number; lng: number } | null
+): OptimizationResult => {
+  const n = driversVehicles.length;
+  
+  if (n === 0 || stopGroups.length === 0) {
+    return {
+      success: false, tours: [], totalDistance: 0, totalDuration: 0,
+      totalPackages: 0, skippedShipments: 0,
+      error: 'Aucun chauffeur ou colis', method: 'fallback'
+    };
+  }
+  
+  // Trier par latitude (nord→sud)
+  const sorted = [...stopGroups].sort((a, b) => {
+    if (a.coords && b.coords) return b.coords.lat - a.coords.lat;
+    return 0;
+  });
+  
+  const stopsPerDriver = Math.ceil(sorted.length / n);
+  const tours: TourResult[] = [];
+  
+  for (let i = 0; i < n; i++) {
+    const dv = driversVehicles[i];
+    const driverStops = sorted.slice(i * stopsPerDriver, (i + 1) * stopsPerDriver);
+    if (driverStops.length === 0) continue;
     
-    for (let i = 0; i < route.visits.length; i++) {
-      const visit = route.visits[i];
-      const mapping = stopMapping[visit.shipmentIndex];
-      const firstPkg = mapping.packages[0];
-      const addressKey = `${firstPkg.address.toLowerCase().trim()}|${firstPkg.postalCode}|${firstPkg.city.toLowerCase().trim()}`;
-      const coords = geocodedAddresses.get(addressKey) || firstPkg.coordinates;
-      
-      const stop: MissionStop = {
-        id: `stop-${Date.now()}-${i}`,
-        sequence: i + 1,
-        type: 'DELIVERY',
+    const stops: MissionStop[] = driverStops.map((sg, idx) => {
+      const firstPkg = sg.packages[0];
+      return {
+        id: `stop-${Date.now()}-${i}-${idx}`,
+        sequence: idx + 1,
+        type: 'DELIVERY' as const,
         address: firstPkg.address,
         city: firstPkg.city,
         postalCode: firstPkg.postalCode,
-        coordinates: coords,
+        coordinates: sg.coords,
         floor: firstPkg.floor,
         hasElevator: firstPkg.hasElevator,
         contactName: firstPkg.contactName,
         contactPhone: firstPkg.contactPhone,
-        packageIds: mapping.packages.map(p => p.id),
-        packageCount: mapping.packages.length,
+        packageIds: sg.packages.map(p => p.id),
+        packageCount: sg.packages.length,
         timeWindowStart: firstPkg.timeWindowStart,
         timeWindowEnd: firstPkg.timeWindowEnd,
-        serviceTime: Math.max(5, mapping.packages.length * 5),
-        status: StopStatus.PENDING,
-        estimatedArrival: visit.startTime
+        serviceTime: Math.max(5, sg.packages.length * 5),
+        status: StopStatus.PENDING
       };
-      
-      stops.push(stop);
-    }
+    });
     
-    // Calculer les métriques
-    const totalDistance = route.metrics?.travelDistanceMeters 
-      ? route.metrics.travelDistanceMeters / 1000 
-      : estimateDistance(stops, hubCoords);
-    const estimatedDuration = route.metrics?.totalDuration 
-      ? parseDuration(route.metrics.totalDuration)
-      : estimateDuration(stops, hubCoords);
-    
-    return {
-      success: true,
+    tours.push({
+      vehicleIndex: i,
+      driverId: dv.driver.id,
+      driverName: `${dv.driver.firstName} ${dv.driver.lastName}`,
+      vehicleId: dv.vehicle?.id,
+      vehiclePlate: dv.vehicle?.plate,
       stops,
-      totalDistance,
-      estimatedDuration
-    };
-    
-  } catch (error) {
-    console.error('Route optimization error:', error);
-    return {
-      success: false,
-      stops: [],
-      totalDistance: 0,
-      estimatedDuration: 0,
-      error: error instanceof Error ? error.message : 'Erreur inconnue'
-    };
+      totalDistance: estimateDistanceForStops(stops, hubCoords || { lat: 0, lng: 0 }),
+      estimatedDuration: estimateDurationForStops(stops, hubCoords || { lat: 0, lng: 0 }),
+      packageCount: stops.reduce((s, st) => s + st.packageCount, 0)
+    });
   }
-};
-
-// Créer une route fallback (sans optimisation)
-const createFallbackRoute = (
-  stopMapping: Array<{ key: string; packages: Package[] }>,
-  hubCoords: { lat: number; lng: number }
-): {
-  success: boolean;
-  stops: MissionStop[];
-  totalDistance: number;
-  estimatedDuration: number;
-  error?: string;
-} => {
-  const stops: MissionStop[] = stopMapping.map((mapping, i) => {
-    const firstPkg = mapping.packages[0];
-    return {
-      id: `stop-${Date.now()}-${i}`,
-      sequence: i + 1,
-      type: 'DELIVERY' as const,
-      address: firstPkg.address,
-      city: firstPkg.city,
-      postalCode: firstPkg.postalCode,
-      coordinates: firstPkg.coordinates,
-      floor: firstPkg.floor,
-      hasElevator: firstPkg.hasElevator,
-      contactName: firstPkg.contactName,
-      contactPhone: firstPkg.contactPhone,
-      packageIds: mapping.packages.map(p => p.id),
-      packageCount: mapping.packages.length,
-      timeWindowStart: firstPkg.timeWindowStart,
-      timeWindowEnd: firstPkg.timeWindowEnd,
-      serviceTime: Math.max(5, mapping.packages.length * 5),
-      status: StopStatus.PENDING
-    };
-  });
   
   return {
     success: true,
-    stops,
-    totalDistance: estimateDistance(stops, hubCoords),
-    estimatedDuration: estimateDuration(stops, hubCoords),
-    error: 'Route non optimisée (fallback)'
+    tours,
+    totalDistance: Math.round(tours.reduce((s, t) => s + t.totalDistance, 0) * 10) / 10,
+    totalDuration: Math.round(tours.reduce((s, t) => s + t.estimatedDuration, 0)),
+    totalPackages: tours.reduce((s, t) => s + t.packageCount, 0),
+    skippedShipments: 0,
+    error: 'Répartition géographique (GMPRO non disponible)',
+    method: 'fallback'
   };
 };
 
-// Estimer la distance (fallback si GMPRO échoue)
-// Si les stops et le hub ont des coordonnées, calculer la distance réelle à vol d'oiseau
-const estimateDistance = (stops: MissionStop[], hubCoords?: { lat: number; lng: number }): number => {
-  if (stops.length === 0) return 0;
-  
-  // Si on a des coordonnées, calculer à vol d'oiseau (× 1.4 pour route réelle)
-  const points: { lat: number; lng: number }[] = [];
-  
-  if (hubCoords && hubCoords.lat !== 0) {
-    points.push(hubCoords);
-  }
-  
-  for (const stop of stops) {
-    if (stop.coordinates) {
-      points.push(stop.coordinates);
-    }
-  }
-  
-  if (hubCoords && hubCoords.lat !== 0) {
-    points.push(hubCoords); // Retour au hub
-  }
-  
-  if (points.length >= 2) {
-    let totalKm = 0;
-    for (let i = 1; i < points.length; i++) {
-      totalKm += haversineDistance(points[i - 1], points[i]);
-    }
-    // Facteur 1.4 pour convertir vol d'oiseau → route réelle (routes sinueuses à La Réunion)
-    return Math.round(totalKm * 1.4 * 10) / 10;
-  }
-  
-  // Pas de coordonnées: estimation grossière
-  return stops.length * 5;
-};
+// ============================================================================
+// UTILITAIRES
+// ============================================================================
 
-// Estimer la durée (fallback si GMPRO échoue)
-const estimateDuration = (stops: MissionStop[], hubCoords?: { lat: number; lng: number }): number => {
-  const distanceKm = estimateDistance(stops, hubCoords);
-  // Vitesse moyenne 30 km/h (routes de La Réunion) + temps de service
-  const travelTime = Math.round((distanceKm / 30) * 60);
-  const serviceTime = stops.reduce((acc, s) => acc + s.serviceTime, 0);
-  return travelTime + serviceTime;
-};
-
-// Calcul de distance Haversine (en km)
 const haversineDistance = (
   a: { lat: number; lng: number },
   b: { lat: number; lng: number }
 ): number => {
-  const R = 6371; // Rayon de la terre en km
+  const R = 6371;
   const dLat = (b.lat - a.lat) * Math.PI / 180;
   const dLng = (b.lng - a.lng) * Math.PI / 180;
   const sinLat = Math.sin(dLat / 2);
   const sinLng = Math.sin(dLng / 2);
-  const h = sinLat * sinLat + 
+  const h = sinLat * sinLat +
     Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * sinLng * sinLng;
   return 2 * R * Math.asin(Math.sqrt(h));
 };
 
-// Récupérer l'ID du projet Google Cloud
-const getProjectId = (): string => {
-  // À configurer via variable d'environnement
-  return import.meta.env.VITE_GOOGLE_CLOUD_PROJECT_ID || 'fleetgenius-app';
+const estimateDistanceForStops = (
+  stops: MissionStop[],
+  hubCoords: { lat: number; lng: number }
+): number => {
+  if (stops.length === 0) return 0;
+  const points: { lat: number; lng: number }[] = [];
+  if (hubCoords.lat !== 0) points.push(hubCoords);
+  for (const stop of stops) {
+    if (stop.coordinates) points.push(stop.coordinates);
+  }
+  if (hubCoords.lat !== 0) points.push(hubCoords);
+  
+  if (points.length >= 2) {
+    let total = 0;
+    for (let i = 1; i < points.length; i++) {
+      total += haversineDistance(points[i - 1], points[i]);
+    }
+    return Math.round(total * 1.4 * 10) / 10;
+  }
+  return stops.length * 5;
 };
 
-// Obtenir la clé API
+const estimateDurationForStops = (
+  stops: MissionStop[],
+  hubCoords: { lat: number; lng: number }
+): number => {
+  const distKm = estimateDistanceForStops(stops, hubCoords);
+  const travelMin = (distKm / 30) * 60;
+  const serviceMin = stops.reduce((s, st) => s + st.serviceTime, 0);
+  return Math.round(travelMin + serviceMin);
+};
+
+// ============================================================================
+// EXPORTS COMPATIBILITÉ (pour ApiDiagnostic, etc.)
+// ============================================================================
+
 export const getGoogleMapsApiKey = (): string => {
   return import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
 };
 
-// Vérifier si l'API est configurée
 export const isGMPROConfigured = (): boolean => {
   return !!getGoogleMapsApiKey();
 };

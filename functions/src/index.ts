@@ -7,12 +7,146 @@
 
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
+import { GoogleAuth } from "google-auth-library";
 
 // Initialiser Firebase Admin
 admin.initializeApp();
 
 const db = admin.firestore();
 const auth = admin.auth();
+
+// ============================================================================
+// OPTIMISATION DE TOURNÉES MULTI-VÉHICULES (GMPRO)
+// ============================================================================
+
+/**
+ * Proxy pour Google Route Optimization API (GMPRO)
+ * 
+ * L'API GMPRO exige OAuth2 (pas de clé API). Cette Cloud Function
+ * sert de proxy authentifié entre le frontend et GMPRO.
+ * 
+ * Reçoit: la requête GMPRO complète (shipments + vehicles)
+ * Retourne: les routes optimisées (répartition multi-véhicules)
+ */
+export const optimizeTours = functions
+  .region("europe-west1")
+  .runWith({ timeoutSeconds: 120, memory: "256MB" })
+  .https.onCall(async (data, context) => {
+    // 1. Vérifier l'authentification
+    if (!context.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "Vous devez être connecté pour optimiser les tournées."
+      );
+    }
+
+    // 2. Vérifier que la requête contient les données nécessaires
+    const { model } = data;
+    if (!model || !model.shipments || !model.vehicles) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "La requête doit contenir model.shipments et model.vehicles"
+      );
+    }
+
+    const shipmentCount = model.shipments.length;
+    const vehicleCount = model.vehicles.length;
+
+    console.log(`🚛 Optimisation: ${shipmentCount} livraisons, ${vehicleCount} véhicules`);
+
+    // 3. Obtenir le token OAuth2 via Application Default Credentials
+    const googleAuth = new GoogleAuth({
+      scopes: ["https://www.googleapis.com/auth/cloud-platform"],
+    });
+    
+    let accessToken: string;
+    try {
+      const client = await googleAuth.getClient();
+      const tokenResponse = await client.getAccessToken();
+      accessToken = tokenResponse.token || "";
+      if (!accessToken) {
+        throw new Error("Token vide");
+      }
+    } catch (err: any) {
+      console.error("❌ Erreur OAuth2:", err);
+      throw new functions.https.HttpsError(
+        "internal",
+        `Erreur d'authentification Google: ${err.message}`
+      );
+    }
+
+    // 4. Appeler Route Optimization API
+    const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || "fleet-genius-app-485611";
+    const url = `https://routeoptimization.googleapis.com/v1/projects/${projectId}:optimizeTours`;
+
+    console.log(`📡 Appel GMPRO: ${url}`);
+
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ model }),
+      });
+
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        console.error("❌ GMPRO erreur:", JSON.stringify(responseData));
+        
+        const errMsg = responseData.error?.message || `HTTP ${response.status}`;
+        const isApiNotEnabled = errMsg.includes("not been used") || 
+                                errMsg.includes("disabled") || 
+                                errMsg.includes("not enabled");
+
+        throw new functions.https.HttpsError(
+          "internal",
+          isApiNotEnabled
+            ? "Route Optimization API non activée. Activez-la dans Google Cloud Console → APIs & Services → Library."
+            : `Erreur GMPRO: ${errMsg}`
+        );
+      }
+
+      // 5. Log succès
+      const routeCount = responseData.routes?.length || 0;
+      const totalDistance = responseData.routes?.reduce(
+        (sum: number, r: any) => sum + (r.metrics?.travelDistanceMeters || 0), 0
+      ) / 1000;
+
+      console.log(`✅ Optimisation réussie: ${routeCount} tournées, ${totalDistance.toFixed(1)} km total`);
+
+      // 6. Log d'audit
+      try {
+        await db.collection("audit_logs").add({
+          action: "TOURS_OPTIMIZED",
+          performedBy: context.auth.uid,
+          performedAt: admin.firestore.FieldValue.serverTimestamp(),
+          details: {
+            shipments: shipmentCount,
+            vehicles: vehicleCount,
+            routesGenerated: routeCount,
+            totalDistanceKm: Math.round(totalDistance * 10) / 10,
+          },
+        });
+      } catch (logErr) {
+        console.warn("Erreur log audit:", logErr);
+      }
+
+      return responseData;
+
+    } catch (err: any) {
+      if (err instanceof functions.https.HttpsError) {
+        throw err;
+      }
+      console.error("❌ Erreur réseau GMPRO:", err);
+      throw new functions.https.HttpsError(
+        "internal",
+        `Erreur de connexion à Google Route Optimization: ${err.message}`
+      );
+    }
+  });
 
 // ============================================================================
 // SUPPRESSION COMPLETE D'UN UTILISATEUR

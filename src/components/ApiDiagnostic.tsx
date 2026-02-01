@@ -42,7 +42,7 @@ const ApiDiagnostic: React.FC = () => {
       { name: 'geocoding_api', status: 'pending', message: 'API Geocoding Google' },
       { name: 'geocoding_reunion', status: 'pending', message: 'Geocoding La Réunion' },
       { name: 'hubs_coordinates', status: 'pending', message: 'Coordonnées des hubs' },
-      { name: 'route_optimization', status: 'pending', message: 'API Route Optimization (GMPRO)' },
+      { name: 'route_optimization', status: 'pending', message: 'API Routes (optimisation tournées)' },
       { name: 'vercel_env', status: 'pending', message: 'Variables Vercel' },
     ];
 
@@ -262,7 +262,7 @@ const ApiDiagnostic: React.FC = () => {
       });
     }
 
-    // --- Test 9: Route Optimization API ---
+    // --- Test 9: Routes API (computeRoutes) ---
     updateTest('route_optimization', { status: 'running' });
     const t9Start = Date.now();
     if (!apiKey) {
@@ -274,51 +274,53 @@ const ApiDiagnostic: React.FC = () => {
     } else {
       try {
         const testRequest = {
-          model: {
-            shipments: [{
-              deliveries: [{
-                arrivalLocation: { latLng: { latitude: -20.88, longitude: 55.45 } },
-                duration: '300s'
-              }]
-            }],
-            vehicles: [{
-              startLocation: { latLng: { latitude: -20.90, longitude: 55.53 } },
-              endLocation: { latLng: { latitude: -20.90, longitude: 55.53 } }
-            }]
-          }
+          origin: {
+            location: { latLng: { latitude: -20.90, longitude: 55.53 } }
+          },
+          destination: {
+            location: { latLng: { latitude: -20.90, longitude: 55.53 } }
+          },
+          intermediates: [
+            { location: { latLng: { latitude: -20.88, longitude: 55.45 } } }
+          ],
+          travelMode: 'DRIVE',
+          optimizeWaypointOrder: true
         };
-        const gmproProjectId = import.meta.env.VITE_GOOGLE_CLOUD_PROJECT_ID || 'fleetgenius-app';
-        const gmproResp = await fetch(
-          `https://routeoptimization.googleapis.com/v1/projects/${gmproProjectId}:optimizeTours`,
+        
+        const routesResp = await fetch(
+          'https://routes.googleapis.com/directions/v2:computeRoutes',
           {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'X-Goog-Api-Key': apiKey
+              'X-Goog-Api-Key': apiKey,
+              'X-Goog-FieldMask': 'routes.distanceMeters,routes.duration,routes.optimizedIntermediateWaypointIndex'
             },
             body: JSON.stringify(testRequest)
           }
         );
         
-        if (gmproResp.ok) {
-          const gmproData = await gmproResp.json();
-          const hasRoute = gmproData.routes && gmproData.routes.length > 0;
+        if (routesResp.ok) {
+          const routesData = await routesResp.json();
+          const route = routesData.routes?.[0];
+          const distKm = route?.distanceMeters ? (route.distanceMeters / 1000).toFixed(1) : '?';
+          const durMin = route?.duration ? Math.round(parseInt(route.duration.replace('s', '')) / 60) : '?';
           updateTest('route_optimization', {
             status: 'success',
-            message: `Route Optimization OK${hasRoute ? ' — route calculée' : ''}`,
+            message: `Routes API OK — Hub↔Saint-Denis: ${distKm} km, ~${durMin} min`,
             duration: Date.now() - t9Start
           });
         } else {
-          const errData = await gmproResp.json().catch(() => ({}));
-          const errMsg = errData.error?.message || `HTTP ${gmproResp.status}`;
-          const isNotEnabled = errMsg.includes('not been used') || errMsg.includes('disabled') || errMsg.includes('PERMISSION_DENIED');
+          const errData = await routesResp.json().catch(() => ({}));
+          const errMsg = errData.error?.message || `HTTP ${routesResp.status}`;
+          const isNotEnabled = errMsg.includes('not been used') || errMsg.includes('disabled') || errMsg.includes('PERMISSION_DENIED') || errMsg.includes('not enabled');
           updateTest('route_optimization', {
             status: 'error',
             message: isNotEnabled 
-              ? 'Route Optimization API non activée'
-              : `Route Optimization échoué: ${errMsg.substring(0, 100)}`,
+              ? 'Routes API non activée'
+              : `Routes API échoué: ${errMsg.substring(0, 100)}`,
             detail: isNotEnabled
-              ? 'Google Cloud Console → APIs & Services → Library → chercher "Route Optimization API" → Enable'
+              ? 'Google Cloud Console → APIs & Services → Library → chercher "Routes API" → Enable'
               : `Réponse: ${errMsg.substring(0, 200)}`,
             duration: Date.now() - t9Start
           });
@@ -326,7 +328,7 @@ const ApiDiagnostic: React.FC = () => {
       } catch (err: any) {
         updateTest('route_optimization', {
           status: 'error',
-          message: 'Erreur appel Route Optimization',
+          message: 'Erreur appel Routes API',
           detail: err.message,
           duration: Date.now() - t9Start
         });
@@ -499,7 +501,7 @@ const ApiDiagnostic: React.FC = () => {
                 <p className="text-slate-500">
                   Dans Google Cloud Console → APIs & Services → Library, activer :<br/>
                   • <strong>Geocoding API</strong> (conversion adresse → coordonnées)<br/>
-                  • <strong>Route Optimization API</strong> (optimisation des tournées)<br/>
+                  • <strong>Routes API</strong> (optimisation des tournées + distances réelles)<br/>
                   • <strong>Directions API</strong> (optionnel, pour le calcul de distance)
                 </p>
               </div>
