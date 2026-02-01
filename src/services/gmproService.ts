@@ -207,7 +207,7 @@ export const optimizeMultiVehicle = async (
       const shipment: GMPROModel['shipments'][0] = {
         deliveries: [{
           arrivalLocation: {
-            latLng: { latitude: sg.coords!.lat, longitude: sg.coords!.lng }
+            latitude: sg.coords!.lat, longitude: sg.coords!.lng
           },
           duration: `${serviceTime * 60}s`
         }],
@@ -226,10 +226,10 @@ export const optimizeMultiVehicle = async (
     
     const vehicles = driversVehicles.map((dv) => ({
       startLocation: {
-        latLng: { latitude: hubCoords!.lat, longitude: hubCoords!.lng }
+        latitude: hubCoords!.lat, longitude: hubCoords!.lng
       },
       endLocation: {
-        latLng: { latitude: hubCoords!.lat, longitude: hubCoords!.lng }
+        latitude: hubCoords!.lat, longitude: hubCoords!.lng
       },
       label: `${dv.driver.firstName} ${dv.driver.lastName}${dv.vehicle ? ` (${dv.vehicle.plate})` : ''}`
     }));

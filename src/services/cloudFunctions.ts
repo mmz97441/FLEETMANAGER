@@ -175,15 +175,15 @@ export const forcePasswordReset = async (
 export interface GMPROModel {
   shipments: Array<{
     deliveries: Array<{
-      arrivalLocation: { latLng: { latitude: number; longitude: number } };
+      arrivalLocation: { latitude: number; longitude: number };
       duration: string;
       timeWindows?: Array<{ startTime: string; endTime: string }>;
     }>;
     label: string;
   }>;
   vehicles: Array<{
-    startLocation: { latLng: { latitude: number; longitude: number } };
-    endLocation: { latLng: { latitude: number; longitude: number } };
+    startLocation: { latitude: number; longitude: number };
+    endLocation: { latitude: number; longitude: number };
     label: string;
   }>;
   globalStartTime: string;
