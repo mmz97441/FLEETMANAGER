@@ -157,17 +157,17 @@ const ApiDiagnostic: React.FC = () => {
       });
     } else {
       try {
-        const result = await geocodeAddress('1 rue de Rivoli', 'Paris', '75001', apiKey);
+        const result = await geocodeAddress('1 rue de la gare', 'Le Port', '97420', apiKey);
         if (result) {
           updateTest('geocoding_api', {
             status: 'success',
-            message: `Geocoding OK — Paris: ${result.lat.toFixed(4)}, ${result.lng.toFixed(4)}`,
+            message: `Geocoding OK — Le Port: ${result.lat.toFixed(4)}, ${result.lng.toFixed(4)}`,
             duration: Date.now() - t6Start
           });
         } else {
           updateTest('geocoding_api', {
             status: 'error',
-            message: 'Geocoding échoué pour adresse test Paris',
+            message: 'Geocoding échoué pour adresse test (Le Port 97420)',
             detail: 'Vérifier que l\'API Geocoding est activée dans Google Cloud Console > APIs & Services',
             duration: Date.now() - t6Start
           });
