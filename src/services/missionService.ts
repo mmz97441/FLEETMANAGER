@@ -530,8 +530,12 @@ export const calculateMissionStats = (missions: Mission[]): MissionStats => {
   };
   
   for (const mission of missions) {
-    stats.byStatus[mission.status]++;
-    stats.byZone[mission.zone]++;
+    if (stats.byStatus[mission.status] !== undefined) {
+      stats.byStatus[mission.status]++;
+    }
+    if (stats.byZone[mission.zone] !== undefined) {
+      stats.byZone[mission.zone]++;
+    }
     stats.totalPackages += mission.totalPackages || 0;
     stats.deliveredPackages += mission.deliveredPackages || 0;
     stats.failedPackages += mission.failedPackages || 0;

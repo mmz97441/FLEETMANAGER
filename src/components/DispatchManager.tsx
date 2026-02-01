@@ -7,11 +7,11 @@
 import React, { useState, useMemo } from 'react';
 import {
   Package, PackageStatus, Zone, Hub, User, UserRole, Vehicle,
-  Mission, MissionStatus, MissionType, MissionStop,
+  Mission, MissionStatus, MissionType, MissionStop, StopStatus,
   ZONE_COLORS
 } from '../types';
 import { optimizeRoute, isGMPROConfigured, getGoogleMapsApiKey } from '../services/gmproService';
-import { addMission, updatePackage } from '../services/missionService';
+import { addMission, updatePackageStatus } from '../services/missionService';
 import { logActivity } from '../services/activityLogService';
 import { ActivityAction } from '../types';
 import Modal from './shared/Modal';
@@ -236,7 +236,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
         timeWindowStart: firstPkg.timeWindowStart,
         timeWindowEnd: firstPkg.timeWindowEnd,
         serviceTime: Math.max(5, pkgs.length * 5),
-        status: 'PENDING' as any
+        status: StopStatus.PENDING
       });
       sequence++;
     }
@@ -266,21 +266,24 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
         hubId: hub?.id || departureHub?.id || '',
         hubName: hub?.name || departureHub?.name || 'Départ direct',
         type: MissionType.DELIVERY,
-        status: MissionStatus.ASSIGNED,
+        status: MissionStatus.DISPATCHED,
         driverId: driver.id,
         driverName: `${driver.firstName} ${driver.lastName}`,
         vehicleId: selectedVehicle?.id,
         vehiclePlate: selectedVehicle?.plateNumber,
         stops: optimizedStops,
-        stopCount: optimizedStops.length,
         totalPackages: totalPkgs,
-        packageCount: totalPkgs,
         completedStops: 0,
         failedStops: 0,
         deliveredPackages: 0,
         failedPackages: 0,
         totalDistance: optimizationResult?.totalDistance || 0,
-        estimatedDuration: optimizationResult?.estimatedDuration || 0
+        estimatedDuration: optimizationResult?.estimatedDuration || 0,
+        createdBy: currentUser.id,
+        createdByName: `${currentUser.firstName} ${currentUser.lastName}`,
+        dispatchedBy: currentUser.id,
+        dispatchedByName: `${currentUser.firstName} ${currentUser.lastName}`,
+        dispatchedAt: new Date().toISOString()
       };
       
       const missionId = await addMission(mission);
@@ -288,13 +291,12 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
       // Mettre à jour le statut des colis
       const packageIds = optimizedStops.flatMap(s => s.packageIds);
       for (const pkgId of packageIds) {
-        await updatePackage({
-          id: pkgId,
-          status: PackageStatus.ASSIGNED,
-          missionId,
-          assignedDriverId: driver.id,
-          assignedAt: new Date().toISOString()
-        } as any);
+        await updatePackageStatus(pkgId, PackageStatus.SORTED, {
+          action: 'SORTED',
+          driverId: driver.id,
+          driverName: `${driver.firstName} ${driver.lastName}`,
+          notes: `Dispatché dans mission ${selectedZone}`
+        });
       }
       
       // Logger l'activité
