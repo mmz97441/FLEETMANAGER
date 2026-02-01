@@ -25,6 +25,7 @@ import {
   MissionStats
 } from '../services/missionService';
 import { importExcelFile, validateExcelFormat } from '../services/importService';
+import { geocodeAddress, getGoogleMapsApiKey } from '../services/gmproService';
 import { logActivity } from '../services/activityLogService';
 import { ActivityAction } from '../types';
 import { usePermissions, Permission } from '../usePermissions';
@@ -272,7 +273,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
     setIsSavingHub(true);
     
     try {
-      const hubData = {
+      const hubData: any = {
         name: hubForm.name,
         zone: hubForm.zone as Zone,
         address: hubForm.address,
@@ -287,6 +288,15 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           .filter(cp => cp.length > 0),
         isActive: true
       };
+      
+      // Géocoder automatiquement l'adresse du hub
+      const apiKey = getGoogleMapsApiKey();
+      if (apiKey) {
+        const coords = await geocodeAddress(hubForm.address, hubForm.city, hubForm.postalCode, apiKey);
+        if (coords) {
+          hubData.coordinates = coords;
+        }
+      }
       
       if (editingHub) {
         // Mise à jour

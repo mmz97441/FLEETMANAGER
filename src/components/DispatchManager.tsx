@@ -178,13 +178,25 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
           apiKey
         );
         
-        setOptimizedStops(result.stops);
-        setOptimizationResult({
-          success: result.success,
-          totalDistance: result.totalDistance,
-          estimatedDuration: result.estimatedDuration,
-          error: result.error
-        });
+        if (result.stops.length > 0) {
+          setOptimizedStops(result.stops);
+          setOptimizationResult({
+            success: result.success,
+            totalDistance: result.totalDistance,
+            estimatedDuration: result.estimatedDuration,
+            error: result.error
+          });
+        } else {
+          // Fallback si l'optimisation n'a retourné aucun stop
+          const stops = createSimpleStops(selectedZoneStats.packages);
+          setOptimizedStops(stops);
+          setOptimizationResult({
+            success: true,
+            totalDistance: stops.length * 5,
+            estimatedDuration: stops.length * 15,
+            error: result.error || 'Optimisation impossible — ordre par défaut'
+          });
+        }
       }
     } catch (error) {
       console.error('Optimization error:', error);

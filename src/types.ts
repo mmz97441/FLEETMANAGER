@@ -536,6 +536,7 @@ export type ViewState =
   | 'activity_logs'
   | 'missions'
   | 'notifications_settings'
+  | 'api_diagnostic'
   | 'import_export';
 
 // ============================================================================

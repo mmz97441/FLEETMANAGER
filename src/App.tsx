@@ -22,6 +22,7 @@ import DocumentAlertModal from './components/DocumentAlertModal';
 import ActivityLogs from './components/ActivityLogs';
 import MissionManager from './components/MissionManager';
 import Settings from './components/Settings'; // New Import
+import ApiDiagnostic from './components/ApiDiagnostic';
 import ErrorBoundary from './components/ErrorBoundary'; // New Import
 import MobileNavBar from './components/MobileNavBar';
 import VehicleDetail from './components/VehicleDetail';
@@ -892,6 +893,13 @@ const App: React.FC = () => {
               <p className="text-slate-500 mb-4">Configurer les alertes email, seuils carburant, rappels contrôle technique...</p>
               <span className="inline-block px-3 py-1 bg-blue-100 text-blue-700 text-sm font-bold rounded-full">À venir</span>
             </div>
+          </div>
+        );
+
+      case 'api_diagnostic':
+        return (
+          <div className="p-8">
+            <ApiDiagnostic />
           </div>
         );
 

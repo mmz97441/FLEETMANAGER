@@ -6,7 +6,7 @@ import {
   FileCheck, CalendarDays, ChevronDown, ChevronRight,
   ShoppingBag, Euro, List, Settings as SettingsIcon, FileSignature,
   UserCog, Bell, Download, ClipboardList, Palmtree, Shield,
-  Route, Package, MapPin
+  Route, Package, MapPin, Activity
 } from 'lucide-react';
 import { ViewState, User, UserRole } from '../types';
 import { usePermissions, Permission, PermissionKey } from '../usePermissions';
@@ -163,6 +163,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
         { id: 'settings', label: 'Préférences', icon: SettingsIcon, permission: Permission.SETTINGS_ACCESS },
         { id: 'notifications_settings', label: 'Notifications', icon: Bell, permission: Permission.SETTINGS_ACCESS },
         { id: 'import_export', label: 'Imports / Exports', icon: Download, permission: Permission.IMPORT_EXPORT_ACCESS },
+        { id: 'api_diagnostic', label: 'Diagnostic API', icon: Activity, permission: Permission.SETTINGS_COMPANY },
       ]
     },
 

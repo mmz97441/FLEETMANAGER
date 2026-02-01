@@ -186,12 +186,15 @@ export const optimizeRoute = async (
     if (!hubCoords) {
       const geocoded = await geocodeAddress(hub.address, hub.city, hub.postalCode, apiKey);
       if (!geocoded) {
+        // Fallback: créer la route sans optimisation géographique
+        const stopMapping: Array<{ key: string; packages: Package[] }> = [];
+        for (const [key, pkgs] of stopGroups) {
+          stopMapping.push({ key, packages: pkgs });
+        }
+        const fallback = createFallbackRoute(stopMapping, { lat: 0, lng: 0 });
         return {
-          success: false,
-          stops: [],
-          totalDistance: 0,
-          estimatedDuration: 0,
-          error: 'Impossible de géocoder l\'adresse du hub'
+          ...fallback,
+          error: 'Adresse du hub non géocodée — tournée non optimisée (ordre par défaut)'
         };
       }
       hubCoords = geocoded;
