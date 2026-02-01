@@ -108,10 +108,20 @@ export const PermissionsProvider: React.FC<PermissionsProviderProps> = ({ childr
           loaded[data.role] = data.permissions;
         });
 
-        // Merger avec les défauts (pour les rôles non configurés)
+        // Merger avec les défauts (les permissions Firestore complètent les défauts)
+        // On utilise un Set pour combiner les permissions par défaut ET celles en base
+        const merged: Record<string, PermissionKey[]> = {};
+        for (const role of Object.keys(DEFAULT_ROLE_TEMPLATES)) {
+          const defaults = DEFAULT_ROLE_TEMPLATES[role as UserRole] || [];
+          const fromDb = loaded[role] || [];
+          // Union des deux listes (pas de doublons)
+          const combined = [...new Set([...defaults, ...fromDb])];
+          merged[role] = combined;
+        }
+        
         setRoleTemplates(prev => ({
           ...prev,
-          ...loaded,
+          ...merged,
         }));
       } catch (error) {
         console.error('Erreur chargement templates permissions:', error);

@@ -29,12 +29,13 @@ import { logActivity } from '../services/activityLogService';
 import { ActivityAction } from '../types';
 import { usePermissions, Permission } from '../usePermissions';
 import Modal from './shared/Modal';
+import DispatchManager from './DispatchManager';
 import {
   Truck, Package as PackageIcon, MapPin, Upload, Calendar, Clock,
   Users, CheckCircle, XCircle, AlertTriangle, Filter, Search,
   ChevronRight, ChevronDown, Download, RefreshCw, Play, Pause,
   Eye, Edit, Trash2, Plus, FileSpreadsheet, Route, Loader2,
-  Building2, Navigation, BarChart3, TrendingUp, ArrowRight, Phone
+  Building2, Navigation, BarChart3, TrendingUp, ArrowRight, Phone, Zap
 } from 'lucide-react';
 
 interface MissionManagerProps {
@@ -43,7 +44,7 @@ interface MissionManagerProps {
   vehicles: Vehicle[];
 }
 
-type TabType = 'dashboard' | 'imports' | 'missions' | 'packages' | 'hubs';
+type TabType = 'dashboard' | 'dispatch' | 'imports' | 'missions' | 'packages' | 'hubs';
 
 const MissionManager: React.FC<MissionManagerProps> = ({
   currentUser,
@@ -354,6 +355,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
     <div className="flex border-b border-slate-200 mb-6 overflow-x-auto">
       {[
         { id: 'dashboard', label: 'Tableau de bord', icon: BarChart3 },
+        ...(canDispatch ? [{ id: 'dispatch', label: 'Dispatch', icon: Zap }] : []),
         { id: 'imports', label: 'Imports', icon: Upload },
         { id: 'missions', label: 'Missions', icon: Route },
         { id: 'packages', label: 'Colis', icon: PackageIcon },
@@ -1234,6 +1236,17 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
       {/* Content */}
       {activeTab === 'dashboard' && renderDashboard()}
+      {activeTab === 'dispatch' && (
+        <DispatchManager
+          packages={packages}
+          hubs={hubs}
+          users={users}
+          vehicles={vehicles}
+          currentUser={currentUser}
+          selectedDate={selectedDate}
+          onMissionCreated={() => setActiveTab('missions')}
+        />
+      )}
       {activeTab === 'imports' && renderImports()}
       {activeTab === 'missions' && renderMissions()}
       {activeTab === 'packages' && renderPackages()}
