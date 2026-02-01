@@ -64,6 +64,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedZone, setSelectedZone] = useState<Zone | 'all'>('all');
   const [searchTerm, setSearchTerm] = useState('');
+  const [expandedMissionId, setExpandedMissionId] = useState<string | null>(null);
   
   // Modals
   const [showImportModal, setShowImportModal] = useState(false);
@@ -663,63 +664,225 @@ const MissionManager: React.FC<MissionManagerProps> = ({
               const progress = mission.totalPackages > 0
                 ? Math.round(((mission.deliveredPackages || 0) / mission.totalPackages) * 100)
                 : 0;
+              const isExpanded = expandedMissionId === mission.id;
+              const sortedStops = [...mission.stops].sort((a, b) => a.sequence - b.sequence);
                 
               return (
-                <div key={mission.id} className="p-4 hover:bg-slate-50 transition-colors">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex items-start gap-3">
-                      <div className={`w-3 h-3 rounded-full mt-1.5 ${zoneColors.dot}`} />
-                      <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <p className="font-bold text-slate-800">
-                            {mission.driverName || 'Non assigné'}
-                          </p>
-                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColors.bg} ${statusColors.text}`}>
-                            {mission.status}
-                          </span>
+                <div key={mission.id}>
+                  {/* En-tête mission (cliquable) */}
+                  <div 
+                    className="p-4 hover:bg-slate-50 transition-colors cursor-pointer"
+                    onClick={() => setExpandedMissionId(isExpanded ? null : mission.id)}
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex items-start gap-3">
+                        <div className="flex items-center gap-2 mt-1">
+                          {isExpanded 
+                            ? <ChevronDown size={18} className="text-brand-500" />
+                            : <ChevronRight size={18} className="text-slate-400" />
+                          }
+                          <div className={`w-3 h-3 rounded-full ${zoneColors.dot}`} />
                         </div>
-                        <p className="text-sm text-slate-500">
-                          {mission.vehiclePlate || 'Pas de véhicule'} • {mission.hubName}
-                        </p>
-                        <div className="flex items-center gap-4 mt-2 text-sm">
-                          <span className="flex items-center gap-1 text-slate-600">
-                            <MapPin size={14} />
-                            {mission.stops.length} stops
-                          </span>
-                          <span className="flex items-center gap-1 text-slate-600">
-                            <PackageIcon size={14} />
-                            {mission.totalPackages} colis
-                          </span>
-                          {mission.totalDistance && (
-                            <span className="flex items-center gap-1 text-slate-600">
-                              <Navigation size={14} />
-                              {Math.round(mission.totalDistance)} km
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
+                            <p className="font-bold text-slate-800">
+                              {mission.driverName || 'Non assigné'}
+                            </p>
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColors.bg} ${statusColors.text}`}>
+                              {mission.status}
                             </span>
-                          )}
+                          </div>
+                          <p className="text-sm text-slate-500">
+                            {mission.vehiclePlate || 'Pas de véhicule'} • {mission.hubName}
+                          </p>
+                          <div className="flex items-center gap-4 mt-2 text-sm">
+                            <span className="flex items-center gap-1 text-slate-600">
+                              <MapPin size={14} />
+                              {mission.stops.length} stops
+                            </span>
+                            <span className="flex items-center gap-1 text-slate-600">
+                              <PackageIcon size={14} />
+                              {mission.totalPackages} colis
+                            </span>
+                            {mission.totalDistance != null && (
+                              <span className="flex items-center gap-1 text-slate-600">
+                                <Navigation size={14} />
+                                {Math.round(mission.totalDistance)} km
+                              </span>
+                            )}
+                            {mission.estimatedDuration != null && (
+                              <span className="flex items-center gap-1 text-slate-600">
+                                <Clock size={14} />
+                                {Math.round(mission.estimatedDuration)} min
+                              </span>
+                            )}
+                          </div>
                         </div>
+                      </div>
+                      
+                      <div className="text-right">
+                        <p className="text-2xl font-bold text-slate-800">{progress}%</p>
+                        <p className="text-xs text-slate-500">
+                          {mission.deliveredPackages || 0} livrés
+                        </p>
+                        {mission.failedPackages > 0 && (
+                          <p className="text-xs text-red-500">
+                            {mission.failedPackages} échecs
+                          </p>
+                        )}
                       </div>
                     </div>
                     
-                    <div className="text-right">
-                      <p className="text-2xl font-bold text-slate-800">{progress}%</p>
-                      <p className="text-xs text-slate-500">
-                        {mission.deliveredPackages || 0} livrés
-                      </p>
-                      {mission.failedPackages > 0 && (
-                        <p className="text-xs text-red-500">
-                          {mission.failedPackages} échecs
-                        </p>
-                      )}
+                    {/* Barre de progression */}
+                    <div className="mt-3 h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-green-500 transition-all"
+                        style={{ width: `${progress}%` }}
+                      />
                     </div>
                   </div>
-                  
-                  {/* Barre de progression */}
-                  <div className="mt-3 h-2 bg-slate-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-green-500 transition-all"
-                      style={{ width: `${progress}%` }}
-                    />
-                  </div>
+
+                  {/* Détail de la tournée (expandable) */}
+                  {isExpanded && (
+                    <div className="bg-slate-50 border-t border-slate-200">
+                      {/* Résumé de la tournée */}
+                      <div className="px-4 py-3 bg-slate-100 border-b border-slate-200">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-6 text-sm">
+                            <span className="font-semibold text-slate-700">
+                              Itinéraire de la tournée
+                            </span>
+                            {mission.dispatchedAt && (
+                              <span className="text-slate-500">
+                                Dispatché le {new Date(mission.dispatchedAt).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                {mission.dispatchedByName ? ` par ${mission.dispatchedByName}` : ''}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-4 text-sm text-slate-500">
+                            <span>{sortedStops.filter(s => s.status === 'Terminé').length}/{sortedStops.length} stops terminés</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Départ Hub */}
+                      <div className="px-4 py-2.5 flex items-center gap-3 border-b border-slate-200">
+                        <div className="flex items-center justify-center w-8 h-8 rounded-full bg-blue-100 text-blue-600 text-xs font-bold">
+                          <Building2 size={16} />
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm font-semibold text-blue-700">🏁 Départ — {mission.hubName}</p>
+                        </div>
+                      </div>
+
+                      {/* Liste des stops */}
+                      {sortedStops.map((stop, index) => {
+                        const stopStatusIcon = 
+                          stop.status === 'Terminé' ? <CheckCircle size={16} className="text-green-500" /> :
+                          stop.status === 'Échec' ? <XCircle size={16} className="text-red-500" /> :
+                          stop.status === 'Passé' ? <XCircle size={16} className="text-amber-500" /> :
+                          stop.status === 'Arrivé' ? <Truck size={16} className="text-blue-500" /> :
+                          <div className="w-4 h-4 rounded-full border-2 border-slate-300" />;
+
+                        const stopBg = 
+                          stop.status === 'Terminé' ? 'bg-green-50' :
+                          stop.status === 'Échec' ? 'bg-red-50' :
+                          stop.status === 'Passé' ? 'bg-amber-50' :
+                          stop.status === 'Arrivé' ? 'bg-blue-50' :
+                          '';
+
+                        return (
+                          <div key={stop.id} className={`px-4 py-3 border-b border-slate-200 ${stopBg}`}>
+                            <div className="flex items-start gap-3">
+                              {/* Numéro du stop */}
+                              <div className="flex flex-col items-center">
+                                <div className={`flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold ${
+                                  stop.status === 'Terminé' ? 'bg-green-100 text-green-700' :
+                                  stop.status === 'Échec' ? 'bg-red-100 text-red-700' :
+                                  'bg-slate-200 text-slate-600'
+                                }`}>
+                                  {stop.sequence}
+                                </div>
+                                {index < sortedStops.length - 1 && (
+                                  <div className="w-0.5 h-6 bg-slate-300 mt-1" />
+                                )}
+                              </div>
+
+                              {/* Détails du stop */}
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-0.5">
+                                  {stopStatusIcon}
+                                  <p className="font-semibold text-slate-800 truncate">
+                                    {stop.contactName}
+                                  </p>
+                                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                                    stop.status === 'Terminé' ? 'bg-green-100 text-green-700' :
+                                    stop.status === 'Échec' ? 'bg-red-100 text-red-700' :
+                                    stop.status === 'Passé' ? 'bg-amber-100 text-amber-700' :
+                                    stop.status === 'Arrivé' ? 'bg-blue-100 text-blue-700' :
+                                    'bg-slate-100 text-slate-600'
+                                  }`}>
+                                    {stop.status}
+                                  </span>
+                                </div>
+                                <p className="text-sm text-slate-600">
+                                  <MapPin size={12} className="inline mr-1" />
+                                  {stop.address}, {stop.postalCode} {stop.city}
+                                </p>
+                                <div className="flex items-center gap-4 mt-1 text-xs text-slate-500">
+                                  <span className="flex items-center gap-1">
+                                    <PackageIcon size={11} />
+                                    {stop.packageCount} colis
+                                  </span>
+                                  <span className="flex items-center gap-1">
+                                    <Clock size={11} />
+                                    ~{stop.serviceTime} min sur place
+                                  </span>
+                                  {stop.contactPhone && (
+                                    <span className="flex items-center gap-1">
+                                      <Phone size={11} />
+                                      {stop.contactPhone}
+                                    </span>
+                                  )}
+                                  {stop.floor != null && (
+                                    <span>
+                                      Étage {stop.floor}{stop.hasElevator ? ' (asc.)' : ''}
+                                    </span>
+                                  )}
+                                </div>
+                                {stop.timeWindowStart && stop.timeWindowEnd && (
+                                  <p className="text-xs text-blue-600 mt-1">
+                                    🕐 Créneau: {stop.timeWindowStart} - {stop.timeWindowEnd}
+                                  </p>
+                                )}
+                                {stop.notes && (
+                                  <p className="text-xs text-amber-600 mt-1 italic">
+                                    📝 {stop.notes}
+                                  </p>
+                                )}
+                                {stop.distanceFromPrevious != null && stop.distanceFromPrevious > 0 && (
+                                  <p className="text-xs text-slate-400 mt-1">
+                                    ↳ {stop.distanceFromPrevious.toFixed(1)} km depuis le stop précédent 
+                                    {stop.durationFromPrevious ? ` (~${Math.round(stop.durationFromPrevious)} min)` : ''}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                      {/* Retour Hub */}
+                      <div className="px-4 py-2.5 flex items-center gap-3">
+                        <div className="flex items-center justify-center w-8 h-8 rounded-full bg-blue-100 text-blue-600 text-xs font-bold">
+                          <Building2 size={16} />
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm font-semibold text-blue-700">🏁 Retour — {mission.hubName}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}

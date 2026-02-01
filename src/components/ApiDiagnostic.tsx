@@ -42,6 +42,7 @@ const ApiDiagnostic: React.FC = () => {
       { name: 'geocoding_api', status: 'pending', message: 'API Geocoding Google' },
       { name: 'geocoding_reunion', status: 'pending', message: 'Geocoding La Réunion' },
       { name: 'hubs_coordinates', status: 'pending', message: 'Coordonnées des hubs' },
+      { name: 'route_optimization', status: 'pending', message: 'API Route Optimization (GMPRO)' },
       { name: 'vercel_env', status: 'pending', message: 'Variables Vercel' },
     ];
 
@@ -261,7 +262,78 @@ const ApiDiagnostic: React.FC = () => {
       });
     }
 
-    // --- Test 9: Vercel Environment ---
+    // --- Test 9: Route Optimization API ---
+    updateTest('route_optimization', { status: 'running' });
+    const t9Start = Date.now();
+    if (!apiKey) {
+      updateTest('route_optimization', {
+        status: 'error',
+        message: 'Test impossible sans clé API',
+        duration: 0
+      });
+    } else {
+      try {
+        const testRequest = {
+          model: {
+            shipments: [{
+              deliveries: [{
+                arrivalLocation: { latLng: { latitude: -20.88, longitude: 55.45 } },
+                duration: '300s'
+              }]
+            }],
+            vehicles: [{
+              startLocation: { latLng: { latitude: -20.90, longitude: 55.53 } },
+              endLocation: { latLng: { latitude: -20.90, longitude: 55.53 } }
+            }]
+          }
+        };
+        const gmproProjectId = import.meta.env.VITE_GOOGLE_CLOUD_PROJECT_ID || 'fleetgenius-app';
+        const gmproResp = await fetch(
+          `https://routeoptimization.googleapis.com/v1/projects/${gmproProjectId}:optimizeTours`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Goog-Api-Key': apiKey
+            },
+            body: JSON.stringify(testRequest)
+          }
+        );
+        
+        if (gmproResp.ok) {
+          const gmproData = await gmproResp.json();
+          const hasRoute = gmproData.routes && gmproData.routes.length > 0;
+          updateTest('route_optimization', {
+            status: 'success',
+            message: `Route Optimization OK${hasRoute ? ' — route calculée' : ''}`,
+            duration: Date.now() - t9Start
+          });
+        } else {
+          const errData = await gmproResp.json().catch(() => ({}));
+          const errMsg = errData.error?.message || `HTTP ${gmproResp.status}`;
+          const isNotEnabled = errMsg.includes('not been used') || errMsg.includes('disabled') || errMsg.includes('PERMISSION_DENIED');
+          updateTest('route_optimization', {
+            status: 'error',
+            message: isNotEnabled 
+              ? 'Route Optimization API non activée'
+              : `Route Optimization échoué: ${errMsg.substring(0, 100)}`,
+            detail: isNotEnabled
+              ? 'Google Cloud Console → APIs & Services → Library → chercher "Route Optimization API" → Enable'
+              : `Réponse: ${errMsg.substring(0, 200)}`,
+            duration: Date.now() - t9Start
+          });
+        }
+      } catch (err: any) {
+        updateTest('route_optimization', {
+          status: 'error',
+          message: 'Erreur appel Route Optimization',
+          detail: err.message,
+          duration: Date.now() - t9Start
+        });
+      }
+    }
+
+    // --- Test 10: Vercel Environment ---
     updateTest('vercel_env', { status: 'running' });
     const firebaseKey = import.meta.env.VITE_FIREBASE_API_KEY;
     const firebaseProject = import.meta.env.VITE_FIREBASE_PROJECT_ID;

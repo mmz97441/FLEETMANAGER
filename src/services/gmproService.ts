@@ -342,10 +342,10 @@ export const optimizeRoute = async (
     // Calculer les métriques
     const totalDistance = route.metrics?.travelDistanceMeters 
       ? route.metrics.travelDistanceMeters / 1000 
-      : estimateDistance(stops);
+      : estimateDistance(stops, hubCoords);
     const estimatedDuration = route.metrics?.totalDuration 
       ? parseDuration(route.metrics.totalDuration)
-      : estimateDuration(stops);
+      : estimateDuration(stops, hubCoords);
     
     return {
       success: true,
@@ -403,24 +403,69 @@ const createFallbackRoute = (
   return {
     success: true,
     stops,
-    totalDistance: estimateDistance(stops),
-    estimatedDuration: estimateDuration(stops),
+    totalDistance: estimateDistance(stops, hubCoords),
+    estimatedDuration: estimateDuration(stops, hubCoords),
     error: 'Route non optimisée (fallback)'
   };
 };
 
 // Estimer la distance (fallback si GMPRO échoue)
-const estimateDistance = (stops: MissionStop[]): number => {
-  // Estimation grossière: 5km entre chaque stop
+// Si les stops et le hub ont des coordonnées, calculer la distance réelle à vol d'oiseau
+const estimateDistance = (stops: MissionStop[], hubCoords?: { lat: number; lng: number }): number => {
+  if (stops.length === 0) return 0;
+  
+  // Si on a des coordonnées, calculer à vol d'oiseau (× 1.4 pour route réelle)
+  const points: { lat: number; lng: number }[] = [];
+  
+  if (hubCoords && hubCoords.lat !== 0) {
+    points.push(hubCoords);
+  }
+  
+  for (const stop of stops) {
+    if (stop.coordinates) {
+      points.push(stop.coordinates);
+    }
+  }
+  
+  if (hubCoords && hubCoords.lat !== 0) {
+    points.push(hubCoords); // Retour au hub
+  }
+  
+  if (points.length >= 2) {
+    let totalKm = 0;
+    for (let i = 1; i < points.length; i++) {
+      totalKm += haversineDistance(points[i - 1], points[i]);
+    }
+    // Facteur 1.4 pour convertir vol d'oiseau → route réelle (routes sinueuses à La Réunion)
+    return Math.round(totalKm * 1.4 * 10) / 10;
+  }
+  
+  // Pas de coordonnées: estimation grossière
   return stops.length * 5;
 };
 
 // Estimer la durée (fallback si GMPRO échoue)
-const estimateDuration = (stops: MissionStop[]): number => {
-  // Estimation: 10 min de trajet + temps de service par stop
-  const travelTime = stops.length * 10;
+const estimateDuration = (stops: MissionStop[], hubCoords?: { lat: number; lng: number }): number => {
+  const distanceKm = estimateDistance(stops, hubCoords);
+  // Vitesse moyenne 30 km/h (routes de La Réunion) + temps de service
+  const travelTime = Math.round((distanceKm / 30) * 60);
   const serviceTime = stops.reduce((acc, s) => acc + s.serviceTime, 0);
   return travelTime + serviceTime;
+};
+
+// Calcul de distance Haversine (en km)
+const haversineDistance = (
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number }
+): number => {
+  const R = 6371; // Rayon de la terre en km
+  const dLat = (b.lat - a.lat) * Math.PI / 180;
+  const dLng = (b.lng - a.lng) * Math.PI / 180;
+  const sinLat = Math.sin(dLat / 2);
+  const sinLng = Math.sin(dLng / 2);
+  const h = sinLat * sinLat + 
+    Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * sinLng * sinLng;
+  return 2 * R * Math.asin(Math.sqrt(h));
 };
 
 // Récupérer l'ID du projet Google Cloud
