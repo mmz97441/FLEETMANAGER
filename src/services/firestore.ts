@@ -251,6 +251,7 @@ export const subscribeToVehicles = (callback: (data: Vehicle[]) => void) => {
         monthlyCost: Number(data.monthlyCost) || 0,
         costPerKm: data.monthlyCost && Number(data.currentMileage) > 0 ? (Number(data.monthlyCost) / 1000) : 0.5,
         assignedDriverId: data.driverId || null,
+        driverId: data.driverId || null,
         photoUrl: data.photoUrl || null,
         technicalControlDate: data.technicalControlDate || undefined,
         fireExtinguisherDate: data.fireExtinguisherDate || undefined,

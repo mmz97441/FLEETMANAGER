@@ -6,7 +6,7 @@
 
 import React, { useState, useMemo } from 'react';
 import {
-  Package, PackageStatus, Zone, Hub, User, UserRole, Vehicle,
+  Package, PackageStatus, Zone, Hub, User, UserRole, Vehicle, VehicleStatus,
   Mission, MissionStatus, MissionType, MissionStop, StopStatus,
   ZONE_COLORS
 } from '../types';
@@ -135,7 +135,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
   // Véhicule du chauffeur sélectionné
   const selectedVehicle = useMemo(() => {
     if (!selectedDriver) return null;
-    return vehicles.find(v => v.driverId === selectedDriver && v.status === 'active') || null;
+    return vehicles.find(v => (v.assignedDriverId === selectedDriver || v.driverId === selectedDriver) && (v.status === VehicleStatus.ACTIVE || v.status === VehicleStatus.IDLE)) || null;
   }, [selectedDriver, vehicles]);
   
   // Hub de départ sélectionné
@@ -270,7 +270,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
         driverId: driver.id,
         driverName: `${driver.firstName} ${driver.lastName}`,
         vehicleId: selectedVehicle?.id,
-        vehiclePlate: selectedVehicle?.plateNumber,
+        vehiclePlate: selectedVehicle?.plate,
         stops: optimizedStops,
         totalPackages: totalPkgs,
         completedStops: 0,
@@ -291,11 +291,18 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
       // Mettre à jour le statut des colis
       const packageIds = optimizedStops.flatMap(s => s.packageIds);
       for (const pkgId of packageIds) {
+        // Trouver le stop de ce colis pour lier stopId
+        const stop = optimizedStops.find(s => s.packageIds.includes(pkgId));
         await updatePackageStatus(pkgId, PackageStatus.SORTED, {
           action: 'SORTED',
           driverId: driver.id,
           driverName: `${driver.firstName} ${driver.lastName}`,
           notes: `Dispatché dans mission ${selectedZone}`
+        }, {
+          missionId,
+          stopId: stop?.id,
+          currentDriverId: driver.id,
+          currentVehicleId: selectedVehicle?.id
         });
       }
       
@@ -533,11 +540,11 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
               >
                 <option value="">Choisir un chauffeur...</option>
                 {selectedZoneStats.availableDrivers.map(driver => {
-                  const vehicle = vehicles.find(v => v.driverId === driver.id && v.status === 'active');
+                  const vehicle = vehicles.find(v => (v.assignedDriverId === driver.id || v.driverId === driver.id) && (v.status === VehicleStatus.ACTIVE || v.status === VehicleStatus.IDLE));
                   return (
                     <option key={driver.id} value={driver.id}>
                       {driver.firstName} {driver.lastName}
-                      {vehicle ? ` - ${vehicle.plateNumber}` : ' (sans véhicule)'}
+                      {vehicle ? ` - ${vehicle.plate}` : ' (sans véhicule)'}
                     </option>
                   );
                 })}
@@ -546,7 +553,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
               {selectedDriver && selectedVehicle && (
                 <div className="mt-2 flex items-center gap-2 text-sm text-green-600 bg-green-50 rounded-lg p-2">
                   <Truck size={16} />
-                  <span>Véhicule: {selectedVehicle.plateNumber}</span>
+                  <span>Véhicule: {selectedVehicle.plate}</span>
                 </div>
               )}
             </div>

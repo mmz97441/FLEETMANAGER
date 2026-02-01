@@ -265,7 +265,8 @@ export const updatePackage = async (pkg: Package): Promise<void> => {
 export const updatePackageStatus = async (
   packageId: string,
   status: PackageStatus,
-  movement: Omit<PackageMovement, 'timestamp'>
+  movement: Omit<PackageMovement, 'timestamp'>,
+  extraFields?: Partial<Pick<Package, 'missionId' | 'stopId' | 'currentDriverId' | 'currentVehicleId' | 'currentHubId'>>
 ): Promise<void> => {
   const pkgDoc = await getDoc(doc(db, PACKAGES_COLLECTION, packageId));
   if (!pkgDoc.exists()) throw new Error('Package not found');
@@ -276,6 +277,7 @@ export const updatePackageStatus = async (
   await updateDoc(doc(db, PACKAGES_COLLECTION, packageId), {
     status,
     movements: [...(pkg.movements || []), { ...movement, timestamp: now }],
+    ...(extraFields || {}),
     updatedAt: now
   });
 };
