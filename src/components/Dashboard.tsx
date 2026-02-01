@@ -264,7 +264,42 @@ const Dashboard: React.FC<DashboardProps> = ({
   vehicles, logs, maintenanceLogs, issues, quotes = [], leaves = [], absences = [],
   currentUser, users, pendingDocuments = 0, onNavigate 
 }) => {
-  const [currentDate, setCurrentDate] = useState(new Date());
+  const [currentDate, setCurrentDate] = useState(() => {
+    // Si on est en début de mois et qu'il n'y a pas encore de données,
+    // on affiche le mois précédent par défaut
+    const now = new Date();
+    if (now.getDate() <= 5) {
+      // On vérifie au premier rendu - sera ajusté par l'effet ci-dessous
+      const prev = new Date(now);
+      prev.setMonth(prev.getMonth() - 1);
+      return prev;
+    }
+    return now;
+  });
+  
+  // Auto-basculer : si le mois affiché n'a aucune donnée, revenir au mois précédent
+  useEffect(() => {
+    const month = currentDate.getMonth();
+    const year = currentDate.getFullYear();
+    const now = new Date();
+    
+    // Seulement si on est sur le mois en cours et en début de mois
+    if (month === now.getMonth() && year === now.getFullYear() && now.getDate() <= 5) {
+      const hasData = logs.some(l => {
+        const d = new Date(l.date);
+        return d.getMonth() === month && d.getFullYear() === year;
+      }) || maintenanceLogs.some(l => {
+        const d = new Date(l.date);
+        return d.getMonth() === month && d.getFullYear() === year;
+      });
+      
+      if (!hasData && logs.length > 0) {
+        const prev = new Date(currentDate);
+        prev.setMonth(prev.getMonth() - 1);
+        setCurrentDate(prev);
+      }
+    }
+  }, [logs, maintenanceLogs]); // Se déclenche quand les données sont chargées
   
   // Hook des permissions
   const { hasPermission, hasAnyPermission } = usePermissions();

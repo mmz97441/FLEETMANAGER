@@ -52,6 +52,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
   // États
   const [selectedZone, setSelectedZone] = useState<Zone | null>(null);
   const [selectedDriver, setSelectedDriver] = useState<string>('');
+  const [selectedHubId, setSelectedHubId] = useState<string>(''); // Hub de départ
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [isDispatching, setIsDispatching] = useState(false);
   const [optimizedStops, setOptimizedStops] = useState<MissionStop[]>([]);
@@ -63,13 +64,10 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
   } | null>(null);
   const [showDispatchModal, setShowDispatchModal] = useState(false);
   
-  // Filtrer les colis en attente
+  // Filtrer les colis en attente (tous les colis non assignés, quelle que soit la date)
   const pendingPackages = useMemo(() => 
-    packages.filter(p => 
-      p.status === PackageStatus.PENDING && 
-      p.createdAt.startsWith(selectedDate)
-    ),
-    [packages, selectedDate]
+    packages.filter(p => p.status === PackageStatus.PENDING),
+    [packages]
   );
   
   // Statistiques par zone
@@ -85,14 +83,35 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
       );
       
       // Trouver le hub de cette zone
-      const hub = hubs.find(h => h.zone === zone && h.isActive) || null;
+      // D'abord chercher par zone, sinon chercher un hub dont les codes postaux couvrent cette zone
+      let hub = hubs.find(h => h.zone === zone && h.isActive) || null;
+      if (!hub) {
+        // Chercher un hub actif qui contient les codes postaux de cette zone
+        const zoneCPs = zonePackages.map(p => p.postalCode);
+        hub = hubs.find(h => 
+          h.isActive && 
+          h.assignedPostalCodes?.some(cp => zoneCPs.includes(cp))
+        ) || null;
+      }
       
       // Chauffeurs disponibles pour cette zone
-      const availableDrivers = users.filter(u => 
-        u.role === UserRole.DRIVER && 
-        !u.isDisabled && 
-        (u.zone === zone || !u.zone) // Zone assignée ou polyvalent
+      // - Chauffeurs assignés à cette zone
+      // - OU tous les chauffeurs si personne n'a de zone assignée (démarrage)
+      const driversWithZone = users.filter(u => 
+        u.role === UserRole.DRIVER && !u.isDisabled && u.zone === zone
       );
+      const allDrivers = users.filter(u => 
+        u.role === UserRole.DRIVER && !u.isDisabled
+      );
+      const anyDriverHasZone = users.some(u => 
+        u.role === UserRole.DRIVER && !u.isDisabled && u.zone
+      );
+      
+      // Si aucun chauffeur n'a de zone → tous sont disponibles partout
+      // Sinon, seuls ceux de la zone + ceux sans zone (polyvalents)
+      const availableDrivers = anyDriverHasZone
+        ? users.filter(u => u.role === UserRole.DRIVER && !u.isDisabled && (u.zone === zone || !u.zone))
+        : allDrivers;
       
       stats.push({
         zone,
@@ -119,9 +138,19 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
     return vehicles.find(v => v.driverId === selectedDriver && v.status === 'active') || null;
   }, [selectedDriver, vehicles]);
   
+  // Hub de départ sélectionné
+  const departureHub = useMemo(() => {
+    if (selectedHubId) return hubs.find(h => h.id === selectedHubId) || null;
+    // Par défaut: le premier hub actif
+    return hubs.find(h => h.isActive) || null;
+  }, [selectedHubId, hubs]);
+  
+  // Hubs actifs disponibles
+  const activeHubs = useMemo(() => hubs.filter(h => h.isActive), [hubs]);
+  
   // Optimiser la tournée
   const handleOptimize = async () => {
-    if (!selectedZoneStats || !selectedZoneStats.hub) return;
+    if (!selectedZoneStats) return;
     
     setIsOptimizing(true);
     setOptimizationResult(null);
@@ -129,20 +158,22 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
     try {
       const apiKey = getGoogleMapsApiKey();
       
-      if (!apiKey) {
-        // Mode fallback sans optimisation
+      if (!apiKey || !departureHub) {
+        // Mode fallback sans optimisation (pas de clé API ou pas de hub)
         const stops = createSimpleStops(selectedZoneStats.packages);
         setOptimizedStops(stops);
         setOptimizationResult({
           success: true,
           totalDistance: stops.length * 5,
           estimatedDuration: stops.length * 15,
-          error: 'API non configurée - ordre par défaut'
+          error: !departureHub 
+            ? 'Aucun hub de départ - ordre par défaut' 
+            : 'API non configurée - ordre par défaut'
         });
       } else {
         const result = await optimizeRoute(
           selectedZoneStats.packages,
-          selectedZoneStats.hub,
+          departureHub,
           selectedDate,
           apiKey
         );
@@ -221,18 +252,19 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
     
     try {
       const driver = users.find(u => u.id === selectedDriver);
-      const hub = selectedZoneStats.hub;
       
-      if (!driver || !hub) {
-        throw new Error('Chauffeur ou hub non trouvé');
+      if (!driver) {
+        throw new Error('Chauffeur non trouvé');
       }
       
       // Créer la mission
+      const totalPkgs = optimizedStops.reduce((sum, s) => sum + s.packageCount, 0);
+      const hub = selectedZoneStats.hub;
       const mission: Omit<Mission, 'id' | 'createdAt' | 'updatedAt'> = {
         date: selectedDate,
         zone: selectedZone!,
-        hubId: hub.id,
-        hubName: hub.name,
+        hubId: hub?.id || departureHub?.id || '',
+        hubName: hub?.name || departureHub?.name || 'Départ direct',
         type: MissionType.DELIVERY,
         status: MissionStatus.ASSIGNED,
         driverId: driver.id,
@@ -241,8 +273,10 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
         vehiclePlate: selectedVehicle?.plateNumber,
         stops: optimizedStops,
         stopCount: optimizedStops.length,
-        packageCount: optimizedStops.reduce((sum, s) => sum + s.packageCount, 0),
+        totalPackages: totalPkgs,
+        packageCount: totalPkgs,
         completedStops: 0,
+        failedStops: 0,
         deliveredPackages: 0,
         failedPackages: 0,
         totalDistance: optimizationResult?.totalDistance || 0,
@@ -282,6 +316,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
       setShowDispatchModal(false);
       setSelectedZone(null);
       setSelectedDriver('');
+      setSelectedHubId('');
       setOptimizedStops([]);
       setOptimizationResult(null);
       
@@ -298,6 +333,10 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
   const openDispatchModal = (zone: Zone) => {
     setSelectedZone(zone);
     setSelectedDriver('');
+    // Pré-sélectionner le hub de départ: celui de la zone si existe, sinon le premier hub actif
+    const zoneHub = hubs.find(h => h.zone === zone && h.isActive);
+    const firstHub = hubs.find(h => h.isActive);
+    setSelectedHubId(zoneHub?.id || firstHub?.id || '');
     setOptimizedStops([]);
     setOptimizationResult(null);
     setShowDispatchModal(true);
@@ -330,7 +369,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
             const colors = ZONE_COLORS[stat.zone];
             const hasHub = !!stat.hub;
             const hasDrivers = stat.availableDrivers.length > 0;
-            const canDispatch = hasHub && hasDrivers;
+            const canDispatch = hasDrivers; // On peut dispatcher même sans hub
             
             return (
               <div
@@ -383,14 +422,19 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
                     </span>
                   </div>
                   
-                  {/* Warnings */}
-                  {!hasHub && (
+                  {/* Hub info */}
+                  {hasHub ? (
+                    <div className="flex items-center gap-2 text-green-600 text-xs bg-green-50 rounded-lg p-2">
+                      <CheckCircle size={14} />
+                      <span>{stat.hub!.name}</span>
+                    </div>
+                  ) : (
                     <div className="flex items-center gap-2 text-amber-600 text-xs bg-amber-50 rounded-lg p-2">
                       <AlertTriangle size={14} />
-                      <span>Hub non configuré</span>
+                      <span>Sans hub (optimisation limitée)</span>
                     </div>
                   )}
-                  {!hasDrivers && hasHub && (
+                  {!hasDrivers && (
                     <div className="flex items-center gap-2 text-red-600 text-xs bg-red-50 rounded-lg p-2">
                       <AlertTriangle size={14} />
                       <span>Aucun chauffeur disponible</span>
@@ -444,10 +488,41 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
               </div>
             </div>
             
-            {/* Étape 1: Sélectionner un chauffeur */}
+            {/* Étape 1: Hub de départ */}
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-2">
-                1. Sélectionner un chauffeur <span className="text-red-500">*</span>
+                1. Hub de départ (dépôt) <span className="text-red-500">*</span>
+              </label>
+              {activeHubs.length === 0 ? (
+                <div className="flex items-center gap-2 text-amber-600 text-sm bg-amber-50 rounded-xl p-3">
+                  <AlertTriangle size={16} />
+                  <span>Aucun hub configuré. Créez un hub dans l'onglet Hubs pour activer l'optimisation.</span>
+                </div>
+              ) : (
+                <select
+                  value={selectedHubId}
+                  onChange={(e) => setSelectedHubId(e.target.value)}
+                  className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none bg-white"
+                >
+                  {activeHubs.map(hub => (
+                    <option key={hub.id} value={hub.id}>
+                      {hub.name} — {hub.address}, {hub.city} (Zone {hub.zone})
+                    </option>
+                  ))}
+                </select>
+              )}
+              {departureHub && (
+                <div className="mt-2 flex items-center gap-2 text-sm text-blue-600 bg-blue-50 rounded-lg p-2">
+                  <MapPin size={16} />
+                  <span>Départ: {departureHub.address}, {departureHub.postalCode} {departureHub.city}</span>
+                </div>
+              )}
+            </div>
+            
+            {/* Étape 2: Sélectionner un chauffeur */}
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-2">
+                2. Sélectionner un chauffeur <span className="text-red-500">*</span>
               </label>
               <select
                 value={selectedDriver}
@@ -474,10 +549,10 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
               )}
             </div>
             
-            {/* Étape 2: Optimiser */}
+            {/* Étape 3: Optimiser */}
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-2">
-                2. Optimiser la tournée
+                3. Optimiser la tournée
               </label>
               
               <button
