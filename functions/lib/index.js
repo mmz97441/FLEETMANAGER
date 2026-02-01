@@ -60,7 +60,9 @@ exports.optimizeTours = functions
         throw new functions.https.HttpsError("internal", `Erreur d'authentification Google: ${err.message}`);
     }
     // 4. Appeler Route Optimization API
-    const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || "fleet-genius-app-485611";
+    // IMPORTANT: GCLOUD_PROJECT renvoie "fleet-genius-app" (alias Firebase)
+    // mais le vrai project ID GCP est "fleet-genius-app-485611"
+    const projectId = "fleet-genius-app-485611";
     const url = `https://routeoptimization.googleapis.com/v1/projects/${projectId}:optimizeTours`;
     console.log(`📡 Appel GMPRO: ${url}`);
     try {
