@@ -1096,7 +1096,7 @@ const App: React.FC = () => {
                   <span className="text-[10px] font-bold text-brand-600 uppercase tracking-wide">{currentUser.role}</span>
               </div>
               <div className="flex items-center gap-2">
-                <NotificationCenter currentUser={currentUser} onNavigate={setActiveView} />
+                <NotificationCenter currentUser={currentUser} onNavigate={setCurrentView} />
                 <div className="w-6">
                   {currentUser.avatarUrl && <img src={currentUser.avatarUrl} className="w-6 h-6 rounded-full border border-slate-200" />}
                 </div>
@@ -1111,7 +1111,7 @@ const App: React.FC = () => {
                   <Menu size={20} />
               </button>
               <div className="pr-2">
-                <NotificationCenter currentUser={currentUser} onNavigate={setActiveView} />
+                <NotificationCenter currentUser={currentUser} onNavigate={setCurrentView} />
               </div>
           </div>
 
