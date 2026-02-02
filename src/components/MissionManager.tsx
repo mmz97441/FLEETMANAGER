@@ -143,11 +143,19 @@ const MissionManager: React.FC<MissionManagerProps> = ({
     [users]
   );
 
-  // Packages du jour
-  const todayPackages = useMemo(() => 
-    packages.filter(p => p.createdAt.startsWith(selectedDate)),
-    [packages, selectedDate]
-  );
+  // Packages visibles : tous les actifs (non terminés) + livrés/échoués du jour sélectionné
+  const todayPackages = useMemo(() => {
+    const activeStatuses = [
+      PackageStatus.PENDING, PackageStatus.COLLECTED, PackageStatus.AT_HUB,
+      PackageStatus.SORTED, PackageStatus.IN_TRANSIT, PackageStatus.LOADED,
+      PackageStatus.IN_DELIVERY
+    ];
+    return packages.filter(p => 
+      activeStatuses.includes(p.status) || 
+      p.createdAt.startsWith(selectedDate) ||
+      p.updatedAt?.startsWith(selectedDate)
+    );
+  }, [packages, selectedDate]);
 
   // Permissions via le hook
   const { hasPermission } = usePermissions();
