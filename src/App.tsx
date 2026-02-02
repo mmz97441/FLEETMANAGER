@@ -1,35 +1,40 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, Suspense, lazy } from 'react';
 // @ts-ignore
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { auth } from "./firebaseConfig";
+// Composants légers chargés immédiatement (shell UI)
 import Sidebar from './components/Sidebar';
-import Dashboard from './components/Dashboard';
-import { VehicleList } from './components/VehicleList';
-import DriverList from './components/DriverList';
-import { FuelManager } from './components/FuelManager';
-import MaintenanceManager from './components/MaintenanceManager';
-import IssueManager from './components/IssueManager';
-import UserManager from './components/UserManager';
-import DriverDocuments from './components/DriverDocuments';
-import AIAdvisor from './components/AIAdvisor';
-import FleetMap from './components/FleetMap';
-import ClientPortal from './components/ClientPortal';
-import QuoteManager from './components/QuoteManager';
-import AbsenceManager from './components/AbsenceManager';
-import DocumentManager from './components/DocumentManager';
-import DocumentAlertModal from './components/DocumentAlertModal';
-import ActivityLogs from './components/ActivityLogs';
-import MissionManager from './components/MissionManager';
-import Settings from './components/Settings'; // New Import
-import ApiDiagnostic from './components/ApiDiagnostic';
-import ErrorBoundary from './components/ErrorBoundary'; // New Import
+import ErrorBoundary from './components/ErrorBoundary';
 import MobileNavBar from './components/MobileNavBar';
-import VehicleDetail from './components/VehicleDetail';
 import Login from './components/Login';
-import ActivateAccount from './components/ActivateAccount';
-import HelpCenter from './components/HelpCenter';
 import { Menu, Loader2, WifiOff } from 'lucide-react';
+
+// === CODE SPLITTING : Lazy loading de tous les composants lourds ===
+const Dashboard = lazy(() => import('./components/Dashboard'));
+const VehicleList = lazy(() => import('./components/VehicleList').then(m => ({ default: m.VehicleList })));
+const DriverList = lazy(() => import('./components/DriverList'));
+const FuelManager = lazy(() => import('./components/FuelManager').then(m => ({ default: m.FuelManager })));
+const MaintenanceManager = lazy(() => import('./components/MaintenanceManager'));
+const IssueManager = lazy(() => import('./components/IssueManager'));
+const UserManager = lazy(() => import('./components/UserManager'));
+const AIAdvisor = lazy(() => import('./components/AIAdvisor'));
+const FleetMap = lazy(() => import('./components/FleetMap'));
+const ClientPortal = lazy(() => import('./components/ClientPortal'));
+const QuoteManager = lazy(() => import('./components/QuoteManager'));
+const AbsenceManager = lazy(() => import('./components/AbsenceManager'));
+const DocumentManager = lazy(() => import('./components/DocumentManager'));
+const DocumentAlertModal = lazy(() => import('./components/DocumentAlertModal'));
+const ActivityLogs = lazy(() => import('./components/ActivityLogs'));
+const MissionManager = lazy(() => import('./components/MissionManager'));
+const Settings = lazy(() => import('./components/Settings'));
+const ApiDiagnostic = lazy(() => import('./components/ApiDiagnostic'));
+const VehicleDetail = lazy(() => import('./components/VehicleDetail'));
+const ActivateAccount = lazy(() => import('./components/ActivateAccount'));
+const HelpCenter = lazy(() => import('./components/HelpCenter'));
+const DriverMissionView = lazy(() => import('./components/DriverMissionView'));
+const PermissionsManager = lazy(() => import('./components/PermissionsManager'));
+const DeliveryScheduleSettings = lazy(() => import('./components/DeliveryScheduleSettings'));
 
 // FIREBASE SERVICES
 import { 
@@ -72,6 +77,7 @@ import {
 } from './services/firestore';
 
 import { logActivity } from './services/activityLogService';
+import { convertQuoteToPackage } from './services/deliveryService';
 import { ActivityAction, ActivityCategory } from './types';
 
 import { 
@@ -81,7 +87,16 @@ import {
 } from './types';
 
 import { PermissionsProvider } from './usePermissions';
-import PermissionsManager from './components/PermissionsManager';
+
+// === Composant de chargement pour Suspense ===
+const PageLoader: React.FC = () => (
+  <div className="flex items-center justify-center h-full min-h-[400px]">
+    <div className="text-center">
+      <Loader2 className="h-10 w-10 animate-spin text-blue-600 mx-auto mb-3" />
+      <p className="text-slate-500 text-sm">Chargement...</p>
+    </div>
+  </div>
+);
 
 const App: React.FC = () => {
   // --- AUTH STATE ---
@@ -573,7 +588,26 @@ const App: React.FC = () => {
   const handleUpdateQuoteStatus = async (id: string, status: QuoteStatus) => {
     const quote = quotes.find(q => q.id === id);
     if (quote) {
-      await updateQuoteInFirestore({ ...quote, status });
+      const updatedQuote = { ...quote, status };
+
+      // Si le devis est ACCEPTÉ → créer automatiquement un colis
+      if (status === QuoteStatus.ACCEPTED && currentUser) {
+        try {
+          const result = await convertQuoteToPackage(quote, currentUser);
+          if (result) {
+            updatedQuote.convertedToPackageId = result.packageId;
+            updatedQuote.convertedAt = new Date().toISOString();
+            console.log(`✅ Devis ${id.slice(-6)} converti en colis ${result.packageId} (zone ${result.zone})`);
+          } else {
+            console.warn(`⚠️ Conversion devis ${id.slice(-6)} en colis échouée (adresse non reconnue ?)`);
+          }
+        } catch (err) {
+          console.error('Erreur conversion devis → colis:', err);
+        }
+      }
+
+      await updateQuoteInFirestore(updatedQuote);
+
       if (currentUser) {
         const action = status === QuoteStatus.ACCEPTED ? ActivityAction.QUOTE_APPROVED 
                      : status === QuoteStatus.REJECTED ? ActivityAction.QUOTE_REJECTED 
@@ -581,7 +615,10 @@ const App: React.FC = () => {
         logActivity(currentUser, action, {
           targetType: 'quote',
           targetId: id,
-          targetName: `Devis ${id.slice(-6)} - ${quote.clientName}`
+          targetName: `Devis ${id.slice(-6)} - ${quote.clientName}`,
+          details: status === QuoteStatus.ACCEPTED && updatedQuote.convertedToPackageId ? {
+            metadata: { convertedToPackageId: updatedQuote.convertedToPackageId }
+          } : undefined
         });
       }
     }
@@ -670,13 +707,15 @@ const App: React.FC = () => {
   // Si token présent ET pas encore connecté → afficher page d'activation
   if (activationToken && !currentUser) {
     return (
-      <ActivateAccount 
-        token={activationToken} 
-        onSuccess={() => {
-          // Nettoyer l'URL après activation réussie
-          window.history.replaceState({}, document.title, window.location.pathname);
-        }}
-      />
+      <Suspense fallback={<div className="h-screen w-screen flex items-center justify-center bg-slate-50"><Loader2 size={48} className="animate-spin text-blue-600" /></div>}>
+        <ActivateAccount 
+          token={activationToken} 
+          onSuccess={() => {
+            // Nettoyer l'URL après activation réussie
+            window.history.replaceState({}, document.title, window.location.pathname);
+          }}
+        />
+      </Suspense>
     );
   }
 
@@ -873,7 +912,16 @@ const App: React.FC = () => {
           />
         );
 
-      case 'missions':
+      case 'missions': {
+        // Chauffeurs → vue mobile dédiée
+        if (currentUser.role === UserRole.DRIVER) {
+          return (
+            <DriverMissionView
+              currentUser={currentUser}
+            />
+          );
+        }
+        // Dispatch / Direction / Admin → vue complète
         return (
           <MissionManager
             currentUser={currentUser}
@@ -881,6 +929,7 @@ const App: React.FC = () => {
             vehicles={vehicles}
           />
         );
+      }
 
       case 'notifications_settings':
         return (
@@ -893,6 +942,13 @@ const App: React.FC = () => {
               <p className="text-slate-500 mb-4">Configurer les alertes email, seuils carburant, rappels contrôle technique...</p>
               <span className="inline-block px-3 py-1 bg-blue-100 text-blue-700 text-sm font-bold rounded-full">À venir</span>
             </div>
+          </div>
+        );
+
+      case 'delivery_schedule':
+        return (
+          <div className="p-4 md:p-8">
+            <DeliveryScheduleSettings currentUser={currentUser} />
           </div>
         );
 
@@ -1031,18 +1087,22 @@ const App: React.FC = () => {
 
           <main className="flex-1 overflow-y-auto p-4 lg:p-8 custom-scrollbar pt-14 lg:pt-20 pb-20 lg:pb-8">
               <div className="max-w-7xl mx-auto h-full">
+                <Suspense fallback={<PageLoader />}>
                   {renderContent()}
+                </Suspense>
               </div>
           </main>
         </div>
 
         {selectedVehicle && (
-          <VehicleDetail 
-              vehicle={selectedVehicle} 
-              logs={fuelLogs} 
-              maintenanceLogs={maintenanceLogs} 
-              onClose={closeVehicleDetail} 
-          />
+          <Suspense fallback={null}>
+            <VehicleDetail 
+                vehicle={selectedVehicle} 
+                logs={fuelLogs} 
+                maintenanceLogs={maintenanceLogs} 
+                onClose={closeVehicleDetail} 
+            />
+          </Suspense>
         )}
 
         {/* Mobile Nav n'est affiché que si on n'est pas Client (car menu différent) */}
@@ -1055,20 +1115,22 @@ const App: React.FC = () => {
         )}
 
         {/* MODAL ALERTE DOCUMENTS NON SIGNÉS */}
-        <DocumentAlertModal
-          isOpen={showDocumentAlert}
-          onClose={() => {
-            setShowDocumentAlert(false);
-            setDocumentAlertDismissed(true);
-          }}
-          onGoToDocuments={() => {
-            setShowDocumentAlert(false);
-            setDocumentAlertDismissed(true);
-            setCurrentView('documents');
-          }}
-          pendingDocuments={pendingDocumentsList}
-          currentUser={currentUser}
-        />
+        <Suspense fallback={null}>
+          <DocumentAlertModal
+            isOpen={showDocumentAlert}
+            onClose={() => {
+              setShowDocumentAlert(false);
+              setDocumentAlertDismissed(true);
+            }}
+            onGoToDocuments={() => {
+              setShowDocumentAlert(false);
+              setDocumentAlertDismissed(true);
+              setCurrentView('documents');
+            }}
+            pendingDocuments={pendingDocumentsList}
+            currentUser={currentUser}
+          />
+        </Suspense>
 
       </div>
       </PermissionsProvider>

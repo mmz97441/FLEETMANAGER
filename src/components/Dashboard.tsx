@@ -13,8 +13,10 @@ import {
   Route, Calculator, Trophy, Award, Target, TrendingDown as TrendDown, Wallet
 } from 'lucide-react';
 import { Vehicle, VehicleStatus, FuelLog, MaintenanceLog, User, UserRole, ViewState, QuoteRequest, Issue, IssueStatus, LeaveRequest, LeaveStatus, Absence, AbsenceStatus, AbsenceType } from '../types';
+import { MissionStatus } from '../types';
 import Modal from './shared/Modal';
 import { usePermissions, Permission } from '../usePermissions';
+import { useMissionStats } from '../hooks/useMissionStats';
 
 // ============================================================================
 // TYPES & INTERFACES
@@ -303,6 +305,9 @@ const Dashboard: React.FC<DashboardProps> = ({
   
   // Hook des permissions
   const { hasPermission, hasAnyPermission } = usePermissions();
+
+  // === MISSIONS : Stats temps réel du jour ===
+  const missionStats = useMissionStats();
 
   // Anciennes vérifications de rôle (gardées pour compatibilité avec le rendu conditionnel existant)
   const effectiveRole = normalizeRole(currentUser.role);
@@ -1676,6 +1681,134 @@ const Dashboard: React.FC<DashboardProps> = ({
           color={commonKpis.pendingLeaves.length + commonKpis.openIssues.length > 0 ? 'orange' : 'green'}
         />
       </div>
+
+      {/* === BLOC OPÉRATIONS LIVRAISON DU JOUR === */}
+      {!missionStats.loading && missionStats.totalMissions > 0 && (
+        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl border border-blue-200/50 overflow-hidden">
+          <div className="p-4 border-b border-blue-200/30 flex items-center justify-between">
+            <h3 className="font-bold text-slate-800 flex items-center gap-2">
+              <Route size={18} className="text-blue-600" /> Livraisons du jour
+            </h3>
+            <button 
+              onClick={() => onNavigate('missions')} 
+              className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1"
+            >
+              Voir détail <ArrowUpRight size={14} />
+            </button>
+          </div>
+          
+          {/* KPIs Livraison */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-4">
+            <div className="bg-white/80 rounded-xl p-3 text-center border border-white">
+              <p className="text-2xl font-extrabold text-slate-800">{missionStats.totalPackages}</p>
+              <p className="text-[11px] font-medium text-slate-500 uppercase">Colis total</p>
+            </div>
+            <div className="bg-white/80 rounded-xl p-3 text-center border border-white">
+              <p className="text-2xl font-extrabold text-green-600">{missionStats.deliveredPackages}</p>
+              <p className="text-[11px] font-medium text-slate-500 uppercase">Livrés</p>
+            </div>
+            <div className="bg-white/80 rounded-xl p-3 text-center border border-white">
+              <p className="text-2xl font-extrabold text-orange-500">{missionStats.inDeliveryPackages}</p>
+              <p className="text-[11px] font-medium text-slate-500 uppercase">En cours</p>
+            </div>
+            <div className="bg-white/80 rounded-xl p-3 text-center border border-white">
+              <p className="text-2xl font-extrabold text-red-500">{missionStats.failedPackages}</p>
+              <p className="text-[11px] font-medium text-slate-500 uppercase">Échecs</p>
+            </div>
+          </div>
+
+          {/* Barre de progression globale */}
+          <div className="px-4 pb-3">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-xs font-medium text-slate-600">
+                Taux de livraison
+              </span>
+              <span className="text-xs font-bold text-slate-800">
+                {missionStats.deliveryRate.toFixed(0)}%
+              </span>
+            </div>
+            <div className="h-2.5 bg-white rounded-full overflow-hidden">
+              <div 
+                className="h-full rounded-full transition-all duration-700"
+                style={{ 
+                  width: `${Math.min(missionStats.deliveryRate, 100)}%`,
+                  background: missionStats.deliveryRate >= 90 
+                    ? 'linear-gradient(90deg, #22c55e, #16a34a)' 
+                    : missionStats.deliveryRate >= 70 
+                      ? 'linear-gradient(90deg, #f59e0b, #d97706)' 
+                      : 'linear-gradient(90deg, #ef4444, #dc2626)'
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Missions actives */}
+          {missionStats.activeMissions.length > 0 && (
+            <div className="border-t border-blue-200/30">
+              <div className="px-4 py-2 bg-blue-50/50">
+                <p className="text-xs font-bold text-blue-700 uppercase">
+                  {missionStats.missionsInProgress} tournée(s) en cours
+                </p>
+              </div>
+              <div className="divide-y divide-blue-100/50 max-h-[200px] overflow-y-auto">
+                {missionStats.activeMissions.slice(0, 5).map(m => (
+                  <div key={m.id} className="px-4 py-2.5 flex items-center justify-between hover:bg-white/40 transition-colors">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                        m.status === MissionStatus.IN_PROGRESS ? 'bg-green-500 animate-pulse' : 'bg-blue-400'
+                      }`} />
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-slate-800 truncate">{m.driverName}</p>
+                        <p className="text-[11px] text-slate-500">
+                          {m.vehiclePlate} • {m.zone} • {m.completedStops}/{m.totalStops} stops
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <div className="w-16 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-blue-500 rounded-full transition-all" 
+                          style={{ width: `${m.progress}%` }}
+                        />
+                      </div>
+                      <span className="text-xs font-bold text-slate-600 w-8 text-right">
+                        {m.progress.toFixed(0)}%
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Stats par zone */}
+          {missionStats.zoneStats.length > 0 && (
+            <div className="border-t border-blue-200/30 p-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                {missionStats.zoneStats.map(z => (
+                  <div key={z.zone} className="bg-white/60 rounded-lg p-2 text-center">
+                    <p className="text-xs font-bold text-slate-700">{z.zone}</p>
+                    <p className="text-sm font-extrabold text-slate-800">{z.delivered}/{z.totalPackages}</p>
+                    <p className="text-[10px] text-slate-500">{z.rate.toFixed(0)}% livré</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Lien rapide vers missions quand aucune mission du jour */}
+      {!missionStats.loading && missionStats.totalMissions === 0 && (
+        <button 
+          onClick={() => onNavigate('missions')} 
+          className="w-full bg-white rounded-2xl border border-dashed border-blue-300 p-6 text-center hover:bg-blue-50/50 transition-colors group"
+        >
+          <Route size={28} className="mx-auto mb-2 text-blue-400 group-hover:text-blue-600 transition-colors" />
+          <p className="text-sm font-bold text-slate-700">Aucune mission aujourd'hui</p>
+          <p className="text-xs text-slate-500 mt-1">Cliquez pour créer des tournées de livraison</p>
+        </button>
+      )}
 
       {/* Deux colonnes : À traiter + Véhicules immobilisés */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

@@ -6,7 +6,7 @@ import {
   FileCheck, CalendarDays, ChevronDown, ChevronRight,
   ShoppingBag, Euro, List, Settings as SettingsIcon, FileSignature,
   UserCog, Bell, Download, ClipboardList, Palmtree, Shield,
-  Route, Package, MapPin, Activity
+  Route, Package, MapPin, Activity, Clock
 } from 'lucide-react';
 import { ViewState, User, UserRole } from '../types';
 import { usePermissions, Permission, PermissionKey } from '../usePermissions';
@@ -161,6 +161,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
       permission: Permission.SETTINGS_ACCESS,
       items: [
         { id: 'settings', label: 'Préférences', icon: SettingsIcon, permission: Permission.SETTINGS_ACCESS },
+        { id: 'delivery_schedule', label: 'Horaires livraison', icon: Clock, permission: Permission.SETTINGS_COMPANY },
         { id: 'notifications_settings', label: 'Notifications', icon: Bell, permission: Permission.SETTINGS_ACCESS },
         { id: 'import_export', label: 'Imports / Exports', icon: Download, permission: Permission.IMPORT_EXPORT_ACCESS },
         { id: 'api_diagnostic', label: 'Diagnostic API', icon: Activity, permission: Permission.SETTINGS_COMPANY },
@@ -177,7 +178,8 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
       permission: Permission.CLIENT_DASHBOARD,
       items: [
         { id: 'client_dashboard', label: 'Tableau de Bord', icon: LayoutDashboard, permission: Permission.CLIENT_DASHBOARD },
-        { id: 'client_list', label: 'Mes Expéditions', icon: List, permission: Permission.CLIENT_REQUESTS_VIEW_OWN },
+        { id: 'client_list', label: 'Mes Demandes', icon: List, permission: Permission.CLIENT_REQUESTS_VIEW_OWN },
+        { id: 'client_shipments', label: 'Mes Expéditions', icon: Package, permission: Permission.CLIENT_REQUESTS_VIEW_OWN },
         { id: 'client_team', label: 'Mon Équipe', icon: Users, permission: Permission.CLIENT_TEAM_VIEW },
       ]
     },

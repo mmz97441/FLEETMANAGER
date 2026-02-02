@@ -141,6 +141,24 @@ service cloud.firestore {
       allow write: if request.auth != null;
     }
     
+    // Preuves de livraison (POD)
+    match /proofs_of_delivery/{podId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+    
+    // Manifestes d'enlèvement (pickup scans)
+    match /pickups/{pickupId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+    
+    // Settings (horaires livraison, config)
+    match /settings/{settingId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+    
     // Package transfers (transferts entre chauffeurs)
     match /package_transfers/{transferId} {
       allow read: if request.auth != null;

@@ -1,13 +1,19 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { QuoteRequest, QuoteStatus, User, UserRole, ViewState, SavedAddress } from '../types';
-import { Package, MapPin, Calendar, Plus, CheckCircle, XCircle, Clock, Truck, Euro, Send, X, ArrowRight, User as UserIcon, Phone, Box, Info, Bell, FileText, Weight, Building2, StickyNote, BarChart3, Users, Mail, UserPlus, AlertTriangle, PieChart as PieChartIcon, Edit, Trash2, HelpCircle, PhoneCall, FileQuestion, BookOpen, ChevronDown, ChevronUp, Bookmark, Star } from 'lucide-react';
+import { QuoteRequest, QuoteStatus, User, UserRole, ViewState, SavedAddress, DeliveryTimeSlot, Zone, ProofOfDelivery, Package as PackageType, PackageStatus, PACKAGE_STATUS_COLORS } from '../types';
+import { Package, MapPin, Calendar, Plus, CheckCircle, XCircle, Clock, Truck, Euro, Send, X, ArrowRight, User as UserIcon, Phone, Box, Info, Bell, FileText, Weight, Building2, StickyNote, BarChart3, Users, Mail, UserPlus, AlertTriangle, PieChart as PieChartIcon, Edit, Trash2, HelpCircle, PhoneCall, FileQuestion, BookOpen, ChevronDown, ChevronUp, Bookmark, Star, Printer, Search, Download, QrCode, Eye } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import Modal from './shared/Modal';
 import ConfirmModal from './ConfirmModal';
 import { sendUserInvitationEmail } from '../services/emailService';
 import { createInvitation, getActivationUrl, resendInvitation } from '../services/invitationService';
 import { subscribeToSavedAddresses, addSavedAddress, incrementAddressUsage } from '../services/firestore';
+import { getDeliveryScheduleConfig, getAvailableSlotsForZone, estimateZoneFromAddress } from '../services/deliveryService';
+import { getPODByPackage } from '../services/podService';
+import { subscribeToPackages } from '../services/missionService';
+import { generateBatchLabelsHTML } from '../services/pickupService';
+import ShippingLabel, { quoteToLabelData, ShippingLabelData } from './ShippingLabel';
+import PODViewer from './PODViewer';
 
 // ============================================================================
 // COMPOSANT InputField DÉFINI EN DEHORS pour éviter le bug de focus
@@ -254,6 +260,67 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   const [selectedDestLabel, setSelectedDestLabel] = useState<string | null>(null);
   const [addressSaveMessage, setAddressSaveMessage] = useState<string | null>(null);
 
+  // Créneaux de livraison
+  const [deliverySlots, setDeliverySlots] = useState<DeliveryTimeSlot[]>([]);
+  const [selectedSlot, setSelectedSlot] = useState<DeliveryTimeSlot | null>(null);
+  const [detectedZone, setDetectedZone] = useState<Zone | null>(null);
+  const [labelData, setLabelData] = useState<ShippingLabelData | null>(null);
+  const [viewingPOD, setViewingPOD] = useState<{ pod: ProofOfDelivery; quote: QuoteRequest } | null>(null);
+  const [loadingPOD, setLoadingPOD] = useState<string | null>(null);
+
+  // === MES EXPÉDITIONS (colis du client) ===
+  const [clientPackages, setClientPackages] = useState<PackageType[]>([]);
+  const [shipmentSearch, setShipmentSearch] = useState('');
+  const [shipmentFilter, setShipmentFilter] = useState<'all' | 'pending' | 'transit' | 'delivered' | 'failed'>('all');
+  const [selectedLabels, setSelectedLabels] = useState<Set<string>>(new Set());
+
+  // Charger la config créneaux au montage
+  useEffect(() => {
+    const loadConfig = async () => {
+      try {
+        const cfg = await getDeliveryScheduleConfig();
+        // Stocker tous les slots actifs, on filtrera quand on connaîtra la zone
+        setDeliverySlots(cfg.slots.filter(s => s.isActive));
+      } catch (e) {
+        console.warn('Erreur chargement créneaux:', e);
+      }
+    };
+    loadConfig();
+  }, []);
+
+  // Charger les colis du client (pour "Mes Expéditions")
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    const unsub = subscribeToPackages((pkgs) => {
+      setClientPackages(pkgs);
+    }, { clientId: currentUser.companyName || currentUser.id });
+    return unsub;
+  }, [currentUser.id, currentUser.companyName]);
+
+  // Détecter la zone quand l'adresse destination change
+  useEffect(() => {
+    const detect = async () => {
+      const fullAddr = `${newRequest.destinationAddress},${newRequest.destinationCity}`;
+      if (fullAddr.length < 8) {
+        setDetectedZone(null);
+        return;
+      }
+      const result = await estimateZoneFromAddress(fullAddr);
+      setDetectedZone(result?.zone || null);
+    };
+    const timer = setTimeout(detect, 500); // debounce
+    return () => clearTimeout(timer);
+  }, [newRequest.destinationAddress, newRequest.destinationCity]);
+
+  // Filtrer les créneaux disponibles selon zone et date
+  const availableSlots = useMemo(() => {
+    if (!detectedZone || !newRequest.deliveryDate) return [];
+    const dateStr = newRequest.deliveryDate.split('T')[0];
+    return deliverySlots
+      .filter(s => s.zones.includes(detectedZone))
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+  }, [detectedZone, newRequest.deliveryDate, deliverySlots]);
+
   // S'abonner aux adresses enregistrées de l'entreprise
   useEffect(() => {
     if (!currentUser.companyName) return;
@@ -432,6 +499,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
               setDestLabel('');
               setSelectedOriginLabel(null);
               setSelectedDestLabel(null);
+              setSelectedSlot(null);
               break;
           case 'ADD_MEMBER':
               if (onAddTeamMember) {
@@ -525,7 +593,14 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
           pickupDate: newRequest.pickupDate,
           deliveryDate: newRequest.deliveryDate,
           clientNotes: newRequest.clientNotes,
-          status: QuoteStatus.REQUESTED
+          status: QuoteStatus.REQUESTED,
+          // Créneau de livraison choisi
+          deliverySlotId: selectedSlot?.id,
+          deliveryTimeWindow: selectedSlot ? {
+            start: selectedSlot.start,
+            end: selectedSlot.end,
+            label: selectedSlot.label
+          } : undefined
       };
 
       setPendingAction({ type: 'ADD_QUOTE', data: request });
@@ -577,6 +652,23 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   const confirmDeleteMember = (user: User) => {
       setPendingAction({ type: 'DELETE_MEMBER', data: user });
       setIsConfirmModalOpen(true);
+  };
+
+  // Charger la POD d'un devis converti en colis
+  const handleViewPOD = async (quote: QuoteRequest) => {
+    if (!quote.convertedToPackageId) return;
+    setLoadingPOD(quote.id);
+    try {
+      const pod = await getPODByPackage(quote.convertedToPackageId);
+      if (pod) {
+        setViewingPOD({ pod, quote });
+      } else {
+        alert('La preuve de livraison n\'est pas encore disponible.');
+      }
+    } catch (e) {
+      console.error('Erreur chargement POD:', e);
+    }
+    setLoadingPOD(null);
   };
 
   const confirmStatusChange = (id: string, status: QuoteStatus) => {
@@ -1073,6 +1165,50 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                     </div>
                                 </div>
                             )}
+
+                            {/* Footer devis ACCEPTÉ — Bouton Étiquette */}
+                            {quote.status === QuoteStatus.ACCEPTED && (
+                                <div className="px-6 py-4 bg-emerald-50/50 border-t border-emerald-100 flex flex-col md:flex-row justify-between items-center gap-4 rounded-b-2xl">
+                                    <div className="flex items-center gap-3">
+                                        <div className="bg-white p-2 rounded-full shadow-sm text-emerald-600 border border-emerald-100">
+                                            <CheckCircle size={20} />
+                                        </div>
+                                        <div>
+                                            <p className="text-xs text-emerald-600 font-bold uppercase">Commande validée</p>
+                                            <p className="text-sm text-slate-600">
+                                                {quote.priceOffer?.toLocaleString()} € HT
+                                                {quote.convertedToPackageId && (
+                                                    <span className="ml-2 text-xs text-emerald-500">• Colis créé ✓</span>
+                                                )}
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={() => setLabelData(quoteToLabelData(quote))}
+                                            className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-lg shadow-emerald-200 text-sm transition-all active:scale-95"
+                                        >
+                                            <Printer size={14} />
+                                            Étiquette
+                                        </button>
+                                        {quote.convertedToPackageId && (
+                                            <button
+                                                onClick={() => handleViewPOD(quote)}
+                                                disabled={loadingPOD === quote.id}
+                                                className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm transition-all active:scale-95 disabled:opacity-50"
+                                            >
+                                                {loadingPOD === quote.id ? (
+                                                    <Clock size={14} className="animate-spin" />
+                                                ) : (
+                                                    <FileText size={14} />
+                                                )}
+                                                Preuve de livraison
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     ))}
                     {displayQuotes.length === 0 && (
@@ -1084,6 +1220,245 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                         </div>
                     )}
                 </div>
+            </div>
+        )}
+
+        {/* --- VIEW: MES EXPÉDITIONS (Tracking + Étiquettes) --- */}
+        {activeView === 'client_shipments' && (
+            <div className="space-y-6 animate-fade-in">
+                {/* Header */}
+                <div className="bg-gradient-to-r from-blue-700 to-indigo-600 rounded-3xl p-6 text-white shadow-xl">
+                    <h2 className="text-2xl font-bold flex items-center gap-3">
+                        <QrCode size={28} />
+                        Mes Expéditions
+                    </h2>
+                    <p className="text-blue-100 mt-1">
+                        {clientPackages.length} colis au total — Suivez vos envois et téléchargez vos étiquettes
+                    </p>
+                </div>
+
+                {/* Stats rapides */}
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                    {[
+                        { label: 'En attente', count: clientPackages.filter(p => p.status === PackageStatus.PENDING).length, color: 'bg-slate-100 text-slate-700', filter: 'pending' as const },
+                        { label: 'En transit', count: clientPackages.filter(p => [PackageStatus.COLLECTED, PackageStatus.AT_HUB, PackageStatus.SORTED, PackageStatus.IN_TRANSIT, PackageStatus.LOADED, PackageStatus.IN_DELIVERY].includes(p.status)).length, color: 'bg-blue-100 text-blue-700', filter: 'transit' as const },
+                        { label: 'Livrés', count: clientPackages.filter(p => p.status === PackageStatus.DELIVERED).length, color: 'bg-green-100 text-green-700', filter: 'delivered' as const },
+                        { label: 'Échecs', count: clientPackages.filter(p => p.status === PackageStatus.FAILED || p.status === PackageStatus.RETURNED).length, color: 'bg-red-100 text-red-700', filter: 'failed' as const },
+                        { label: 'Tous', count: clientPackages.length, color: 'bg-indigo-100 text-indigo-700', filter: 'all' as const },
+                    ].map(s => (
+                        <button
+                            key={s.filter}
+                            onClick={() => setShipmentFilter(s.filter)}
+                            className={`p-3 rounded-xl text-center transition-all ${
+                                shipmentFilter === s.filter ? `${s.color} ring-2 ring-offset-1 ring-current shadow-md` : 'bg-white border border-slate-200 hover:bg-slate-50'
+                            }`}
+                        >
+                            <p className="text-2xl font-black">{s.count}</p>
+                            <p className="text-[11px] font-medium">{s.label}</p>
+                        </button>
+                    ))}
+                </div>
+
+                {/* Actions : Recherche + Impression lot */}
+                <div className="flex flex-col md:flex-row gap-3">
+                    <div className="relative flex-1">
+                        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <input
+                            type="text"
+                            value={shipmentSearch}
+                            onChange={(e) => setShipmentSearch(e.target.value)}
+                            placeholder="Rechercher par code, destinataire, adresse..."
+                            className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
+                        />
+                    </div>
+
+                    {selectedLabels.size > 0 && (
+                        <button
+                            onClick={() => {
+                                const selected = clientPackages.filter(p => selectedLabels.has(p.id));
+                                if (selected.length === 0) return;
+                                const html = generateBatchLabelsHTML(selected, 'FleetGenius Transport');
+                                const win = window.open('', '_blank');
+                                if (win) { win.document.write(html); win.document.close(); }
+                            }}
+                            className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-bold text-sm shadow-lg shadow-indigo-200 active:scale-95 transition-transform"
+                        >
+                            <Printer size={16} />
+                            Imprimer {selectedLabels.size} étiquette{selectedLabels.size > 1 ? 's' : ''}
+                        </button>
+                    )}
+
+                    <button
+                        onClick={() => {
+                            const pending = clientPackages.filter(p => p.status === PackageStatus.PENDING);
+                            if (pending.length === 0) return;
+                            const html = generateBatchLabelsHTML(pending as PackageType[], 'FleetGenius Transport');
+                            const win = window.open('', '_blank');
+                            if (win) { win.document.write(html); win.document.close(); }
+                        }}
+                        className="flex items-center gap-2 px-5 py-2.5 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold text-sm hover:bg-slate-50 transition-colors"
+                    >
+                        <Download size={16} />
+                        Toutes les étiquettes en attente ({clientPackages.filter(p => p.status === PackageStatus.PENDING).length})
+                    </button>
+                </div>
+
+                {/* Liste des colis */}
+                {(() => {
+                    const filtered = clientPackages.filter(p => {
+                        // Filtre statut
+                        if (shipmentFilter === 'pending' && p.status !== PackageStatus.PENDING) return false;
+                        if (shipmentFilter === 'transit' && ![PackageStatus.COLLECTED, PackageStatus.AT_HUB, PackageStatus.SORTED, PackageStatus.IN_TRANSIT, PackageStatus.LOADED, PackageStatus.IN_DELIVERY].includes(p.status)) return false;
+                        if (shipmentFilter === 'delivered' && p.status !== PackageStatus.DELIVERED) return false;
+                        if (shipmentFilter === 'failed' && p.status !== PackageStatus.FAILED && p.status !== PackageStatus.RETURNED) return false;
+                        // Filtre recherche
+                        if (shipmentSearch) {
+                            const term = shipmentSearch.toLowerCase();
+                            return (
+                                (p.barcode || '').toLowerCase().includes(term) ||
+                                p.orderNumber.toLowerCase().includes(term) ||
+                                p.contactName.toLowerCase().includes(term) ||
+                                p.address.toLowerCase().includes(term) ||
+                                p.city.toLowerCase().includes(term)
+                            );
+                        }
+                        return true;
+                    }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+                    // Exposer pour le bouton "Toutes les étiquettes"
+
+                    return (
+                        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+                            {/* Header tableau */}
+                            <div className="hidden md:grid grid-cols-12 gap-2 px-4 py-3 bg-slate-50 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wide">
+                                <div className="col-span-1 flex items-center">
+                                    <input
+                                        type="checkbox"
+                                        checked={selectedLabels.size === filtered.length && filtered.length > 0}
+                                        onChange={(e) => {
+                                            if (e.target.checked) setSelectedLabels(new Set(filtered.map(p => p.id)));
+                                            else setSelectedLabels(new Set());
+                                        }}
+                                        className="rounded"
+                                    />
+                                </div>
+                                <div className="col-span-2">Code-barres</div>
+                                <div className="col-span-3">Destinataire</div>
+                                <div className="col-span-2">Ville</div>
+                                <div className="col-span-2">Statut</div>
+                                <div className="col-span-2 text-right">Actions</div>
+                            </div>
+
+                            {/* Lignes */}
+                            <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto">
+                                {filtered.map(pkg => {
+                                    const statusColors = PACKAGE_STATUS_COLORS[pkg.status] || { bg: 'bg-slate-100', text: 'text-slate-700' };
+                                    const lastMove = pkg.movements?.[pkg.movements.length - 1];
+                                    
+                                    return (
+                                        <div key={pkg.id} className="grid grid-cols-1 md:grid-cols-12 gap-2 px-4 py-3 items-center hover:bg-slate-50 transition-colors">
+                                            {/* Checkbox */}
+                                            <div className="hidden md:flex col-span-1 items-center">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selectedLabels.has(pkg.id)}
+                                                    onChange={(e) => {
+                                                        const next = new Set(selectedLabels);
+                                                        e.target.checked ? next.add(pkg.id) : next.delete(pkg.id);
+                                                        setSelectedLabels(next);
+                                                    }}
+                                                    className="rounded"
+                                                />
+                                            </div>
+
+                                            {/* Code-barres */}
+                                            <div className="md:col-span-2">
+                                                <p className="font-mono text-xs font-bold text-slate-800">{pkg.barcode || pkg.orderNumber}</p>
+                                                <p className="text-[10px] text-slate-400">Réf: {pkg.orderNumber}</p>
+                                            </div>
+
+                                            {/* Destinataire */}
+                                            <div className="md:col-span-3">
+                                                <p className="text-sm font-semibold text-slate-800 truncate">{pkg.contactName}</p>
+                                                <p className="text-xs text-slate-500 truncate">{pkg.address}</p>
+                                            </div>
+
+                                            {/* Ville */}
+                                            <div className="md:col-span-2">
+                                                <p className="text-xs font-medium text-slate-600">{pkg.postalCode} {pkg.city}</p>
+                                                <p className="text-[10px] text-slate-400">{pkg.zone}</p>
+                                            </div>
+
+                                            {/* Statut */}
+                                            <div className="md:col-span-2">
+                                                <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-bold ${statusColors.bg} ${statusColors.text}`}>
+                                                    {pkg.status === PackageStatus.DELIVERED && '✅'}
+                                                    {pkg.status === PackageStatus.PENDING && '⏳'}
+                                                    {pkg.status === PackageStatus.COLLECTED && '📦'}
+                                                    {(pkg.status === PackageStatus.IN_TRANSIT || pkg.status === PackageStatus.IN_DELIVERY) && '🚚'}
+                                                    {pkg.status === PackageStatus.FAILED && '❌'}
+                                                    {pkg.status}
+                                                </span>
+                                                {lastMove && (
+                                                    <p className="text-[10px] text-slate-400 mt-0.5">
+                                                        {new Date(lastMove.timestamp).toLocaleDateString('fr-FR')} {new Date(lastMove.timestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                                                    </p>
+                                                )}
+                                            </div>
+
+                                            {/* Actions */}
+                                            <div className="md:col-span-2 flex items-center justify-end gap-2">
+                                                {/* Imprimer étiquette */}
+                                                <button
+                                                    onClick={() => {
+                                                        const html = generateBatchLabelsHTML([pkg as PackageType], 'FleetGenius Transport');
+                                                        const win = window.open('', '_blank');
+                                                        if (win) { win.document.write(html); win.document.close(); }
+                                                    }}
+                                                    title="Imprimer l'étiquette"
+                                                    className="p-2 bg-slate-100 hover:bg-indigo-100 text-slate-600 hover:text-indigo-700 rounded-lg transition-colors"
+                                                >
+                                                    <QrCode size={14} />
+                                                </button>
+
+                                                {/* Voir POD si livré */}
+                                                {pkg.status === PackageStatus.DELIVERED && pkg.pod && (
+                                                    <button
+                                                        onClick={() => setViewingPOD({ pod: pkg.pod!, quote: { id: pkg.id, clientName: pkg.clientName, destination: pkg.city, destinationAddress: pkg.address, destinationContact: { name: pkg.contactName } } as any })}
+                                                        title="Preuve de livraison"
+                                                        className="p-2 bg-green-100 hover:bg-green-200 text-green-700 rounded-lg transition-colors"
+                                                    >
+                                                        <Eye size={14} />
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+
+                                {filtered.length === 0 && (
+                                    <div className="text-center py-16">
+                                        <Package className="mx-auto text-slate-300 mb-3" size={40} />
+                                        <p className="text-slate-500 font-medium">Aucune expédition trouvée</p>
+                                        <p className="text-xs text-slate-400 mt-1">
+                                            {shipmentSearch ? 'Essayez un autre terme de recherche' : 'Vos colis apparaîtront ici après import'}
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Footer */}
+                            {filtered.length > 0 && (
+                                <div className="px-4 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-xs text-slate-500">
+                                    <span>{filtered.length} expédition{filtered.length > 1 ? 's' : ''}</span>
+                                    {selectedLabels.size > 0 && (
+                                        <span className="font-bold text-indigo-600">{selectedLabels.size} sélectionnée{selectedLabels.size > 1 ? 's' : ''}</span>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    );
+                })()}
             </div>
         )}
 
@@ -1427,6 +1802,48 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                     onChange={(e: any) => setNewRequest({...newRequest, deliveryDate: e.target.value})}
                                 />
                             </div>
+
+                            {/* Créneau de livraison */}
+                            {newRequest.deliveryDate && (
+                              <div className="pt-2">
+                                <label className="block text-xs font-bold text-slate-500 mb-1 ml-1">
+                                  Créneau de livraison souhaité
+                                  {detectedZone && (
+                                    <span className="ml-2 text-indigo-500 font-normal">(Zone {detectedZone})</span>
+                                  )}
+                                </label>
+                                {availableSlots.length > 0 ? (
+                                  <div className="grid grid-cols-2 gap-2">
+                                    {availableSlots.map(slot => (
+                                      <button
+                                        key={slot.id}
+                                        type="button"
+                                        onClick={() => setSelectedSlot(selectedSlot?.id === slot.id ? null : slot)}
+                                        className={`flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-medium border transition-all ${
+                                          selectedSlot?.id === slot.id
+                                            ? 'bg-indigo-50 border-indigo-300 text-indigo-700 ring-2 ring-indigo-200'
+                                            : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-200'
+                                        }`}
+                                      >
+                                        <Clock size={14} className={selectedSlot?.id === slot.id ? 'text-indigo-500' : 'text-slate-400'} />
+                                        <div className="text-left">
+                                          <div className="font-bold text-xs">{slot.label}</div>
+                                          <div className="text-[10px] opacity-70">{slot.start} — {slot.end}</div>
+                                        </div>
+                                      </button>
+                                    ))}
+                                  </div>
+                                ) : detectedZone ? (
+                                  <p className="text-xs text-amber-600 bg-amber-50 px-3 py-2 rounded-lg">
+                                    Aucun créneau disponible pour cette zone/date. Contactez-nous pour un arrangement.
+                                  </p>
+                                ) : (
+                                  <p className="text-xs text-slate-400 px-3 py-2">
+                                    Renseignez l'adresse de destination pour voir les créneaux disponibles.
+                                  </p>
+                                )}
+                              </div>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -1576,6 +1993,30 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                 confirmLabel="Confirmer"
                 cancelLabel="Annuler"
             />
+        )}
+
+        {/* ÉTIQUETTE D'EXPÉDITION */}
+        {labelData && (
+          <ShippingLabel
+            data={labelData}
+            onClose={() => setLabelData(null)}
+            companyName={currentUser.companyName || 'FleetGenius Transport'}
+          />
+        )}
+
+        {/* PREUVE DE LIVRAISON */}
+        {viewingPOD && (
+          <PODViewer
+            pod={viewingPOD.pod}
+            onClose={() => setViewingPOD(null)}
+            packageInfo={{
+              orderNumber: viewingPOD.quote.id.slice(-8),
+              contactName: viewingPOD.quote.destinationContact?.name || 'Destinataire',
+              address: viewingPOD.quote.destinationAddress || viewingPOD.quote.destination,
+              city: viewingPOD.quote.destination
+            }}
+            showDriverInfo={false}
+          />
         )}
     </div>
   );

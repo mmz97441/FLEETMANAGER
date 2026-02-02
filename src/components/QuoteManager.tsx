@@ -2,7 +2,8 @@
 import React, { useState, useMemo } from 'react';
 import Modal from './shared/Modal';
 import { QuoteRequest, QuoteStatus } from '../types';
-import { Package, MapPin, Search, CheckCircle, Clock, XCircle, Euro, Send, Filter, ArrowRight, User, Phone, Box, Calendar, AlertTriangle, FileText, ChevronRight, Calculator, StickyNote } from 'lucide-react';
+import { Package, MapPin, Search, CheckCircle, Clock, XCircle, Euro, Send, Filter, ArrowRight, User, Phone, Box, Calendar, AlertTriangle, FileText, ChevronRight, Calculator, StickyNote, Printer } from 'lucide-react';
+import ShippingLabel, { quoteToLabelData, ShippingLabelData } from './ShippingLabel';
 
 interface QuoteManagerProps {
   quotes: QuoteRequest[];
@@ -19,6 +20,7 @@ const QuoteManager: React.FC<QuoteManagerProps> = ({ quotes, onUpdateQuote }) =>
   
   // Confirmation Modal State
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+  const [labelData, setLabelData] = useState<ShippingLabelData | null>(null);
 
   const filteredQuotes = quotes.filter(q => {
       if (filter === 'pending') return q.status === QuoteStatus.REQUESTED;
@@ -347,6 +349,20 @@ const QuoteManager: React.FC<QuoteManagerProps> = ({ quotes, onUpdateQuote }) =>
                                     <span className={`text-lg font-bold ${selectedQuote.status === QuoteStatus.ACCEPTED ? 'text-green-800' : 'text-red-800'}`}>
                                         Ce devis a été {selectedQuote.status === QuoteStatus.ACCEPTED ? 'accepté' : 'refusé'}.
                                     </span>
+                                    {selectedQuote.status === QuoteStatus.ACCEPTED && (
+                                        <button
+                                            onClick={() => setLabelData(quoteToLabelData(selectedQuote))}
+                                            className="mt-2 flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-xl text-sm font-bold hover:bg-green-700 transition-colors"
+                                        >
+                                            <Printer size={14} />
+                                            Imprimer l'étiquette
+                                        </button>
+                                    )}
+                                    {selectedQuote.convertedToPackageId && (
+                                        <p className="text-xs text-green-600 mt-1">
+                                            Colis #{selectedQuote.convertedToPackageId.slice(-6)} créé automatiquement
+                                        </p>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -408,6 +424,14 @@ const QuoteManager: React.FC<QuoteManagerProps> = ({ quotes, onUpdateQuote }) =>
                 </>
             )}
         </Modal>
+
+        {/* ÉTIQUETTE D'EXPÉDITION */}
+        {labelData && (
+          <ShippingLabel
+            data={labelData}
+            onClose={() => setLabelData(null)}
+          />
+        )}
     </div>
   );
 };

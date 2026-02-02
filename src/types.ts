@@ -508,6 +508,46 @@ export interface QuoteRequest {
   status: QuoteStatus;
   priceOffer?: number;
   adminNotes?: string;
+
+  // Créneau de livraison choisi par le client
+  deliverySlotId?: string;             // Référence vers le créneau
+  deliveryTimeWindow?: {               // Fenêtre horaire
+    start: string;                     // "08:00"
+    end: string;                       // "12:00"
+    label: string;                     // "Matin (08h-12h)"
+  };
+
+  // Conversion vers mission (rempli automatiquement quand ACCEPTED)
+  convertedToPackageId?: string;       // ID du colis créé
+  convertedToMissionId?: string;       // ID de la mission assignée
+  convertedAt?: string;                // Date de conversion
+}
+
+// ============================================================================
+// CRÉNEAUX DE LIVRAISON
+// ============================================================================
+
+export interface DeliveryTimeSlot {
+  id: string;
+  label: string;                       // "Matin", "Après-midi", "Soir"
+  start: string;                       // "08:00"
+  end: string;                         // "12:00"
+  zones: Zone[];                       // Zones où ce créneau est dispo
+  maxCapacity?: number;                // Nb max de livraisons sur ce créneau (optionnel)
+  isActive: boolean;                   // Désactivable
+  sortOrder: number;                   // Pour ordonner l'affichage
+}
+
+export interface DeliveryScheduleConfig {
+  id: string;
+  slots: DeliveryTimeSlot[];           // Créneaux configurés
+  cutoffHours: number;                 // Heures avant le créneau pour accepter les demandes (ex: 2h)
+  sameDayEnabled: boolean;             // Autorise les livraisons le jour même
+  sameDayCutoff?: string;              // Heure limite pour le jour même ("10:00")
+  weekendEnabled: boolean;             // Livraison le week-end
+  holidays: string[];                  // Jours fériés (format "YYYY-MM-DD")
+  updatedAt: string;
+  updatedBy: string;
 }
 
 export type ViewState = 
@@ -537,6 +577,8 @@ export type ViewState =
   | 'missions'
   | 'notifications_settings'
   | 'api_diagnostic'
+  | 'delivery_schedule'
+  | 'client_shipments'
   | 'import_export';
 
 // ============================================================================

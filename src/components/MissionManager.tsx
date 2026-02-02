@@ -24,19 +24,22 @@ import {
   DEFAULT_POSTAL_CODE_MAPPINGS,
   MissionStats
 } from '../services/missionService';
-import { importExcelFile, validateExcelFormat } from '../services/importService';
+import { importExcelFile, validateExcelFormat, parseExcelForReview, ReviewResult } from '../services/importService';
 import { geocodeAddress, getGoogleMapsApiKey } from '../services/gmproService';
 import { logActivity } from '../services/activityLogService';
 import { ActivityAction } from '../types';
 import { usePermissions, Permission } from '../usePermissions';
 import Modal from './shared/Modal';
 import DispatchManager from './DispatchManager';
+import ImportReviewTable from './ImportReviewTable';
+import PODViewer from './PODViewer';
 import {
   Truck, Package as PackageIcon, MapPin, Upload, Calendar, Clock,
   Users, CheckCircle, XCircle, AlertTriangle, Filter, Search,
   ChevronRight, ChevronDown, Download, RefreshCw, Play, Pause,
   Eye, Edit, Trash2, Plus, FileSpreadsheet, Route, Loader2,
-  Building2, Navigation, BarChart3, TrendingUp, ArrowRight, Phone, Zap
+  Building2, Navigation, BarChart3, TrendingUp, ArrowRight, Phone, Zap,
+  Printer
 } from 'lucide-react';
 
 interface MissionManagerProps {
@@ -72,6 +75,10 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   const [selectedClient, setSelectedClient] = useState<string>('');
   const [isImporting, setIsImporting] = useState(false);
   const [importResult, setImportResult] = useState<any>(null);
+  const [reviewData, setReviewData] = useState<ReviewResult | null>(null);
+  
+  // POD Viewer
+  const [viewingPOD, setViewingPOD] = useState<{ pod: any; pkg: Package } | null>(null);
   
   // Gestion des hubs
   const [showHubModal, setShowHubModal] = useState(false);
@@ -148,6 +155,144 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   const canDispatch = hasPermission(Permission.MISSIONS_DISPATCH);
   const canManageHubs = hasPermission(Permission.HUBS_MANAGE);
 
+  // === IMPRESSION TOURNÉE ===
+  const handlePrintMission = (mission: Mission) => {
+    const sortedStops = [...mission.stops].sort((a, b) => a.sequence - b.sequence);
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+
+    const stopsHtml = sortedStops.map((stop, i) => `
+      <tr>
+        <td style="padding:8px;border:1px solid #ddd;text-align:center;font-weight:bold;">${stop.sequence}</td>
+        <td style="padding:8px;border:1px solid #ddd;">
+          <strong>${stop.contactName || '-'}</strong><br/>
+          <span style="color:#555;">${stop.address}, ${stop.postalCode} ${stop.city}</span>
+          ${stop.floor != null ? `<br/><small>Étage ${stop.floor}${stop.hasElevator ? ' (ascenseur)' : ' (sans asc.)'}</small>` : ''}
+        </td>
+        <td style="padding:8px;border:1px solid #ddd;text-align:center;">${stop.contactPhone || '-'}</td>
+        <td style="padding:8px;border:1px solid #ddd;text-align:center;font-weight:bold;">${stop.packageCount}</td>
+        <td style="padding:8px;border:1px solid #ddd;text-align:center;">${stop.timeWindowStart && stop.timeWindowEnd ? `${stop.timeWindowStart} - ${stop.timeWindowEnd}` : '-'}</td>
+        <td style="padding:8px;border:1px solid #ddd;font-size:11px;">${stop.notes || ''}</td>
+        <td style="padding:8px;border:1px solid #ddd;width:60px;"></td>
+      </tr>
+    `).join('');
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Tournée - ${mission.driverName} - ${mission.date}</title>
+        <style>
+          * { margin:0; padding:0; box-sizing:border-box; }
+          body { font-family: Arial, sans-serif; padding: 20px; color: #333; }
+          h1 { font-size: 20px; margin-bottom: 4px; }
+          .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; border-bottom: 3px solid #333; padding-bottom: 12px; }
+          .meta { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 16px; }
+          .meta-item { background: #f5f5f5; padding: 8px 12px; border-radius: 4px; }
+          .meta-label { font-size: 10px; text-transform: uppercase; color: #888; }
+          .meta-value { font-size: 14px; font-weight: bold; }
+          table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+          th { background: #333; color: white; padding: 8px; text-align: left; font-size: 11px; text-transform: uppercase; }
+          tr:nth-child(even) { background: #f9f9f9; }
+          .hub-row { background: #e8f0fe !important; font-weight: bold; }
+          .signature-block { margin-top: 30px; display: flex; justify-content: space-between; }
+          .signature-box { border: 1px solid #ccc; padding: 12px; width: 45%; text-align: center; }
+          .signature-label { font-size: 11px; color: #888; margin-bottom: 40px; }
+          .footer { margin-top: 20px; text-align: center; font-size: 10px; color: #aaa; }
+          @media print {
+            body { padding: 10px; }
+            .no-print { display: none; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <h1>🚛 Feuille de Route</h1>
+            <p style="color:#666;">Tournée ${mission.zone} — ${new Date(mission.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
+          </div>
+          <div style="text-align:right;">
+            <p style="font-size:12px;color:#888;">Imprimé le ${new Date().toLocaleString('fr-FR')}</p>
+            <button class="no-print" onclick="window.print()" style="margin-top:8px;padding:8px 16px;background:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">
+              🖨️ Imprimer
+            </button>
+          </div>
+        </div>
+
+        <div class="meta">
+          <div class="meta-item">
+            <div class="meta-label">Chauffeur</div>
+            <div class="meta-value">${mission.driverName || 'Non assigné'}</div>
+          </div>
+          <div class="meta-item">
+            <div class="meta-label">Véhicule</div>
+            <div class="meta-value">${mission.vehiclePlate || '-'}</div>
+          </div>
+          <div class="meta-item">
+            <div class="meta-label">Hub de départ</div>
+            <div class="meta-value">${mission.hubName || '-'}</div>
+          </div>
+          <div class="meta-item">
+            <div class="meta-label">Nombre de stops</div>
+            <div class="meta-value">${sortedStops.length}</div>
+          </div>
+          <div class="meta-item">
+            <div class="meta-label">Total colis</div>
+            <div class="meta-value">${mission.totalPackages}</div>
+          </div>
+          <div class="meta-item">
+            <div class="meta-label">Distance / Durée estimée</div>
+            <div class="meta-value">${mission.totalDistance ? Math.round(mission.totalDistance) + ' km' : '-'} / ${mission.estimatedDuration ? Math.round(mission.estimatedDuration) + ' min' : '-'}</div>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th style="width:40px;">N°</th>
+              <th>Adresse / Contact</th>
+              <th style="width:110px;">Téléphone</th>
+              <th style="width:50px;">Colis</th>
+              <th style="width:110px;">Créneau</th>
+              <th>Notes</th>
+              <th style="width:60px;">Signat.</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="hub-row">
+              <td style="padding:8px;border:1px solid #ddd;text-align:center;">🏁</td>
+              <td colspan="6" style="padding:8px;border:1px solid #ddd;">DÉPART — ${mission.hubName}</td>
+            </tr>
+            ${stopsHtml}
+            <tr class="hub-row">
+              <td style="padding:8px;border:1px solid #ddd;text-align:center;">🏁</td>
+              <td colspan="6" style="padding:8px;border:1px solid #ddd;">RETOUR — ${mission.hubName}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="signature-block">
+          <div class="signature-box">
+            <div class="signature-label">Signature Chauffeur (départ)</div>
+            <div style="border-bottom:1px solid #ccc;margin-bottom:8px;height:40px;"></div>
+            <small>Heure de départ : ___________</small>
+          </div>
+          <div class="signature-box">
+            <div class="signature-label">Signature Chauffeur (retour)</div>
+            <div style="border-bottom:1px solid #ccc;margin-bottom:8px;height:40px;"></div>
+            <small>Heure de retour : ___________</small>
+          </div>
+        </div>
+
+        <div class="footer">
+          FleetGenius — Feuille de route générée automatiquement
+        </div>
+      </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
   // Handlers
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -177,30 +322,15 @@ const MissionManager: React.FC<MissionManagerProps> = ({
         return;
       }
       
-      // Importer
-      const result = await importExcelFile(importFile, client, currentUser);
-      setImportResult(result);
-      
-      if (result.success) {
-        logActivity(currentUser, ActivityAction.DATA_IMPORTED, {
-          targetType: 'package',
-          targetId: result.batchId,
-          targetName: importFile.name,
-          details: {
-            metadata: {
-              totalRows: result.totalRows,
-              successCount: result.successCount,
-              errorCount: result.errorCount,
-              zones: result.zoneBreakdown.map((z: any) => `${z.zone}: ${z.count}`)
-            }
-          }
-        });
-      }
+      // Parser pour revue (NE crée PAS les colis en base)
+      const review = await parseExcelForReview(importFile);
+      setReviewData(review);
+      setShowImportModal(false); // Ferme le modal de sélection fichier
     } catch (error) {
       console.error('Import error:', error);
       setImportResult({
         success: false,
-        errors: [{ row: 0, message: 'Erreur lors de l\'import' }]
+        errors: [{ row: 0, message: 'Erreur lors de la lecture du fichier' }]
       });
     }
     
@@ -212,6 +342,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
     setImportFile(null);
     setSelectedClient('');
     setImportResult(null);
+    setReviewData(null);
   };
 
   // === GESTION DES HUBS ===
@@ -720,8 +851,17 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                         </div>
                       </div>
                       
-                      <div className="text-right">
-                        <p className="text-2xl font-bold text-slate-800">{progress}%</p>
+                      <div className="text-right flex flex-col items-end gap-1">
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handlePrintMission(mission); }}
+                            className="p-1.5 rounded-lg hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition-colors"
+                            title="Imprimer la feuille de route"
+                          >
+                            <Printer size={16} />
+                          </button>
+                          <p className="text-2xl font-bold text-slate-800">{progress}%</p>
+                        </div>
                         <p className="text-xs text-slate-500">
                           {mission.deliveredPackages || 0} livrés
                         </p>
@@ -760,6 +900,14 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                             )}
                           </div>
                           <div className="flex items-center gap-4 text-sm text-slate-500">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handlePrintMission(mission); }}
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 hover:border-blue-300 transition-colors text-xs font-medium"
+                              title="Imprimer la feuille de route"
+                            >
+                              <Printer size={14} />
+                              Imprimer
+                            </button>
                             <span>{sortedStops.filter(s => s.status === 'Terminé').length}/{sortedStops.length} stops terminés</span>
                           </div>
                         </div>
@@ -866,6 +1014,37 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                                     {stop.durationFromPrevious ? ` (~${Math.round(stop.durationFromPrevious)} min)` : ''}
                                   </p>
                                 )}
+                                
+                                {/* POD Status — pour stops traités */}
+                                {stop.status === 'Terminé' && (() => {
+                                  // Chercher le colis correspondant pour voir s'il a un POD
+                                  const stopPkg = todayPackages.find(p => 
+                                    stop.packageIds?.includes(p.id) && p.pod
+                                  );
+                                  return stopPkg?.pod ? (
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); setViewingPOD({ pod: stopPkg.pod!, pkg: stopPkg }); }}
+                                      className="inline-flex items-center gap-1.5 mt-2 px-2.5 py-1 bg-emerald-100 text-emerald-700 rounded-lg text-xs font-bold hover:bg-emerald-200 transition-colors cursor-pointer"
+                                    >
+                                      {stopPkg.pod?.signatureUrl ? '✍️' : '📷'}
+                                      {stopPkg.pod?.signatureUrl ? 'Signé' : 'Photo'} — Voir la preuve
+                                    </button>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 mt-2 px-2 py-0.5 bg-amber-50 text-amber-600 rounded text-[10px] font-medium">
+                                      ⚠️ POD manquante
+                                    </span>
+                                  );
+                                })()}
+                                {stop.status === 'Échec' && (() => {
+                                  const hasFailurePhotos = todayPackages.some(p => 
+                                    stop.packageIds?.includes(p.id)
+                                  );
+                                  return (
+                                    <span className="inline-flex items-center gap-1 mt-2 px-2 py-0.5 bg-red-50 text-red-500 rounded text-[10px] font-medium">
+                                      ❌ {stop.completionTime ? new Date(stop.completionTime).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : 'Échec'}
+                                    </span>
+                                  );
+                                })()}
                               </div>
                             </div>
                           </div>
@@ -939,12 +1118,13 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                 <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase">Adresse</th>
                 <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase">Zone</th>
                 <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase">Statut</th>
+                <th className="px-4 py-3 text-center text-xs font-bold text-slate-500 uppercase">POD</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {todayPackages.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
+                  <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
                     Aucun colis pour cette date
                   </td>
                 </tr>
@@ -966,7 +1146,13 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                     const statusColors = PACKAGE_STATUS_COLORS[pkg.status];
                     
                     return (
-                      <tr key={pkg.id} className="hover:bg-slate-50 transition-colors">
+                      <tr
+                        key={pkg.id}
+                        className={`hover:bg-slate-50 transition-colors ${pkg.pod ? 'cursor-pointer' : ''}`}
+                        onClick={() => {
+                          if (pkg.pod) setViewingPOD({ pod: pkg.pod, pkg });
+                        }}
+                      >
                         <td className="px-4 py-3">
                           <span className="font-mono font-medium text-slate-800">
                             {pkg.orderNumber}
@@ -991,6 +1177,19 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                           <span className={`px-2 py-1 rounded-lg text-xs font-medium ${statusColors.bg} ${statusColors.text}`}>
                             {pkg.status}
                           </span>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {pkg.pod?.signatureUrl ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-1 bg-emerald-100 text-emerald-700 rounded-lg text-xs font-bold" title="Preuve disponible — Cliquez pour voir">
+                              ✓ Signé
+                            </span>
+                          ) : pkg.pod ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-1 bg-amber-100 text-amber-700 rounded-lg text-xs font-bold" title="Photo sans signature">
+                              📷
+                            </span>
+                          ) : pkg.status === PackageStatus.DELIVERED ? (
+                            <span className="text-xs text-slate-400">—</span>
+                          ) : null}
                         </td>
                       </tr>
                     );
@@ -1420,7 +1619,27 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           onMissionCreated={() => setActiveTab('missions')}
         />
       )}
-      {activeTab === 'imports' && renderImports()}
+      {activeTab === 'imports' && !reviewData && renderImports()}
+
+      {/* === TABLE DE REVUE POST-IMPORT === */}
+      {activeTab === 'imports' && reviewData && selectedClient && users.find(u => u.id === selectedClient) && (
+        <ImportReviewTable
+          reviewResult={reviewData}
+          client={users.find(u => u.id === selectedClient)!}
+          currentUser={currentUser}
+          onConfirm={(result) => {
+            setImportResult(result);
+            setReviewData(null);
+            // Re-ouvrir le modal pour afficher le résultat final
+            setShowImportModal(true);
+          }}
+          onCancel={() => {
+            setReviewData(null);
+            setImportFile(null);
+            setSelectedClient('');
+          }}
+        />
+      )}
       {activeTab === 'missions' && renderMissions()}
       {activeTab === 'packages' && renderPackages()}
       {activeTab === 'hubs' && renderHubs()}
@@ -1776,6 +1995,21 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           </div>
         )}
       </Modal>
+
+      {/* POD VIEWER */}
+      {viewingPOD && (
+        <PODViewer
+          pod={viewingPOD.pod}
+          onClose={() => setViewingPOD(null)}
+          packageInfo={{
+            orderNumber: viewingPOD.pkg.orderNumber,
+            contactName: viewingPOD.pkg.contactName,
+            address: viewingPOD.pkg.address,
+            city: `${viewingPOD.pkg.postalCode} ${viewingPOD.pkg.city}`
+          }}
+          showDriverInfo={true}
+        />
+      )}
     </div>
   );
 };

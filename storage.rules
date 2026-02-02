@@ -1,0 +1,38 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Preuves de livraison (signatures + photos)
+    // Structure: pod/{missionId}/{stopId}/signature.png
+    //            pod/{missionId}/{stopId}/photo-{n}.jpg
+    match /pod/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && request.resource.size < 10 * 1024 * 1024  // Max 10 MB par fichier
+        && (request.resource.contentType.matches('image/.*'));
+    }
+    
+    // Photos incidents
+    match /issues/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && request.resource.size < 10 * 1024 * 1024
+        && (request.resource.contentType.matches('image/.*'));
+    }
+    
+    // Photos carburant
+    match /fuel/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && request.resource.size < 10 * 1024 * 1024
+        && (request.resource.contentType.matches('image/.*'));
+    }
+
+    // Documents absences
+    match /absences/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && request.resource.size < 10 * 1024 * 1024;
+    }
+  }
+}
