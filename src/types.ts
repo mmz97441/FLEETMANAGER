@@ -579,6 +579,8 @@ export type ViewState =
   | 'api_diagnostic'
   | 'delivery_schedule'
   | 'client_shipments'
+  | 'hub_operations'
+  | 'driver_tour'
   | 'import_export';
 
 // ============================================================================

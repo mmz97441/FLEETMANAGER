@@ -7,6 +7,7 @@ import { auth } from "./firebaseConfig";
 import Sidebar from './components/Sidebar';
 import ErrorBoundary from './components/ErrorBoundary';
 import MobileNavBar from './components/MobileNavBar';
+import NotificationCenter from './components/NotificationCenter';
 import Login from './components/Login';
 import { Menu, Loader2, WifiOff } from 'lucide-react';
 
@@ -35,6 +36,8 @@ const HelpCenter = lazy(() => import('./components/HelpCenter'));
 const DriverMissionView = lazy(() => import('./components/DriverMissionView'));
 const PermissionsManager = lazy(() => import('./components/PermissionsManager'));
 const DeliveryScheduleSettings = lazy(() => import('./components/DeliveryScheduleSettings'));
+const HubOperations = lazy(() => import('./components/HubOperations'));
+const DriverTourView = lazy(() => import('./components/DriverTourView'));
 
 // FIREBASE SERVICES
 import { 
@@ -952,6 +955,27 @@ const App: React.FC = () => {
           </div>
         );
 
+      case 'hub_operations':
+        return (
+          <div className="p-4 md:p-8">
+            <HubOperations
+              currentUser={currentUser}
+              vehicles={vehicles}
+              users={users}
+            />
+          </div>
+        );
+
+      case 'driver_tour':
+        return (
+          <div className="p-4 md:p-8 max-w-lg mx-auto">
+            <DriverTourView
+              currentUser={currentUser}
+              vehicles={vehicles}
+            />
+          </div>
+        );
+
       case 'api_diagnostic':
         return (
           <div className="p-8">
@@ -1071,18 +1095,24 @@ const App: React.FC = () => {
                   <span className="font-bold text-lg text-slate-800">FleetGenius</span>
                   <span className="text-[10px] font-bold text-brand-600 uppercase tracking-wide">{currentUser.role}</span>
               </div>
-              <div className="w-6">
-                {currentUser.avatarUrl && <img src={currentUser.avatarUrl} className="w-6 h-6 rounded-full border border-slate-200" />}
+              <div className="flex items-center gap-2">
+                <NotificationCenter currentUser={currentUser} onNavigate={setActiveView} />
+                <div className="w-6">
+                  {currentUser.avatarUrl && <img src={currentUser.avatarUrl} className="w-6 h-6 rounded-full border border-slate-200" />}
+                </div>
               </div> 
           </div>
 
-          <div className="hidden lg:flex items-center p-4 absolute top-0 left-0 z-10">
+          <div className="hidden lg:flex items-center p-4 absolute top-0 left-0 right-0 z-10 justify-between">
               <button 
                   onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
                   className="bg-white p-2 rounded-lg shadow-sm border border-slate-200 text-slate-500 hover:text-brand-600 transition-colors"
               >
                   <Menu size={20} />
               </button>
+              <div className="pr-2">
+                <NotificationCenter currentUser={currentUser} onNavigate={setActiveView} />
+              </div>
           </div>
 
           <main className="flex-1 overflow-y-auto p-4 lg:p-8 custom-scrollbar pt-14 lg:pt-20 pb-20 lg:pb-8">

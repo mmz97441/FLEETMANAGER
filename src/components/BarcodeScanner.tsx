@@ -63,8 +63,10 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
     setLastScanned(barcode);
     setLastScanResult(isExpected ? 'success' : 'unknown');
 
-    // Vibration longue = succès
-    try { navigator.vibrate?.([100, 50, 100]); } catch {}
+    // Vibration différente : succès = double pulse, erreur = single long
+    try { 
+      navigator.vibrate?.(isExpected ? [100, 50, 100] : [300]); 
+    } catch {}
 
     // Remonter au parent
     onScan(barcode);

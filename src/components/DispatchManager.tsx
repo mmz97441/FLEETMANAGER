@@ -15,6 +15,7 @@ import {
 } from '../types';
 import { optimizeMultiVehicle, isGMPROConfigured, getGoogleMapsApiKey, TourResult, OptimizationResult, DriverVehicle } from '../services/gmproService';
 import { addMission, updatePackageStatus } from '../services/missionService';
+import { notifyMissionAssigned } from '../services/notificationService';
 import { logActivity } from '../services/activityLogService';
 import { ActivityAction } from '../types';
 import Modal from './shared/Modal';
@@ -62,9 +63,9 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
   const [expandedTour, setExpandedTour] = useState<number | null>(null);
   const [showDispatchModal, setShowDispatchModal] = useState(false);
   
-  // Filtrer les colis en attente
+  // Filtrer les colis au hub (collectés et réceptionnés) — prêts à être dispatchés
   const pendingPackages = useMemo(() => 
-    packages.filter(p => p.status === PackageStatus.PENDING),
+    packages.filter(p => p.status === PackageStatus.AT_HUB),
     [packages]
   );
   
@@ -284,6 +285,14 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
             }
           }
         });
+        
+        // 🔔 Notifier le chauffeur
+        notifyMissionAssigned(
+          tour.driverId,
+          selectedZone!,
+          tour.stops.length,
+          tour.vehiclePlate
+        ).catch(e => console.warn('[Notif] Erreur notif mission:', e));
       }
       
       // Reset
@@ -336,9 +345,9 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
       {zoneStats.length === 0 ? (
         <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
           <PackageIcon size={48} className="mx-auto text-slate-300 mb-3" />
-          <p className="text-slate-500 mb-2">Aucun colis en attente de dispatch</p>
+          <p className="text-slate-500 mb-2">Aucun colis au hub prêt à être dispatché</p>
           <p className="text-sm text-slate-400">
-            Importez des colis pour commencer à créer des missions
+            Réceptionnez les colis au hub pour les dispatcher
           </p>
         </div>
       ) : (

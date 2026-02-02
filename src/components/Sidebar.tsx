@@ -6,7 +6,7 @@ import {
   FileCheck, CalendarDays, ChevronDown, ChevronRight,
   ShoppingBag, Euro, List, Settings as SettingsIcon, FileSignature,
   UserCog, Bell, Download, ClipboardList, Palmtree, Shield,
-  Route, Package, MapPin, Activity, Clock
+  Route, Package, MapPin, Activity, Clock, Navigation
 } from 'lucide-react';
 import { ViewState, User, UserRole } from '../types';
 import { usePermissions, Permission, PermissionKey } from '../usePermissions';
@@ -103,6 +103,18 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
       id: 'missions', 
       label: 'Missions', 
       icon: Route, 
+      permission: Permission.MISSIONS_VIEW
+    },
+    {
+      id: 'driver_tour',
+      label: 'Ma Tournée',
+      icon: Navigation,
+      permission: Permission.MISSIONS_VIEW_OWN
+    },
+    {
+      id: 'hub_operations',
+      label: 'Opérations Hub',
+      icon: Package,
       permission: Permission.MISSIONS_VIEW
     },
 

@@ -27,10 +27,12 @@ import {
 import { importExcelFile, validateExcelFormat, parseExcelForReview, ReviewResult } from '../services/importService';
 import { geocodeAddress, getGoogleMapsApiKey } from '../services/gmproService';
 import { logActivity } from '../services/activityLogService';
+import { notifyImportCompleted } from '../services/notificationService';
 import { ActivityAction } from '../types';
 import { usePermissions, Permission } from '../usePermissions';
 import Modal from './shared/Modal';
 import DispatchManager from './DispatchManager';
+import MissionKPIs from './MissionKPIs';
 import ImportReviewTable from './ImportReviewTable';
 import PODViewer from './PODViewer';
 import {
@@ -529,144 +531,12 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
   // Render Dashboard
   const renderDashboard = () => (
-    <div className="space-y-6">
-      {/* Stats globales */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-              <Route size={20} className="text-blue-600" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-slate-800">{stats.total}</p>
-              <p className="text-xs text-slate-500">Missions</p>
-            </div>
-          </div>
-        </div>
-        
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center">
-              <PackageIcon size={20} className="text-amber-600" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-slate-800">{stats.totalPackages}</p>
-              <p className="text-xs text-slate-500">Colis</p>
-            </div>
-          </div>
-        </div>
-        
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
-              <CheckCircle size={20} className="text-green-600" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-green-600">{stats.deliveredPackages}</p>
-              <p className="text-xs text-slate-500">Livrés</p>
-            </div>
-          </div>
-        </div>
-        
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
-              <TrendingUp size={20} className="text-purple-600" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-purple-600">{stats.completionRate}%</p>
-              <p className="text-xs text-slate-500">Taux livraison</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Stats par zone */}
-      <div className="bg-white rounded-xl border border-slate-200 p-6">
-        <h3 className="text-lg font-bold text-slate-800 mb-4">Performance par zone</h3>
-        <div className="space-y-3">
-          {[Zone.NORD, Zone.SUD, Zone.EST, Zone.OUEST].map(zone => {
-            const zoneMissions = missions.filter(m => m.zone === zone);
-            const zoneDelivered = zoneMissions.reduce((acc, m) => acc + (m.deliveredPackages || 0), 0);
-            const zoneTotal = zoneMissions.reduce((acc, m) => acc + (m.totalPackages || 0), 0);
-            const zoneRate = zoneTotal > 0 ? Math.round((zoneDelivered / zoneTotal) * 100) : 0;
-            const colors = ZONE_COLORS[zone];
-            
-            return (
-              <div key={zone} className="flex items-center gap-4">
-                <div className={`w-20 px-2 py-1 rounded-lg text-center text-sm font-bold ${colors.bg} ${colors.text}`}>
-                  {zone}
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm text-slate-600">{zoneMissions.length} missions</span>
-                    <span className="text-sm font-medium">{zoneDelivered}/{zoneTotal} colis</span>
-                  </div>
-                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                    <div 
-                      className={`h-full ${colors.dot} transition-all`}
-                      style={{ width: `${zoneRate}%` }}
-                    />
-                  </div>
-                </div>
-                <div className="w-12 text-right font-bold text-slate-800">
-                  {zoneRate}%
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Missions en cours */}
-      <div className="bg-white rounded-xl border border-slate-200 p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-bold text-slate-800">Missions en cours</h3>
-          <button
-            onClick={() => setActiveTab('missions')}
-            className="text-sm text-brand-600 hover:text-brand-700 font-medium"
-          >
-            Voir tout →
-          </button>
-        </div>
-        
-        {missions.filter(m => m.status === MissionStatus.IN_PROGRESS).length === 0 ? (
-          <p className="text-slate-500 text-center py-8">Aucune mission en cours</p>
-        ) : (
-          <div className="space-y-2">
-            {missions
-              .filter(m => m.status === MissionStatus.IN_PROGRESS)
-              .slice(0, 5)
-              .map(mission => {
-                const colors = ZONE_COLORS[mission.zone];
-                const progress = mission.totalPackages > 0 
-                  ? Math.round(((mission.deliveredPackages || 0) / mission.totalPackages) * 100)
-                  : 0;
-                  
-                return (
-                  <div key={mission.id} className="flex items-center gap-4 p-3 bg-slate-50 rounded-lg">
-                    <div className={`w-2 h-2 rounded-full ${colors.dot}`} />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-slate-800 truncate">
-                        {mission.driverName || 'Non assigné'}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        {mission.vehiclePlate} • {mission.stops.length} stops
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-bold text-slate-800">{progress}%</p>
-                      <p className="text-xs text-slate-500">
-                        {mission.deliveredPackages || 0}/{mission.totalPackages}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })}
-          </div>
-        )}
-      </div>
-    </div>
+    <MissionKPIs
+      missions={missions}
+      packages={packages}
+      users={users}
+      selectedDate={selectedDate}
+    />
   );
 
   // Render Imports
@@ -1638,8 +1508,25 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           onConfirm={(result) => {
             setImportResult(result);
             setReviewData(null);
-            // Re-ouvrir le modal pour afficher le résultat final
             setShowImportModal(true);
+            
+            // 🔔 Notifier les admins si import réussi
+            if (result.success && result.successCount > 0) {
+              const client = users.find(u => u.id === selectedClient);
+              const adminIds = users
+                .filter(u => ['admin', 'super_admin', 'Admin', 'Super Admin', 'Directeur', 'Exploitant']
+                  .some(r => u.role?.toLowerCase() === r.toLowerCase()))
+                .map(u => u.id)
+                .filter(id => id !== currentUser.id); // Pas se notifier soi-même
+              if (adminIds.length > 0) {
+                notifyImportCompleted(
+                  adminIds,
+                  client?.companyName || client?.firstName || 'Client',
+                  result.successCount,
+                  result.batchId || ''
+                ).catch(e => console.warn('[Notif] Erreur notif import:', e));
+              }
+            }
           }}
           onCancel={() => {
             setReviewData(null);

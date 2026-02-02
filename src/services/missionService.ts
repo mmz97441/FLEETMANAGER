@@ -280,6 +280,78 @@ export const updatePackageStatus = async (
     ...(extraFields || {}),
     updatedAt: now
   });
+
+  // === AUTO-NOTIFICATIONS (fire-and-forget) ===
+  triggerPackageNotifications(pkg, status, movement).catch(e => 
+    console.warn('[Notif] Erreur notification auto:', e)
+  );
+};
+
+/**
+ * Déclenche les notifications automatiques selon le changement de statut.
+ * Exécuté en background (fire-and-forget) pour ne pas ralentir le workflow.
+ */
+const triggerPackageNotifications = async (
+  pkg: Package,
+  newStatus: PackageStatus,
+  movement: Omit<PackageMovement, 'timestamp'>
+) => {
+  // Import dynamique pour ne pas alourdir le bundle si les notifs ne sont pas utilisées
+  const { 
+    notifyPackageDelivered, 
+    notifyPackageFailed, 
+    notifyPackageInDelivery,
+    notifyAdminDeliveryFailure 
+  } = await import('./notificationService');
+  
+  const barcode = pkg.barcode || pkg.orderNumber || 'N/A';
+  const recipientName = pkg.contactName || 'Destinataire';
+  const driverName = movement.driverName || 'Chauffeur';
+
+  // === CLIENT : colis livré ===
+  if (newStatus === PackageStatus.DELIVERED && pkg.clientId) {
+    await notifyPackageDelivered(pkg.clientId, barcode, recipientName);
+  }
+  
+  // === CLIENT + ADMINS : échec livraison ===
+  if (newStatus === PackageStatus.FAILED && pkg.clientId) {
+    const reason = movement.notes || 'Motif non précisé';
+    
+    // Notifier le client
+    await notifyPackageFailed(pkg.clientId, barcode, recipientName, reason);
+    
+    // Notifier les admins
+    const adminIds = await getAdminUserIds();
+    if (adminIds.length > 0) {
+      await notifyAdminDeliveryFailure(adminIds, driverName, barcode, recipientName, reason);
+    }
+  }
+  
+  // === CLIENT : colis en livraison ===
+  if (newStatus === PackageStatus.IN_DELIVERY && pkg.clientId) {
+    await notifyPackageInDelivery(pkg.clientId, barcode, recipientName, driverName);
+  }
+};
+
+/**
+ * Récupère les IDs des utilisateurs admin/directeur pour les notifications broadcast
+ */
+const getAdminUserIds = async (): Promise<string[]> => {
+  try {
+    const q = query(
+      collection(db, 'users'),
+      where('role', 'in', [
+        UserRole.ADMIN, UserRole.SUPER_ADMIN, 
+        'admin', 'super_admin', 'Admin', 'Super Admin',
+        'Directeur', 'directeur', 'Exploitant', 'exploitant'
+      ])
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(d => d.id);
+  } catch (e) {
+    console.warn('[Notif] Impossible de récupérer les admins:', e);
+    return [];
+  }
 };
 
 export const addPackagesBatch = async (packages: Omit<Package, 'id' | 'createdAt' | 'updatedAt'>[]): Promise<string[]> => {

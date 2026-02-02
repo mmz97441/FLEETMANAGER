@@ -14,6 +14,7 @@ import { subscribeToPackages } from '../services/missionService';
 import { generateBatchLabelsHTML } from '../services/pickupService';
 import ShippingLabel, { quoteToLabelData, ShippingLabelData } from './ShippingLabel';
 import PODViewer from './PODViewer';
+import ClientKPIs from './ClientKPIs';
 
 // ============================================================================
 // COMPOSANT InputField DÉFINI EN DEHORS pour éviter le bug de focus
@@ -755,99 +756,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
 
         {/* --- VIEW: DASHBOARD --- */}
         {activeView === 'client_dashboard' && (
-            <div className="space-y-6">
-                {/* KPIS */}
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 hover:border-indigo-200 transition-colors">
-                        <div className="flex justify-between items-start mb-4">
-                            <div className="bg-indigo-50 p-3 rounded-xl text-indigo-600"><Euro size={24} /></div>
-                            <span className="text-xs font-bold text-slate-400 uppercase">Budget Transport</span>
-                        </div>
-                        <h3 className="text-2xl font-bold text-slate-900">{kpis.totalSpent.toLocaleString()} €</h3>
-                        <p className="text-xs text-slate-500 mt-1">Dépensé (Global Entreprise)</p>
-                    </div>
-                    
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 hover:border-emerald-200 transition-colors">
-                        <div className="flex justify-between items-start mb-4">
-                            <div className="bg-emerald-50 p-3 rounded-xl text-emerald-600"><Box size={24} /></div>
-                            <span className="text-xs font-bold text-slate-400 uppercase">Volume Expédié</span>
-                        </div>
-                        <h3 className="text-2xl font-bold text-slate-900">{kpis.totalVolume.toFixed(1)} m3</h3>
-                        <p className="text-xs text-slate-500 mt-1">{kpis.totalWeight} kg au total</p>
-                    </div>
-
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 hover:border-blue-200 transition-colors">
-                        <div className="flex justify-between items-start mb-4">
-                            <div className="bg-blue-50 p-3 rounded-xl text-blue-600"><Truck size={24} /></div>
-                            <span className="text-xs font-bold text-slate-400 uppercase">Dossiers Actifs</span>
-                        </div>
-                        <h3 className="text-2xl font-bold text-slate-900">{kpis.activeCount}</h3>
-                        <p className="text-xs text-slate-500 mt-1">En cours de traitement</p>
-                    </div>
-
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 hover:border-orange-200 transition-colors">
-                        <div className="flex justify-between items-start mb-4">
-                            <div className="bg-orange-50 p-3 rounded-xl text-orange-600"><FileText size={24} /></div>
-                            <span className="text-xs font-bold text-slate-400 uppercase">Total Demandes</span>
-                        </div>
-                        <h3 className="text-2xl font-bold text-slate-900">{kpis.totalQuotes}</h3>
-                        <p className="text-xs text-slate-500 mt-1">Depuis le début</p>
-                    </div>
-                </div>
-
-                {/* CHARTS */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-80">
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col">
-                        <h3 className="font-bold text-slate-800 mb-6 flex items-center gap-2">
-                            <BarChart3 className="text-indigo-500" size={20} /> Évolution des Dépenses (6 mois)
-                        </h3>
-                        <div className="flex-1 w-full min-h-0">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <BarChart data={spendingData}>
-                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12}} />
-                                    <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12}} />
-                                    <Tooltip 
-                                        contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                        cursor={{fill: '#f1f5f9'}}
-                                    />
-                                    <Bar dataKey="amount" fill="#4f46e5" radius={[4, 4, 0, 0]} barSize={40} name="Montant (€)" />
-                                </BarChart>
-                            </ResponsiveContainer>
-                        </div>
-                    </div>
-
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col">
-                        <h3 className="font-bold text-slate-800 mb-6 flex items-center gap-2">
-                            <PieChartIcon className="text-emerald-500" size={20} /> Répartition des Demandes
-                        </h3>
-                        <div className="flex-1 w-full min-h-0 relative">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <PieChart>
-                                    <Pie
-                                        data={statusData}
-                                        innerRadius={60}
-                                        outerRadius={80}
-                                        paddingAngle={5}
-                                        dataKey="value"
-                                    >
-                                        {statusData.map((entry, index) => (
-                                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                        ))}
-                                    </Pie>
-                                    <Tooltip />
-                                    <Legend verticalAlign="bottom" height={36} iconType="circle"/>
-                                </PieChart>
-                            </ResponsiveContainer>
-                            {statusData.length === 0 && (
-                                <div className="absolute inset-0 flex items-center justify-center text-slate-400 text-sm">
-                                    Aucune donnée
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                </div>
-            </div>
+            <ClientKPIs packages={clientPackages} />
         )}
 
         {/* --- VIEW: TEAM MANAGEMENT --- */}
