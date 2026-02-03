@@ -96,6 +96,10 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   const [isSavingPkg, setIsSavingPkg] = useState(false);
   const [deletingPkg, setDeletingPkg] = useState<Package | null>(null);
   
+  // Sélection multiple de colis
+  const [selectedPackageIds, setSelectedPackageIds] = useState<Set<string>>(new Set());
+  const [bulkStatusTarget, setBulkStatusTarget] = useState<PackageStatus | null>(null);
+  
   // Edit/Delete stops dans tournée (admin)
   const [editingStop, setEditingStop] = useState<{ mission: Mission; stop: MissionStop } | null>(null);
   const [editStopForm, setEditStopForm] = useState<Record<string, any>>({});
@@ -1351,65 +1355,54 @@ const MissionManager: React.FC<MissionManagerProps> = ({
         />
       </div>
 
-      {/* Actions de masse */}
-      {(() => {
-        const pendingCount = todayPackages.filter(p => p.status === PackageStatus.PENDING).length;
-        const collectedCount = todayPackages.filter(p => p.status === PackageStatus.COLLECTED).length;
-        if (pendingCount === 0 && collectedCount === 0) return null;
-        return (
-          <div className="flex flex-wrap gap-2 items-center">
-            <span className="text-sm text-slate-500 mr-2">Actions en masse :</span>
-            {pendingCount > 0 && (
-              <button
-                disabled={isChangingStatus}
-                onClick={async () => {
-                  if (!confirm(`Passer ${pendingCount} colis "En attente" → "Au hub" ?`)) return;
-                  setIsChangingStatus(true);
-                  const pending = todayPackages.filter(p => p.status === PackageStatus.PENDING);
-                  for (const pkg of pending) {
-                    try {
-                      await updatePackageStatus(pkg.id, PackageStatus.AT_HUB, {
-                        action: 'MANUAL_STATUS_CHANGE',
-                        driverId: currentUser.id,
-                        driverName: `${currentUser.firstName} ${currentUser.lastName}`,
-                        notes: 'Passage en masse au hub (admin)'
-                      });
-                    } catch (e) { console.warn('Erreur:', pkg.id, e); }
-                  }
-                  setIsChangingStatus(false);
-                }}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-100 text-indigo-700 hover:bg-indigo-200 transition-colors disabled:opacity-50"
-              >
-                {isChangingStatus ? '⏳ En cours...' : `📦 Tout passer au hub (${pendingCount})`}
-              </button>
-            )}
-            {collectedCount > 0 && (
-              <button
-                disabled={isChangingStatus}
-                onClick={async () => {
-                  if (!confirm(`Passer ${collectedCount} colis "Collectés" → "Au hub" ?`)) return;
-                  setIsChangingStatus(true);
-                  const collected = todayPackages.filter(p => p.status === PackageStatus.COLLECTED);
-                  for (const pkg of collected) {
-                    try {
-                      await updatePackageStatus(pkg.id, PackageStatus.AT_HUB, {
-                        action: 'MANUAL_STATUS_CHANGE',
-                        driverId: currentUser.id,
-                        driverName: `${currentUser.firstName} ${currentUser.lastName}`,
-                        notes: 'Passage en masse au hub (admin)'
-                      });
-                    } catch (e) { console.warn('Erreur:', pkg.id, e); }
-                  }
-                  setIsChangingStatus(false);
-                }}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors disabled:opacity-50"
-              >
-                {isChangingStatus ? '⏳ En cours...' : `📦 Collectés → Hub (${collectedCount})`}
-              </button>
-            )}
+      {/* Actions de masse pour sélection */}
+      {selectedPackageIds.size > 0 && (
+        <div className="bg-brand-50 border border-brand-200 rounded-xl p-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-bold text-brand-700">
+              {selectedPackageIds.size} colis sélectionné{selectedPackageIds.size > 1 ? 's' : ''}
+            </span>
+            <button
+              onClick={() => setSelectedPackageIds(new Set())}
+              className="text-xs text-brand-600 hover:underline"
+            >
+              Tout désélectionner
+            </button>
           </div>
-        );
-      })()}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-500">Changer statut :</span>
+            {[
+              { status: PackageStatus.PENDING, label: 'En attente', color: 'bg-slate-100 text-slate-700' },
+              { status: PackageStatus.AT_HUB, label: 'Au hub', color: 'bg-indigo-100 text-indigo-700' },
+              { status: PackageStatus.SORTED, label: 'Trié', color: 'bg-purple-100 text-purple-700' },
+            ].map(({ status, label, color }) => (
+              <button
+                key={status}
+                disabled={isChangingStatus}
+                onClick={async () => {
+                  if (!confirm(`Passer ${selectedPackageIds.size} colis vers "${label}" ?`)) return;
+                  setIsChangingStatus(true);
+                  for (const pkgId of selectedPackageIds) {
+                    try {
+                      await updatePackageStatus(pkgId, status, {
+                        action: 'MANUAL_STATUS_CHANGE',
+                        driverId: currentUser.id,
+                        driverName: `${currentUser.firstName} ${currentUser.lastName}`,
+                        notes: `Changement groupé → ${label}`
+                      });
+                    } catch (e) { console.warn('Erreur:', pkgId, e); }
+                  }
+                  setSelectedPackageIds(new Set());
+                  setIsChangingStatus(false);
+                }}
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium ${color} hover:opacity-80 transition-opacity disabled:opacity-50`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Liste des colis */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
@@ -1417,21 +1410,47 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           <table className="w-full">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase">N° Commande</th>
-                <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase">Destinataire</th>
-                <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase">Adresse</th>
-                <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase">Zone</th>
-                <th className="px-4 py-3 text-center text-xs font-bold text-slate-500 uppercase">Import</th>
-                <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase">Statut</th>
-                <th className="px-4 py-3 text-center text-xs font-bold text-slate-500 uppercase">Actions</th>
-                <th className="px-4 py-3 text-center text-xs font-bold text-slate-500 uppercase">POD</th>
-                <th className="px-4 py-3 text-center text-xs font-bold text-slate-500 uppercase">Gérer</th>
+                <th className="px-2 py-3 text-center">
+                  <input
+                    type="checkbox"
+                    checked={selectedPackageIds.size > 0 && selectedPackageIds.size === todayPackages.filter(p => {
+                      if (!searchTerm) return true;
+                      const term = searchTerm.toLowerCase();
+                      return p.orderNumber.toLowerCase().includes(term) || p.contactName.toLowerCase().includes(term);
+                    }).slice(0, 50).length}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        const visibleIds = todayPackages
+                          .filter(p => {
+                            if (!searchTerm) return true;
+                            const term = searchTerm.toLowerCase();
+                            return p.orderNumber.toLowerCase().includes(term) || p.contactName.toLowerCase().includes(term);
+                          })
+                          .slice(0, 50)
+                          .map(p => p.id);
+                        setSelectedPackageIds(new Set(visibleIds));
+                      } else {
+                        setSelectedPackageIds(new Set());
+                      }
+                    }}
+                    className="w-4 h-4 rounded border-slate-300 text-brand-500 focus:ring-brand-500"
+                  />
+                </th>
+                <th className="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase">N° Commande</th>
+                <th className="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase">Destinataire</th>
+                <th className="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase">Adresse</th>
+                <th className="px-3 py-3 text-center text-xs font-bold text-slate-500 uppercase">Zone</th>
+                <th className="px-2 py-3 text-center text-xs font-bold text-slate-500 uppercase">Créneau début</th>
+                <th className="px-2 py-3 text-center text-xs font-bold text-slate-500 uppercase">Créneau fin</th>
+                <th className="px-3 py-3 text-center text-xs font-bold text-slate-500 uppercase">Statut</th>
+                <th className="px-2 py-3 text-center text-xs font-bold text-slate-500 uppercase">Actions</th>
+                <th className="px-2 py-3 text-center text-xs font-bold text-slate-500 uppercase">Gérer</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {todayPackages.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-slate-500">
+                  <td colSpan={10} className="px-4 py-8 text-center text-slate-500">
                     Aucun colis pour cette date
                   </td>
                 </tr>
@@ -1451,53 +1470,103 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                   .map(pkg => {
                     const zoneColors = ZONE_COLORS[pkg.zone];
                     const statusColors = PACKAGE_STATUS_COLORS[pkg.status];
+                    const isSelected = selectedPackageIds.has(pkg.id);
                     
                     return (
                       <tr
                         key={pkg.id}
-                        className={`hover:bg-slate-50 transition-colors ${pkg.pod ? 'cursor-pointer' : ''}`}
-                        onClick={() => {
-                          if (pkg.pod) setViewingPOD({ pod: pkg.pod, pkg });
-                        }}
+                        className={`hover:bg-slate-50 transition-colors ${isSelected ? 'bg-brand-50' : ''}`}
                       >
-                        <td className="px-4 py-3">
-                          <span className="font-mono font-medium text-slate-800">
+                        {/* Checkbox */}
+                        <td className="px-2 py-2 text-center">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              setSelectedPackageIds(prev => {
+                                const next = new Set(prev);
+                                if (e.target.checked) {
+                                  next.add(pkg.id);
+                                } else {
+                                  next.delete(pkg.id);
+                                }
+                                return next;
+                              });
+                            }}
+                            className="w-4 h-4 rounded border-slate-300 text-brand-500 focus:ring-brand-500"
+                          />
+                        </td>
+                        {/* N° commande */}
+                        <td className="px-3 py-2">
+                          <span className="font-mono font-medium text-slate-800 text-sm">
                             {pkg.orderNumber}
                           </span>
                         </td>
-                        <td className="px-4 py-3">
-                          <p className="font-medium text-slate-800">{pkg.contactName}</p>
+                        {/* Destinataire */}
+                        <td className="px-3 py-2">
+                          <p className="font-medium text-slate-800 text-sm">{pkg.contactName}</p>
                           {pkg.contactPhone && (
                             <p className="text-xs text-slate-500">{pkg.contactPhone}</p>
                           )}
                         </td>
-                        <td className="px-4 py-3">
+                        {/* Adresse */}
+                        <td className="px-3 py-2">
                           <p className="text-sm text-slate-700">{pkg.address}</p>
                           <p className="text-xs text-slate-500">{pkg.postalCode} {pkg.city}</p>
                         </td>
-                        <td className="px-4 py-3">
+                        {/* Zone */}
+                        <td className="px-3 py-2 text-center">
                           <span className={`px-2 py-1 rounded-lg text-xs font-bold ${zoneColors.bg} ${zoneColors.text}`}>
                             {pkg.zone}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-center">
-                          <span className="text-xs text-slate-500 font-mono">
-                            {new Date(pkg.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                          <p className="text-[10px] text-slate-400">
-                            {new Date(pkg.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })}
-                          </p>
+                        {/* Créneau début - modifiable inline */}
+                        <td className="px-2 py-2 text-center">
+                          <input
+                            type="time"
+                            value={pkg.timeWindowStart || ''}
+                            onChange={async (e) => {
+                              e.stopPropagation();
+                              try {
+                                await updatePackageFields(pkg.id, { timeWindowStart: e.target.value || undefined });
+                              } catch (err) {
+                                console.error('Erreur mise à jour créneau:', err);
+                              }
+                            }}
+                            className="w-20 px-1.5 py-1 border border-slate-200 rounded text-xs font-mono text-center focus:ring-2 focus:ring-brand-200 outline-none"
+                            onClick={(e) => e.stopPropagation()}
+                          />
                         </td>
-                        <td className="px-4 py-3">
+                        {/* Créneau fin - modifiable inline */}
+                        <td className="px-2 py-2 text-center">
+                          <input
+                            type="time"
+                            value={pkg.timeWindowEnd || ''}
+                            onChange={async (e) => {
+                              e.stopPropagation();
+                              try {
+                                await updatePackageFields(pkg.id, { timeWindowEnd: e.target.value || undefined });
+                              } catch (err) {
+                                console.error('Erreur mise à jour créneau:', err);
+                              }
+                            }}
+                            className="w-20 px-1.5 py-1 border border-slate-200 rounded text-xs font-mono text-center focus:ring-2 focus:ring-brand-200 outline-none"
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        </td>
+                        {/* Statut */}
+                        <td className="px-3 py-2 text-center">
                           <span className={`px-2 py-1 rounded-lg text-xs font-medium ${statusColors.bg} ${statusColors.text}`}>
                             {pkg.status}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-center">
+                        {/* Actions statut */}
+                        <td className="px-2 py-2 text-center">
                           {getAllowedTransitions(pkg.status).length > 0 ? (
                             <div className="relative inline-block">
                               {statusChangePkg?.id === pkg.id ? (
-                                <div className="flex flex-col gap-1 min-w-[140px]">
+                                <div className="flex flex-col gap-1 min-w-[120px]">
                                   {getAllowedTransitions(pkg.status).map(t => (
                                     <button
                                       key={t.status}
@@ -1528,20 +1597,8 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                             <span className="text-xs text-slate-300">—</span>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-center">
-                          {pkg.pod?.signatureUrl ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-1 bg-emerald-100 text-emerald-700 rounded-lg text-xs font-bold" title="Preuve disponible — Cliquez pour voir">
-                              ✓ Signé
-                            </span>
-                          ) : pkg.pod ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-1 bg-amber-100 text-amber-700 rounded-lg text-xs font-bold" title="Photo sans signature">
-                              📷
-                            </span>
-                          ) : pkg.status === PackageStatus.DELIVERED ? (
-                            <span className="text-xs text-slate-400">—</span>
-                          ) : null}
-                        </td>
-                        <td className="px-4 py-3 text-center">
+                        {/* Gérer (éditer/supprimer) */}
+                        <td className="px-2 py-2 text-center">
                           <div className="flex items-center justify-center gap-1">
                             <button
                               onClick={(e) => {
@@ -1565,7 +1622,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                             >
                               <Edit size={14} />
                             </button>
-                            {(pkg.status === PackageStatus.PENDING || pkg.status === PackageStatus.AT_HUB || pkg.status === PackageStatus.COLLECTED) && (
+                            {(pkg.status === PackageStatus.PENDING || pkg.status === PackageStatus.AT_HUB || pkg.status === PackageStatus.COLLECTED || pkg.status === PackageStatus.SORTED) && (
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
