@@ -749,7 +749,8 @@ export enum PackageStatus {
   IN_DELIVERY = 'En livraison',    // Chauffeur en route
   DELIVERED = 'Livré',             // POD enregistré
   FAILED = 'Échec',                // Tentative échouée
-  RETURNED = 'Retourné'            // Retour hub après échec
+  RETURN_REQUESTED = 'À retourner', // Stop supprimé — colis doit revenir au hub
+  RETURNED = 'Retourné'            // Retour hub confirmé (photo + signature)
 }
 
 export const PACKAGE_STATUS_COLORS: Record<PackageStatus, { bg: string; text: string }> = {
@@ -762,12 +763,13 @@ export const PACKAGE_STATUS_COLORS: Record<PackageStatus, { bg: string; text: st
   [PackageStatus.IN_DELIVERY]: { bg: 'bg-orange-100', text: 'text-orange-700' },
   [PackageStatus.DELIVERED]: { bg: 'bg-green-100', text: 'text-green-700' },
   [PackageStatus.FAILED]: { bg: 'bg-red-100', text: 'text-red-700' },
+  [PackageStatus.RETURN_REQUESTED]: { bg: 'bg-yellow-100', text: 'text-yellow-800' },
   [PackageStatus.RETURNED]: { bg: 'bg-rose-100', text: 'text-rose-700' }
 };
 
 export interface PackageMovement {
   timestamp: string;
-  action: 'IMPORTED' | 'COLLECTED' | 'HUB_ARRIVAL' | 'SORTED' | 'LOADED' | 'TRANSFERRED' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'FAILED' | 'RETURNED';
+  action: 'IMPORTED' | 'COLLECTED' | 'HUB_ARRIVAL' | 'SORTED' | 'LOADED' | 'TRANSFERRED' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'FAILED' | 'RETURN_REQUESTED' | 'RETURNED' | 'STOP_DELETED' | 'MANUAL_STATUS_CHANGE' | 'LOADING_COMPLETE';
   vehicleId?: string;
   vehiclePlate?: string;
   driverId?: string;
@@ -827,6 +829,10 @@ export interface Package {
   pod?: ProofOfDelivery;
   failureReason?: FailureReason;
   failureNotes?: string;
+  
+  // Retour hub (si stop supprimé ou annulation)
+  returnProof?: ReturnProof;
+  returnReason?: string;           // Raison du retour (visible chauffeur)
   
   // Timestamps
   createdAt: string;
@@ -995,6 +1001,39 @@ export interface ProofOfDelivery {
   // Preuves
   signatureUrl?: string;           // URL Storage
   photoUrls: string[];             // URLs des photos
+  
+  // Localisation
+  coordinates: { lat: number; lng: number };
+  
+  // Horodatage
+  timestamp: string;
+  
+  // Commentaire
+  notes?: string;
+}
+
+// Preuve de retour au hub (quand un colis est annulé/retourné)
+export interface ReturnProof {
+  packageId: string;
+  missionId?: string;
+  
+  // Qui a retourné
+  driverId: string;
+  driverName: string;
+  vehicleId?: string;
+  vehiclePlate?: string;
+  
+  // Destination du retour
+  hubId: string;
+  hubName: string;
+  
+  // Raison du retour
+  reason: 'STOP_DELETED' | 'DELIVERY_CANCELLED' | 'ADDRESS_ERROR' | 'REFUSED' | 'OTHER';
+  reasonLabel: string;
+  
+  // Preuves (obligatoires)
+  photoUrls: string[];             // Au moins 1 photo obligatoire
+  signatureUrl?: string;           // Signature de réception au hub
   
   // Localisation
   coordinates: { lat: number; lng: number };

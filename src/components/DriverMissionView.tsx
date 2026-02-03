@@ -258,6 +258,15 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   const [showScanner, setShowScanner] = useState(false);
   const [scannedBarcodes, setScannedBarcodes] = useState<string[]>([]);
   const [stopPackages, setStopPackages] = useState<Package[]>([]);
+  
+  // Return to hub workflow
+  const [returnPackages, setReturnPackages] = useState<Package[]>([]);
+  const [showReturnModal, setShowReturnModal] = useState(false);
+  const [returningPackage, setReturningPackage] = useState<Package | null>(null);
+  const [returnPhotos, setReturnPhotos] = useState<string[]>([]);
+  const [returnSignature, setReturnSignature] = useState<string | null>(null);
+  const [showReturnSignature, setShowReturnSignature] = useState(false);
+  const returnPhotoInputRef = useRef<HTMLInputElement>(null);
 
   const today = new Date().toISOString().split('T')[0];
 
@@ -316,6 +325,18 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
     setScannedBarcodes([]);
     setShowScanner(false);
   }, [currentStop?.id]);
+
+  // Charger les colis "À retourner" pour ce chauffeur
+  useEffect(() => {
+    const unsub = subscribeToPackages((pkgs) => {
+      const toReturn = pkgs.filter(p => 
+        p.status === PackageStatus.RETURN_REQUESTED &&
+        p.currentDriverId === currentUser.id
+      );
+      setReturnPackages(toReturn);
+    });
+    return unsub;
+  }, [currentUser.id]);
 
   const nextPendingStopIndex = useMemo(() => {
     return sortedStops.findIndex(s => s.status === StopStatus.PENDING || s.status === StopStatus.ARRIVED);
@@ -418,6 +439,113 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
     setIsLoadingPhase(false);
     setActiveMissionId(null);
     showNotif('Chargement annulé');
+  };
+
+  // === WORKFLOW RETOUR HUB ===
+  
+  // Ouvrir le modal de retour pour un colis
+  const openReturnModal = (pkg: Package) => {
+    setReturningPackage(pkg);
+    setReturnPhotos([]);
+    setReturnSignature(null);
+    setShowReturnModal(true);
+  };
+
+  // Prendre photo retour
+  const handleReturnPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (returnPhotos.length < 5) {
+        setReturnPhotos(prev => [...prev, reader.result as string]);
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  // Valider le retour au hub
+  const handleConfirmReturn = async () => {
+    if (!returningPackage) return;
+    if (returnPhotos.length === 0) {
+      showNotif('❌ Photo obligatoire pour le retour');
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      let coords: { lat: number; lng: number } | undefined;
+      try { coords = await getCurrentPosition(); } catch {}
+
+      // Uploader les photos
+      const photoUrls: string[] = [];
+      for (const photoBase64 of returnPhotos) {
+        try {
+          const { uploadProofPhoto } = await import('../services/podService');
+          const url = await uploadProofPhoto(photoBase64, returningPackage.id, 'return');
+          photoUrls.push(url);
+        } catch (e) { console.warn('Erreur upload photo retour:', e); }
+      }
+
+      // Uploader la signature si présente
+      let signatureUrl: string | undefined;
+      if (returnSignature) {
+        try {
+          const { uploadProofPhoto } = await import('../services/podService');
+          signatureUrl = await uploadProofPhoto(returnSignature, returningPackage.id, 'return-signature');
+        } catch (e) { console.warn('Erreur upload signature retour:', e); }
+      }
+
+      // Créer la preuve de retour
+      const returnProof = {
+        packageId: returningPackage.id,
+        missionId: returningPackage.missionId,
+        driverId: currentUser.id,
+        driverName: `${currentUser.firstName} ${currentUser.lastName}`,
+        vehicleId: activeMission?.vehicleId,
+        vehiclePlate: activeMission?.vehiclePlate,
+        hubId: activeMission?.hubId || '',
+        hubName: activeMission?.hubName || 'Hub',
+        reason: 'STOP_DELETED' as const,
+        reasonLabel: returningPackage.returnReason || 'Stop supprimé',
+        photoUrls,
+        signatureUrl,
+        coordinates: coords || { lat: 0, lng: 0 },
+        timestamp: new Date().toISOString(),
+        notes: `Retourné par ${currentUser.firstName} ${currentUser.lastName}`
+      };
+
+      // Mettre à jour le colis : RETURNED + enregistrer la preuve
+      await updatePackageStatus(returningPackage.id, PackageStatus.RETURNED, {
+        action: 'RETURNED',
+        driverId: currentUser.id,
+        driverName: `${currentUser.firstName} ${currentUser.lastName}`,
+        notes: `Retour hub confirmé — ${photoUrls.length} photo(s)`
+      });
+
+      // Sauvegarder la preuve de retour dans le colis
+      const { updatePackageFields } = await import('../services/missionService');
+      await updatePackageFields(returningPackage.id, {
+        returnProof,
+        currentHubId: activeMission?.hubId,
+        missionId: undefined,
+        stopId: undefined,
+        currentDriverId: undefined,
+        currentVehicleId: undefined
+      });
+
+      showNotif('✅ Retour hub confirmé !');
+      setShowReturnModal(false);
+      setReturningPackage(null);
+      setReturnPhotos([]);
+      setReturnSignature(null);
+    } catch (err) {
+      console.error('Erreur confirmation retour:', err);
+      showNotif('❌ Erreur — Réessayez');
+    }
+    setIsProcessing(false);
   };
 
   // Marquer arrivée au stop
@@ -846,6 +974,41 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
         {notification && (
           <div className="fixed top-4 left-4 right-4 z-50 bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg text-center text-sm font-medium animate-fade-in">
             {notification}
+          </div>
+        )}
+
+        {/* === ALERTE COLIS À RETOURNER === */}
+        {returnPackages.length > 0 && (
+          <div className="bg-yellow-50 border-2 border-yellow-400 rounded-2xl p-4 shadow-sm">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 bg-yellow-100 rounded-full flex items-center justify-center flex-shrink-0">
+                <span className="text-xl">⚠️</span>
+              </div>
+              <div className="flex-1">
+                <h3 className="font-bold text-yellow-800 text-sm">
+                  {returnPackages.length} colis à retourner au hub
+                </h3>
+                <p className="text-xs text-yellow-700 mt-0.5">
+                  Ces colis ont été retirés de votre tournée. Ramenez-les au hub.
+                </p>
+                <div className="mt-2 space-y-1.5">
+                  {returnPackages.map(pkg => (
+                    <div key={pkg.id} className="flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-yellow-200">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-slate-800 truncate">{pkg.orderNumber}</p>
+                        <p className="text-xs text-slate-500 truncate">{pkg.contactName}</p>
+                      </div>
+                      <button
+                        onClick={() => openReturnModal(pkg)}
+                        className="ml-2 px-3 py-1.5 bg-yellow-500 text-white rounded-lg text-xs font-bold hover:bg-yellow-600 active:scale-95 transition-all"
+                      >
+                        Retour hub
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
@@ -1369,6 +1532,161 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
               title={`Scan enlèvement — ${currentStop?.contactName || ''}`}
             />
           </Suspense>
+        )}
+
+        {/* === MODAL RETOUR HUB === */}
+        {showReturnModal && returningPackage && (
+          <div className="fixed inset-0 z-50 bg-black/60 flex items-end justify-center">
+            <div className="bg-white rounded-t-3xl w-full max-w-lg max-h-[90vh] overflow-y-auto animate-slide-up">
+              {/* Header */}
+              <div className="p-4 border-b border-slate-200 bg-yellow-50">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-bold text-slate-800">Retour hub</h3>
+                    <p className="text-xs text-yellow-700">{returningPackage.orderNumber} — {returningPackage.contactName}</p>
+                  </div>
+                  <button 
+                    onClick={() => setShowReturnModal(false)}
+                    className="p-2 rounded-full hover:bg-yellow-100"
+                  >
+                    <XCircle size={20} className="text-slate-400" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Raison du retour */}
+              <div className="p-4 bg-amber-50 border-b border-amber-200">
+                <p className="text-xs text-amber-800 font-medium">
+                  ⚠️ {returningPackage.returnReason || 'Ce colis a été retiré de votre tournée'}
+                </p>
+              </div>
+
+              {/* Contenu */}
+              <div className="p-4 space-y-4">
+                {/* Photos (obligatoire) */}
+                <div>
+                  <label className="text-xs font-bold text-slate-700 flex items-center gap-1 mb-2">
+                    📷 Photo du colis <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    ref={returnPhotoInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={handleReturnPhoto}
+                    className="hidden"
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    {returnPhotos.map((photo, idx) => (
+                      <div key={idx} className="relative w-16 h-16 rounded-lg overflow-hidden border border-slate-200">
+                        <img src={photo} alt="" className="w-full h-full object-cover" />
+                        <button
+                          onClick={() => setReturnPhotos(prev => prev.filter((_, i) => i !== idx))}
+                          className="absolute top-0.5 right-0.5 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                    {returnPhotos.length < 5 && (
+                      <button
+                        onClick={() => returnPhotoInputRef.current?.click()}
+                        className="w-16 h-16 rounded-lg border-2 border-dashed border-slate-300 flex items-center justify-center text-slate-400 hover:border-yellow-400 hover:text-yellow-500"
+                      >
+                        <Camera size={24} />
+                      </button>
+                    )}
+                  </div>
+                  {returnPhotos.length === 0 && (
+                    <p className="text-xs text-red-500 mt-1">⚠️ Au moins 1 photo obligatoire</p>
+                  )}
+                </div>
+
+                {/* Signature (optionnelle) */}
+                <div>
+                  <label className="text-xs font-bold text-slate-700 flex items-center gap-1 mb-2">
+                    ✍️ Signature réception hub <span className="text-slate-400">(optionnel)</span>
+                  </label>
+                  {returnSignature ? (
+                    <div className="relative">
+                      <img src={returnSignature} alt="Signature" className="w-full h-20 object-contain border border-slate-200 rounded-lg bg-white" />
+                      <button
+                        onClick={() => setReturnSignature(null)}
+                        className="absolute top-1 right-1 w-6 h-6 bg-red-500 text-white rounded-full text-xs flex items-center justify-center"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setShowReturnSignature(true)}
+                      className="w-full py-3 border-2 border-dashed border-slate-300 rounded-lg text-slate-500 text-sm flex items-center justify-center gap-2 hover:border-yellow-400"
+                    >
+                      <PenTool size={16} />
+                      Ajouter signature
+                    </button>
+                  )}
+                </div>
+
+                {/* Info géoloc */}
+                <div className="bg-slate-50 rounded-lg p-3">
+                  <p className="text-xs text-slate-500">
+                    📍 Votre position GPS sera enregistrée automatiquement pour confirmer la remise au hub.
+                  </p>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="p-4 border-t border-slate-200 space-y-2">
+                <button
+                  onClick={handleConfirmReturn}
+                  disabled={isProcessing || returnPhotos.length === 0}
+                  className="w-full py-3.5 bg-yellow-500 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50 active:scale-95 transition-all"
+                >
+                  {isProcessing ? (
+                    <>
+                      <Loader2 size={18} className="animate-spin" />
+                      Envoi en cours...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle size={18} />
+                      Confirmer retour au hub
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={() => setShowReturnModal(false)}
+                  disabled={isProcessing}
+                  className="w-full py-2 text-slate-500 text-sm"
+                >
+                  Annuler
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal signature retour */}
+        {showReturnSignature && (
+          <div className="fixed inset-0 z-[60] bg-black flex flex-col">
+            <div className="bg-slate-800 px-4 py-3 flex items-center justify-between">
+              <h3 className="text-white font-bold">Signature réception hub</h3>
+              <button onClick={() => setShowReturnSignature(false)} className="text-white p-1">
+                <XCircle size={24} />
+              </button>
+            </div>
+            <div className="flex-1 bg-white relative">
+              <SignaturePad
+                onSave={(data) => {
+                  setReturnSignature(data);
+                  setShowReturnSignature(false);
+                }}
+                onClear={() => {}}
+                driverName={`${currentUser.firstName} ${currentUser.lastName}`}
+              />
+            </div>
+          </div>
         )}
       </div>
     );
