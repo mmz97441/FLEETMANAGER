@@ -41,6 +41,7 @@ const cleanData = (obj: any): any => {
 
 // Mapper action -> catégorie
 const getCategory = (action: ActivityAction): ActivityCategory => {
+  if (!action) return ActivityCategory.SYSTEM;
   if (action.startsWith('USER_')) return ActivityCategory.USERS;
   if (action.startsWith('VEHICLE_')) return ActivityCategory.VEHICLES;
   if (action.startsWith('FUEL_')) return ActivityCategory.FUEL;
@@ -49,6 +50,7 @@ const getCategory = (action: ActivityAction): ActivityCategory => {
   if (action.startsWith('DOCUMENT_')) return ActivityCategory.DOCUMENTS;
   if (action.startsWith('ABSENCE_')) return ActivityCategory.ABSENCES;
   if (action.startsWith('QUOTE_')) return ActivityCategory.QUOTES;
+  if (action.startsWith('MISSION_') || action.startsWith('ITEM_')) return ActivityCategory.MISSIONS;
   return ActivityCategory.SYSTEM;
 };
 
@@ -106,6 +108,14 @@ const getActionLabel = (action: ActivityAction): string => {
     [ActivityAction.QUOTE_UPDATED]: 'a modifié un devis',
     [ActivityAction.QUOTE_APPROVED]: 'a approuvé un devis',
     [ActivityAction.QUOTE_REJECTED]: 'a refusé un devis',
+    
+    // Missions
+    [ActivityAction.MISSION_CREATED]: 'a créé une mission',
+    [ActivityAction.MISSION_DISPATCHED]: 'a dispatché une mission',
+    [ActivityAction.MISSION_STARTED]: 'a démarré une mission',
+    [ActivityAction.MISSION_COMPLETED]: 'a terminé une mission',
+    [ActivityAction.MISSION_CANCELLED]: 'a annulé une mission',
+    [ActivityAction.ITEM_CREATED]: 'a créé un élément',
     
     // Système
     [ActivityAction.SYSTEM_SETTINGS_UPDATED]: 'a modifié les paramètres',

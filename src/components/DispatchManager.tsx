@@ -235,6 +235,9 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
   const handleDispatchAll = async () => {
     if (!optimResult || optimResult.tours.length === 0 || !selectedZoneStats) return;
     
+    // Empêcher double-clic
+    if (isDispatching) return;
+    
     setIsDispatching(true);
     
     try {
@@ -274,17 +277,24 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
         const packageIds = tour.stops.flatMap(s => s.packageIds);
         for (const pkgId of packageIds) {
           const stop = tour.stops.find(s => s.packageIds.includes(pkgId));
+          
+          // Construire extraFields sans les valeurs undefined
+          const extraFields: Record<string, string | undefined> = {
+            missionId,
+            stopId: stop?.id,
+            currentDriverId: tour.driverId
+          };
+          // N'ajouter currentVehicleId que s'il existe
+          if (tour.vehicleId) {
+            extraFields.currentVehicleId = tour.vehicleId;
+          }
+          
           await updatePackageStatus(pkgId, PackageStatus.SORTED, {
             action: 'SORTED',
             driverId: tour.driverId,
             driverName: tour.driverName,
             notes: `Dispatché mission ${selectedZone} - ${tour.driverName}`
-          }, {
-            missionId,
-            stopId: stop?.id,
-            currentDriverId: tour.driverId,
-            currentVehicleId: tour.vehicleId
-          });
+          }, extraFields);
         }
         
         logActivity(currentUser, ActivityAction.ITEM_CREATED, {
@@ -311,7 +321,8 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
         ).catch(e => console.warn('[Notif] Erreur notif mission:', e));
       }
       
-      // Reset
+      // Reset et fermer
+      setIsDispatching(false);
       setShowDispatchModal(false);
       setSelectedZone(null);
       setSelectedDriverIds(new Set());
@@ -322,9 +333,9 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
       
     } catch (error) {
       console.error('Dispatch error:', error);
+      alert('Erreur lors du dispatch. Vérifiez la console pour plus de détails.');
+      setIsDispatching(false);
     }
-    
-    setIsDispatching(false);
   };
   
   // Ouvrir le modal
