@@ -168,6 +168,15 @@ const minutesToTime = (minutes: number): string => {
 // ============================================================================
 
 /**
+ * Options d'optimisation
+ */
+export interface OptimizationOptions {
+  departureTime?: string;      // Heure de départ prévue (défaut: '08:00')
+  globalEndTime?: string;      // Heure de fin max (défaut: utilise hub.closingTime)
+  returnToHub?: boolean;       // Retour au hub obligatoire (défaut: false)
+}
+
+/**
  * Optimise les tournées pour N chauffeurs avec M colis
  */
 export const optimizeMultiVehicle = async (
@@ -176,8 +185,13 @@ export const optimizeMultiVehicle = async (
   hub: Hub,
   date: string,
   apiKey: string,
-  departureTime: string = '08:00'  // Heure de départ prévue (du formulaire)
+  options: OptimizationOptions = {}
 ): Promise<OptimizationResult> => {
+  const {
+    departureTime = '08:00',
+    globalEndTime: customEndTime,
+    returnToHub = false  // Par défaut, pas de retour au hub obligatoire
+  } = options;
   try {
     console.log(`📦 GMPRO: ${packages.length} colis reçus`);
     packages.forEach(p => console.log(`   - ${p.orderNumber}: ${p.contactName} | ${p.address} | statut=${p.status}`));
@@ -237,10 +251,13 @@ export const optimizeMultiVehicle = async (
     
     // 5. Construire la requête GMPRO
     // Utiliser l'heure de départ du formulaire dispatch
+    // Pour l'heure de fin: priorité aux créneaux du dispatch, sinon hub.closingTime
     const globalStartMinutes = timeToMinutes(departureTime);
-    const globalEndMinutes = timeToMinutes(hub.closingTime || '20:00');
-    
-    console.log(`🕐 Plage horaire GMPRO: ${departureTime} → ${hub.closingTime || '20:00'}`);
+    const effectiveEndTime = customEndTime || hub.closingTime || '20:00';
+    const globalEndMinutes = timeToMinutes(effectiveEndTime);
+
+    console.log(`🕐 Plage horaire GMPRO: ${departureTime} → ${effectiveEndTime}`);
+    console.log(`🔄 Retour au hub: ${returnToHub ? 'OUI' : 'NON'}`);
     
     const shipments = validStops.map((sg, idx) => {
       const serviceTime = Math.max(5, sg.packages.length * 5);
@@ -288,21 +305,30 @@ export const optimizeMultiVehicle = async (
       return shipment;
     });
     
-    const vehicles = driversVehicles.map((dv) => ({
-      startLocation: {
-        latitude: hubCoords!.lat, longitude: hubCoords!.lng
-      },
-      endLocation: {
-        latitude: hubCoords!.lat, longitude: hubCoords!.lng
-      },
-      label: `${dv.driver.firstName} ${dv.driver.lastName}${dv.vehicle ? ` (${dv.vehicle.plate})` : ''}`
-    }));
+    // Construire les véhicules - endLocation seulement si returnToHub est activé
+    const vehicles = driversVehicles.map((dv) => {
+      const vehicle: any = {
+        startLocation: {
+          latitude: hubCoords!.lat, longitude: hubCoords!.lng
+        },
+        label: `${dv.driver.firstName} ${dv.driver.lastName}${dv.vehicle ? ` (${dv.vehicle.plate})` : ''}`
+      };
+
+      // Ajouter endLocation seulement si retour au hub obligatoire
+      if (returnToHub) {
+        vehicle.endLocation = {
+          latitude: hubCoords!.lat, longitude: hubCoords!.lng
+        };
+      }
+
+      return vehicle;
+    });
     
     const model: GMPROModel = {
       shipments,
       vehicles,
       globalStartTime: timeToISO(departureTime, date),
-      globalEndTime: timeToISO(hub.closingTime || '20:00', date)
+      globalEndTime: timeToISO(effectiveEndTime, date)
     };
     
     // 6. Appeler GMPRO via Cloud Function

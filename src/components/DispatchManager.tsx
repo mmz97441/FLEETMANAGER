@@ -63,7 +63,8 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
   const [optimResult, setOptimResult] = useState<OptimizationResult | null>(null);
   const [expandedTour, setExpandedTour] = useState<number | null>(null);
   const [showDispatchModal, setShowDispatchModal] = useState(false);
-  
+  const [returnToHub, setReturnToHub] = useState<boolean>(false);  // Retour hub désactivé par défaut
+
   // Créneaux de livraison modifiés (packageId → { start, end })
   const [packageTimeWindows, setPackageTimeWindows] = useState<Record<string, { start: string; end: string }>>({});
   
@@ -177,14 +178,14 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
   
   const handleOptimize = async () => {
     if (!selectedZoneStats || selectedDriversVehicles.length === 0 || !departureHub) return;
-    
+
     setIsOptimizing(true);
     setOptimResult(null);
     setExpandedTour(null);
-    
+
     try {
       const apiKey = getGoogleMapsApiKey();
-      
+
       // Appliquer les créneaux modifiés aux packages
       const packagesWithUpdatedTimeWindows = selectedZoneStats.packages.map(pkg => {
         const tw = packageTimeWindows[pkg.id];
@@ -194,23 +195,40 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
           timeWindowEnd: tw?.end || undefined
         };
       });
-      
+
+      // Calculer l'heure de fin max parmi les créneaux du dispatch
+      // C'est la dernière info modifiée, donc c'est elle qui prime
+      let maxEndTime: string | undefined;
+      Object.values(packageTimeWindows).forEach(tw => {
+        if (tw.end) {
+          if (!maxEndTime || tw.end > maxEndTime) {
+            maxEndTime = tw.end;
+          }
+        }
+      });
+
+      console.log(`🕐 Plage horaire dispatch: départ=${plannedDepartureTime}, fin max créneaux=${maxEndTime || 'non défini'}, retour hub=${returnToHub}`);
+
       const result = await optimizeMultiVehicle(
         packagesWithUpdatedTimeWindows,
         selectedDriversVehicles,
         departureHub,
         selectedDate,
         apiKey,
-        plannedDepartureTime  // Utiliser l'heure de départ du formulaire
+        {
+          departureTime: plannedDepartureTime,
+          globalEndTime: maxEndTime,  // Utiliser l'heure de fin max des créneaux du dispatch
+          returnToHub: returnToHub     // Option retour au hub (désactivé par défaut)
+        }
       );
-      
+
       setOptimResult(result);
-      
+
       // Ouvrir le premier tour par défaut
       if (result.tours.length > 0) {
         setExpandedTour(0);
       }
-      
+
     } catch (error) {
       console.error('Optimization error:', error);
       setOptimResult({
@@ -224,7 +242,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
         method: 'fallback'
       });
     }
-    
+
     setIsOptimizing(false);
   };
   
@@ -598,6 +616,26 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
               <p className="text-xs text-slate-400 mt-1">
                 Les ETAs de chaque stop seront calculées à partir de cette heure
               </p>
+
+              {/* Option retour au hub */}
+              <div className="mt-4 pt-4 border-t border-slate-100">
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={returnToHub}
+                    onChange={(e) => { setReturnToHub(e.target.checked); setOptimResult(null); }}
+                    className="w-4 h-4 text-brand-600 rounded border-slate-300 focus:ring-brand-500"
+                  />
+                  <div>
+                    <span className="text-sm font-medium text-slate-700">Retour au hub obligatoire</span>
+                    <p className="text-xs text-slate-400">
+                      {returnToHub
+                        ? 'Le véhicule doit revenir au hub après les livraisons'
+                        : 'Le véhicule termine sa tournée au dernier stop (plus de flexibilité)'}
+                    </p>
+                  </div>
+                </label>
+              </div>
             </div>
             
             {/* Créneaux de livraison des colis */}
@@ -782,12 +820,14 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
                               <span className="text-[11px] text-slate-500 shrink-0">{stop.packageCount} col.</span>
                             </div>
                           ))}
-                          
-                          {/* Retour hub */}
-                          <div className="flex items-center gap-3 px-4 py-2 border-t border-slate-100 text-xs text-slate-500">
-                            <div className="w-5 h-5 rounded-full bg-blue-500 text-white text-[10px] font-bold flex items-center justify-center">H</div>
-                            <span>Retour: {departureHub?.name || 'Hub'}</span>
-                          </div>
+
+                          {/* Retour hub - seulement si l'option est activée */}
+                          {returnToHub && (
+                            <div className="flex items-center gap-3 px-4 py-2 border-t border-slate-100 text-xs text-slate-500">
+                              <div className="w-5 h-5 rounded-full bg-blue-500 text-white text-[10px] font-bold flex items-center justify-center">H</div>
+                              <span>Retour: {departureHub?.name || 'Hub'}</span>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
