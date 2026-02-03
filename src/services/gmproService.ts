@@ -188,7 +188,13 @@ export const optimizeMultiVehicle = async (
     const skippedStops = stopGroups.filter(sg => !sg.coords);
     
     if (skippedStops.length > 0) {
-      console.warn(`${skippedStops.length} stops sans coordonnées ignorés`);
+      console.warn(`⚠️ ${skippedStops.length} stops sans coordonnées:`, skippedStops.map(s => s.key));
+      // Si tous les stops n'ont pas de coords, utiliser le fallback avec tous les stops
+      // (le fallback peut fonctionner sans coords en répartissant simplement)
+      if (validStops.length === 0) {
+        console.warn('🔄 Tous les stops sans coordonnées — utilisation du fallback géographique');
+        return createFallbackOptimization(stopGroups, driversVehicles, hubCoords);
+      }
     }
     
     if (validStops.length === 0) {
@@ -243,10 +249,12 @@ export const optimizeMultiVehicle = async (
     
     // 6. Appeler GMPRO via Cloud Function
     console.log(`📡 GMPRO: ${shipments.length} stops → ${vehicles.length} véhicules`);
+    console.log(`📦 Stops valides: ${validStops.length}, Skippés (sans coords): ${skippedStops.length}`);
     
     let gmproResult: GMPROResult;
     try {
       gmproResult = await optimizeToursCF(model);
+      console.log('📡 GMPRO résultat:', JSON.stringify(gmproResult.metrics || {}, null, 2));
     } catch (err: any) {
       console.error('GMPRO échoué:', err.message);
       return createFallbackOptimization(stopGroups, driversVehicles, hubCoords);
@@ -254,6 +262,7 @@ export const optimizeMultiVehicle = async (
     
     // 7. Parser les résultats
     if (!gmproResult.routes || gmproResult.routes.length === 0) {
+      console.warn('GMPRO: aucune route retournée, fallback');
       return createFallbackOptimization(stopGroups, driversVehicles, hubCoords);
     }
     
@@ -263,7 +272,13 @@ export const optimizeMultiVehicle = async (
       const vehicleIdx = route.vehicleIndex || 0;
       const dv = driversVehicles[vehicleIdx];
       
-      if (!dv || !route.visits || route.visits.length === 0) continue;
+      // Log si route sans visits
+      if (!route.visits || route.visits.length === 0) {
+        console.warn(`GMPRO: Route ${vehicleIdx} sans visits (${dv?.driver?.firstName || 'N/A'})`);
+        continue;
+      }
+      
+      if (!dv) continue;
       
       const stops: MissionStop[] = [];
       let tourPackageCount = 0;
@@ -321,6 +336,13 @@ export const optimizeMultiVehicle = async (
     }
     
     const skippedCount = gmproResult.metrics?.skippedMandatoryShipmentCount || 0;
+    
+    // Si aucun stop n'a été routé (tous skipped), utiliser le fallback
+    const totalRoutedPackages = tours.reduce((s, t) => s + t.packageCount, 0);
+    if (totalRoutedPackages === 0 && validStops.length > 0) {
+      console.warn('GMPRO a skipped tous les shipments, utilisation du fallback');
+      return createFallbackOptimization(stopGroups, driversVehicles, hubCoords);
+    }
     
     return {
       success: true,

@@ -66,7 +66,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
   
   // Filtrer les colis au hub (collectés et réceptionnés) — prêts à être dispatchés
   const pendingPackages = useMemo(() => 
-    packages.filter(p => p.status === PackageStatus.AT_HUB),
+    packages.filter(p => p.status === PackageStatus.AT_HUB || p.status === PackageStatus.SORTED),
     [packages]
   );
   
