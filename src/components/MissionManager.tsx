@@ -21,6 +21,9 @@ import {
   addHub,
   updateHub,
   deleteHub,
+  updatePackageStatus,
+  deletePackage,
+  updatePackageFields,
   DEFAULT_POSTAL_CODE_MAPPINGS,
   MissionStats
 } from '../services/missionService';
@@ -81,6 +84,16 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   
   // POD Viewer
   const [viewingPOD, setViewingPOD] = useState<{ pod: any; pkg: Package } | null>(null);
+  
+  // Status change (admin)
+  const [statusChangePkg, setStatusChangePkg] = useState<Package | null>(null);
+  const [isChangingStatus, setIsChangingStatus] = useState(false);
+  
+  // Edit/Delete colis (admin)
+  const [editingPkg, setEditingPkg] = useState<Package | null>(null);
+  const [editPkgForm, setEditPkgForm] = useState<Record<string, any>>({});
+  const [isSavingPkg, setIsSavingPkg] = useState(false);
+  const [deletingPkg, setDeletingPkg] = useState<Package | null>(null);
   
   // Gestion des hubs
   const [showHubModal, setShowHubModal] = useState(false);
@@ -949,6 +962,72 @@ const MissionManager: React.FC<MissionManagerProps> = ({
     </div>
   );
 
+  // Changement de statut admin
+  const handleStatusChange = async (pkg: Package, newStatus: PackageStatus) => {
+    setIsChangingStatus(true);
+    try {
+      const statusLabels: Record<string, string> = {
+        [PackageStatus.PENDING]: 'En attente',
+        [PackageStatus.COLLECTED]: 'Collecté',
+        [PackageStatus.AT_HUB]: 'Au hub',
+        [PackageStatus.SORTED]: 'Trié',
+        [PackageStatus.LOADED]: 'Chargé',
+        [PackageStatus.IN_DELIVERY]: 'En livraison',
+        [PackageStatus.DELIVERED]: 'Livré',
+        [PackageStatus.FAILED]: 'Échec',
+      };
+      await updatePackageStatus(
+        pkg.id,
+        newStatus,
+        {
+          action: 'MANUAL_STATUS_CHANGE',
+          driverId: currentUser.id,
+          driverName: `${currentUser.firstName} ${currentUser.lastName}`,
+          notes: `Changement manuel: ${statusLabels[pkg.status] || pkg.status} → ${statusLabels[newStatus] || newStatus}`
+        }
+      );
+      setStatusChangePkg(null);
+    } catch (err) {
+      console.error('Erreur changement statut:', err);
+    }
+    setIsChangingStatus(false);
+  };
+
+  // Transitions autorisées par statut (pour l'admin)
+  const getAllowedTransitions = (status: PackageStatus): { status: PackageStatus; label: string; color: string }[] => {
+    const transitions: Record<string, { status: PackageStatus; label: string; color: string }[]> = {
+      [PackageStatus.PENDING]: [
+        { status: PackageStatus.COLLECTED, label: 'Collecté', color: 'bg-blue-100 text-blue-700' },
+        { status: PackageStatus.AT_HUB, label: 'Au hub', color: 'bg-indigo-100 text-indigo-700' },
+      ],
+      [PackageStatus.COLLECTED]: [
+        { status: PackageStatus.AT_HUB, label: 'Au hub', color: 'bg-indigo-100 text-indigo-700' },
+        { status: PackageStatus.PENDING, label: '↩ En attente', color: 'bg-slate-100 text-slate-700' },
+      ],
+      [PackageStatus.AT_HUB]: [
+        { status: PackageStatus.SORTED, label: 'Trié', color: 'bg-purple-100 text-purple-700' },
+        { status: PackageStatus.PENDING, label: '↩ En attente', color: 'bg-slate-100 text-slate-700' },
+      ],
+      [PackageStatus.SORTED]: [
+        { status: PackageStatus.LOADED, label: 'Chargé', color: 'bg-amber-100 text-amber-700' },
+        { status: PackageStatus.AT_HUB, label: '↩ Au hub', color: 'bg-indigo-100 text-indigo-700' },
+      ],
+      [PackageStatus.LOADED]: [
+        { status: PackageStatus.IN_DELIVERY, label: 'En livraison', color: 'bg-orange-100 text-orange-700' },
+        { status: PackageStatus.SORTED, label: '↩ Trié', color: 'bg-purple-100 text-purple-700' },
+      ],
+      [PackageStatus.IN_DELIVERY]: [
+        { status: PackageStatus.DELIVERED, label: '✅ Livré', color: 'bg-green-100 text-green-700' },
+        { status: PackageStatus.FAILED, label: '❌ Échec', color: 'bg-red-100 text-red-700' },
+      ],
+      [PackageStatus.FAILED]: [
+        { status: PackageStatus.PENDING, label: '↩ Remettre en attente', color: 'bg-slate-100 text-slate-700' },
+      ],
+      [PackageStatus.DELIVERED]: [],
+    };
+    return transitions[status] || [];
+  };
+
   // Render Packages
   const renderPackages = () => (
     <div className="space-y-6">
@@ -985,6 +1064,66 @@ const MissionManager: React.FC<MissionManagerProps> = ({
         />
       </div>
 
+      {/* Actions de masse */}
+      {(() => {
+        const pendingCount = todayPackages.filter(p => p.status === PackageStatus.PENDING).length;
+        const collectedCount = todayPackages.filter(p => p.status === PackageStatus.COLLECTED).length;
+        if (pendingCount === 0 && collectedCount === 0) return null;
+        return (
+          <div className="flex flex-wrap gap-2 items-center">
+            <span className="text-sm text-slate-500 mr-2">Actions en masse :</span>
+            {pendingCount > 0 && (
+              <button
+                disabled={isChangingStatus}
+                onClick={async () => {
+                  if (!confirm(`Passer ${pendingCount} colis "En attente" → "Au hub" ?`)) return;
+                  setIsChangingStatus(true);
+                  const pending = todayPackages.filter(p => p.status === PackageStatus.PENDING);
+                  for (const pkg of pending) {
+                    try {
+                      await updatePackageStatus(pkg.id, PackageStatus.AT_HUB, {
+                        action: 'MANUAL_STATUS_CHANGE',
+                        driverId: currentUser.id,
+                        driverName: `${currentUser.firstName} ${currentUser.lastName}`,
+                        notes: 'Passage en masse au hub (admin)'
+                      });
+                    } catch (e) { console.warn('Erreur:', pkg.id, e); }
+                  }
+                  setIsChangingStatus(false);
+                }}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-100 text-indigo-700 hover:bg-indigo-200 transition-colors disabled:opacity-50"
+              >
+                {isChangingStatus ? '⏳ En cours...' : `📦 Tout passer au hub (${pendingCount})`}
+              </button>
+            )}
+            {collectedCount > 0 && (
+              <button
+                disabled={isChangingStatus}
+                onClick={async () => {
+                  if (!confirm(`Passer ${collectedCount} colis "Collectés" → "Au hub" ?`)) return;
+                  setIsChangingStatus(true);
+                  const collected = todayPackages.filter(p => p.status === PackageStatus.COLLECTED);
+                  for (const pkg of collected) {
+                    try {
+                      await updatePackageStatus(pkg.id, PackageStatus.AT_HUB, {
+                        action: 'MANUAL_STATUS_CHANGE',
+                        driverId: currentUser.id,
+                        driverName: `${currentUser.firstName} ${currentUser.lastName}`,
+                        notes: 'Passage en masse au hub (admin)'
+                      });
+                    } catch (e) { console.warn('Erreur:', pkg.id, e); }
+                  }
+                  setIsChangingStatus(false);
+                }}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors disabled:opacity-50"
+              >
+                {isChangingStatus ? '⏳ En cours...' : `📦 Collectés → Hub (${collectedCount})`}
+              </button>
+            )}
+          </div>
+        );
+      })()}
+
       {/* Liste des colis */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <div className="overflow-x-auto">
@@ -995,14 +1134,17 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                 <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase">Destinataire</th>
                 <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase">Adresse</th>
                 <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase">Zone</th>
+                <th className="px-4 py-3 text-center text-xs font-bold text-slate-500 uppercase">Import</th>
                 <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase">Statut</th>
+                <th className="px-4 py-3 text-center text-xs font-bold text-slate-500 uppercase">Actions</th>
                 <th className="px-4 py-3 text-center text-xs font-bold text-slate-500 uppercase">POD</th>
+                <th className="px-4 py-3 text-center text-xs font-bold text-slate-500 uppercase">Gérer</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {todayPackages.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                  <td colSpan={9} className="px-4 py-8 text-center text-slate-500">
                     Aucun colis pour cette date
                   </td>
                 </tr>
@@ -1051,10 +1193,53 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                             {pkg.zone}
                           </span>
                         </td>
+                        <td className="px-4 py-3 text-center">
+                          <span className="text-xs text-slate-500 font-mono">
+                            {new Date(pkg.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                          <p className="text-[10px] text-slate-400">
+                            {new Date(pkg.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })}
+                          </p>
+                        </td>
                         <td className="px-4 py-3">
                           <span className={`px-2 py-1 rounded-lg text-xs font-medium ${statusColors.bg} ${statusColors.text}`}>
                             {pkg.status}
                           </span>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {getAllowedTransitions(pkg.status).length > 0 ? (
+                            <div className="relative inline-block">
+                              {statusChangePkg?.id === pkg.id ? (
+                                <div className="flex flex-col gap-1 min-w-[140px]">
+                                  {getAllowedTransitions(pkg.status).map(t => (
+                                    <button
+                                      key={t.status}
+                                      disabled={isChangingStatus}
+                                      onClick={(e) => { e.stopPropagation(); handleStatusChange(pkg, t.status); }}
+                                      className={`px-2 py-1 rounded-lg text-xs font-medium ${t.color} hover:opacity-80 transition-opacity disabled:opacity-50`}
+                                    >
+                                      {isChangingStatus ? '...' : t.label}
+                                    </button>
+                                  ))}
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); setStatusChangePkg(null); }}
+                                    className="px-2 py-1 rounded-lg text-xs text-slate-500 hover:bg-slate-100"
+                                  >
+                                    Annuler
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setStatusChangePkg(pkg); }}
+                                  className="px-2 py-1 rounded-lg text-xs font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors"
+                                >
+                                  Changer ▾
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-slate-300">—</span>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-center">
                           {pkg.pod?.signatureUrl ? (
@@ -1069,6 +1254,44 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                             <span className="text-xs text-slate-400">—</span>
                           ) : null}
                         </td>
+                        <td className="px-4 py-3 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditPkgForm({
+                                  contactName: pkg.contactName,
+                                  contactPhone: pkg.contactPhone || '',
+                                  address: pkg.address,
+                                  city: pkg.city,
+                                  postalCode: pkg.postalCode,
+                                  timeWindowStart: pkg.timeWindowStart || '',
+                                  timeWindowEnd: pkg.timeWindowEnd || '',
+                                  comment: pkg.comment || '',
+                                  weight: pkg.weight || '',
+                                  volume: pkg.volume || ''
+                                });
+                                setEditingPkg(pkg);
+                              }}
+                              className="p-1.5 rounded-lg text-blue-500 hover:bg-blue-50 transition-colors"
+                              title="Modifier ce colis"
+                            >
+                              <Edit size={14} />
+                            </button>
+                            {(pkg.status === PackageStatus.PENDING || pkg.status === PackageStatus.AT_HUB || pkg.status === PackageStatus.COLLECTED) && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeletingPkg(pkg);
+                                }}
+                                className="p-1.5 rounded-lg text-red-400 hover:bg-red-50 transition-colors"
+                                title="Supprimer ce colis"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            )}
+                          </div>
+                        </td>
                       </tr>
                     );
                   })
@@ -1077,10 +1300,175 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           </table>
         </div>
       </div>
+
+      {/* === MODAL ÉDITION COLIS === */}
+      {editingPkg && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setEditingPkg(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+              <div>
+                <h3 className="font-bold text-slate-800">Modifier le colis</h3>
+                <p className="text-xs text-slate-500 font-mono">{editingPkg.orderNumber}</p>
+              </div>
+              <button onClick={() => setEditingPkg(null)} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100">
+                <XCircle size={18} />
+              </button>
+            </div>
+            <div className="p-4 space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-slate-500 block mb-1">Destinataire</label>
+                  <input type="text" value={editPkgForm.contactName || ''} onChange={e => setEditPkgForm(f => ({...f, contactName: e.target.value}))}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-500 block mb-1">Téléphone</label>
+                  <input type="text" value={editPkgForm.contactPhone || ''} onChange={e => setEditPkgForm(f => ({...f, contactPhone: e.target.value}))}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-500 block mb-1">Adresse</label>
+                <input type="text" value={editPkgForm.address || ''} onChange={e => setEditPkgForm(f => ({...f, address: e.target.value}))}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-slate-500 block mb-1">Code postal</label>
+                  <input type="text" value={editPkgForm.postalCode || ''} onChange={e => setEditPkgForm(f => ({...f, postalCode: e.target.value}))}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-500 block mb-1">Ville</label>
+                  <input type="text" value={editPkgForm.city || ''} onChange={e => setEditPkgForm(f => ({...f, city: e.target.value}))}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-slate-500 block mb-1">Créneau début</label>
+                  <input type="time" value={editPkgForm.timeWindowStart || ''} onChange={e => setEditPkgForm(f => ({...f, timeWindowStart: e.target.value}))}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-500 block mb-1">Créneau fin</label>
+                  <input type="time" value={editPkgForm.timeWindowEnd || ''} onChange={e => setEditPkgForm(f => ({...f, timeWindowEnd: e.target.value}))}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-slate-500 block mb-1">Poids (kg)</label>
+                  <input type="number" step="0.1" value={editPkgForm.weight || ''} onChange={e => setEditPkgForm(f => ({...f, weight: e.target.value ? parseFloat(e.target.value) : ''}))}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-500 block mb-1">Volume (m³)</label>
+                  <input type="number" step="0.01" value={editPkgForm.volume || ''} onChange={e => setEditPkgForm(f => ({...f, volume: e.target.value ? parseFloat(e.target.value) : ''}))}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-500 block mb-1">Commentaire</label>
+                <textarea value={editPkgForm.comment || ''} onChange={e => setEditPkgForm(f => ({...f, comment: e.target.value}))}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none resize-none h-16" />
+              </div>
+            </div>
+            <div className="p-4 border-t border-slate-100 flex gap-2">
+              <button onClick={() => setEditingPkg(null)} className="flex-1 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-600">
+                Annuler
+              </button>
+              <button
+                disabled={isSavingPkg}
+                onClick={async () => {
+                  setIsSavingPkg(true);
+                  try {
+                    const fields: Record<string, any> = {};
+                    if (editPkgForm.contactName !== editingPkg.contactName) fields.contactName = editPkgForm.contactName;
+                    if (editPkgForm.contactPhone !== (editingPkg.contactPhone || '')) fields.contactPhone = editPkgForm.contactPhone || null;
+                    if (editPkgForm.address !== editingPkg.address) fields.address = editPkgForm.address;
+                    if (editPkgForm.city !== editingPkg.city) fields.city = editPkgForm.city;
+                    if (editPkgForm.postalCode !== editingPkg.postalCode) fields.postalCode = editPkgForm.postalCode;
+                    if (editPkgForm.timeWindowStart !== (editingPkg.timeWindowStart || '')) fields.timeWindowStart = editPkgForm.timeWindowStart || null;
+                    if (editPkgForm.timeWindowEnd !== (editingPkg.timeWindowEnd || '')) fields.timeWindowEnd = editPkgForm.timeWindowEnd || null;
+                    if (editPkgForm.comment !== (editingPkg.comment || '')) fields.comment = editPkgForm.comment || null;
+                    if (editPkgForm.weight !== (editingPkg.weight || '')) fields.weight = editPkgForm.weight || null;
+                    if (editPkgForm.volume !== (editingPkg.volume || '')) fields.volume = editPkgForm.volume || null;
+                    
+                    if (Object.keys(fields).length > 0) {
+                      await updatePackageFields(editingPkg.id, fields);
+                      await logActivity({
+                        type: 'PACKAGE_UPDATED',
+                        userId: currentUser.id,
+                        userName: `${currentUser.firstName} ${currentUser.lastName}`,
+                        target: editingPkg.orderNumber,
+                        details: { changes: Object.keys(fields), before: {}, after: fields }
+                      });
+                    }
+                    setEditingPkg(null);
+                  } catch (err) {
+                    console.error('Erreur modification colis:', err);
+                  }
+                  setIsSavingPkg(false);
+                }}
+                className="flex-1 py-2.5 bg-brand-500 text-white rounded-xl text-sm font-bold hover:bg-brand-600 transition-colors disabled:opacity-50"
+              >
+                {isSavingPkg ? '⏳ Enregistrement...' : '✓ Enregistrer'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* === MODAL SUPPRESSION COLIS === */}
+      {deletingPkg && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setDeletingPkg(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full" onClick={e => e.stopPropagation()}>
+            <div className="p-5 text-center">
+              <div className="w-14 h-14 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                <Trash2 size={24} className="text-red-600" />
+              </div>
+              <h3 className="font-bold text-slate-800 text-lg mb-1">Supprimer ce colis ?</h3>
+              <p className="text-sm text-slate-500 mb-1">
+                <span className="font-mono font-bold">{deletingPkg.orderNumber}</span> — {deletingPkg.contactName}
+              </p>
+              <p className="text-xs text-red-500 font-medium">
+                Cette action est irréversible.
+              </p>
+            </div>
+            <div className="p-4 border-t border-slate-100 flex gap-2">
+              <button onClick={() => setDeletingPkg(null)} className="flex-1 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-600">
+                Annuler
+              </button>
+              <button
+                disabled={isSavingPkg}
+                onClick={async () => {
+                  setIsSavingPkg(true);
+                  try {
+                    await deletePackage(deletingPkg.id);
+                    await logActivity({
+                      type: 'PACKAGE_DELETED',
+                      userId: currentUser.id,
+                      userName: `${currentUser.firstName} ${currentUser.lastName}`,
+                      target: deletingPkg.orderNumber,
+                      details: { metadata: { contactName: deletingPkg.contactName, address: deletingPkg.address } }
+                    });
+                    setDeletingPkg(null);
+                  } catch (err) {
+                    console.error('Erreur suppression colis:', err);
+                  }
+                  setIsSavingPkg(false);
+                }}
+                className="flex-1 py-2.5 bg-red-600 text-white rounded-xl text-sm font-bold hover:bg-red-700 transition-colors disabled:opacity-50"
+              >
+                {isSavingPkg ? '⏳ Suppression...' : '🗑 Supprimer'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
-
-  // Render Hubs
   const renderHubs = () => (
     <div className="space-y-6">
       {/* Header avec bouton Ajouter */}

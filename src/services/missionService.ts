@@ -437,6 +437,20 @@ export const updateMission = async (mission: Mission): Promise<void> => {
   }));
 };
 
+/**
+ * Mise à jour partielle d'une mission (merge).
+ * Utile pour modifier quelques champs sans envoyer toute la mission.
+ */
+export const updateMissionFields = async (
+  missionId: string,
+  fields: Partial<Omit<Mission, 'id' | 'createdAt'>>
+): Promise<void> => {
+  await updateDoc(doc(db, MISSIONS_COLLECTION, missionId), {
+    ...fields,
+    updatedAt: new Date().toISOString()
+  });
+};
+
 export const updateMissionStatus = async (missionId: string, status: MissionStatus): Promise<void> => {
   const updates: any = { status, updatedAt: new Date().toISOString() };
   
@@ -620,4 +634,34 @@ export const calculateMissionStats = (missions: Mission[]): MissionStats => {
   }
   
   return stats;
+};
+
+// ============================================================================
+// CRUD COLIS — ADMIN
+// ============================================================================
+
+/**
+ * Supprimer un colis (admin uniquement).
+ * Supprime le document Firestore. Irréversible.
+ */
+export const deletePackage = async (packageId: string): Promise<void> => {
+  await deleteDoc(doc(db, PACKAGES_COLLECTION, packageId));
+};
+
+/**
+ * Modifier les champs d'un colis existant (admin).
+ * Ne modifie que les champs fournis (merge partiel).
+ */
+export const updatePackageFields = async (
+  packageId: string,
+  fields: Partial<Pick<Package,
+    'contactName' | 'contactPhone' | 'address' | 'city' | 'postalCode' |
+    'timeWindowStart' | 'timeWindowEnd' | 'comment' | 'weight' | 'volume' |
+    'zone' | 'floor' | 'hasElevator'
+  >>
+): Promise<void> => {
+  await updateDoc(doc(db, PACKAGES_COLLECTION, packageId), {
+    ...fields,
+    updatedAt: new Date().toISOString()
+  });
 };

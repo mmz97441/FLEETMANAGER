@@ -16,13 +16,14 @@
 import React, { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import {
   Mission, MissionStatus, MissionType, MissionStop, StopStatus,
-  PackageStatus, FailureReason, Package,
+  PackageStatus, FailureReason, Package, DeliveryLocation,
   User, MISSION_STATUS_COLORS
 } from '../types';
 import {
   subscribeToMissions,
   subscribeToPackages,
   updateMission,
+  updateMissionFields,
   updateMissionStatus,
   updatePackageStatus
 } from '../services/missionService';
@@ -53,10 +54,13 @@ interface DriverMissionViewProps {
 const SignaturePad: React.FC<{
   onSave: (dataUrl: string) => void;
   onCancel: () => void;
-}> = ({ onSave, onCancel }) => {
+  driverName?: string;
+}> = ({ onSave, onCancel, driverName }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [hasContent, setHasContent] = useState(false);
+  const strokesRef = useRef<{ x: number; y: number }[][]>([]);
+  const currentStrokeRef = useRef<{ x: number; y: number }[]>([]);
 
   const getPos = (e: React.TouchEvent | React.MouseEvent) => {
     const canvas = canvasRef.current;
@@ -70,13 +74,33 @@ const SignaturePad: React.FC<{
     };
   };
 
+  const redraw = () => {
+    const ctx = canvasRef.current?.getContext('2d');
+    if (!ctx || !canvasRef.current) return;
+    ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+    ctx.strokeStyle = '#1e293b';
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    for (const stroke of strokesRef.current) {
+      if (stroke.length < 2) continue;
+      ctx.beginPath();
+      ctx.moveTo(stroke[0].x, stroke[0].y);
+      for (let i = 1; i < stroke.length - 1; i++) {
+        const mx = (stroke[i].x + stroke[i + 1].x) / 2;
+        const my = (stroke[i].y + stroke[i + 1].y) / 2;
+        ctx.quadraticCurveTo(stroke[i].x, stroke[i].y, mx, my);
+      }
+      ctx.lineTo(stroke[stroke.length - 1].x, stroke[stroke.length - 1].y);
+      ctx.stroke();
+    }
+  };
+
   const startDrawing = (e: React.TouchEvent | React.MouseEvent) => {
     e.preventDefault();
-    const ctx = canvasRef.current?.getContext('2d');
-    if (!ctx) return;
     const pos = getPos(e);
-    ctx.beginPath();
-    ctx.moveTo(pos.x, pos.y);
+    currentStrokeRef.current = [pos];
     setIsDrawing(true);
   };
 
@@ -86,58 +110,114 @@ const SignaturePad: React.FC<{
     const ctx = canvasRef.current?.getContext('2d');
     if (!ctx) return;
     const pos = getPos(e);
-    ctx.lineTo(pos.x, pos.y);
+    currentStrokeRef.current.push(pos);
+
+    // Live drawing du trait courant
+    const pts = currentStrokeRef.current;
+    if (pts.length < 2) return;
+    ctx.beginPath();
     ctx.strokeStyle = '#1e293b';
     ctx.lineWidth = 2.5;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
+    const prev = pts[pts.length - 2];
+    ctx.moveTo(prev.x, prev.y);
+    ctx.lineTo(pos.x, pos.y);
     ctx.stroke();
     setHasContent(true);
   };
 
-  const stopDrawing = () => setIsDrawing(false);
+  const stopDrawing = () => {
+    if (isDrawing && currentStrokeRef.current.length > 1) {
+      strokesRef.current.push([...currentStrokeRef.current]);
+      currentStrokeRef.current = [];
+      redraw(); // Redessine avec Bézier pour lisser
+    }
+    setIsDrawing(false);
+  };
+
+  const undo = () => {
+    if (strokesRef.current.length === 0) return;
+    strokesRef.current.pop();
+    redraw();
+    setHasContent(strokesRef.current.length > 0);
+  };
 
   const clear = () => {
     const ctx = canvasRef.current?.getContext('2d');
     if (!ctx || !canvasRef.current) return;
     ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+    strokesRef.current = [];
+    currentStrokeRef.current = [];
     setHasContent(false);
   };
 
   const save = () => {
     if (!canvasRef.current || !hasContent) return;
-    onSave(canvasRef.current.toDataURL('image/png'));
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) { onSave(canvas.toDataURL('image/png')); return; }
+
+    // Watermark en bas : date + heure + chauffeur
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const timeStr = now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    const watermark = `${dateStr} ${timeStr}${driverName ? ` — ${driverName}` : ''}`;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.08)';
+    ctx.fillRect(0, canvas.height - 22, canvas.width, 22);
+    ctx.font = '11px Arial, sans-serif';
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(watermark, 6, canvas.height - 11);
+
+    onSave(canvas.toDataURL('image/png'));
   };
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-      <div className="p-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-        <span className="text-sm font-bold text-slate-700">✍️ Signature du destinataire</span>
-        <button onClick={clear} className="text-xs text-slate-500 hover:text-red-500">Effacer</button>
+    <div className="bg-white rounded-xl border-2 border-amber-300 overflow-hidden shadow-lg">
+      <div className="px-3 py-2.5 bg-amber-50 border-b border-amber-200 flex items-center justify-between">
+        <span className="text-sm font-bold text-amber-800">✍️ Signature du destinataire</span>
+        <div className="flex gap-2">
+          <button onClick={undo} disabled={strokesRef.current.length === 0}
+            className="text-xs text-slate-500 hover:text-amber-600 disabled:opacity-30 font-medium">
+            ↩ Annuler
+          </button>
+          <button onClick={clear} className="text-xs text-red-500 hover:text-red-700 font-medium">
+            Effacer tout
+          </button>
+        </div>
       </div>
-      <canvas
-        ref={canvasRef}
-        width={600}
-        height={200}
-        className="w-full h-[120px] touch-none bg-white cursor-crosshair"
-        onTouchStart={startDrawing}
-        onTouchMove={draw}
-        onTouchEnd={stopDrawing}
-        onMouseDown={startDrawing}
-        onMouseMove={draw}
-        onMouseUp={stopDrawing}
-        onMouseLeave={stopDrawing}
-      />
+      <div className="relative">
+        <canvas
+          ref={canvasRef}
+          width={800}
+          height={280}
+          className="w-full h-[160px] touch-none bg-white cursor-crosshair"
+          onTouchStart={startDrawing}
+          onTouchMove={draw}
+          onTouchEnd={stopDrawing}
+          onMouseDown={startDrawing}
+          onMouseMove={draw}
+          onMouseUp={stopDrawing}
+          onMouseLeave={stopDrawing}
+        />
+        {!hasContent && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <p className="text-slate-300 text-sm">Signez ici avec le doigt</p>
+          </div>
+        )}
+      </div>
       <div className="p-3 bg-slate-50 border-t border-slate-200 flex gap-2">
-        <button onClick={onCancel} className="flex-1 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-lg">
+        <button onClick={onCancel} className="flex-1 py-2.5 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-lg">
           Annuler
         </button>
         <button
           onClick={save}
           disabled={!hasContent}
-          className="flex-1 py-2 text-sm font-bold text-white bg-green-600 rounded-lg disabled:opacity-40"
+          className="flex-1 py-2.5 text-sm font-bold text-white bg-green-600 rounded-lg disabled:opacity-40"
         >
-          Valider signature
+          ✓ Valider signature
         </button>
       </div>
     </div>
@@ -162,12 +242,15 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   const [failureReason, setFailureReason] = useState<FailureReason>(FailureReason.ABSENT);
   const [failureNotes, setFailureNotes] = useState('');
   const [recipientName, setRecipientName] = useState('');
+  const [deliveryLocation, setDeliveryLocation] = useState<DeliveryLocation>(DeliveryLocation.HAND_DELIVERY);
   const [capturedPhotos, setCapturedPhotos] = useState<string[]>([]);
+  const MAX_PHOTOS = 5;
   const [signatureData, setSignatureData] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
   const [failurePhotos, setFailurePhotos] = useState<string[]>([]);
   const [notification, setNotification] = useState<string | null>(null);
+  const [isLoadingPhase, setIsLoadingPhase] = useState(false); // Phase chargement véhicule
   const photoInputRef = useRef<HTMLInputElement>(null);
   const failurePhotoInputRef = useRef<HTMLInputElement>(null);
 
@@ -267,19 +350,74 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
 
   // === ACTIONS ===
 
-  // Démarrer la tournée
-  const handleStartMission = async (mission: Mission) => {
+  // Phase 1 : Commencer le chargement (DISPATCHED → LOADING en mémoire)
+  const handleStartLoading = (mission: Mission) => {
+    setActiveMissionId(mission.id);
+    setIsLoadingPhase(true);
+    showNotif('📦 Chargement en cours — Confirmez quand vous avez tout chargé');
+  };
+
+  // Phase 2 : Chargement terminé → packages IN_DELIVERY + mission IN_PROGRESS + recalcul ETA
+  const handleLoadingComplete = async (mission: Mission) => {
     setIsProcessing(true);
     try {
-      await updateMissionStatus(mission.id, MissionStatus.IN_PROGRESS);
-      setActiveMissionId(mission.id);
+      const now = new Date();
+      const nowISO = now.toISOString();
+
+      // 1. Passer tous les colis SORTED → LOADED → IN_DELIVERY
+      const packageIds = mission.stops.flatMap(s => s.packageIds);
+      for (const pkgId of packageIds) {
+        try {
+          await updatePackageStatus(pkgId, PackageStatus.IN_DELIVERY, {
+            action: 'LOADING_COMPLETE',
+            driverId: currentUser.id,
+            driverName: `${currentUser.firstName} ${currentUser.lastName}`,
+            notes: `Chargement terminé — départ ${now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`
+          });
+        } catch (e) { console.warn('Erreur statut colis:', pkgId, e); }
+      }
+
+      // 2. Recalculer les ETAs basées sur l'heure réelle de départ
+      const updatedStops = mission.stops.map((stop, idx) => {
+        const baseMinutes = (stop.durationFromPrevious || 0);
+        const cumulativeMinutes = mission.stops
+          .slice(0, idx + 1)
+          .reduce((sum, s) => sum + (s.durationFromPrevious || 0) + (s.serviceTime || 5), 0);
+        
+        const etaDate = new Date(now.getTime() + cumulativeMinutes * 60000);
+        const estimatedArrival = etaDate.toISOString();
+        const estimatedDeparture = new Date(etaDate.getTime() + (stop.serviceTime || 5) * 60000).toISOString();
+        
+        return {
+          ...stop,
+          estimatedArrival,
+          estimatedDeparture
+        };
+      });
+
+      // 3. Mission → IN_PROGRESS avec loadedAt + stops recalculés
+      await updateMissionFields(mission.id, {
+        status: MissionStatus.IN_PROGRESS,
+        loadedAt: nowISO,
+        startedAt: nowISO,
+        stops: updatedStops
+      });
+
+      setIsLoadingPhase(false);
       setActiveStopIndex(0);
-      showNotif('✅ Tournée démarrée !');
+      showNotif('🚀 Chargement terminé — Bonne tournée !');
     } catch (err) {
-      console.error('Erreur démarrage:', err);
-      showNotif('❌ Erreur au démarrage');
+      console.error('Erreur chargement terminé:', err);
+      showNotif('❌ Erreur — Réessayez');
     }
     setIsProcessing(false);
+  };
+
+  // Annuler le chargement
+  const handleCancelLoading = () => {
+    setIsLoadingPhase(false);
+    setActiveMissionId(null);
+    showNotif('Chargement annulé');
   };
 
   // Marquer arrivée au stop
@@ -360,10 +498,11 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
         vehicleId: activeMission.vehicleId || '',
         vehiclePlate: activeMission.vehiclePlate || '',
         recipientName: recipientName || undefined,
+        deliveryLocation,
         signatureBase64: signatureData || undefined,
         photosBase64: capturedPhotos,
         coordinates: coords || { lat: 0, lng: 0 },
-        notes: recipientName ? `Réceptionné par: ${recipientName}` : undefined
+        notes: recipientName ? `${deliveryLocation} — Réceptionné par: ${recipientName}` : undefined
       }, setUploadProgress);
 
       if (podResult) {
@@ -408,6 +547,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
       setSignatureData(null);
       setCapturedPhotos([]);
       setRecipientName('');
+      setDeliveryLocation(DeliveryLocation.HAND_DELIVERY);
       setShowSignature(false);
       setUploadProgress(null);
 
@@ -525,26 +665,31 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   const handlePhotoCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (capturedPhotos.length >= MAX_PHOTOS) return;
     const reader = new FileReader();
     reader.onload = () => {
       if (reader.result) {
-        setCapturedPhotos(prev => [...prev, reader.result as string]);
+        setCapturedPhotos(prev => prev.length < MAX_PHOTOS ? [...prev, reader.result as string] : prev);
       }
     };
     reader.readAsDataURL(file);
+    // Reset pour pouvoir reprendre la même photo
+    e.target.value = '';
   };
 
   // Photo échec (preuve de tentative)
   const handleFailurePhotoCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (failurePhotos.length >= MAX_PHOTOS) return;
     const reader = new FileReader();
     reader.onload = () => {
       if (reader.result) {
-        setFailurePhotos(prev => [...prev, reader.result as string]);
+        setFailurePhotos(prev => prev.length < MAX_PHOTOS ? [...prev, reader.result as string] : prev);
       }
     };
     reader.readAsDataURL(file);
+    e.target.value = '';
   };
 
   // ============================================================================
@@ -920,9 +1065,38 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                         type="text"
                         value={recipientName}
                         onChange={(e) => setRecipientName(e.target.value)}
-                        placeholder="Nom de la personne qui signe"
+                        placeholder="Nom de la personne qui réceptionne"
                         className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-green-200 focus:border-green-400 outline-none"
                       />
+                    </div>
+
+                    {/* Lieu de remise */}
+                    <div className="px-1">
+                      <label className="text-xs font-medium text-slate-500 mb-1 block">
+                        📍 Lieu de remise
+                      </label>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {Object.values(DeliveryLocation).map(loc => (
+                          <button
+                            key={loc}
+                            onClick={() => setDeliveryLocation(loc as DeliveryLocation)}
+                            className={`px-2 py-2 rounded-lg text-xs font-medium transition-colors text-left ${
+                              deliveryLocation === loc
+                                ? 'bg-green-100 border-2 border-green-400 text-green-800'
+                                : 'bg-slate-50 border border-slate-200 text-slate-600 hover:bg-slate-100'
+                            }`}
+                          >
+                            {loc === DeliveryLocation.HAND_DELIVERY && '🤝 '}
+                            {loc === DeliveryLocation.NEIGHBOR && '🏠 '}
+                            {loc === DeliveryLocation.CONCIERGE && '🔑 '}
+                            {loc === DeliveryLocation.MAILBOX && '📬 '}
+                            {loc === DeliveryLocation.RECEPTION && '🏢 '}
+                            {loc === DeliveryLocation.SAFE_PLACE && '🔒 '}
+                            {loc === DeliveryLocation.OTHER && '📋 '}
+                            {loc}
+                          </button>
+                        ))}
+                      </div>
                     </div>
 
                     {/* Signature */}
@@ -940,6 +1114,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                       <SignaturePad
                         onSave={(data) => { setSignatureData(data); setShowSignature(false); }}
                         onCancel={() => setShowSignature(false)}
+                        driverName={`${currentUser.firstName} ${currentUser.lastName}`}
                       />
                     )}
 
@@ -953,34 +1128,46 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                       </div>
                     )}
 
-                    {/* Photo */}
-                    <button
-                      onClick={() => photoInputRef.current?.click()}
-                      className="w-full flex items-center justify-center gap-2 py-3 bg-slate-50 border border-slate-200 text-slate-700 rounded-xl font-medium text-sm"
-                    >
-                      <Camera size={16} />
-                      📸 Photo du colis ({capturedPhotos.length})
-                    </button>
-                    <input
-                      ref={photoInputRef}
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      className="hidden"
-                      onChange={handlePhotoCapture}
-                    />
+                    {/* Photos — max 5, previews plus grandes */}
+                    <div className="px-1">
+                      <label className="text-xs font-medium text-slate-500 mb-1.5 block">
+                        📸 Photos du colis / lieu de livraison
+                      </label>
+                      <button
+                        onClick={() => photoInputRef.current?.click()}
+                        disabled={capturedPhotos.length >= MAX_PHOTOS}
+                        className="w-full flex items-center justify-center gap-2 py-3 bg-slate-50 border border-slate-200 text-slate-700 rounded-xl font-medium text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        <Camera size={16} />
+                        {capturedPhotos.length >= MAX_PHOTOS 
+                          ? `Maximum atteint (${MAX_PHOTOS}/${MAX_PHOTOS})`
+                          : `Prendre une photo (${capturedPhotos.length}/${MAX_PHOTOS})`
+                        }
+                      </button>
+                      <input
+                        ref={photoInputRef}
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        className="hidden"
+                        onChange={handlePhotoCapture}
+                      />
+                    </div>
 
                     {capturedPhotos.length > 0 && (
-                      <div className="flex gap-2 px-1 overflow-x-auto">
+                      <div className="flex gap-2 px-1 overflow-x-auto pb-1">
                         {capturedPhotos.map((photo, i) => (
                           <div key={i} className="relative flex-shrink-0">
-                            <img src={photo} alt={`Photo ${i+1}`} className="w-16 h-16 rounded-lg object-cover border border-slate-200" />
+                            <img src={photo} alt={`Photo ${i+1}`} className="w-20 h-20 rounded-lg object-cover border-2 border-slate-200" />
                             <button
                               onClick={() => setCapturedPhotos(prev => prev.filter((_, idx) => idx !== i))}
-                              className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-[10px]"
+                              className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-[10px] shadow-md"
                             >
                               ✕
                             </button>
+                            <span className="absolute bottom-0.5 left-0.5 bg-black/50 text-white text-[9px] px-1 rounded">
+                              {i + 1}/{capturedPhotos.length}
+                            </span>
                           </div>
                         ))}
                       </div>
@@ -1098,13 +1285,14 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
 
                 {/* Photo preuve d'échec */}
                 <div className="border-t border-slate-100 pt-3">
-                  <p className="text-xs font-bold text-slate-500 mb-2">📷 Photo preuve (recommandé)</p>
+                  <p className="text-xs font-bold text-slate-500 mb-2">📷 Photo preuve <span className="text-red-500">obligatoire</span></p>
                   <button
                     onClick={() => failurePhotoInputRef.current?.click()}
-                    className="w-full flex items-center justify-center gap-2 py-2.5 bg-slate-50 border border-slate-200 text-slate-600 rounded-xl text-sm font-medium"
+                    disabled={failurePhotos.length >= MAX_PHOTOS}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 bg-slate-50 border border-slate-200 text-slate-600 rounded-xl text-sm font-medium disabled:opacity-40"
                   >
                     <Camera size={14} />
-                    Photo porte / boîte aux lettres ({failurePhotos.length})
+                    Photo porte / boîte aux lettres ({failurePhotos.length}/{MAX_PHOTOS})
                   </button>
                   <input
                     ref={failurePhotoInputRef}
@@ -1114,11 +1302,16 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                     className="hidden"
                     onChange={handleFailurePhotoCapture}
                   />
+                  {failurePhotos.length === 0 && (
+                    <p className="text-[11px] text-red-500 font-medium mt-1.5 text-center">
+                      ⚠️ Au moins 1 photo requise pour confirmer l'échec
+                    </p>
+                  )}
                   {failurePhotos.length > 0 && (
                     <div className="flex gap-2 mt-2 overflow-x-auto">
                       {failurePhotos.map((photo, i) => (
                         <div key={i} className="relative flex-shrink-0">
-                          <img src={photo} alt={`Échec ${i+1}`} className="w-14 h-14 rounded-lg object-cover border border-red-200" />
+                          <img src={photo} alt={`Échec ${i+1}`} className="w-16 h-16 rounded-lg object-cover border border-red-200" />
                           <button
                             onClick={() => setFailurePhotos(prev => prev.filter((_, idx) => idx !== i))}
                             className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white rounded-full flex items-center justify-center text-[9px]"
@@ -1148,10 +1341,10 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                 </button>
                 <button
                   onClick={handleDeliveryFailure}
-                  disabled={isProcessing}
+                  disabled={isProcessing || failurePhotos.length === 0}
                   className="flex-1 py-3 bg-red-600 text-white rounded-xl text-sm font-bold disabled:opacity-50"
                 >
-                  {isProcessing ? 'Envoi...' : 'Confirmer échec'}
+                  {isProcessing ? 'Envoi...' : failurePhotos.length === 0 ? '📷 Photo requise' : 'Confirmer échec'}
                 </button>
               </div>
             </div>
@@ -1260,16 +1453,64 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                 </div>
               )}
 
+              {/* Heure de départ prévue */}
+              {mission.plannedDepartureTime && mission.status === MissionStatus.DISPATCHED && (
+                <div className="flex items-center gap-2 mb-2 px-3 py-2 bg-blue-50 border border-blue-100 rounded-xl">
+                  <Clock size={14} className="text-blue-500" />
+                  <span className="text-xs text-blue-700 font-medium">Départ prévu : </span>
+                  <span className="text-sm font-bold text-blue-800 font-mono">{mission.plannedDepartureTime}</span>
+                </div>
+              )}
+
               {/* Bouton action */}
-              {mission.status === MissionStatus.DISPATCHED && (
+              {mission.status === MissionStatus.DISPATCHED && !isLoadingPhase && (
                 <button
-                  onClick={() => handleStartMission(mission)}
+                  onClick={() => handleStartLoading(mission)}
                   disabled={isProcessing}
                   className="w-full flex items-center justify-center gap-2 py-3.5 bg-blue-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-50"
                 >
                   {isProcessing ? <Loader2 size={18} className="animate-spin" /> : <Play size={18} />}
-                  Démarrer la tournée
+                  📦 Commencer le chargement
                 </button>
+              )}
+
+              {/* Phase chargement en cours */}
+              {mission.status === MissionStatus.DISPATCHED && isLoadingPhase && activeMissionId === mission.id && (
+                <div className="space-y-2">
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Loader2 size={14} className="animate-spin text-amber-600" />
+                      <span className="text-sm font-bold text-amber-800">Chargement en cours...</span>
+                    </div>
+                    <p className="text-xs text-amber-600">
+                      {mission.totalPackages} colis • {mission.stops.length} stops à charger
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => handleLoadingComplete(mission)}
+                    disabled={isProcessing}
+                    className="w-full flex items-center justify-center gap-2 py-3.5 bg-green-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-50"
+                  >
+                    {isProcessing ? (
+                      <>
+                        <Loader2 size={18} className="animate-spin" />
+                        Mise à jour en cours...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle size={18} />
+                        ✅ Chargement terminé — Départ !
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={handleCancelLoading}
+                    disabled={isProcessing}
+                    className="w-full flex items-center justify-center gap-2 py-2 text-slate-500 text-xs font-medium"
+                  >
+                    Annuler
+                  </button>
+                </div>
               )}
 
               {isInProgress && (

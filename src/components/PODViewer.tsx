@@ -9,7 +9,7 @@
  */
 
 import React, { useState } from 'react';
-import { ProofOfDelivery } from '../types';
+import { ProofOfDelivery, DeliveryLocation } from '../types';
 import {
   X, MapPin, Clock, User, Truck, Camera, PenTool,
   ZoomIn, ChevronLeft, ChevronRight, ExternalLink, Printer
@@ -95,6 +95,7 @@ const PODViewer: React.FC<PODViewerProps> = ({
         ` : ''}
         <hr />
         <div class="row"><span class="label">Réceptionné par :</span><span class="value">${pod.recipientName || 'Non renseigné'}</span></div>
+        ${pod.deliveryLocation ? `<div class="row"><span class="label">Lieu de remise :</span><span class="value">${pod.deliveryLocation}</span></div>` : ''}
         <div class="row"><span class="label">Date / Heure :</span><span class="value">${formatDate(pod.timestamp)}</span></div>
         <div class="row"><span class="label">Chauffeur :</span><span class="value">${pod.driverName}</span></div>
         <div class="row"><span class="label">Véhicule :</span><span class="value">${pod.vehiclePlate}</span></div>
@@ -173,10 +174,22 @@ const PODViewer: React.FC<PODViewerProps> = ({
             {/* Réceptionné par */}
             <div className="flex items-center gap-3 bg-slate-50 rounded-xl p-3">
               <User size={16} className="text-slate-400" />
-              <div>
+              <div className="flex-1">
                 <p className="text-xs text-slate-500">Réceptionné par</p>
                 <p className="font-bold text-slate-800 text-sm">{pod.recipientName || 'Non renseigné'}</p>
               </div>
+              {pod.deliveryLocation && (
+                <span className="px-2 py-1 bg-green-100 text-green-700 rounded-lg text-[10px] font-bold">
+                  {pod.deliveryLocation === DeliveryLocation.HAND_DELIVERY && '🤝'}
+                  {pod.deliveryLocation === DeliveryLocation.NEIGHBOR && '🏠'}
+                  {pod.deliveryLocation === DeliveryLocation.CONCIERGE && '🔑'}
+                  {pod.deliveryLocation === DeliveryLocation.MAILBOX && '📬'}
+                  {pod.deliveryLocation === DeliveryLocation.RECEPTION && '🏢'}
+                  {pod.deliveryLocation === DeliveryLocation.SAFE_PLACE && '🔒'}
+                  {pod.deliveryLocation === DeliveryLocation.OTHER && '📋'}
+                  {' '}{pod.deliveryLocation}
+                </span>
+              )}
             </div>
 
             {/* Infos chauffeur (back-office uniquement) */}
@@ -199,23 +212,39 @@ const PODViewer: React.FC<PODViewerProps> = ({
               </div>
             )}
 
-            {/* GPS */}
+            {/* GPS + Mini carte */}
             {pod.coordinates && (pod.coordinates.lat !== 0 || pod.coordinates.lng !== 0) && (
-              <div className="flex items-center gap-3 bg-blue-50 rounded-xl p-3 border border-blue-100">
-                <MapPin size={16} className="text-blue-500" />
-                <div className="flex-1">
-                  <p className="text-xs text-blue-600 font-medium">Position GPS vérifiée</p>
-                  <p className="text-xs text-blue-500 font-mono">
-                    {pod.coordinates.lat.toFixed(6)}, {pod.coordinates.lng.toFixed(6)}
-                  </p>
+              <div className="space-y-2">
+                <div className="flex items-center gap-3 bg-blue-50 rounded-xl p-3 border border-blue-100">
+                  <MapPin size={16} className="text-blue-500" />
+                  <div className="flex-1">
+                    <p className="text-xs text-blue-600 font-medium">Position GPS vérifiée</p>
+                    <p className="text-xs text-blue-500 font-mono">
+                      {pod.coordinates.lat.toFixed(6)}, {pod.coordinates.lng.toFixed(6)}
+                    </p>
+                  </div>
+                  <a
+                    href={`https://maps.google.com/?q=${pod.coordinates.lat},${pod.coordinates.lng}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-500 hover:text-blue-700"
+                  >
+                    <ExternalLink size={14} />
+                  </a>
                 </div>
+                {/* Mini carte OpenStreetMap (gratuit, pas de clé API) */}
                 <a
                   href={`https://maps.google.com/?q=${pod.coordinates.lat},${pod.coordinates.lng}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-blue-500 hover:text-blue-700"
+                  className="block rounded-xl overflow-hidden border border-slate-200 hover:border-blue-300 transition-colors"
                 >
-                  <ExternalLink size={14} />
+                  <img
+                    src={`https://staticmap.openstreetmap.de/staticmap.php?center=${pod.coordinates.lat},${pod.coordinates.lng}&zoom=16&size=480x160&markers=${pod.coordinates.lat},${pod.coordinates.lng},red-pushpin`}
+                    alt="Position livraison"
+                    className="w-full h-[100px] object-cover"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                  />
                 </a>
               </div>
             )}

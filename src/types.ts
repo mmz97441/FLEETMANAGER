@@ -950,6 +950,8 @@ export interface Mission {
   
   // Exécution
   status: MissionStatus;
+  plannedDepartureTime?: string;  // "08:30" — heure de départ prévue (modifiable au dispatch)
+  loadedAt?: string;              // ISO — quand le chauffeur a confirmé le chargement
   startedAt?: string;
   completedAt?: string;
   
@@ -988,6 +990,7 @@ export interface ProofOfDelivery {
   
   // Réceptionnaire
   recipientName?: string;
+  deliveryLocation?: DeliveryLocation;
   
   // Preuves
   signatureUrl?: string;           // URL Storage
@@ -1001,6 +1004,17 @@ export interface ProofOfDelivery {
   
   // Commentaire
   notes?: string;
+}
+
+// Lieu de remise du colis
+export enum DeliveryLocation {
+  HAND_DELIVERY = 'Remis en main propre',
+  NEIGHBOR = 'Remis au voisin',
+  CONCIERGE = 'Gardien / Loge',
+  MAILBOX = 'Boîte aux lettres',
+  RECEPTION = 'Accueil / Secrétariat',
+  SAFE_PLACE = 'Lieu sûr (convenu)',
+  OTHER = 'Autre'
 }
 
 // ============================================================================

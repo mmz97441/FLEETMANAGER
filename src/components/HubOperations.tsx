@@ -120,9 +120,9 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
     [users]
   );
 
-  // --- RÉCEPTION : colis COLLECTED à réceptionner ---
+  // --- RÉCEPTION : colis PENDING ou COLLECTED à réceptionner ---
   const receptionPackages = useMemo(() => 
-    packages.filter(p => p.status === PackageStatus.COLLECTED),
+    packages.filter(p => p.status === PackageStatus.COLLECTED || p.status === PackageStatus.PENDING),
     [packages]
   );
 

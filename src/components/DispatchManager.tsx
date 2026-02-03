@@ -57,6 +57,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
   const [selectedZone, setSelectedZone] = useState<Zone | null>(null);
   const [selectedDriverIds, setSelectedDriverIds] = useState<Set<string>>(new Set());
   const [selectedHubId, setSelectedHubId] = useState<string>('');
+  const [plannedDepartureTime, setPlannedDepartureTime] = useState<string>('08:00');
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [isDispatching, setIsDispatching] = useState(false);
   const [optimResult, setOptimResult] = useState<OptimizationResult | null>(null);
@@ -233,6 +234,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
           hubName: hub?.name || 'Départ direct',
           type: MissionType.DELIVERY,
           status: MissionStatus.DISPATCHED,
+          plannedDepartureTime,
           driverId: tour.driverId,
           driverName: tour.driverName,
           vehicleId: tour.vehicleId,
@@ -543,6 +545,23 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
                   );
                 })}
               </div>
+            </div>
+            
+            {/* Heure de départ prévue */}
+            <div className="bg-white border border-slate-200 rounded-xl p-4">
+              <label className="flex items-center gap-2 text-sm font-bold text-slate-700 mb-2">
+                <Clock size={16} className="text-brand-500" />
+                Heure de départ prévue
+              </label>
+              <input
+                type="time"
+                value={plannedDepartureTime}
+                onChange={(e) => setPlannedDepartureTime(e.target.value)}
+                className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm font-mono font-bold text-slate-800 focus:ring-2 focus:ring-brand-200 outline-none"
+              />
+              <p className="text-xs text-slate-400 mt-1">
+                Les ETAs de chaque stop seront calculées à partir de cette heure
+              </p>
             </div>
             
             {/* Bouton Optimiser */}

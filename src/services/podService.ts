@@ -20,7 +20,7 @@
 import { storage, db } from '../firebaseConfig';
 import { ref, uploadString, getDownloadURL } from 'firebase/storage';
 import { doc, setDoc, updateDoc, collection, query, where, getDocs, getDoc } from 'firebase/firestore';
-import { ProofOfDelivery, Package, PackageStatus } from '../types';
+import { ProofOfDelivery, Package, PackageStatus, DeliveryLocation } from '../types';
 
 const POD_COLLECTION = 'proofs_of_delivery';
 const PACKAGES_COLLECTION = 'packages';
@@ -61,6 +61,61 @@ export const compressImage = (
       const compKB = Math.round(compressed.length * 0.75 / 1024);
       console.log(`📷 ${origKB} KB → ${compKB} KB (-${Math.round((1 - compKB / origKB) * 100)}%)`);
       resolve(compressed);
+    };
+    img.onerror = () => resolve(base64Data);
+    img.src = base64Data.includes(',') ? base64Data : `data:image/jpeg;base64,${base64Data}`;
+  });
+};
+
+/**
+ * Grave un watermark (GPS + timestamp + chauffeur) en bas de la photo.
+ * Fait APRÈS compression pour ne pas affecter la qualité.
+ */
+export const burnWatermark = (
+  base64Data: string,
+  info: {
+    timestamp: string;
+    driverName: string;
+    coords?: { lat: number; lng: number };
+  }
+): Promise<string> => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { resolve(base64Data); return; }
+
+      // Dessiner l'image
+      ctx.drawImage(img, 0, 0);
+
+      // Bande semi-transparente en bas
+      const barHeight = Math.max(36, img.height * 0.06);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+      ctx.fillRect(0, img.height - barHeight, img.width, barHeight);
+
+      // Texte watermark
+      const fontSize = Math.max(11, Math.min(14, img.width * 0.018));
+      ctx.font = `bold ${fontSize}px Arial, sans-serif`;
+      ctx.fillStyle = '#ffffff';
+      ctx.textBaseline = 'middle';
+
+      const date = new Date(info.timestamp);
+      const dateStr = date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      const timeStr = date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+      const leftText = `📅 ${dateStr}  🕐 ${timeStr}  🚚 ${info.driverName}`;
+      ctx.fillText(leftText, 8, img.height - barHeight / 2);
+
+      if (info.coords && (info.coords.lat !== 0 || info.coords.lng !== 0)) {
+        const gpsText = `📍 ${info.coords.lat.toFixed(5)}, ${info.coords.lng.toFixed(5)}`;
+        const gpsWidth = ctx.measureText(gpsText).width;
+        ctx.fillText(gpsText, img.width - gpsWidth - 8, img.height - barHeight / 2);
+      }
+
+      resolve(canvas.toDataURL('image/jpeg', 0.85));
     };
     img.onerror = () => resolve(base64Data);
     img.src = base64Data.includes(',') ? base64Data : `data:image/jpeg;base64,${base64Data}`;
@@ -110,6 +165,7 @@ export const uploadAndCreatePOD = async (
     vehicleId: string;
     vehiclePlate: string;
     recipientName?: string;
+    deliveryLocation?: DeliveryLocation;
     signatureBase64?: string;
     photosBase64: string[];
     coordinates: { lat: number; lng: number };
@@ -119,7 +175,7 @@ export const uploadAndCreatePOD = async (
 ): Promise<ProofOfDelivery | null> => {
   const {
     missionId, stopId, packageIds, driverId, driverName,
-    vehicleId, vehiclePlate, recipientName,
+    vehicleId, vehiclePlate, recipientName, deliveryLocation,
     signatureBase64, photosBase64, coordinates, notes
   } = params;
 
@@ -138,6 +194,11 @@ export const uploadAndCreatePOD = async (
     emit('compressing', 'Compression des photos...');
     const compressed = await Promise.all(photosBase64.map(p => compressImage(p)));
 
+    // 1b. Watermark GPS + timestamp + chauffeur sur chaque photo
+    const watermarked = await Promise.all(
+      compressed.map(p => burnWatermark(p, { timestamp, driverName, coords: coordinates }))
+    );
+
     // 2. Upload signature
     let signatureUrl: string | undefined;
     if (signatureBase64) {
@@ -145,17 +206,17 @@ export const uploadAndCreatePOD = async (
       signatureUrl = await uploadBase64(`${basePath}/signature.png`, signatureBase64, 'image/png');
     }
 
-    // 3. Upload photos
+    // 3. Upload photos (watermarked)
     let photoUrls: string[] = [];
-    if (compressed.length > 0) {
-      emit('uploading_photos', `Envoi photos (0/${compressed.length})...`);
+    if (watermarked.length > 0) {
+      emit('uploading_photos', `Envoi photos (0/${watermarked.length})...`);
       photoUrls = await Promise.all(
-        compressed.map((photo, i) =>
+        watermarked.map((photo, i) =>
           uploadBase64(`${basePath}/photo-${i}.jpg`, photo, 'image/jpeg')
             .then(url => {
               onProgress?.({
                 step: 'uploading_photos', current: step, total: totalSteps,
-                message: `Envoi photos (${i + 1}/${compressed.length})...`
+                message: `Envoi photos (${i + 1}/${watermarked.length})...`
               });
               return url;
             })
@@ -168,7 +229,8 @@ export const uploadAndCreatePOD = async (
     const podDocId = `${missionId}_${stopId}`;
     await setDoc(doc(db, POD_COLLECTION, podDocId), {
       packageIds, missionId, stopId, driverId, driverName,
-      vehicleId, vehiclePlate, recipientName, signatureUrl, photoUrls,
+      vehicleId, vehiclePlate, recipientName, deliveryLocation: deliveryLocation || null,
+      signatureUrl, photoUrls,
       coordinates, timestamp, notes, type: 'SUCCESS', createdAt: timestamp
     });
 
@@ -177,7 +239,8 @@ export const uploadAndCreatePOD = async (
       try {
         const pkgPod: ProofOfDelivery = {
           packageId: pkgId, missionId, stopId, driverId, driverName,
-          vehicleId, vehiclePlate, recipientName, signatureUrl, photoUrls,
+          vehicleId, vehiclePlate, recipientName, deliveryLocation,
+          signatureUrl, photoUrls,
           coordinates, timestamp, notes
         };
         await updateDoc(doc(db, PACKAGES_COLLECTION, pkgId), { pod: pkgPod, updatedAt: timestamp });
@@ -187,7 +250,8 @@ export const uploadAndCreatePOD = async (
     emit('done', 'Preuves enregistrées ✓');
     return {
       packageId: packageIds[0] || '', missionId, stopId, driverId, driverName,
-      vehicleId, vehiclePlate, recipientName, signatureUrl, photoUrls,
+      vehicleId, vehiclePlate, recipientName, deliveryLocation,
+      signatureUrl, photoUrls,
       coordinates, timestamp, notes
     };
   } catch (err) {
