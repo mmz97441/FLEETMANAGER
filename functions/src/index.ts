@@ -53,6 +53,7 @@ export const optimizeTours = functions
     const vehicleCount = model.vehicles.length;
 
     console.log(`🚛 Optimisation: ${shipmentCount} livraisons, ${vehicleCount} véhicules`);
+    console.log(`📤 Model envoyé à GMPRO:`, JSON.stringify(model, null, 2));
 
     // 3. Obtenir le token OAuth2 via Application Default Credentials
     const googleAuth = new GoogleAuth({
@@ -112,12 +113,18 @@ export const optimizeTours = functions
       }
 
       // 5. Log succès
+      console.log(`📦 GMPRO Response brute:`, JSON.stringify(responseData, null, 2));
+      
       const routeCount = responseData.routes?.length || 0;
+      const totalVisits = responseData.routes?.reduce(
+        (sum: number, r: any) => sum + (r.visits?.length || 0), 0
+      ) || 0;
       const totalDistance = responseData.routes?.reduce(
         (sum: number, r: any) => sum + (r.metrics?.travelDistanceMeters || 0), 0
       ) / 1000;
+      const skippedCount = responseData.metrics?.skippedMandatoryShipmentCount || 0;
 
-      console.log(`✅ Optimisation réussie: ${routeCount} tournées, ${totalDistance.toFixed(1)} km total`);
+      console.log(`✅ Optimisation: ${routeCount} tournées, ${totalVisits} visits, ${totalDistance.toFixed(1)} km, ${skippedCount} skippés`);
 
       // 6. Log d'audit
       try {

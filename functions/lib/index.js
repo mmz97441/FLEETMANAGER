@@ -6,13 +6,120 @@
  * Elles permettent des opérations impossibles depuis le client (navigateur).
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.activateAccount = exports.validateInvitationToken = exports.forcePasswordReset = exports.toggleUserStatus = exports.cleanupExpiredInvitations = exports.deleteUserCompletely = void 0;
+exports.activateAccount = exports.validateInvitationToken = exports.forcePasswordReset = exports.toggleUserStatus = exports.cleanupExpiredInvitations = exports.deleteUserCompletely = exports.optimizeTours = void 0;
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
+const google_auth_library_1 = require("google-auth-library");
 // Initialiser Firebase Admin
 admin.initializeApp();
 const db = admin.firestore();
 const auth = admin.auth();
+// ============================================================================
+// OPTIMISATION DE TOURNÉES MULTI-VÉHICULES (GMPRO)
+// ============================================================================
+/**
+ * Proxy pour Google Route Optimization API (GMPRO)
+ *
+ * L'API GMPRO exige OAuth2 (pas de clé API). Cette Cloud Function
+ * sert de proxy authentifié entre le frontend et GMPRO.
+ *
+ * Reçoit: la requête GMPRO complète (shipments + vehicles)
+ * Retourne: les routes optimisées (répartition multi-véhicules)
+ */
+exports.optimizeTours = functions
+    .region("europe-west1")
+    .runWith({ timeoutSeconds: 120, memory: "256MB" })
+    .https.onCall(async (data, context) => {
+    // 1. Vérifier l'authentification
+    if (!context.auth) {
+        throw new functions.https.HttpsError("unauthenticated", "Vous devez être connecté pour optimiser les tournées.");
+    }
+    // 2. Vérifier que la requête contient les données nécessaires
+    const { model } = data;
+    if (!model || !model.shipments || !model.vehicles) {
+        throw new functions.https.HttpsError("invalid-argument", "La requête doit contenir model.shipments et model.vehicles");
+    }
+    const shipmentCount = model.shipments.length;
+    const vehicleCount = model.vehicles.length;
+    console.log(`🚛 Optimisation: ${shipmentCount} livraisons, ${vehicleCount} véhicules`);
+    console.log(`📤 Model envoyé à GMPRO:`, JSON.stringify(model, null, 2));
+    // 3. Obtenir le token OAuth2 via Application Default Credentials
+    const googleAuth = new google_auth_library_1.GoogleAuth({
+        scopes: ["https://www.googleapis.com/auth/cloud-platform"],
+    });
+    let accessToken;
+    try {
+        const client = await googleAuth.getClient();
+        const tokenResponse = await client.getAccessToken();
+        accessToken = tokenResponse.token || "";
+        if (!accessToken) {
+            throw new Error("Token vide");
+        }
+    }
+    catch (err) {
+        console.error("❌ Erreur OAuth2:", err);
+        throw new functions.https.HttpsError("internal", `Erreur d'authentification Google: ${err.message}`);
+    }
+    // 4. Appeler Route Optimization API
+    // IMPORTANT: GCLOUD_PROJECT renvoie "fleet-genius-app" (alias Firebase)
+    // mais le vrai project ID GCP est "fleet-genius-app-485611"
+    const projectId = "fleet-genius-app-485611";
+    const url = `https://routeoptimization.googleapis.com/v1/projects/${projectId}:optimizeTours`;
+    console.log(`📡 Appel GMPRO: ${url}`);
+    try {
+        const response = await fetch(url, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({ model }),
+        });
+        const responseData = await response.json();
+        if (!response.ok) {
+            console.error("❌ GMPRO erreur:", JSON.stringify(responseData));
+            const errMsg = responseData.error?.message || `HTTP ${response.status}`;
+            const isApiNotEnabled = errMsg.includes("not been used") ||
+                errMsg.includes("disabled") ||
+                errMsg.includes("not enabled");
+            throw new functions.https.HttpsError("internal", isApiNotEnabled
+                ? "Route Optimization API non activée. Activez-la dans Google Cloud Console → APIs & Services → Library."
+                : `Erreur GMPRO: ${errMsg}`);
+        }
+        // 5. Log succès
+        console.log(`📦 GMPRO Response brute:`, JSON.stringify(responseData, null, 2));
+        const routeCount = responseData.routes?.length || 0;
+        const totalVisits = responseData.routes?.reduce((sum, r) => sum + (r.visits?.length || 0), 0) || 0;
+        const totalDistance = responseData.routes?.reduce((sum, r) => sum + (r.metrics?.travelDistanceMeters || 0), 0) / 1000;
+        const skippedCount = responseData.metrics?.skippedMandatoryShipmentCount || 0;
+        console.log(`✅ Optimisation: ${routeCount} tournées, ${totalVisits} visits, ${totalDistance.toFixed(1)} km, ${skippedCount} skippés`);
+        // 6. Log d'audit
+        try {
+            await db.collection("audit_logs").add({
+                action: "TOURS_OPTIMIZED",
+                performedBy: context.auth.uid,
+                performedAt: admin.firestore.FieldValue.serverTimestamp(),
+                details: {
+                    shipments: shipmentCount,
+                    vehicles: vehicleCount,
+                    routesGenerated: routeCount,
+                    totalDistanceKm: Math.round(totalDistance * 10) / 10,
+                },
+            });
+        }
+        catch (logErr) {
+            console.warn("Erreur log audit:", logErr);
+        }
+        return responseData;
+    }
+    catch (err) {
+        if (err instanceof functions.https.HttpsError) {
+            throw err;
+        }
+        console.error("❌ Erreur réseau GMPRO:", err);
+        throw new functions.https.HttpsError("internal", `Erreur de connexion à Google Route Optimization: ${err.message}`);
+    }
+});
 // ============================================================================
 // SUPPRESSION COMPLETE D'UN UTILISATEUR
 // ============================================================================
@@ -27,7 +134,6 @@ const auth = admin.auth();
 exports.deleteUserCompletely = functions
     .region("europe-west1") // Serveur en Europe (plus proche de La Réunion)
     .https.onCall(async (data, context) => {
-    var _a;
     // 1. Vérifier que l'appelant est authentifié
     if (!context.auth) {
         throw new functions.https.HttpsError("unauthenticated", "Vous devez être connecté pour effectuer cette action.");
@@ -43,7 +149,7 @@ exports.deleteUserCompletely = functions
     if (!callerDoc.exists) {
         throw new functions.https.HttpsError("permission-denied", "Votre profil n'a pas été trouvé.");
     }
-    const callerRole = String(((_a = callerDoc.data()) === null || _a === void 0 ? void 0 : _a.role) || "").toLowerCase();
+    const callerRole = String(callerDoc.data()?.role || "").toLowerCase();
     const allowedRoles = ["admin", "président", "president", "directeur", "director", "directeur exploitation"];
     const hasPermission = allowedRoles.some(role => callerRole.includes(role));
     if (!hasPermission) {
@@ -193,7 +299,6 @@ exports.cleanupExpiredInvitations = functions
 exports.toggleUserStatus = functions
     .region("europe-west1")
     .https.onCall(async (data, context) => {
-    var _a;
     // 1. Vérifier l'authentification
     if (!context.auth) {
         throw new functions.https.HttpsError("unauthenticated", "Vous devez être connecté pour effectuer cette action.");
@@ -208,7 +313,7 @@ exports.toggleUserStatus = functions
     if (!callerDoc.exists) {
         throw new functions.https.HttpsError("permission-denied", "Votre profil n'a pas été trouvé.");
     }
-    const callerRole = String(((_a = callerDoc.data()) === null || _a === void 0 ? void 0 : _a.role) || "").toLowerCase();
+    const callerRole = String(callerDoc.data()?.role || "").toLowerCase();
     const allowedRoles = ["admin", "président", "president", "directeur", "director", "directeur exploitation"];
     const hasPermission = allowedRoles.some(role => callerRole.includes(role));
     if (!hasPermission) {
@@ -296,7 +401,6 @@ exports.toggleUserStatus = functions
 exports.forcePasswordReset = functions
     .region("europe-west1")
     .https.onCall(async (data, context) => {
-    var _a;
     // 1. Vérifier l'authentification
     if (!context.auth) {
         throw new functions.https.HttpsError("unauthenticated", "Vous devez être connecté pour effectuer cette action.");
@@ -311,7 +415,7 @@ exports.forcePasswordReset = functions
     if (!callerDoc.exists) {
         throw new functions.https.HttpsError("permission-denied", "Votre profil n'a pas été trouvé.");
     }
-    const callerRole = String(((_a = callerDoc.data()) === null || _a === void 0 ? void 0 : _a.role) || "").toLowerCase();
+    const callerRole = String(callerDoc.data()?.role || "").toLowerCase();
     const allowedRoles = ["admin", "président", "president", "directeur", "director", "directeur exploitation", "secret"];
     const hasPermission = allowedRoles.some(role => callerRole.includes(role));
     if (!hasPermission) {
@@ -473,9 +577,9 @@ exports.validateInvitationToken = functions
                 email: invitation.email,
                 expiresAt: invitation.expiresAt,
                 invitedByName: invitation.invitedByName,
-                firstName: (userData === null || userData === void 0 ? void 0 : userData.firstName) || "",
-                lastName: (userData === null || userData === void 0 ? void 0 : userData.lastName) || "",
-                role: (userData === null || userData === void 0 ? void 0 : userData.role) || "",
+                firstName: userData?.firstName || "",
+                lastName: userData?.lastName || "",
+                role: userData?.role || "",
             },
         };
     }
@@ -493,16 +597,20 @@ exports.validateInvitationToken = functions
 // ============================================================================
 /**
  * Active un compte utilisateur avec un token d'invitation
- * - Crée le compte Firebase Auth
- * - Migre le profil Firestore
- * - Marque l'invitation comme utilisée
- * - Retourne un custom token pour auto-login
+ * FLUX ROBUSTE PRODUCTION:
+ * 1. Valide le token d'invitation
+ * 2. Crée le compte Firebase Auth
+ * 3. Migre OU reconstruit le profil Firestore avec l'UID Auth
+ * 4. Marque l'invitation comme utilisée
+ * 5. Log d'audit
  */
 exports.activateAccount = functions
     .region("europe-west1")
     .https.onCall(async (data) => {
     const { token, password } = data;
-    // Validations
+    // ========================================
+    // VALIDATIONS
+    // ========================================
     if (!token || typeof token !== "string") {
         throw new functions.https.HttpsError("invalid-argument", "Token manquant");
     }
@@ -510,7 +618,10 @@ exports.activateAccount = functions
         throw new functions.https.HttpsError("invalid-argument", "Le mot de passe doit contenir au moins 6 caractères");
     }
     try {
-        // 1. Trouver et valider l'invitation
+        // ========================================
+        // ÉTAPE 1: TROUVER ET VALIDER L'INVITATION
+        // ========================================
+        console.log(`🔍 Recherche invitation pour token: ${token.substring(0, 8)}...`);
         const snapshot = await db
             .collection("invitations")
             .where("token", "==", token)
@@ -521,61 +632,128 @@ exports.activateAccount = functions
         }
         const invitationDoc = snapshot.docs[0];
         const invitation = invitationDoc.data();
+        console.log(`📧 Invitation trouvée pour: ${invitation.email}`);
         if (invitation.used) {
-            throw new functions.https.HttpsError("already-exists", "Ce lien a déjà été utilisé");
+            throw new functions.https.HttpsError("already-exists", "Ce lien a déjà été utilisé. Connectez-vous avec votre email et mot de passe.");
         }
         const now = new Date();
         const expiresAt = new Date(invitation.expiresAt);
         if (now > expiresAt) {
-            throw new functions.https.HttpsError("deadline-exceeded", "Ce lien a expiré");
+            throw new functions.https.HttpsError("deadline-exceeded", "Ce lien a expiré. Demandez une nouvelle invitation à votre administrateur.");
         }
-        // 2. Créer le compte Firebase Auth
+        // ========================================
+        // ÉTAPE 2: CRÉER LE COMPTE FIREBASE AUTH
+        // ========================================
+        console.log(`🔐 Création du compte Auth pour: ${invitation.email}`);
         let authUser;
         try {
             authUser = await auth.createUser({
-                email: invitation.email,
+                email: invitation.email.toLowerCase().trim(),
                 password: password,
-                emailVerified: true, // On considère l'email vérifié car il a reçu l'invitation
+                emailVerified: true, // Email vérifié car il a reçu l'invitation
             });
             console.log(`✅ Compte Auth créé: ${authUser.uid}`);
         }
         catch (authError) {
             if (authError.code === "auth/email-already-exists") {
-                throw new functions.https.HttpsError("already-exists", "Ce compte existe déjà. Utilisez 'Mot de passe oublié' pour vous connecter.");
+                // L'utilisateur existe déjà dans Auth - peut-être une activation partielle précédente
+                console.warn(`⚠️ Compte Auth existe déjà pour: ${invitation.email}`);
+                // Récupérer l'UID existant
+                const existingUser = await auth.getUserByEmail(invitation.email.toLowerCase().trim());
+                // Vérifier si le profil Firestore existe
+                const existingProfile = await db.collection("users").doc(existingUser.uid).get();
+                if (existingProfile.exists) {
+                    // Le compte est déjà complètement activé
+                    throw new functions.https.HttpsError("already-exists", "Ce compte existe déjà. Utilisez 'Mot de passe oublié' si vous avez oublié votre mot de passe.");
+                }
+                // Le compte Auth existe mais pas le profil - on continue avec cet UID
+                authUser = existingUser;
+                console.log(`🔄 Utilisation du compte Auth existant: ${authUser.uid}`);
             }
-            throw authError;
+            else {
+                throw authError;
+            }
         }
-        // 3. Migrer le profil Firestore vers le bon UID
-        const oldUserDoc = await db.collection("users").doc(invitation.userId).get();
-        if (oldUserDoc.exists) {
-            const userData = oldUserDoc.data();
-            // Créer le nouveau document avec l'Auth UID
-            await db.collection("users").doc(authUser.uid).set(Object.assign(Object.assign({}, userData), { id: authUser.uid, email: invitation.email.toLowerCase().trim(), activatedAt: admin.firestore.FieldValue.serverTimestamp() }));
-            // Supprimer l'ancien document
-            await db.collection("users").doc(invitation.userId).delete();
-            console.log(`✅ Profil migré de ${invitation.userId} vers ${authUser.uid}`);
+        // ========================================
+        // ÉTAPE 3: CRÉER/MIGRER LE PROFIL FIRESTORE
+        // ========================================
+        console.log(`📝 Migration/Création du profil Firestore...`);
+        // Vérifier si le profil existe déjà avec le bon UID (double activation)
+        const existingNewProfile = await db.collection("users").doc(authUser.uid).get();
+        if (existingNewProfile.exists) {
+            console.log(`✅ Profil existe déjà avec le bon UID: ${authUser.uid}`);
         }
-        // 4. Marquer l'invitation comme utilisée
+        else {
+            // Chercher le profil original
+            const oldUserDoc = await db.collection("users").doc(invitation.userId).get();
+            if (oldUserDoc.exists) {
+                // MIGRATION: Copier le profil existant vers le nouvel UID
+                const userData = oldUserDoc.data();
+                await db.collection("users").doc(authUser.uid).set({
+                    ...userData,
+                    id: authUser.uid,
+                    email: invitation.email.toLowerCase().trim(),
+                    activatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                    status: "active",
+                });
+                // Supprimer l'ancien document
+                await db.collection("users").doc(invitation.userId).delete();
+                console.log(`✅ Profil migré de ${invitation.userId} vers ${authUser.uid}`);
+            }
+            else {
+                // RECONSTRUCTION: Créer le profil depuis les données de l'invitation
+                console.warn(`⚠️ Profil original ${invitation.userId} non trouvé - Reconstruction...`);
+                // Construire le profil complet depuis l'invitation
+                const reconstructedProfile = {
+                    id: authUser.uid,
+                    email: invitation.email.toLowerCase().trim(),
+                    firstName: invitation.firstName || "",
+                    lastName: invitation.lastName || "",
+                    role: invitation.role || "Chauffeur",
+                    activatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                    createdAt: invitation.createdAt || new Date().toISOString(),
+                    status: "active",
+                    // Champs par défaut pour un nouvel utilisateur
+                    phone: "",
+                    assignedVehicleId: null,
+                    companyName: "",
+                };
+                // Valider que les champs essentiels sont présents
+                if (!reconstructedProfile.firstName || !reconstructedProfile.lastName) {
+                    console.error(`❌ Données insuffisantes pour reconstruire le profil`);
+                    throw new functions.https.HttpsError("failed-precondition", "Les informations de profil sont manquantes. Contactez votre administrateur.");
+                }
+                await db.collection("users").doc(authUser.uid).set(reconstructedProfile);
+                console.log(`✅ Profil reconstruit pour ${authUser.uid}: ${reconstructedProfile.firstName} ${reconstructedProfile.lastName}`);
+            }
+        }
+        // ========================================
+        // ÉTAPE 4: MARQUER L'INVITATION COMME UTILISÉE
+        // ========================================
         await invitationDoc.ref.update({
             used: true,
             usedAt: new Date().toISOString(),
             authUid: authUser.uid,
+            activationSuccess: true,
         });
-        // 5. Créer un custom token pour l'auto-login
-        const customToken = await auth.createCustomToken(authUser.uid);
-        console.log(`✅ Compte activé pour: ${invitation.email}`);
-        // 6. Log d'audit
+        console.log(`✅ Compte activé avec succès pour: ${invitation.email}`);
+        // ========================================
+        // ÉTAPE 5: LOG D'AUDIT
+        // ========================================
         await db.collection("audit_logs").add({
             action: "ACCOUNT_ACTIVATED",
             userId: authUser.uid,
             email: invitation.email,
             invitedBy: invitation.invitedBy,
+            invitedByName: invitation.invitedByName,
+            originalUserId: invitation.userId,
+            reconstructed: !await db.collection("users").doc(invitation.userId).get().then(d => d.exists),
             activatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
         return {
             success: true,
-            customToken: customToken,
-            message: "Compte activé avec succès !",
+            email: invitation.email,
+            message: "Compte activé avec succès ! Vous pouvez maintenant vous connecter.",
         };
     }
     catch (error) {

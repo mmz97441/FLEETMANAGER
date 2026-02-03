@@ -240,30 +240,74 @@ export const optimizeMultiVehicle = async (
       label: `${dv.driver.firstName} ${dv.driver.lastName}${dv.vehicle ? ` (${dv.vehicle.plate})` : ''}`
     }));
     
+    // Calculer le temps de début réel (si la date est aujourd'hui et l'heure de départ est passée)
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    const isToday = date === todayStr;
+    
+    let effectiveStartTime = hub.openingTime || '07:00';
+    if (isToday) {
+      // Si c'est aujourd'hui, utiliser l'heure actuelle + 30 min si on a dépassé l'heure d'ouverture
+      const nowHours = now.getHours();
+      const nowMinutes = now.getMinutes();
+      const currentTime = `${String(nowHours).padStart(2, '0')}:${String(nowMinutes + 30).padStart(2, '0')}`;
+      const openingParts = effectiveStartTime.split(':');
+      const openingMinutes = parseInt(openingParts[0]) * 60 + parseInt(openingParts[1] || '0');
+      const currentMinutes = nowHours * 60 + nowMinutes + 30;
+      
+      if (currentMinutes > openingMinutes) {
+        // Arrondir à l'heure suivante pour faire propre
+        const roundedHour = Math.min(23, nowHours + 1);
+        effectiveStartTime = `${String(roundedHour).padStart(2, '0')}:00`;
+        console.log(`⏰ Heure de départ ajustée: ${hub.openingTime || '07:00'} → ${effectiveStartTime} (aujourd'hui)`);
+      }
+    }
+    
     const model: GMPROModel = {
       shipments,
       vehicles,
-      globalStartTime: timeToISO(hub.openingTime || '07:00', date),
+      globalStartTime: timeToISO(effectiveStartTime, date),
       globalEndTime: timeToISO(hub.closingTime || '20:00', date)
     };
     
     // 6. Appeler GMPRO via Cloud Function
-    console.log(`📡 GMPRO: ${shipments.length} stops → ${vehicles.length} véhicules`);
-    console.log(`📦 Stops valides: ${validStops.length}, Skippés (sans coords): ${skippedStops.length}`);
+    console.log(`📡 GMPRO REQUEST:`);
+    console.log(`   - ${shipments.length} shipments (stops)`);
+    console.log(`   - ${vehicles.length} véhicules`);
+    console.log(`   - Plage horaire: ${model.globalStartTime} → ${model.globalEndTime}`);
+    console.log(`   - Shipments:`, JSON.stringify(shipments, null, 2));
+    console.log(`   - Vehicles:`, JSON.stringify(vehicles, null, 2));
     
     let gmproResult: GMPROResult;
     try {
       gmproResult = await optimizeToursCF(model);
-      console.log('📡 GMPRO résultat:', JSON.stringify(gmproResult.metrics || {}, null, 2));
+      console.log('📡 GMPRO RESPONSE COMPLÈTE:', JSON.stringify(gmproResult, null, 2));
+      
+      // Debug détaillé
+      if (gmproResult.routes) {
+        for (let i = 0; i < gmproResult.routes.length; i++) {
+          const route = gmproResult.routes[i];
+          console.log(`   Route ${i}: vehicleIndex=${route.vehicleIndex}, visits=${route.visits?.length || 0}, distance=${route.metrics?.travelDistanceMeters || 0}m`);
+        }
+      }
+      if (gmproResult.metrics?.skippedMandatoryShipmentCount) {
+        console.warn(`⚠️ GMPRO a skippé ${gmproResult.metrics.skippedMandatoryShipmentCount} shipments!`);
+      }
     } catch (err: any) {
-      console.error('GMPRO échoué:', err.message);
-      return createFallbackOptimization(stopGroups, driversVehicles, hubCoords);
+      console.error('❌ GMPRO erreur:', err.message);
+      // Ne pas utiliser le fallback automatiquement - remonter l'erreur
+      throw err;
     }
     
     // 7. Parser les résultats
     if (!gmproResult.routes || gmproResult.routes.length === 0) {
-      console.warn('GMPRO: aucune route retournée, fallback');
-      return createFallbackOptimization(stopGroups, driversVehicles, hubCoords);
+      console.error('❌ GMPRO: aucune route retournée');
+      return {
+        success: false, tours: [], totalDistance: 0, totalDuration: 0,
+        totalPackages: 0, skippedShipments: validStops.length,
+        error: 'GMPRO n\'a retourné aucune route. Vérifiez les logs console (F12).', 
+        method: 'gmpro'
+      };
     }
     
     const tours: TourResult[] = [];
@@ -337,11 +381,17 @@ export const optimizeMultiVehicle = async (
     
     const skippedCount = gmproResult.metrics?.skippedMandatoryShipmentCount || 0;
     
-    // Si aucun stop n'a été routé (tous skipped), utiliser le fallback
+    // Vérifier si des stops ont été routés
     const totalRoutedPackages = tours.reduce((s, t) => s + t.packageCount, 0);
     if (totalRoutedPackages === 0 && validStops.length > 0) {
-      console.warn('GMPRO a skipped tous les shipments, utilisation du fallback');
-      return createFallbackOptimization(stopGroups, driversVehicles, hubCoords);
+      console.error(`❌ GMPRO a skippé tous les ${validStops.length} shipments!`);
+      console.error('   Vérifiez: time windows, coordonnées, plage horaire globale');
+      return {
+        success: false, tours: [], totalDistance: 0, totalDuration: 0,
+        totalPackages: 0, skippedShipments: validStops.length,
+        error: `GMPRO a skippé tous les ${validStops.length} stops. Vérifiez les contraintes horaires ou les coordonnées dans la console (F12).`, 
+        method: 'gmpro'
+      };
     }
     
     return {
