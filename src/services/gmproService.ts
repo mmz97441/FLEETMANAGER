@@ -157,6 +157,12 @@ const timeToMinutes = (time: string): number => {
   return parseInt(parts[0]) * 60 + parseInt(parts[1] || '0');
 };
 
+const minutesToTime = (minutes: number): string => {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+};
+
 // ============================================================================
 // OPTIMISATION MULTI-VÉHICULES (GMPRO via Cloud Function)
 // ============================================================================
@@ -232,20 +238,32 @@ export const optimizeMultiVehicle = async (
         label: `Stop ${idx + 1}: ${sg.contactName} (${sg.packages.length} colis)`
       };
       
-      // Ajouter time window SEULEMENT si elle est dans la plage globale
+      // Gérer les time windows - AJUSTER au lieu d'ignorer
       if (firstPkg.timeWindowStart && firstPkg.timeWindowEnd) {
-        const twStart = timeToMinutes(firstPkg.timeWindowStart);
-        const twEnd = timeToMinutes(firstPkg.timeWindowEnd);
+        let twStart = timeToMinutes(firstPkg.timeWindowStart);
+        let twEnd = timeToMinutes(firstPkg.timeWindowEnd);
         
-        // Vérifier que le créneau est dans la plage globale
-        if (twStart >= globalStartMinutes && twEnd <= globalEndMinutes) {
+        // Ajuster le créneau pour qu'il soit dans la plage globale
+        // Si le début est avant le départ, on décale au départ
+        if (twStart < globalStartMinutes) {
+          console.log(`📌 Créneau ${firstPkg.timeWindowStart}-${firstPkg.timeWindowEnd}: début ajusté → ${minutesToTime(globalStartMinutes)} pour ${sg.contactName}`);
+          twStart = globalStartMinutes;
+        }
+        // Si la fin est après la fermeture, on limite à la fermeture
+        if (twEnd > globalEndMinutes) {
+          console.log(`📌 Créneau ${firstPkg.timeWindowStart}-${firstPkg.timeWindowEnd}: fin ajustée → ${minutesToTime(globalEndMinutes)} pour ${sg.contactName}`);
+          twEnd = globalEndMinutes;
+        }
+        
+        // Vérifier que le créneau ajusté est encore valide (au moins 15 min)
+        if (twEnd > twStart + 15) {
           shipment.deliveries[0].timeWindows = [{
-            startTime: timeToISO(firstPkg.timeWindowStart, date),
-            endTime: timeToISO(firstPkg.timeWindowEnd, date)
+            startTime: timeToISO(minutesToTime(twStart), date),
+            endTime: timeToISO(minutesToTime(twEnd), date)
           }];
         } else {
-          // Créneau hors plage → on l'ignore (livraison sans contrainte horaire)
-          console.warn(`⚠️ Créneau ${firstPkg.timeWindowStart}-${firstPkg.timeWindowEnd} hors plage ${departureTime}-${hub.closingTime || '20:00'} pour ${sg.contactName} — ignoré`);
+          // Créneau trop court après ajustement → pas de contrainte horaire
+          console.warn(`⚠️ Créneau ${firstPkg.timeWindowStart}-${firstPkg.timeWindowEnd} impossible (fin avant départ) pour ${sg.contactName} — livraison sans contrainte`);
         }
       }
       
