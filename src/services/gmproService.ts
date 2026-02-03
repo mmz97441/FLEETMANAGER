@@ -179,11 +179,23 @@ export const optimizeMultiVehicle = async (
   departureTime: string = '08:00'  // Heure de départ prévue (du formulaire)
 ): Promise<OptimizationResult> => {
   try {
+    console.log(`📦 GMPRO: ${packages.length} colis reçus`);
+    packages.forEach(p => console.log(`   - ${p.orderNumber}: ${p.contactName} | ${p.address} | statut=${p.status}`));
+    
     // 1. Géocoder les adresses
     const geocodedAddresses = await geocodePackages(packages, apiKey);
     
     // 2. Regrouper par stop
     const stopGroups = groupPackagesByStop(packages, geocodedAddresses);
+    console.log(`📍 ${stopGroups.length} stops créés à partir de ${packages.length} colis:`);
+    stopGroups.forEach(sg => {
+      console.log(`   - ${sg.contactName}: ${sg.packages.length} colis | coords=${sg.coords ? 'OK' : 'MANQUANTES'}`);
+    });
+    
+    const totalPackagesInStops = stopGroups.reduce((sum, sg) => sum + sg.packages.length, 0);
+    if (totalPackagesInStops !== packages.length) {
+      console.error(`❌ PERTE DE COLIS: ${packages.length} reçus → ${totalPackagesInStops} dans les stops`);
+    }
     
     // 3. Coordonnées du hub
     let hubCoords = hub.coordinates;
@@ -199,8 +211,14 @@ export const optimizeMultiVehicle = async (
     const validStops = stopGroups.filter(sg => sg.coords);
     const skippedStops = stopGroups.filter(sg => !sg.coords);
     
+    const validPackageCount = validStops.reduce((sum, sg) => sum + sg.packages.length, 0);
+    const skippedPackageCount = skippedStops.reduce((sum, sg) => sum + sg.packages.length, 0);
+    
+    console.log(`✅ ${validStops.length} stops avec coordonnées (${validPackageCount} colis)`);
+    console.log(`❌ ${skippedStops.length} stops SANS coordonnées (${skippedPackageCount} colis perdus)`);
+    
     if (skippedStops.length > 0) {
-      console.warn(`⚠️ ${skippedStops.length} stops sans coordonnées:`, skippedStops.map(s => s.key));
+      console.warn(`⚠️ Stops sans coordonnées (EXCLUS):`, skippedStops.map(s => `${s.contactName}: ${s.packages.length} colis`));
       // Si tous les stops n'ont pas de coords, utiliser le fallback avec tous les stops
       // (le fallback peut fonctionner sans coords en répartissant simplement)
       if (validStops.length === 0) {
@@ -398,8 +416,20 @@ export const optimizeMultiVehicle = async (
     
     const skippedCount = gmproResult.metrics?.skippedMandatoryShipmentCount || 0;
     
-    // Vérifier si des stops ont été routés
+    // Debug final
     const totalRoutedPackages = tours.reduce((s, t) => s + t.packageCount, 0);
+    const totalRoutedStops = tours.reduce((s, t) => s + t.stops.length, 0);
+    console.log(`📊 RÉSUMÉ FINAL:`);
+    console.log(`   - Colis entrée: ${packages.length}`);
+    console.log(`   - Stops valides: ${validStops.length} (${validStops.reduce((s, sg) => s + sg.packages.length, 0)} colis)`);
+    console.log(`   - Stops GMPRO skipped: ${skippedCount}`);
+    console.log(`   - Stops routés: ${totalRoutedStops}`);
+    console.log(`   - Colis routés: ${totalRoutedPackages}`);
+    if (totalRoutedPackages < packages.length) {
+      console.warn(`⚠️ ${packages.length - totalRoutedPackages} COLIS PERDUS !`);
+    }
+    
+    // Vérifier si des stops ont été routés
     if (totalRoutedPackages === 0 && validStops.length > 0) {
       console.error(`❌ GMPRO a skippé tous les ${validStops.length} shipments!`);
       console.error('   Vérifiez: time windows, coordonnées, plage horaire globale');
