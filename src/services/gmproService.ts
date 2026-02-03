@@ -152,6 +152,11 @@ const timeToISO = (time: string, date: string): string => {
   return `${date}T${time}:00+04:00`;
 };
 
+const timeToMinutes = (time: string): number => {
+  const parts = time.split(':');
+  return parseInt(parts[0]) * 60 + parseInt(parts[1] || '0');
+};
+
 // ============================================================================
 // OPTIMISATION MULTI-VÉHICULES (GMPRO via Cloud Function)
 // ============================================================================
@@ -164,7 +169,8 @@ export const optimizeMultiVehicle = async (
   driversVehicles: DriverVehicle[],
   hub: Hub,
   date: string,
-  apiKey: string
+  apiKey: string,
+  departureTime: string = '08:00'  // Heure de départ prévue (du formulaire)
 ): Promise<OptimizationResult> => {
   try {
     // 1. Géocoder les adresses
@@ -206,6 +212,12 @@ export const optimizeMultiVehicle = async (
     }
     
     // 5. Construire la requête GMPRO
+    // Utiliser l'heure de départ du formulaire dispatch
+    const globalStartMinutes = timeToMinutes(departureTime);
+    const globalEndMinutes = timeToMinutes(hub.closingTime || '20:00');
+    
+    console.log(`🕐 Plage horaire GMPRO: ${departureTime} → ${hub.closingTime || '20:00'}`);
+    
     const shipments = validStops.map((sg, idx) => {
       const serviceTime = Math.max(5, sg.packages.length * 5);
       const firstPkg = sg.packages[0];
@@ -220,11 +232,21 @@ export const optimizeMultiVehicle = async (
         label: `Stop ${idx + 1}: ${sg.contactName} (${sg.packages.length} colis)`
       };
       
+      // Ajouter time window SEULEMENT si elle est dans la plage globale
       if (firstPkg.timeWindowStart && firstPkg.timeWindowEnd) {
-        shipment.deliveries[0].timeWindows = [{
-          startTime: timeToISO(firstPkg.timeWindowStart, date),
-          endTime: timeToISO(firstPkg.timeWindowEnd, date)
-        }];
+        const twStart = timeToMinutes(firstPkg.timeWindowStart);
+        const twEnd = timeToMinutes(firstPkg.timeWindowEnd);
+        
+        // Vérifier que le créneau est dans la plage globale
+        if (twStart >= globalStartMinutes && twEnd <= globalEndMinutes) {
+          shipment.deliveries[0].timeWindows = [{
+            startTime: timeToISO(firstPkg.timeWindowStart, date),
+            endTime: timeToISO(firstPkg.timeWindowEnd, date)
+          }];
+        } else {
+          // Créneau hors plage → on l'ignore (livraison sans contrainte horaire)
+          console.warn(`⚠️ Créneau ${firstPkg.timeWindowStart}-${firstPkg.timeWindowEnd} hors plage ${departureTime}-${hub.closingTime || '20:00'} pour ${sg.contactName} — ignoré`);
+        }
       }
       
       return shipment;
@@ -240,33 +262,10 @@ export const optimizeMultiVehicle = async (
       label: `${dv.driver.firstName} ${dv.driver.lastName}${dv.vehicle ? ` (${dv.vehicle.plate})` : ''}`
     }));
     
-    // Calculer le temps de début réel (si la date est aujourd'hui et l'heure de départ est passée)
-    const now = new Date();
-    const todayStr = now.toISOString().split('T')[0];
-    const isToday = date === todayStr;
-    
-    let effectiveStartTime = hub.openingTime || '07:00';
-    if (isToday) {
-      // Si c'est aujourd'hui, utiliser l'heure actuelle + 30 min si on a dépassé l'heure d'ouverture
-      const nowHours = now.getHours();
-      const nowMinutes = now.getMinutes();
-      const currentTime = `${String(nowHours).padStart(2, '0')}:${String(nowMinutes + 30).padStart(2, '0')}`;
-      const openingParts = effectiveStartTime.split(':');
-      const openingMinutes = parseInt(openingParts[0]) * 60 + parseInt(openingParts[1] || '0');
-      const currentMinutes = nowHours * 60 + nowMinutes + 30;
-      
-      if (currentMinutes > openingMinutes) {
-        // Arrondir à l'heure suivante pour faire propre
-        const roundedHour = Math.min(23, nowHours + 1);
-        effectiveStartTime = `${String(roundedHour).padStart(2, '0')}:00`;
-        console.log(`⏰ Heure de départ ajustée: ${hub.openingTime || '07:00'} → ${effectiveStartTime} (aujourd'hui)`);
-      }
-    }
-    
     const model: GMPROModel = {
       shipments,
       vehicles,
-      globalStartTime: timeToISO(effectiveStartTime, date),
+      globalStartTime: timeToISO(departureTime, date),
       globalEndTime: timeToISO(hub.closingTime || '20:00', date)
     };
     

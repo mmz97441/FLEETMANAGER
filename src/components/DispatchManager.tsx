@@ -22,7 +22,7 @@ import Modal from './shared/Modal';
 import {
   Route, Package as PackageIcon, MapPin, Users, Truck, Play,
   CheckCircle, Loader2, AlertTriangle, Zap, Clock, Navigation,
-  ChevronRight, User as UserIcon, ChevronDown, ChevronUp
+  ChevronRight, User as UserIcon, ChevronDown, ChevronUp, XCircle
 } from 'lucide-react';
 
 interface DispatchManagerProps {
@@ -63,6 +63,9 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
   const [optimResult, setOptimResult] = useState<OptimizationResult | null>(null);
   const [expandedTour, setExpandedTour] = useState<number | null>(null);
   const [showDispatchModal, setShowDispatchModal] = useState(false);
+  
+  // Créneaux de livraison modifiés (packageId → { start, end })
+  const [packageTimeWindows, setPackageTimeWindows] = useState<Record<string, { start: string; end: string }>>({});
   
   // Filtrer les colis au hub (collectés et réceptionnés) — prêts à être dispatchés
   const pendingPackages = useMemo(() => 
@@ -182,12 +185,23 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
     try {
       const apiKey = getGoogleMapsApiKey();
       
+      // Appliquer les créneaux modifiés aux packages
+      const packagesWithUpdatedTimeWindows = selectedZoneStats.packages.map(pkg => {
+        const tw = packageTimeWindows[pkg.id];
+        return {
+          ...pkg,
+          timeWindowStart: tw?.start || undefined,
+          timeWindowEnd: tw?.end || undefined
+        };
+      });
+      
       const result = await optimizeMultiVehicle(
-        selectedZoneStats.packages,
+        packagesWithUpdatedTimeWindows,
         selectedDriversVehicles,
         departureHub,
         selectedDate,
-        apiKey
+        apiKey,
+        plannedDepartureTime  // Utiliser l'heure de départ du formulaire
       );
       
       setOptimResult(result);
@@ -324,6 +338,17 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
     setSelectedHubId(zoneHub?.id || firstHub?.id || '');
     setOptimResult(null);
     setExpandedTour(null);
+    
+    // Initialiser les créneaux des colis
+    const initialTimeWindows: Record<string, { start: string; end: string }> = {};
+    zStat?.packages.forEach(pkg => {
+      initialTimeWindows[pkg.id] = {
+        start: pkg.timeWindowStart || '',
+        end: pkg.timeWindowEnd || ''
+      };
+    });
+    setPackageTimeWindows(initialTimeWindows);
+    
     setShowDispatchModal(true);
   };
   
@@ -562,6 +587,64 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
               <p className="text-xs text-slate-400 mt-1">
                 Les ETAs de chaque stop seront calculées à partir de cette heure
               </p>
+            </div>
+            
+            {/* Créneaux de livraison des colis */}
+            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+              <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
+                <h4 className="text-sm font-bold text-slate-700 flex items-center gap-2">
+                  <PackageIcon size={16} className="text-brand-500" />
+                  Créneaux de livraison ({selectedZoneStats?.packages.length || 0} colis)
+                </h4>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Modifiez les créneaux si nécessaire avant l'optimisation
+                </p>
+              </div>
+              <div className="max-h-64 overflow-y-auto divide-y divide-slate-100">
+                {selectedZoneStats?.packages.map(pkg => (
+                  <div key={pkg.id} className="px-4 py-2.5 hover:bg-slate-50 flex items-center gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-slate-800 truncate">{pkg.contactName}</p>
+                      <p className="text-xs text-slate-500 truncate">{pkg.address}, {pkg.postalCode}</p>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="time"
+                        value={packageTimeWindows[pkg.id]?.start || ''}
+                        onChange={(e) => setPackageTimeWindows(prev => ({
+                          ...prev,
+                          [pkg.id]: { ...prev[pkg.id], start: e.target.value }
+                        }))}
+                        className="w-24 px-2 py-1.5 border border-slate-200 rounded text-xs font-mono focus:ring-2 focus:ring-brand-200 outline-none"
+                        placeholder="Début"
+                      />
+                      <span className="text-slate-400 text-xs">→</span>
+                      <input
+                        type="time"
+                        value={packageTimeWindows[pkg.id]?.end || ''}
+                        onChange={(e) => setPackageTimeWindows(prev => ({
+                          ...prev,
+                          [pkg.id]: { ...prev[pkg.id], end: e.target.value }
+                        }))}
+                        className="w-24 px-2 py-1.5 border border-slate-200 rounded text-xs font-mono focus:ring-2 focus:ring-brand-200 outline-none"
+                        placeholder="Fin"
+                      />
+                      {(packageTimeWindows[pkg.id]?.start || packageTimeWindows[pkg.id]?.end) && (
+                        <button
+                          onClick={() => setPackageTimeWindows(prev => ({
+                            ...prev,
+                            [pkg.id]: { start: '', end: '' }
+                          }))}
+                          className="p-1 text-slate-400 hover:text-red-500 rounded"
+                          title="Supprimer le créneau"
+                        >
+                          <XCircle size={14} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
             
             {/* Bouton Optimiser */}
