@@ -29,10 +29,11 @@ import {
   MissionStats
 } from '../services/missionService';
 import { importExcelFile, validateExcelFormat, parseExcelForReview, ReviewResult } from '../services/importService';
-import { geocodeAddress, getGoogleMapsApiKey } from '../services/gmproService';
+import { geocodeAddress, getGoogleMapsApiKey, optimizeMultiVehicle, DriverVehicle } from '../services/gmproService';
 import { logActivity } from '../services/activityLogService';
-import { notifyImportCompleted } from '../services/notificationService';
+import { notifyImportCompleted, notifyMissionAssigned } from '../services/notificationService';
 import { ActivityAction } from '../types';
+import { addMission } from '../services/missionService';
 import { usePermissions, Permission } from '../usePermissions';
 import Modal from './shared/Modal';
 import DispatchManager from './DispatchManager';
@@ -99,6 +100,23 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   // Sélection multiple de colis
   const [selectedPackageIds, setSelectedPackageIds] = useState<Set<string>>(new Set());
   const [bulkStatusTarget, setBulkStatusTarget] = useState<PackageStatus | null>(null);
+  
+  // Dispatch rapide depuis sélection
+  const [showQuickDispatch, setShowQuickDispatch] = useState(false);
+  const [quickDispatchDriverId, setQuickDispatchDriverId] = useState<string>('');
+  const [quickDispatchTime, setQuickDispatchTime] = useState<string>(() => {
+    const now = new Date();
+    const minutes = now.getMinutes();
+    const roundedMinutes = Math.ceil(minutes / 15) * 15;
+    now.setMinutes(roundedMinutes, 0, 0);
+    if (roundedMinutes >= 60) {
+      now.setHours(now.getHours() + 1);
+      now.setMinutes(0);
+    }
+    return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  });
+  const [quickDispatchHubId, setQuickDispatchHubId] = useState<string>('');
+  const [isQuickDispatching, setIsQuickDispatching] = useState(false);
   
   // Edit/Delete stops dans tournée (admin)
   const [editingStop, setEditingStop] = useState<{ mission: Mission; stop: MissionStop } | null>(null);
@@ -1357,7 +1375,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
       {/* Actions de masse pour sélection */}
       {selectedPackageIds.size > 0 && (
-        <div className="bg-brand-50 border border-brand-200 rounded-xl p-3 flex items-center justify-between">
+        <div className="bg-brand-50 border border-brand-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-3">
             <span className="text-sm font-bold text-brand-700">
               {selectedPackageIds.size} colis sélectionné{selectedPackageIds.size > 1 ? 's' : ''}
@@ -1369,8 +1387,34 @@ const MissionManager: React.FC<MissionManagerProps> = ({
               Tout désélectionner
             </button>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500">Changer statut :</span>
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Bouton Dispatcher */}
+            <button
+              onClick={() => {
+                // Pré-sélectionner le premier hub actif
+                const firstHub = hubs.find(h => h.isActive);
+                setQuickDispatchHubId(firstHub?.id || '');
+                // Mettre à jour l'heure
+                const now = new Date();
+                const minutes = now.getMinutes();
+                const roundedMinutes = Math.ceil(minutes / 15) * 15;
+                now.setMinutes(roundedMinutes, 0, 0);
+                if (roundedMinutes >= 60) {
+                  now.setHours(now.getHours() + 1);
+                  now.setMinutes(0);
+                }
+                setQuickDispatchTime(`${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`);
+                setShowQuickDispatch(true);
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-gradient-to-r from-brand-500 to-blue-500 text-white hover:from-brand-600 hover:to-blue-600 transition-all shadow-sm"
+            >
+              <Zap size={14} />
+              Dispatcher
+            </button>
+            
+            <div className="w-px h-5 bg-slate-300 mx-1" />
+            
+            <span className="text-xs text-slate-500">Statut :</span>
             {[
               { status: PackageStatus.PENDING, label: 'En attente', color: 'bg-slate-100 text-slate-700' },
               { status: PackageStatus.AT_HUB, label: 'Au hub', color: 'bg-indigo-100 text-indigo-700' },
@@ -2848,6 +2892,260 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           }}
           showDriverInfo={true}
         />
+      )}
+
+      {/* === MODAL DISPATCH RAPIDE === */}
+      {showQuickDispatch && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowQuickDispatch(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b border-slate-200 bg-gradient-to-r from-brand-500 to-blue-500">
+              <h3 className="font-bold text-white flex items-center gap-2">
+                <Zap size={20} />
+                Dispatch rapide
+              </h3>
+              <p className="text-sm text-white/80 mt-1">
+                {selectedPackageIds.size} colis sélectionné{selectedPackageIds.size > 1 ? 's' : ''}
+              </p>
+            </div>
+            
+            <div className="p-4 space-y-4">
+              {/* Hub de départ */}
+              <div>
+                <label className="text-sm font-bold text-slate-700 block mb-1">Hub de départ</label>
+                <select
+                  value={quickDispatchHubId}
+                  onChange={(e) => setQuickDispatchHubId(e.target.value)}
+                  className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none"
+                >
+                  <option value="">Sélectionner un hub...</option>
+                  {hubs.filter(h => h.isActive).map(hub => (
+                    <option key={hub.id} value={hub.id}>
+                      {hub.name} — {hub.zone}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              
+              {/* Chauffeur */}
+              <div>
+                <label className="text-sm font-bold text-slate-700 block mb-1">Chauffeur</label>
+                <select
+                  value={quickDispatchDriverId}
+                  onChange={(e) => setQuickDispatchDriverId(e.target.value)}
+                  className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none"
+                >
+                  <option value="">Sélectionner un chauffeur...</option>
+                  {users.filter(u => u.role === UserRole.DRIVER && u.isActive !== false).map(driver => {
+                    const vehicle = vehicles.find(v => v.assignedDriverId === driver.id);
+                    return (
+                      <option key={driver.id} value={driver.id}>
+                        {driver.firstName} {driver.lastName}
+                        {vehicle ? ` — ${vehicle.plate}` : ' (sans véhicule)'}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+              
+              {/* Heure de départ */}
+              <div>
+                <label className="text-sm font-bold text-slate-700 block mb-1">Heure de départ</label>
+                <input
+                  type="time"
+                  value={quickDispatchTime}
+                  onChange={(e) => setQuickDispatchTime(e.target.value)}
+                  className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm font-mono focus:ring-2 focus:ring-brand-200 outline-none"
+                />
+              </div>
+              
+              {/* Récapitulatif colis */}
+              <div className="bg-slate-50 rounded-lg p-3">
+                <p className="text-xs font-bold text-slate-600 mb-2">Colis à dispatcher :</p>
+                <div className="max-h-32 overflow-y-auto space-y-1">
+                  {Array.from(selectedPackageIds).map(pkgId => {
+                    const pkg = packages.find(p => p.id === pkgId);
+                    if (!pkg) return null;
+                    return (
+                      <div key={pkgId} className="text-xs text-slate-600 flex items-center gap-2">
+                        <span className="font-mono text-slate-400">{pkg.orderNumber}</span>
+                        <span>{pkg.contactName}</span>
+                        <span className={`ml-auto px-1.5 py-0.5 rounded text-[10px] font-bold ${ZONE_COLORS[pkg.zone]?.bg} ${ZONE_COLORS[pkg.zone]?.text}`}>
+                          {pkg.zone}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+            
+            <div className="p-4 border-t border-slate-200 flex justify-end gap-2">
+              <button
+                onClick={() => setShowQuickDispatch(false)}
+                className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+              >
+                Annuler
+              </button>
+              <button
+                disabled={!quickDispatchDriverId || !quickDispatchHubId || isQuickDispatching}
+                onClick={async () => {
+                  if (!quickDispatchDriverId || !quickDispatchHubId) return;
+                  
+                  setIsQuickDispatching(true);
+                  
+                  try {
+                    // Récupérer les colis sélectionnés
+                    const selectedPkgs = packages.filter(p => selectedPackageIds.has(p.id));
+                    if (selectedPkgs.length === 0) {
+                      alert('Aucun colis sélectionné');
+                      setIsQuickDispatching(false);
+                      return;
+                    }
+                    
+                    // Récupérer le chauffeur et son véhicule
+                    const driver = users.find(u => u.id === quickDispatchDriverId);
+                    const vehicle = vehicles.find(v => v.assignedDriverId === quickDispatchDriverId);
+                    const hub = hubs.find(h => h.id === quickDispatchHubId);
+                    
+                    if (!driver || !hub) {
+                      alert('Chauffeur ou hub non trouvé');
+                      setIsQuickDispatching(false);
+                      return;
+                    }
+                    
+                    // Déterminer la zone (prendre celle du premier colis)
+                    const zone = selectedPkgs[0].zone;
+                    
+                    // Préparer le driver/vehicle pour GMPRO
+                    const driversVehicles: DriverVehicle[] = [{
+                      driver,
+                      vehicle
+                    }];
+                    
+                    // Optimiser avec GMPRO
+                    const apiKey = getGoogleMapsApiKey();
+                    const result = await optimizeMultiVehicle(
+                      selectedPkgs,
+                      driversVehicles,
+                      hub,
+                      selectedDate,
+                      apiKey,
+                      quickDispatchTime
+                    );
+                    
+                    if (!result.success || result.tours.length === 0) {
+                      alert(`Erreur d'optimisation: ${result.error || 'Aucune tournée générée'}`);
+                      setIsQuickDispatching(false);
+                      return;
+                    }
+                    
+                    // Créer la mission
+                    const tour = result.tours[0];
+                    const mission: Omit<Mission, 'id' | 'createdAt' | 'updatedAt'> = {
+                      date: selectedDate,
+                      zone,
+                      hubId: hub.id,
+                      hubName: hub.name,
+                      type: MissionType.DELIVERY,
+                      status: MissionStatus.DISPATCHED,
+                      plannedDepartureTime: quickDispatchTime,
+                      driverId: driver.id,
+                      driverName: `${driver.firstName} ${driver.lastName}`,
+                      vehicleId: vehicle?.id || '',
+                      vehiclePlate: vehicle?.plate || '',
+                      stops: tour.stops,
+                      totalPackages: tour.packageCount,
+                      completedStops: 0,
+                      failedStops: 0,
+                      deliveredPackages: 0,
+                      failedPackages: 0,
+                      totalDistance: tour.totalDistance,
+                      estimatedDuration: tour.estimatedDuration,
+                      createdBy: currentUser.id,
+                      createdByName: `${currentUser.firstName} ${currentUser.lastName}`,
+                      dispatchedBy: currentUser.id,
+                      dispatchedByName: `${currentUser.firstName} ${currentUser.lastName}`,
+                      dispatchedAt: new Date().toISOString()
+                    };
+                    
+                    const missionId = await addMission(mission);
+                    
+                    // Mettre à jour les colis
+                    const packageIds = tour.stops.flatMap(s => s.packageIds);
+                    for (const pkgId of packageIds) {
+                      const stop = tour.stops.find(s => s.packageIds.includes(pkgId));
+                      const extraFields: Record<string, string | undefined> = {
+                        missionId,
+                        stopId: stop?.id,
+                        currentDriverId: driver.id
+                      };
+                      if (vehicle?.id) {
+                        extraFields.currentVehicleId = vehicle.id;
+                      }
+                      
+                      await updatePackageStatus(pkgId, PackageStatus.SORTED, {
+                        action: 'SORTED',
+                        driverId: driver.id,
+                        driverName: `${driver.firstName} ${driver.lastName}`,
+                        notes: `Dispatch rapide — ${driver.firstName} ${driver.lastName}`
+                      }, extraFields);
+                    }
+                    
+                    // Log activité
+                    logActivity(currentUser, ActivityAction.MISSION_DISPATCHED, {
+                      targetType: 'mission',
+                      targetId: missionId,
+                      targetName: `Mission ${zone} — ${driver.firstName} ${driver.lastName}`,
+                      details: {
+                        metadata: {
+                          zone,
+                          driver: `${driver.firstName} ${driver.lastName}`,
+                          stops: tour.stops.length,
+                          packages: packageIds.length,
+                          distance: tour.totalDistance
+                        }
+                      }
+                    });
+                    
+                    // Notifier le chauffeur
+                    notifyMissionAssigned(
+                      driver.id,
+                      zone,
+                      tour.stops.length,
+                      vehicle?.plate || ''
+                    ).catch(e => console.warn('[Notif] Erreur:', e));
+                    
+                    // Reset
+                    setShowQuickDispatch(false);
+                    setSelectedPackageIds(new Set());
+                    setQuickDispatchDriverId('');
+                    
+                    alert(`✅ Mission créée avec ${tour.stops.length} stops et ${packageIds.length} colis !`);
+                    
+                  } catch (error) {
+                    console.error('Erreur dispatch rapide:', error);
+                    alert('Erreur lors du dispatch. Voir la console pour plus de détails.');
+                  }
+                  
+                  setIsQuickDispatching(false);
+                }}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-bold bg-gradient-to-r from-brand-500 to-blue-500 text-white rounded-lg hover:from-brand-600 hover:to-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                {isQuickDispatching ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    Création en cours...
+                  </>
+                ) : (
+                  <>
+                    <Zap size={16} />
+                    Dispatcher {selectedPackageIds.size} colis
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
