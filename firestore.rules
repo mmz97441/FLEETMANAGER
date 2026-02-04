@@ -1,0 +1,192 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Règle par défaut: refuser tout accès
+    match /{document=**} {
+      allow read, write: if false;
+    }
+    
+    // Users: lecture pour les connectés, écriture pour les admins ou soi-même
+    match /users/{userId} {
+      allow read: if request.auth != null;
+      // Création: admin/direction peut créer n'importe quel profil, ou l'utilisateur peut créer le sien
+      allow create: if request.auth != null && (
+        request.auth.uid == userId ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['Admin', 'Président', 'President', 'Directeur', 'Directeur Exploitation', 'Secrétariat']
+      );
+      allow update: if request.auth != null && (
+        request.auth.uid == userId ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['Admin', 'Président', 'President', 'Directeur', 'Directeur Exploitation', 'Secrétariat']
+      );
+      // Suppression : admins ou migration de profil (même email)
+      allow delete: if request.auth != null && (
+        // L'utilisateur supprime son ancien profil avec un email différent du UID
+        resource.data.email == request.auth.token.email ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['Admin', 'Président', 'President', 'Directeur', 'Directeur Exploitation']
+      );
+    }
+    
+    // Invitations: lecture/écriture uniquement pour les utilisateurs connectés
+    // La validation des tokens se fait via Cloud Function (validateInvitationToken)
+    match /invitations/{invitationId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Vehicles: accès pour les connectés
+    match /vehicles/{vehicleId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+    
+    // Fuel logs (les deux noms pour compatibilité)
+    match /fuelLogs/{logId} {
+      allow read, write: if request.auth != null;
+    }
+    match /fuel_logs/{logId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Maintenance (les deux noms pour compatibilité)
+    match /maintenanceLogs/{logId} {
+      allow read, write: if request.auth != null;
+    }
+    match /maintenance_logs/{logId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Issues
+    match /issues/{issueId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Leaves
+    match /leaves/{leaveId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Absences
+    match /absences/{absenceId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Quotes
+    match /quotes/{quoteId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Carnet d'adresses clients
+    match /savedAddresses/{addressId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Documents d'entreprise
+    match /documents/{docId} {
+      allow read, write: if request.auth != null;
+    }
+    match /companyDocuments/{docId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Accusés de réception documents
+    match /documentAcknowledgments/{ackId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Mail (pour Trigger Email extension)
+    match /mail/{mailId} {
+      allow create: if request.auth != null;
+      allow read: if false; // Seul l'extension peut lire
+    }
+    
+    // Audit logs (création seulement par les Cloud Functions)
+    match /audit_logs/{logId} {
+      allow read: if request.auth != null && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['Admin', 'Président'];
+      allow write: if false; // Seulement via Cloud Function
+    }
+    
+    // Role Permissions (templates de permissions par rôle)
+    match /rolePermissions/{roleId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['Président', 'Secrétariat'];
+    }
+    
+    // ============================================
+    // MODULE MISSIONS
+    // ============================================
+    
+    // Hubs (points de concentration)
+    match /hubs/{hubId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['Admin', 'Président', 'President', 'Directeur', 'Directeur Exploitation'];
+    }
+    
+    // Packages (colis)
+    match /packages/{packageId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+    
+    // Missions (tournées)
+    match /missions/{missionId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+    
+    // Import batches (historique des imports)
+    match /import_batches/{batchId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+    
+    // Preuves de livraison (POD)
+    match /proofs_of_delivery/{podId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+    
+    // Manifestes d'enlèvement (pickup scans)
+    match /pickups/{pickupId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+    
+    // Settings (horaires livraison, config)
+    match /settings/{settingId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+    
+    // Package transfers (transferts entre chauffeurs)
+    match /package_transfers/{transferId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+    
+    // Postal code mappings (configuration zones)
+    match /postal_code_mappings/{mappingId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['Admin', 'Président', 'President', 'Directeur', 'Directeur Exploitation'];
+    }
+    
+    // Activity logs (logs d'activité)
+    match /activity_logs/{logId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update, delete: if false;
+    }
+    
+    // Notifications
+    match /notifications/{notifId} {
+      allow read: if request.auth != null && 
+        resource.data.recipientId == request.auth.uid;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && 
+        resource.data.recipientId == request.auth.uid;
+      allow delete: if false;
+    }
+  }
+}
