@@ -40,6 +40,7 @@ import DispatchManager from './DispatchManager';
 import MissionKPIs from './MissionKPIs';
 import ImportReviewTable from './ImportReviewTable';
 import PODViewer from './PODViewer';
+import StopReorderModal from './StopReorderModal';
 import {
   Truck, Package as PackageIcon, MapPin, Upload, Calendar, Clock,
   Users, CheckCircle, XCircle, AlertTriangle, Filter, Search,
@@ -125,6 +126,9 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   const [addingStopToMission, setAddingStopToMission] = useState<Mission | null>(null);
   const [newStopForm, setNewStopForm] = useState<Record<string, any>>({});
   
+  // Réordonnancement des stops
+  const [reorderingMission, setReorderingMission] = useState<Mission | null>(null);
+  
   // Gestion des hubs
   const [showHubModal, setShowHubModal] = useState(false);
   const [editingHub, setEditingHub] = useState<Hub | null>(null);
@@ -209,6 +213,30 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   const canManageHubs = hasPermission(Permission.HUBS_MANAGE);
 
   // === IMPRESSION TOURNÉE ===
+  // === RÉORDONNANCEMENT DES STOPS ===
+  const handleSaveReorderedStops = async (mission: Mission, newStops: MissionStop[]) => {
+    try {
+      await updateMissionFields(mission.id, { stops: newStops });
+      
+      // Log de l'activité
+      await logActivity({
+        userId: currentUser.id,
+        userEmail: currentUser.email,
+        userName: `${currentUser.firstName} ${currentUser.lastName}`,
+        action: ActivityAction.MISSION_UPDATED,
+        targetType: 'mission',
+        targetId: mission.id,
+        targetName: `Tournée ${mission.driverName || 'Non assigné'}`,
+        details: `Ordre des stops modifié manuellement (${newStops.length} stops)`
+      });
+
+      console.log('✅ Ordre des stops sauvegardé');
+    } catch (error) {
+      console.error('❌ Erreur sauvegarde ordre:', error);
+      throw error;
+    }
+  };
+
   const handlePrintMission = (mission: Mission) => {
     const sortedStops = [...mission.stops].sort((a, b) => a.sequence - b.sequence);
     const printWindow = window.open('', '_blank');
@@ -833,6 +861,19 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                               >
                                 <Plus size={14} />
                                 Ajouter stop
+                              </button>
+                            )}
+                            {(mission.status === MissionStatus.DISPATCHED || mission.status === MissionStatus.IN_PROGRESS) && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setReorderingMission(mission);
+                                }}
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 hover:bg-amber-100 hover:border-amber-300 transition-colors text-xs font-medium"
+                                title="Réordonner les stops"
+                              >
+                                <GripVertical size={14} />
+                                Réordonner
                               </button>
                             )}
                             <button
@@ -3146,6 +3187,16 @@ const MissionManager: React.FC<MissionManagerProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Modal Réordonnancement des stops */}
+      {reorderingMission && (
+        <StopReorderModal
+          isOpen={!!reorderingMission}
+          onClose={() => setReorderingMission(null)}
+          mission={reorderingMission}
+          onSave={handleSaveReorderedStops}
+        />
       )}
     </div>
   );
