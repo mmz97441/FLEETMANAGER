@@ -5,10 +5,10 @@ import {
   Clock, User as UserIcon, AlertTriangle, Trash2, Edit2, Upload, FileText,
   Download, Filter, Search, Eye, MessageSquare, AlertOctagon, Briefcase,
   Heart, GraduationCap, Baby, Ban, RotateCcw, HelpCircle, X, Save,
-  FileCheck, CalendarRange, Users, PieChart, List, LayoutGrid, Printer, Mail, MapPin, Lock
+  FileCheck, CalendarRange, Users, PieChart, List, LayoutGrid, Printer, Mail, MapPin, Lock, Loader2
 } from 'lucide-react';
 import {
-  Absence, AbsenceStatus, AbsenceType, AbsenceDocument, User, UserRole,
+  Absence, AbsenceStatus, AbsenceType, AbsenceDocument, AbsenceModificationProposal, User, UserRole,
   ABSENCE_REQUIRES_DOCUMENT, ABSENCE_EMPLOYEE_CAN_REQUEST, ABSENCE_IMPACTS_CP_BALANCE,
   Zone, ZONE_COLORS
 } from '../types';
@@ -20,6 +20,7 @@ import {
   sendLeaveRejectedEmail,
   getAdminEmails
 } from '../services/emailService';
+import { notifyLeaveRequest } from '../services/notificationService';
 import { usePermissions, Permission } from '../usePermissions';
 
 // ============================================================================
@@ -202,6 +203,15 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
   const [editingAbsence, setEditingAbsence] = useState<Absence | null>(null);
   const [selectedAbsence, setSelectedAbsence] = useState<Absence | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  
+  // Modification proposal
+  const [isProposalModalOpen, setIsProposalModalOpen] = useState(false);
+  const [proposalData, setProposalData] = useState({
+    startDate: '',
+    endDate: '',
+    reason: ''
+  });
+  const [isProposing, setIsProposing] = useState(false);
 
   // Form state
   const [formData, setFormData] = useState<Partial<Absence>>({
@@ -212,6 +222,7 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
     userId: ''
   });
   const [formErrors, setFormErrors] = useState<string[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [uploadingFile, setUploadingFile] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -472,6 +483,8 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
 
   const handleSubmit = async () => {
     if (!validateForm()) return;
+    
+    setIsSubmitting(true);
 
     const { days, saturdays, details } = calculateWorkingDays(formData.startDate!, formData.endDate!);
 
@@ -522,23 +535,68 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
       updatedAt: new Date().toISOString()
     };
 
-    if (editingAbsence) {
-      await onUpdateAbsence(absenceData);
-    } else {
-      await onAddAbsence(absenceData);
-      
-      // 📧 ENVOI EMAIL À LA DIRECTION (nouvelle demande en attente)
-      if (absenceData.status === AbsenceStatus.PENDING) {
-        const employee = users.find(u => u.id === absenceData.userId) || currentUser;
-        const approverEmails = getAdminEmails(users);
+    try {
+      if (editingAbsence) {
+        await onUpdateAbsence(absenceData);
+        alert('✅ Demande mise à jour avec succès !');
+      } else {
+        await onAddAbsence(absenceData);
         
-        if (approverEmails.length > 0) {
-          await sendLeaveRequestEmail(absenceData, employee, approverEmails);
+        // 📧 ENVOI EMAIL + NOTIFICATION IN-APP À LA DIRECTION (nouvelle demande en attente)
+        if (absenceData.status === AbsenceStatus.PENDING) {
+          const employee = users.find(u => u.id === absenceData.userId) || currentUser;
+          
+          // Récupérer les IDs des admins/direction/président pour notification in-app
+          const adminIds = users
+            .filter(u => u.role === UserRole.ADMIN || u.role === UserRole.DIRECTOR || 
+                        u.role === UserRole.MANAGER || u.role === UserRole.PRESIDENT)
+            .map(u => u.id);
+          
+          // Labels pour les types d'absence
+          const typeLabels: Record<AbsenceType, string> = {
+            [AbsenceType.CP]: 'congés payés',
+            [AbsenceType.RTT]: 'RTT',
+            [AbsenceType.CSS]: 'congés sans solde',
+            [AbsenceType.MALADIE]: 'arrêt maladie',
+            [AbsenceType.AT]: 'accident du travail',
+            [AbsenceType.MATERNITE]: 'congé maternité',
+            [AbsenceType.PATERNITE]: 'congé paternité',
+            [AbsenceType.FORMATION]: 'formation',
+            [AbsenceType.AUTRE]: 'autre absence'
+          };
+          
+          const formatDate = (d: string) => new Date(d).toLocaleDateString('fr-FR');
+          
+          // Notification in-app
+          if (adminIds.length > 0) {
+            notifyLeaveRequest(
+              adminIds,
+              `${employee.firstName} ${employee.lastName}`,
+              typeLabels[absenceData.type] || absenceData.type,
+              formatDate(absenceData.startDate),
+              formatDate(absenceData.endDate),
+              days
+            ).catch(e => console.warn('[Notif in-app] Erreur:', e));
+          }
+          
+          // Email
+          const approverEmails = getAdminEmails(users);
+          if (approverEmails.length > 0) {
+            sendLeaveRequestEmail(absenceData, employee, approverEmails)
+              .catch(e => console.warn('[Email] Erreur:', e));
+          }
         }
+        
+        alert('✅ Demande de congé créée avec succès !');
       }
-    }
 
-    setIsFormModalOpen(false);
+      setIsFormModalOpen(false);
+    } catch (error) {
+      console.error('❌ Erreur lors de la sauvegarde:', error);
+      alert('❌ Erreur lors de la sauvegarde de la demande. Veuillez réessayer.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleValidate = async (absence: Absence, status: AbsenceStatus, comment?: string) => {
@@ -575,6 +633,163 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
     }
 
     setIsDetailModalOpen(false);
+  };
+
+  // === PROPOSITION DE MODIFICATION ===
+  
+  const openProposalModal = (absence: Absence) => {
+    setProposalData({
+      startDate: absence.startDate,
+      endDate: absence.endDate,
+      reason: ''
+    });
+    setIsProposalModalOpen(true);
+  };
+
+  const handleProposeModification = async () => {
+    if (!selectedAbsence || !proposalData.startDate || !proposalData.endDate) return;
+    if (!proposalData.reason.trim()) {
+      alert('Veuillez indiquer la raison de la modification proposée.');
+      return;
+    }
+    
+    setIsProposing(true);
+    
+    try {
+      const proposal: AbsenceModificationProposal = {
+        proposedStartDate: proposalData.startDate,
+        proposedEndDate: proposalData.endDate,
+        reason: proposalData.reason,
+        proposedBy: currentUser.id,
+        proposedAt: new Date().toISOString()
+      };
+      
+      const updated: Absence = {
+        ...selectedAbsence,
+        status: AbsenceStatus.MODIFICATION_PROPOSED,
+        modificationProposal: proposal,
+        updatedAt: new Date().toISOString()
+      };
+      
+      await onUpdateAbsence(updated);
+      
+      // Notification in-app au collaborateur
+      const employee = users.find(u => u.id === selectedAbsence.userId);
+      if (employee) {
+        // Notification
+        notifyLeaveRequest(
+          [employee.id],
+          `${currentUser.firstName} ${currentUser.lastName}`,
+          `MODIFICATION PROPOSÉE pour vos congés`,
+          new Date(proposalData.startDate).toLocaleDateString('fr-FR'),
+          new Date(proposalData.endDate).toLocaleDateString('fr-FR'),
+          0
+        ).catch(e => console.warn('[Notif] Erreur:', e));
+        
+        // Email si disponible
+        if (employee.email) {
+          // TODO: sendModificationProposalEmail
+        }
+      }
+      
+      alert('✅ Proposition de modification envoyée au collaborateur !');
+      setIsProposalModalOpen(false);
+      setIsDetailModalOpen(false);
+    } catch (error) {
+      console.error('Erreur proposition modification:', error);
+      alert('❌ Erreur lors de l\'envoi de la proposition');
+    } finally {
+      setIsProposing(false);
+    }
+  };
+
+  const handleAcceptProposal = async (absence: Absence) => {
+    if (!absence.modificationProposal) return;
+    
+    try {
+      const { days, saturdays, details } = calculateWorkingDays(
+        absence.modificationProposal.proposedStartDate,
+        absence.modificationProposal.proposedEndDate
+      );
+      
+      const updated: Absence = {
+        ...absence,
+        startDate: absence.modificationProposal.proposedStartDate,
+        endDate: absence.modificationProposal.proposedEndDate,
+        workingDays: days,
+        saturdaysDeducted: saturdays,
+        calculationDetails: details,
+        status: AbsenceStatus.APPROVED,
+        modificationProposal: undefined, // Clear proposal
+        validatedBy: absence.modificationProposal.proposedBy,
+        validatedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      
+      await onUpdateAbsence(updated);
+      
+      // Débiter le solde CP si nécessaire
+      if (ABSENCE_IMPACTS_CP_BALANCE.includes(absence.type) && onUpdateUserBalance) {
+        const user = users.find(u => u.id === absence.userId);
+        if (user) {
+          const newBalance = (user.leaveBalance || 0) - days;
+          await onUpdateUserBalance({ ...user, leaveBalance: Math.max(0, newBalance) });
+        }
+      }
+      
+      // Notification au manager qui a proposé
+      const proposer = users.find(u => u.id === absence.modificationProposal?.proposedBy);
+      if (proposer) {
+        notifyLeaveRequest(
+          [proposer.id],
+          `${currentUser.firstName} ${currentUser.lastName}`,
+          'a ACCEPTÉ votre proposition de modification',
+          new Date(absence.modificationProposal.proposedStartDate).toLocaleDateString('fr-FR'),
+          new Date(absence.modificationProposal.proposedEndDate).toLocaleDateString('fr-FR'),
+          days
+        ).catch(e => console.warn('[Notif] Erreur:', e));
+      }
+      
+      alert('✅ Modification acceptée ! Vos congés sont maintenant validés.');
+      setIsDetailModalOpen(false);
+    } catch (error) {
+      console.error('Erreur acceptation proposition:', error);
+      alert('❌ Erreur lors de l\'acceptation');
+    }
+  };
+
+  const handleRejectProposal = async (absence: Absence) => {
+    if (!confirm('Refuser la modification proposée ? La demande reviendra en attente de validation.')) return;
+    
+    try {
+      const updated: Absence = {
+        ...absence,
+        status: AbsenceStatus.PENDING,
+        modificationProposal: undefined, // Clear proposal
+        updatedAt: new Date().toISOString()
+      };
+      
+      await onUpdateAbsence(updated);
+      
+      // Notification au manager
+      const proposer = users.find(u => u.id === absence.modificationProposal?.proposedBy);
+      if (proposer) {
+        notifyLeaveRequest(
+          [proposer.id],
+          `${currentUser.firstName} ${currentUser.lastName}`,
+          'a REFUSÉ votre proposition de modification',
+          new Date(absence.startDate).toLocaleDateString('fr-FR'),
+          new Date(absence.endDate).toLocaleDateString('fr-FR'),
+          0
+        ).catch(e => console.warn('[Notif] Erreur:', e));
+      }
+      
+      alert('Modification refusée. La demande est de nouveau en attente.');
+      setIsDetailModalOpen(false);
+    } catch (error) {
+      console.error('Erreur refus proposition:', error);
+      alert('❌ Erreur lors du refus');
+    }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1531,10 +1746,20 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
 
           <button
             onClick={handleSubmit}
-            className="w-full py-3 bg-brand-600 hover:bg-brand-700 text-white rounded-xl font-bold flex items-center justify-center gap-2"
+            disabled={isSubmitting}
+            className="w-full py-3 bg-brand-600 hover:bg-brand-700 text-white rounded-xl font-bold flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <Save size={18} />
-            {editingAbsence ? 'Enregistrer les modifications' : 'Créer l\'absence'}
+            {isSubmitting ? (
+              <>
+                <Loader2 size={18} className="animate-spin" />
+                Enregistrement...
+              </>
+            ) : (
+              <>
+                <Save size={18} />
+                {editingAbsence ? 'Enregistrer les modifications' : 'Créer l\'absence'}
+              </>
+            )}
           </button>
         </div>
       </Modal>
@@ -1645,15 +1870,71 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
                 )}
 
                 {/* Validation info */}
-                {selectedAbsence.validatedBy && (
+                {selectedAbsence.validatedBy && selectedAbsence.status !== AbsenceStatus.MODIFICATION_PROPOSED && (
                   <div className="text-sm text-slate-500">
                     Validé par {validator ? `${validator.firstName} ${validator.lastName}` : 'Inconnu'} 
                     {selectedAbsence.validatedAt && ` le ${formatDate(selectedAbsence.validatedAt)}`}
                   </div>
                 )}
 
+                {/* === PROPOSITION DE MODIFICATION === */}
+                {selectedAbsence.status === AbsenceStatus.MODIFICATION_PROPOSED && selectedAbsence.modificationProposal && (
+                  <div className="p-4 bg-amber-50 rounded-xl border-2 border-amber-300">
+                    <h4 className="font-bold text-amber-800 flex items-center gap-2 mb-3">
+                      <AlertTriangle size={18} />
+                      Modification proposée par la direction
+                    </h4>
+                    <div className="space-y-2 text-sm">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <p className="text-amber-600 text-xs font-medium">Dates actuelles</p>
+                          <p className="text-slate-600 line-through">
+                            {formatDate(selectedAbsence.startDate)} → {formatDate(selectedAbsence.endDate)}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-amber-600 text-xs font-medium">Nouvelles dates proposées</p>
+                          <p className="font-bold text-amber-800">
+                            {formatDate(selectedAbsence.modificationProposal.proposedStartDate)} → {formatDate(selectedAbsence.modificationProposal.proposedEndDate)}
+                          </p>
+                        </div>
+                      </div>
+                      
+                      {selectedAbsence.modificationProposal.reason && (
+                        <div className="mt-3 p-3 bg-white rounded-lg border border-amber-200">
+                          <p className="text-xs text-amber-600 font-medium mb-1">Commentaire de la direction :</p>
+                          <p className="text-slate-700">{selectedAbsence.modificationProposal.reason}</p>
+                        </div>
+                      )}
+                      
+                      <p className="text-xs text-amber-600 mt-2">
+                        Proposé par {users.find(u => u.id === selectedAbsence.modificationProposal?.proposedBy)?.firstName || 'Direction'} 
+                        {selectedAbsence.modificationProposal.proposedAt && ` le ${formatDate(selectedAbsence.modificationProposal.proposedAt)}`}
+                      </p>
+                    </div>
+                    
+                    {/* Boutons pour le collaborateur */}
+                    {selectedAbsence.userId === currentUser.id && (
+                      <div className="flex gap-2 mt-4 pt-3 border-t border-amber-200">
+                        <button
+                          onClick={() => handleAcceptProposal(selectedAbsence)}
+                          className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold flex items-center justify-center gap-2"
+                        >
+                          <CheckCircle size={18} /> Accepter
+                        </button>
+                        <button
+                          onClick={() => handleRejectProposal(selectedAbsence)}
+                          className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold flex items-center justify-center gap-2"
+                        >
+                          <XCircle size={18} /> Refuser
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Actions */}
-                <div className="flex gap-2 pt-4 border-t border-slate-200">
+                <div className="flex flex-wrap gap-2 pt-4 border-t border-slate-200">
                   {canValidate && selectedAbsence.status === AbsenceStatus.PENDING && (
                     <>
                       <button
@@ -1661,6 +1942,12 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
                         className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold flex items-center justify-center gap-2"
                       >
                         <CheckCircle size={18} /> Valider
+                      </button>
+                      <button
+                        onClick={() => openProposalModal(selectedAbsence)}
+                        className="flex-1 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold flex items-center justify-center gap-2"
+                      >
+                        <Edit2 size={18} /> Proposer modification
                       </button>
                       <button
                         onClick={() => { setRejectReason(''); setIsRejectModalOpen(true); }}
@@ -1819,6 +2106,123 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
               className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold flex items-center justify-center gap-2"
             >
               <XCircle size={18} /> Confirmer le refus
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modification Proposal Modal */}
+      <Modal
+        isOpen={isProposalModalOpen && !!selectedAbsence}
+        onClose={() => setIsProposalModalOpen(false)}
+        title="Proposer une modification"
+        size="lg"
+        headerIcon={<Edit2 size={20} />}
+      >
+        <div className="space-y-4">
+          <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
+            <p className="text-sm text-amber-800">
+              Vous proposez une modification à{' '}
+              <strong>
+                {selectedAbsence && (() => {
+                  const user = users.find(u => u.id === selectedAbsence.userId);
+                  return user ? `${user.firstName} ${user.lastName}` : 'Inconnu';
+                })()}
+              </strong>
+            </p>
+            <p className="text-xs text-amber-600 mt-1">
+              Le collaborateur devra accepter ou refuser cette proposition avant validation.
+            </p>
+          </div>
+
+          {/* Dates actuelles */}
+          <div className="p-3 bg-slate-50 rounded-xl">
+            <p className="text-xs text-slate-500 uppercase font-bold mb-1">Dates demandées actuellement</p>
+            <p className="font-medium text-slate-700">
+              {selectedAbsence && formatDate(selectedAbsence.startDate)} → {selectedAbsence && formatDate(selectedAbsence.endDate)}
+              <span className="text-slate-400 ml-2">({selectedAbsence?.workingDays} jours)</span>
+            </p>
+          </div>
+
+          {/* Nouvelles dates proposées */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">
+                Nouvelle date de début *
+              </label>
+              <input
+                type="date"
+                value={proposalData.startDate}
+                onChange={e => setProposalData(prev => ({ ...prev, startDate: e.target.value }))}
+                className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">
+                Nouvelle date de fin *
+              </label>
+              <input
+                type="date"
+                value={proposalData.endDate}
+                onChange={e => setProposalData(prev => ({ ...prev, endDate: e.target.value }))}
+                className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none"
+              />
+            </div>
+          </div>
+
+          {/* Calcul des nouveaux jours */}
+          {proposalData.startDate && proposalData.endDate && (
+            <div className="p-3 bg-green-50 rounded-xl border border-green-200">
+              <p className="text-sm text-green-800">
+                <strong>Nouvelles dates proposées :</strong>{' '}
+                {calculateWorkingDays(proposalData.startDate, proposalData.endDate).days} jours ouvrés
+              </p>
+            </div>
+          )}
+
+          {/* Commentaire obligatoire */}
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">
+              Motif de la modification * <span className="text-red-500">(obligatoire)</span>
+            </label>
+            <textarea
+              value={proposalData.reason}
+              onChange={e => setProposalData(prev => ({ ...prev, reason: e.target.value }))}
+              rows={3}
+              className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none resize-none"
+              placeholder="Expliquez pourquoi vous proposez ces nouvelles dates (ex: nécessité de service, chevauchement avec un autre congé, etc.)..."
+            />
+          </div>
+
+          <div className="flex items-center gap-3 p-3 bg-blue-50 rounded-xl border border-blue-100">
+            <Mail size={18} className="text-blue-600" />
+            <span className="text-sm text-blue-800">
+              Le collaborateur recevra une notification et devra accepter ou refuser cette proposition.
+            </span>
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              onClick={() => setIsProposalModalOpen(false)}
+              className="flex-1 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-bold"
+            >
+              Annuler
+            </button>
+            <button
+              onClick={handleProposeModification}
+              disabled={isProposing || !proposalData.startDate || !proposalData.endDate || !proposalData.reason.trim()}
+              className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isProposing ? (
+                <>
+                  <Loader2 size={18} className="animate-spin" />
+                  Envoi...
+                </>
+              ) : (
+                <>
+                  <Edit2 size={18} /> Envoyer la proposition
+                </>
+              )}
             </button>
           </div>
         </div>

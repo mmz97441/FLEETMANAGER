@@ -356,3 +356,69 @@ export const activateAccountCF = async (
     };
   }
 };
+
+// ============================================================================
+// EMAILS CONGÉS
+// ============================================================================
+
+/**
+ * Envoie un email aux admins quand un chauffeur fait une demande de congés
+ */
+export const sendLeaveRequestEmail = async (
+  employeeName: string,
+  employeeEmail: string,
+  leaveType: string,
+  startDate: string,
+  endDate: string,
+  duration: number,
+  reason: string
+): Promise<void> => {
+  try {
+    const sendEmail = httpsCallable(functions, 'sendLeaveRequestEmail');
+    await sendEmail({
+      employeeName,
+      employeeEmail,
+      leaveType,
+      startDate,
+      endDate,
+      duration,
+      reason
+    });
+    console.log('[CF] Email demande de congés envoyé');
+  } catch (error) {
+    console.error('[CF] Erreur email demande congés:', error);
+    throw error;
+  }
+};
+
+/**
+ * Envoie un email au chauffeur quand sa demande est validée/refusée
+ */
+export const sendLeaveDecisionEmail = async (
+  employeeName: string,
+  employeeEmail: string,
+  leaveType: string,
+  startDate: string,
+  endDate: string,
+  decision: 'approved' | 'rejected',
+  approverName: string,
+  reason?: string
+): Promise<void> => {
+  try {
+    const sendEmail = httpsCallable(functions, 'sendLeaveDecisionEmail');
+    await sendEmail({
+      employeeName,
+      employeeEmail,
+      leaveType,
+      startDate,
+      endDate,
+      decision,
+      approverName,
+      reason
+    });
+    console.log(`[CF] Email décision congés (${decision}) envoyé`);
+  } catch (error) {
+    console.error('[CF] Erreur email décision congés:', error);
+    throw error;
+  }
+};

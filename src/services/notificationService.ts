@@ -57,6 +57,11 @@ export enum NotificationType {
   RATE_ALERT = 'rate_alert',
   NEW_CLIENT = 'new_client',
   
+  // Congés / Absences
+  LEAVE_REQUEST = 'leave_request',
+  LEAVE_APPROVED = 'leave_approved',
+  LEAVE_REJECTED = 'leave_rejected',
+  
   // Système
   SYSTEM = 'system'
 }
@@ -404,4 +409,74 @@ export const notifyRateAlert = (
   actionTarget: 'missions',
   actionLabel: 'Voir les KPIs',
   metadata: { currentRate, threshold, zone }
+});
+
+// ============================================================================
+// NOTIFICATIONS CONGÉS / ABSENCES
+// ============================================================================
+
+/**
+ * Nouvelle demande de congés → Admin/Direction
+ */
+export const notifyLeaveRequest = (
+  adminIds: string[],
+  employeeName: string,
+  leaveType: string,
+  startDate: string,
+  endDate: string,
+  duration: number
+) => createBatchNotifications(adminIds, {
+  type: NotificationType.LEAVE_REQUEST,
+  priority: NotificationPriority.NORMAL,
+  title: `📅 Nouvelle demande de congés`,
+  message: `${employeeName} demande ${duration} jour${duration > 1 ? 's' : ''} de ${leaveType} du ${startDate} au ${endDate}`,
+  actionType: 'navigate',
+  actionTarget: 'absences',
+  actionLabel: 'Voir les demandes',
+  metadata: { employeeName, leaveType, startDate, endDate, duration }
+});
+
+/**
+ * Congés approuvés → Chauffeur
+ */
+export const notifyLeaveApproved = (
+  userId: string,
+  leaveType: string,
+  startDate: string,
+  endDate: string,
+  approverName: string
+) => createNotification({
+  recipientId: userId,
+  type: NotificationType.LEAVE_APPROVED,
+  priority: NotificationPriority.NORMAL,
+  title: `✅ Congés approuvés`,
+  message: `Votre demande de ${leaveType} du ${startDate} au ${endDate} a été validée par ${approverName}`,
+  actionType: 'navigate',
+  actionTarget: 'absences',
+  actionLabel: 'Voir mes congés',
+  metadata: { leaveType, startDate, endDate, approverName }
+});
+
+/**
+ * Congés refusés → Chauffeur
+ */
+export const notifyLeaveRejected = (
+  userId: string,
+  leaveType: string,
+  startDate: string,
+  endDate: string,
+  rejecterName: string,
+  reason?: string
+) => createNotification({
+  recipientId: userId,
+  type: NotificationType.LEAVE_REJECTED,
+  priority: NotificationPriority.HIGH,
+  title: `❌ Congés refusés`,
+  message: reason 
+    ? `Votre demande de ${leaveType} du ${startDate} au ${endDate} a été refusée par ${rejecterName}. Motif : ${reason}`
+    : `Votre demande de ${leaveType} du ${startDate} au ${endDate} a été refusée par ${rejecterName}`,
+  actionType: 'navigate',
+  actionTarget: 'absences',
+  actionLabel: 'Voir mes congés',
+  metadata: { leaveType, startDate, endDate, rejecterName, reason }
 });

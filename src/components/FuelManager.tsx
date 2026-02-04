@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { FuelLog, Vehicle, User, UserRole } from '../types';
-import { Droplet, Plus, TrendingUp, DollarSign, Calendar, Filter, X, Save, Car, ChevronDown, ChevronUp, Route, Gauge, Download, Eye, FileText, User as UserIcon, Search, Check, ExternalLink, Lock, Camera, Upload, AlertCircle, Edit2 } from 'lucide-react';
+import { Droplet, Plus, TrendingUp, DollarSign, Calendar, Filter, X, Save, Car, ChevronDown, ChevronUp, Route, Gauge, Download, Eye, FileText, User as UserIcon, Search, Check, ExternalLink, Lock, Camera, Upload, AlertCircle, Edit2, AlertTriangle } from 'lucide-react';
 import Modal from './shared/Modal';
 import ConfirmModal from './ConfirmModal';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -768,13 +768,20 @@ export const FuelManager: React.FC<FuelManagerProps> = ({ logs, vehicles, users,
               </button>
               )}
               
-              {canCreateFuel && (
+              {canCreateFuel && accessibleVehicles.length > 0 && (
               <button 
                  onClick={() => setIsModalOpen(true)}
                  className="bg-slate-900 hover:bg-black text-white px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all shadow-lg shadow-slate-300 hover:shadow-xl transform hover:-translate-y-0.5 active:translate-y-0"
               >
                  <Plus size={18} /> <span className="hidden sm:inline">Nouveau Plein</span>
               </button>
+              )}
+              
+              {canCreateFuel && accessibleVehicles.length === 0 && currentUser.role === UserRole.DRIVER && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 text-sm text-amber-700 flex items-center gap-2">
+                <AlertTriangle size={16} />
+                <span>Aucun véhicule assigné — Contactez votre responsable</span>
+              </div>
               )}
           </div>
       </div>

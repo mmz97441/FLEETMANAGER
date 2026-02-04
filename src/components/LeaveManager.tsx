@@ -5,6 +5,8 @@ import ConfirmModal from './ConfirmModal';
 import { User, UserRole, LeaveRequest, LeaveStatus, LeaveType } from '../types';
 import { CalendarDays, Calendar, ChevronLeft, ChevronRight, Plus, CheckCircle, XCircle, Clock, User as UserIcon, AlertOctagon, Trash2, Edit2, AlertTriangle, ShieldCheck, Lock } from 'lucide-react';
 import { usePermissions, Permission } from '../usePermissions';
+import { notifyLeaveRequest, notifyLeaveApproved, notifyLeaveRejected } from '../services/notificationService';
+import { sendLeaveRequestEmail, sendLeaveDecisionEmail } from '../services/cloudFunctions';
 
 interface LeaveManagerProps {
   currentUser: User;
@@ -317,6 +319,43 @@ const LeaveManager: React.FC<LeaveManagerProps> = ({ currentUser, users, leaves,
               calculationDetails: calculation.details
           };
           onAddLeave(newLeave);
+          
+          // Notifier les admins/direction de la nouvelle demande
+          const adminIds = users
+            .filter(u => u.role === UserRole.ADMIN || u.role === UserRole.DIRECTOR || u.role === UserRole.MANAGER || u.role === UserRole.PRESIDENT)
+            .map(u => u.id);
+          
+          const leaveTypeLabels: Record<LeaveType, string> = {
+            [LeaveType.PAID]: 'congés payés',
+            [LeaveType.UNPAID]: 'congés sans solde',
+            [LeaveType.SICK]: 'arrêt maladie',
+            [LeaveType.RTT]: 'RTT',
+            [LeaveType.FAMILY]: 'congés exceptionnels',
+            [LeaveType.OTHER]: 'autre absence'
+          };
+          
+          const formatDate = (d: string) => new Date(d).toLocaleDateString('fr-FR');
+          
+          // Notification in-app
+          notifyLeaveRequest(
+            adminIds,
+            `${currentUser.firstName} ${currentUser.lastName}`,
+            leaveTypeLabels[pendingAction.data.type as LeaveType] || pendingAction.data.type,
+            formatDate(pendingAction.data.startDate),
+            formatDate(pendingAction.data.endDate),
+            calculation.days
+          ).catch(e => console.warn('[Notif] Erreur:', e));
+          
+          // Email
+          sendLeaveRequestEmail(
+            `${currentUser.firstName} ${currentUser.lastName}`,
+            currentUser.email || '',
+            leaveTypeLabels[pendingAction.data.type as LeaveType] || pendingAction.data.type,
+            formatDate(pendingAction.data.startDate),
+            formatDate(pendingAction.data.endDate),
+            calculation.days,
+            pendingAction.data.reason || ''
+          ).catch(e => console.warn('[Email] Erreur:', e));
       } 
       else if (pendingAction.type === 'UPDATE' && selectedLeave) {
           // Recalculer les jours ouvrables
@@ -379,6 +418,40 @@ const LeaveManager: React.FC<LeaveManagerProps> = ({ currentUser, users, leaves,
                   });
               }
           }
+          
+          // 3. Notifier le chauffeur de l'approbation
+          const leaveTypeLabels: Record<LeaveType, string> = {
+            [LeaveType.PAID]: 'congés payés',
+            [LeaveType.UNPAID]: 'congés sans solde',
+            [LeaveType.SICK]: 'arrêt maladie',
+            [LeaveType.RTT]: 'RTT',
+            [LeaveType.FAMILY]: 'congés exceptionnels',
+            [LeaveType.OTHER]: 'autre absence'
+          };
+          const formatDate = (d: string) => new Date(d).toLocaleDateString('fr-FR');
+          const requester = users.find(u => u.id === selectedLeave.userId);
+          
+          // Notification in-app
+          notifyLeaveApproved(
+            selectedLeave.userId,
+            leaveTypeLabels[selectedLeave.type as LeaveType] || selectedLeave.type,
+            formatDate(selectedLeave.startDate),
+            formatDate(selectedLeave.endDate),
+            `${currentUser.firstName} ${currentUser.lastName}`
+          ).catch(e => console.warn('[Notif] Erreur:', e));
+          
+          // Email
+          if (requester?.email) {
+            sendLeaveDecisionEmail(
+              `${requester.firstName} ${requester.lastName}`,
+              requester.email,
+              leaveTypeLabels[selectedLeave.type as LeaveType] || selectedLeave.type,
+              formatDate(selectedLeave.startDate),
+              formatDate(selectedLeave.endDate),
+              'approved',
+              `${currentUser.firstName} ${currentUser.lastName}`
+            ).catch(e => console.warn('[Email] Erreur:', e));
+          }
       }
       else if (pendingAction.type === 'REJECT' && selectedLeave) {
           const updated: LeaveRequest = {
@@ -388,6 +461,40 @@ const LeaveManager: React.FC<LeaveManagerProps> = ({ currentUser, users, leaves,
               validationDate: new Date().toISOString()
           };
           onUpdateLeave(updated);
+          
+          // Notifier le chauffeur du refus
+          const leaveTypeLabels: Record<LeaveType, string> = {
+            [LeaveType.PAID]: 'congés payés',
+            [LeaveType.UNPAID]: 'congés sans solde',
+            [LeaveType.SICK]: 'arrêt maladie',
+            [LeaveType.RTT]: 'RTT',
+            [LeaveType.FAMILY]: 'congés exceptionnels',
+            [LeaveType.OTHER]: 'autre absence'
+          };
+          const formatDate = (d: string) => new Date(d).toLocaleDateString('fr-FR');
+          const requester = users.find(u => u.id === selectedLeave.userId);
+          
+          // Notification in-app
+          notifyLeaveRejected(
+            selectedLeave.userId,
+            leaveTypeLabels[selectedLeave.type as LeaveType] || selectedLeave.type,
+            formatDate(selectedLeave.startDate),
+            formatDate(selectedLeave.endDate),
+            `${currentUser.firstName} ${currentUser.lastName}`
+          ).catch(e => console.warn('[Notif] Erreur:', e));
+          
+          // Email
+          if (requester?.email) {
+            sendLeaveDecisionEmail(
+              `${requester.firstName} ${requester.lastName}`,
+              requester.email,
+              leaveTypeLabels[selectedLeave.type as LeaveType] || selectedLeave.type,
+              formatDate(selectedLeave.startDate),
+              formatDate(selectedLeave.endDate),
+              'rejected',
+              `${currentUser.firstName} ${currentUser.lastName}`
+            ).catch(e => console.warn('[Email] Erreur:', e));
+          }
       }
 
       setIsConfirmModalOpen(false);
