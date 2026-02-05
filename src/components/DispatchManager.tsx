@@ -84,9 +84,14 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
   // Option pour ignorer les créneaux (force inclusion de tous les stops)
   const [ignoreTimeWindows, setIgnoreTimeWindows] = useState(false);
   
-  // Filtrer les colis au hub (collectés et réceptionnés) — prêts à être dispatchés
+  // Filtrer les colis au hub — prêts à être dispatchés
+  // FIX v3.7.10: Exclure les colis déjà assignés à une mission (anti-double dispatch)
   const pendingPackages = useMemo(() => 
-    packages.filter(p => p.status === PackageStatus.AT_HUB || p.status === PackageStatus.SORTED),
+    packages.filter(p => 
+      (p.status === PackageStatus.AT_HUB || p.status === PackageStatus.SORTED) && 
+      !p.missionId && 
+      !p.currentDriverId
+    ),
     [packages]
   );
   

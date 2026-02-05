@@ -169,7 +169,8 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
   const driversWithPackages = useMemo(() => {
     const driverIds = new Set(
       packages
-        .filter(p => p.status === PackageStatus.SORTED && p.currentDriverId)
+        // FIX v3.7.10: Vérifier aussi missionId pour éviter les orphelins
+        .filter(p => p.status === PackageStatus.SORTED && p.currentDriverId && p.missionId)
         .map(p => p.currentDriverId!)
     );
     return drivers.filter(d => driverIds.has(d.id));
@@ -203,6 +204,11 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
     if (pkg.status !== PackageStatus.COLLECTED && pkg.status !== PackageStatus.PENDING) {
       showNotif('warning', `${barcode} — statut ${pkg.status}, réception non applicable`);
       return;
+    }
+
+    // FIX v3.7.10: Avertir si le colis est déjà assigné à une mission
+    if (pkg.missionId) {
+      showNotif('warning', `⚠️ ${barcode} — déjà assigné à une mission`);
     }
 
     try {
