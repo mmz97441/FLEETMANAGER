@@ -1556,17 +1556,25 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                     const zoneColors = ZONE_COLORS[pkg.zone];
                     const statusColors = PACKAGE_STATUS_COLORS[pkg.status];
                     const isSelected = selectedPackageIds.has(pkg.id);
+                    const isDispatched = !!(pkg.missionId || pkg.currentDriverId);
                     
                     return (
                       <tr
                         key={pkg.id}
-                        className={`hover:bg-slate-50 transition-colors ${isSelected ? 'bg-brand-50' : ''}`}
+                        className={`transition-colors ${
+                          isDispatched 
+                            ? 'bg-slate-100 opacity-60 cursor-not-allowed' 
+                            : isSelected 
+                              ? 'bg-brand-50 hover:bg-slate-50' 
+                              : 'hover:bg-slate-50'
+                        }`}
                       >
                         {/* Checkbox */}
                         <td className="px-2 py-2 text-center">
                           <input
                             type="checkbox"
                             checked={isSelected}
+                            disabled={isDispatched}
                             onChange={(e) => {
                               e.stopPropagation();
                               setSelectedPackageIds(prev => {
@@ -1645,6 +1653,11 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                           <span className={`px-2 py-1 rounded-lg text-xs font-medium ${statusColors.bg} ${statusColors.text}`}>
                             {pkg.status}
                           </span>
+                          {isDispatched && (
+                            <span className="ml-1 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-blue-100 text-blue-700">
+                              🚚 En mission
+                            </span>
+                          )}
                         </td>
                         {/* Actions statut */}
                         <td className="px-2 py-2 text-center">

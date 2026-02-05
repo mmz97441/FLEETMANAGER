@@ -357,6 +357,7 @@ export const addFuelLogToFirestore = async (log: FuelLog) => {
     adBlueLiters: log.adBlueVolume || 0,
     adBlueCost: log.adBlueCost || 0,
     station: log.station || '',
+    receiptUrl: log.receiptUrl || '',
     isRentalEntry: false
   };
   await addDoc(collection(db, "fuel_logs"), cleanFirestoreData(dataToSave));
@@ -387,6 +388,7 @@ export const updateFuelLogInFirestore = async (log: FuelLog) => {
       liters: log.volume,
       adBlueLiters: log.adBlueVolume || 0,
       adBlueCost: log.adBlueCost || 0,
+      receiptUrl: log.receiptUrl || '',
       lastModifiedAt: (log as any).lastModifiedAt || new Date().toISOString(),
       lastModifiedBy: (log as any).lastModifiedBy || '',
       lastModifiedByName: (log as any).lastModifiedByName || ''
@@ -400,6 +402,7 @@ export const updateFuelLogInFirestore = async (log: FuelLog) => {
       liters: log.volume,
       adBlueLiters: log.adBlueVolume || 0,
       adBlueCost: log.adBlueCost || 0,
+      receiptUrl: log.receiptUrl || '',
       lastModifiedAt: (log as any).lastModifiedAt || new Date().toISOString(),
       lastModifiedBy: (log as any).lastModifiedBy || '',
       lastModifiedByName: (log as any).lastModifiedByName || ''
