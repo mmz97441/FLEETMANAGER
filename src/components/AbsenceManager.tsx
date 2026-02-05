@@ -252,6 +252,9 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
   const canValidateAbsence = hasPermission(Permission.ABSENCES_VALIDATE);
   const canExport = hasPermission(Permission.ABSENCES_REPORT);
 
+  // DEBUG — à retirer après diagnostic
+  console.log(`🔍 [DEBUG ABSENCES] Role: ${currentUser.role} | canViewAll: ${canViewAll} | canViewTeam: ${canViewTeam} | absences reçues: ${absences.length}`);
+
   // Rétrocompatibilité avec l'ancien code
   const isManager = canViewAll;
   const canValidate = canValidateAbsence;
