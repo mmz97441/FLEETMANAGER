@@ -1385,7 +1385,8 @@ const MissionManager: React.FC<MissionManagerProps> = ({
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         {[
           { status: PackageStatus.PENDING, label: 'En attente' },
-          { status: PackageStatus.LOADED, label: 'Chargés' },
+          { status: PackageStatus.AT_HUB, label: 'Au hub' },
+          { status: PackageStatus.SORTED, label: 'Triés' },
           { status: PackageStatus.IN_DELIVERY, label: 'En livraison' },
           { status: PackageStatus.DELIVERED, label: 'Livrés' },
           { status: PackageStatus.FAILED, label: 'Échecs' }
@@ -1528,6 +1529,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                 <th className="px-2 py-3 text-center text-xs font-bold text-slate-500 uppercase">Créneau début</th>
                 <th className="px-2 py-3 text-center text-xs font-bold text-slate-500 uppercase">Créneau fin</th>
                 <th className="px-3 py-3 text-center text-xs font-bold text-slate-500 uppercase">Statut</th>
+                <th className="px-3 py-3 text-center text-xs font-bold text-slate-500 uppercase">Affecté à</th>
                 <th className="px-2 py-3 text-center text-xs font-bold text-slate-500 uppercase">Actions</th>
                 <th className="px-2 py-3 text-center text-xs font-bold text-slate-500 uppercase">Gérer</th>
               </tr>
@@ -1657,6 +1659,19 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                             <span className="ml-1 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-blue-100 text-blue-700">
                               🚚 En mission
                             </span>
+                          )}
+                        </td>
+                        {/* Affecté à */}
+                        <td className="px-3 py-2 text-center">
+                          {pkg.currentDriverId ? (
+                            <span className="text-xs font-medium text-blue-700 bg-blue-50 px-2 py-1 rounded-lg">
+                              {(() => {
+                                const driver = users.find(u => u.id === pkg.currentDriverId);
+                                return driver ? `${driver.firstName} ${driver.lastName}` : 'Chauffeur inconnu';
+                              })()}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-slate-300">—</span>
                           )}
                         </td>
                         {/* Actions statut */}

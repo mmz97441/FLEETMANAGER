@@ -239,19 +239,12 @@ const App: React.FC = () => {
 
     // SECURE: We pass currentUser to filter data server-side (for Users and Quotes)
     const unsubscribeVehicles = subscribeToVehicles(setVehicles);
-    const unsubscribeFuel = subscribeToFuelLogs((logs) => {
-      console.log(`🔍 [DEBUG] fuel_logs reçus depuis Firestore: ${logs.length} entrées`);
-      if (logs.length > 0) console.log('🔍 [DEBUG] Dernier plein:', logs[0]?.date, logs[0]?.vehicleId);
-      setFuelLogs(logs);
-    });
+    const unsubscribeFuel = subscribeToFuelLogs(setFuelLogs);
     const unsubscribeMaint = subscribeToMaintenance(setMaintenanceLogs);
     const unsubscribeIssues = subscribeToIssues(setIssues);
     const unsubscribeUsers = subscribeToUsers(currentUser, setUsers);
     const unsubscribeLeaves = subscribeToLeaves(setLeaves);
-    const unsubscribeAbsences = subscribeToAbsences((abs) => {
-      console.log(`🔍 [DEBUG] absences reçues depuis Firestore: ${abs.length} entrées`);
-      setAbsences(abs);
-    });
+    const unsubscribeAbsences = subscribeToAbsences(setAbsences);
     const unsubscribeQuotes = subscribeToQuotes(currentUser, setQuotes);
     const unsubscribeDocs = subscribeToCompanyDocuments(setCompanyDocuments);
     const unsubscribeAcks = subscribeToDocumentAcknowledgments(setDocumentAcknowledgments);

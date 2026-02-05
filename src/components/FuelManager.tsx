@@ -29,9 +29,6 @@ export const FuelManager: React.FC<FuelManagerProps> = ({ logs, vehicles, users,
   const canDeleteFuel = hasPermission(Permission.FUEL_DELETE);
   const canExportFuel = hasPermission(Permission.FUEL_EXPORT);
   
-  // DEBUG — à retirer après diagnostic
-  console.log(`🔍 [DEBUG FUEL] Role: ${currentUser.role} | canViewFuel: ${canViewFuel} | canViewAllFuel: ${canViewAllFuel} | logs reçus: ${logs.length}`);
-  
   // Helper: obtenir l'ID du chauffeur assigné (supporte driverId ET assignedDriverId)
   const getDriverId = (v: Vehicle) => v.assignedDriverId || v.driverId || null;
   
