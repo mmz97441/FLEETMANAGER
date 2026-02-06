@@ -11,68 +11,73 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
-    // Récupère le rôle de l'utilisateur connecté
+    // Récupère le rôle de l'utilisateur connecté (en minuscules pour comparaison robuste)
     function getUserRole() {
-      return getUserData().role;
+      return getUserData().role.lower();
     }
 
     // Rôles d'administration (gestion complète)
+    // Comparaison en minuscules pour éviter les problèmes d'encodage Unicode (accents)
     function isAdminRole() {
       return request.auth != null && getUserRole() in [
-        'Admin',
-        'Président',
-        'President',
-        'Directeur',
-        'Directeur Exploitation',
-        'Secrétariat',
-        'Secretariat'
+        'admin',
+        'président',
+        'president',
+        'présidente',
+        'presidente',
+        'directeur',
+        'directeur exploitation',
+        'secrétariat',
+        'secretariat'
       ];
     }
 
     // Rôles internes (tous sauf Client)
     function isInternalUser() {
       return request.auth != null && getUserRole() in [
-        'Admin',
-        'Président',
-        'President',
-        'Directeur',
-        'Directeur Exploitation',
-        'Secrétariat',
-        'Secretariat',
-        'Chauffeur',
-        'Mécanicien',
-        'Mecanicien',
-        'Stagiaire'
+        'admin',
+        'président',
+        'president',
+        'présidente',
+        'presidente',
+        'directeur',
+        'directeur exploitation',
+        'secrétariat',
+        'secretariat',
+        'chauffeur',
+        'mécanicien',
+        'mecanicien',
+        'stagiaire'
       ];
     }
 
     // Rôles opérationnels (chauffeurs, mécaniciens)
     function isOperationalRole() {
       return request.auth != null && getUserRole() in [
-        'Chauffeur',
-        'Mécanicien',
-        'Mecanicien'
+        'chauffeur',
+        'mécanicien',
+        'mecanicien'
       ];
     }
 
     // Est un chauffeur
     function isDriver() {
-      return request.auth != null && getUserRole() == 'Chauffeur';
+      return request.auth != null && getUserRole() == 'chauffeur';
     }
 
     // Est un mécanicien
     function isMechanic() {
-      return request.auth != null && getUserRole() in ['Mécanicien', 'Mecanicien'];
+      return request.auth != null && getUserRole() in ['mécanicien', 'mecanicien'];
     }
 
     // Est un client
     function isClient() {
-      return request.auth != null && getUserRole() == 'Client';
+      return request.auth != null && getUserRole() == 'client';
     }
 
     // Est un stagiaire
     function isIntern() {
-      return request.auth != null && getUserRole() == 'Stagiaire';
+      return request.auth != null && getUserRole() == 'stagiaire';
     }
 
     // Vérifie que l'utilisateur est authentifié
