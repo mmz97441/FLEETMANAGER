@@ -395,7 +395,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
             driverName: `${currentUser.firstName} ${currentUser.lastName}`,
             notes: `Chargement terminé — départ ${now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`
           });
-        } catch (e) { console.warn('Erreur statut colis:', pkgId, e); }
+        } catch (e) { /* silenced */ }
       }
 
       // 2. Recalculer les ETAs basées sur l'heure réelle de départ
@@ -486,7 +486,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
           const { uploadProofPhoto } = await import('../services/podService');
           const url = await uploadProofPhoto(photoBase64, returningPackage.id, 'return');
           photoUrls.push(url);
-        } catch (e) { console.warn('Erreur upload photo retour:', e); }
+        } catch (e) { /* silenced */ }
       }
 
       // Uploader la signature si présente
@@ -495,7 +495,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
         try {
           const { uploadProofPhoto } = await import('../services/podService');
           signatureUrl = await uploadProofPhoto(returnSignature, returningPackage.id, 'return-signature');
-        } catch (e) { console.warn('Erreur upload signature retour:', e); }
+        } catch (e) { /* silenced */ }
       }
 
       // Créer la preuve de retour
@@ -659,7 +659,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
               currentVehicleId: activeMission.vehicleId
             }
           );
-        } catch (e) { console.warn('Erreur update colis:', pkgId, e); }
+        } catch (e) { /* silenced */ }
       }
 
       // 6. FIX BUG 2: Trouver le prochain stop en attente dans l'ORDRE TRIÉ (par sequence)
@@ -746,7 +746,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
               currentVehicleId: activeMission.vehicleId
             }
           );
-        } catch (e) { console.warn('Erreur update colis échec:', pkgId, e); }
+        } catch (e) { /* silenced */ }
       }
 
       // Upload photos d'échec si présentes (preuve de tentative)

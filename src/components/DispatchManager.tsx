@@ -359,7 +359,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
           selectedZone!,
           tour.stops.length,
           tour.vehiclePlate
-        ).catch(e => console.warn('[Notif] Erreur notif mission:', e));
+        ).catch(() => {});
       }
       
       // Reset et fermer

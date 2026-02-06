@@ -11,7 +11,7 @@ let ai: GoogleGenAI | null = null;
 if (apiKey) {
   ai = new GoogleGenAI({ apiKey });
 } else {
-  console.warn("Gemini API Key is missing. AI features will be disabled.");
+  // Gemini API Key is missing - AI features will be disabled
 }
 
 export const askFleetGenius = async (

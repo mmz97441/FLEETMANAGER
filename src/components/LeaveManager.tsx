@@ -344,8 +344,8 @@ const LeaveManager: React.FC<LeaveManagerProps> = ({ currentUser, users, leaves,
             formatDate(pendingAction.data.startDate),
             formatDate(pendingAction.data.endDate),
             calculation.days
-          ).catch(e => console.warn('[Notif] Erreur:', e));
-          
+          ).catch(() => {});
+
           // Email
           sendLeaveRequestEmail(
             `${currentUser.firstName} ${currentUser.lastName}`,
@@ -355,7 +355,7 @@ const LeaveManager: React.FC<LeaveManagerProps> = ({ currentUser, users, leaves,
             formatDate(pendingAction.data.endDate),
             calculation.days,
             pendingAction.data.reason || ''
-          ).catch(e => console.warn('[Email] Erreur:', e));
+          ).catch(() => {});
       } 
       else if (pendingAction.type === 'UPDATE' && selectedLeave) {
           // Recalculer les jours ouvrables
@@ -438,8 +438,8 @@ const LeaveManager: React.FC<LeaveManagerProps> = ({ currentUser, users, leaves,
             formatDate(selectedLeave.startDate),
             formatDate(selectedLeave.endDate),
             `${currentUser.firstName} ${currentUser.lastName}`
-          ).catch(e => console.warn('[Notif] Erreur:', e));
-          
+          ).catch(() => {});
+
           // Email
           if (requester?.email) {
             sendLeaveDecisionEmail(
@@ -450,7 +450,7 @@ const LeaveManager: React.FC<LeaveManagerProps> = ({ currentUser, users, leaves,
               formatDate(selectedLeave.endDate),
               'approved',
               `${currentUser.firstName} ${currentUser.lastName}`
-            ).catch(e => console.warn('[Email] Erreur:', e));
+            ).catch(() => {});
           }
       }
       else if (pendingAction.type === 'REJECT' && selectedLeave) {
@@ -481,8 +481,8 @@ const LeaveManager: React.FC<LeaveManagerProps> = ({ currentUser, users, leaves,
             formatDate(selectedLeave.startDate),
             formatDate(selectedLeave.endDate),
             `${currentUser.firstName} ${currentUser.lastName}`
-          ).catch(e => console.warn('[Notif] Erreur:', e));
-          
+          ).catch(() => {});
+
           // Email
           if (requester?.email) {
             sendLeaveDecisionEmail(
@@ -493,7 +493,7 @@ const LeaveManager: React.FC<LeaveManagerProps> = ({ currentUser, users, leaves,
               formatDate(selectedLeave.endDate),
               'rejected',
               `${currentUser.firstName} ${currentUser.lastName}`
-            ).catch(e => console.warn('[Email] Erreur:', e));
+            ).catch(() => {});
           }
       }
 

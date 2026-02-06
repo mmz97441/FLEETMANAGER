@@ -202,7 +202,6 @@ export const assignDriverToVehicle = async (
         const oldVehicleRef = doc(db, "vehicles", oldVehicle.id);
         batch.update(oldVehicleRef, { driverId: null });
         changes.oldVehicleCleared = true;
-        console.log(`🔄 Ancien véhicule ${oldVehicle.plate} libéré`);
       }
     }
 
@@ -217,8 +216,6 @@ export const assignDriverToVehicle = async (
     const message = driverId 
       ? "✅ Chauffeur assigné avec succès"
       : "✅ Véhicule libéré";
-
-    console.log(message);
 
     return { success: true, message, changes };
 

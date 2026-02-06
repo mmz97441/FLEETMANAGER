@@ -282,9 +282,7 @@ export const updatePackageStatus = async (
   });
 
   // === AUTO-NOTIFICATIONS (fire-and-forget) ===
-  triggerPackageNotifications(pkg, status, movement).catch(e => 
-    console.warn('[Notif] Erreur notification auto:', e)
-  );
+  triggerPackageNotifications(pkg, status, movement).catch(() => {});
 };
 
 /**
@@ -349,7 +347,6 @@ const getAdminUserIds = async (): Promise<string[]> => {
     const snapshot = await getDocs(q);
     return snapshot.docs.map(d => d.id);
   } catch (e) {
-    console.warn('[Notif] Impossible de récupérer les admins:', e);
     return [];
   }
 };

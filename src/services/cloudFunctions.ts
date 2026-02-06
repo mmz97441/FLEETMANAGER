@@ -48,8 +48,7 @@ export const deleteUserCompletely = async (
     >(functions, "deleteUserCompletely");
 
     const result = await deleteFunction({ userId, email });
-    
-    console.log("✅ Suppression utilisateur:", result.data);
+
     return result.data;
     
   } catch (error: any) {
@@ -100,8 +99,7 @@ export const toggleUserStatus = async (
     >(functions, "toggleUserStatus");
 
     const result = await toggleFunction({ userId, email, disable });
-    
-    console.log(`✅ Compte ${disable ? "désactivé" : "réactivé"}:`, result.data);
+
     return result.data;
     
   } catch (error: any) {
@@ -145,8 +143,7 @@ export const forcePasswordReset = async (
     >(functions, "forcePasswordReset");
 
     const result = await resetFunction({ userId, email });
-    
-    console.log("✅ Reset password:", result.data);
+
     return result.data;
     
   } catch (error: any) {
@@ -222,16 +219,13 @@ export const optimizeToursCF = async (
   model: GMPROModel
 ): Promise<GMPROResult> => {
   try {
-    console.log(`🚛 Appel GMPRO: ${model.shipments.length} livraisons, ${model.vehicles.length} véhicules`);
-    
     const optimizeFunction = httpsCallable<
       { model: GMPROModel },
       GMPROResult
     >(functions, "optimizeTours");
 
     const result = await optimizeFunction({ model });
-    
-    console.log("✅ GMPRO résultat:", result.data);
+
     return result.data;
     
   } catch (error: any) {
@@ -287,8 +281,7 @@ export const validateInvitationTokenCF = async (
     >(functions, "validateInvitationToken");
 
     const result = await validateFunction({ token });
-    
-    console.log("✅ Validation token:", result.data.valid);
+
     return result.data;
     
   } catch (error: any) {
@@ -330,8 +323,7 @@ export const activateAccountCF = async (
     >(functions, "activateAccount");
 
     const result = await activateFunction({ token, password });
-    
-    console.log("✅ Activation:", result.data.success);
+
     return result.data;
     
   } catch (error: any) {
@@ -384,7 +376,6 @@ export const sendLeaveRequestEmail = async (
       duration,
       reason
     });
-    console.log('[CF] Email demande de congés envoyé');
   } catch (error) {
     console.error('[CF] Erreur email demande congés:', error);
     throw error;
@@ -416,7 +407,6 @@ export const sendLeaveDecisionEmail = async (
       approverName,
       reason
     });
-    console.log(`[CF] Email décision congés (${decision}) envoyé`);
   } catch (error) {
     console.error('[CF] Erreur email décision congés:', error);
     throw error;

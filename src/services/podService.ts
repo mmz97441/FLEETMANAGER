@@ -59,7 +59,6 @@ export const compressImage = (
       const compressed = canvas.toDataURL('image/jpeg', quality);
       const origKB = Math.round(base64Data.length * 0.75 / 1024);
       const compKB = Math.round(compressed.length * 0.75 / 1024);
-      console.log(`📷 ${origKB} KB → ${compKB} KB (-${Math.round((1 - compKB / origKB) * 100)}%)`);
       resolve(compressed);
     };
     img.onerror = () => resolve(base64Data);
@@ -244,7 +243,7 @@ export const uploadAndCreatePOD = async (
           coordinates, timestamp, notes
         };
         await updateDoc(doc(db, PACKAGES_COLLECTION, pkgId), { pod: pkgPod, updatedAt: timestamp });
-      } catch (e) { console.warn(`POD colis ${pkgId}:`, e); }
+      } catch (e) { /* silenced */ }
     }
 
     emit('done', 'Preuves enregistrées ✓');

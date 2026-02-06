@@ -317,11 +317,9 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
             // ============================================================
             
             // ÉTAPE 1: Créer le profil utilisateur dans Firestore
-            console.log('📝 Étape 1/4: Création du profil Firestore...');
             await onAddUser(userData);
             
             // ÉTAPE 2: Vérifier que le profil a bien été créé
-            console.log('🔍 Étape 2/4: Vérification du profil...');
             const { doc, getDoc } = await import('firebase/firestore');
             const { db } = await import('../firebaseConfig');
             
@@ -334,10 +332,8 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
             if (!userDocSnap.exists()) {
               throw new Error(`Le profil utilisateur n'a pas été créé correctement (ID: ${userData.id})`);
             }
-            console.log('✅ Profil vérifié dans Firestore');
-            
+
             // ÉTAPE 3: Créer l'invitation avec TOUTES les infos du profil
-            console.log('📧 Étape 3/4: Création de l\'invitation...');
             const { token, expiresAt } = await createInvitation(
               userData.email,
               userData.id,
@@ -354,7 +350,6 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
             );
             
             // ÉTAPE 4: Envoyer l'email d'invitation
-            console.log('✉️ Étape 4/4: Envoi de l\'email...');
             const activationUrl = getActivationUrl(token);
             
             await sendUserInvitationEmail(
@@ -371,8 +366,6 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
               activationUrl,
               expiresAt
             );
-            
-            console.log('✅ Utilisateur créé avec succès:', userData.email);
             
           } catch (error: any) {
             console.error('❌ Erreur création utilisateur:', error);

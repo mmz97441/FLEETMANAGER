@@ -133,7 +133,7 @@ export const finalizePickup = async (params: {
           updatedAt: timestamp
         });
       } catch (e) {
-        console.warn(`Erreur MAJ colis ${pkgId}:`, e);
+        /* silenced */
       }
     }
 
@@ -164,7 +164,6 @@ export const finalizePickup = async (params: {
 
     await setDoc(doc(db, PICKUPS_COLLECTION, manifestId), manifest);
 
-    console.log(`✅ Enlèvement finalisé: ${scannedPackageIds.length}/${expectedPackageIds.length} colis collectés`);
     return manifest;
 
   } catch (err) {
@@ -299,7 +298,7 @@ ${labels}
           displayValue: true, fontSize: 12, font: 'monospace',
           fontOptions: 'bold', margin: 2
         });
-      } catch(e) { console.warn('Barcode error:', bc.code, e); }
+      } catch(e) { /* silenced */ }
     }
   });
   // Regrouper en pages de 4

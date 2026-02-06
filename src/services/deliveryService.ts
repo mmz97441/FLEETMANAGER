@@ -92,7 +92,7 @@ export const getDeliveryScheduleConfig = async (): Promise<DeliveryScheduleConfi
       return { id: docSnap.id, ...docSnap.data() } as DeliveryScheduleConfig;
     }
   } catch (e) {
-    console.warn('Erreur lecture config créneaux:', e);
+    /* silenced */
   }
 
   // Retourner la config par défaut si pas encore configuré

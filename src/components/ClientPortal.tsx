@@ -283,7 +283,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
         // Stocker tous les slots actifs, on filtrera quand on connaîtra la zone
         setDeliverySlots(cfg.slots.filter(s => s.isActive));
       } catch (e) {
-        console.warn('Erreur chargement créneaux:', e);
+        /* silenced */
       }
     };
     loadConfig();

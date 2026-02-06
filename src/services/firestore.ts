@@ -84,17 +84,14 @@ export const checkUserEmailAuthorized = async (email: string): Promise<boolean> 
     try {
         // Normaliser l'email (lowercase, trim) pour matcher avec Firebase Auth
         const normalizedEmail = email.toLowerCase().trim();
-        console.log(`🔍 Vérification autorisation pour: ${normalizedEmail}`);
-        
+
         const q = query(collection(db, "users"), where("email", "==", normalizedEmail));
         const querySnapshot = await getDocs(q);
         
         if (querySnapshot.empty) {
-            console.warn(`❌ Email non trouvé dans la base: ${normalizedEmail}`);
             return false;
         }
-        
-        console.log(`✅ Email autorisé: ${normalizedEmail}`);
+
         return true;
     } catch (e) {
         console.error("Erreur vérification email:", e);
@@ -126,7 +123,6 @@ export const linkAuthToProfile = async (email: string, authUid: string) => {
 
             // 2. Supprimer l'ancien document (celui avec l'ID temporaire)
             await deleteDoc(doc(db, "users", oldDoc.id));
-            console.log(`Profil migré de ${oldDoc.id} vers ${authUid}`);
         }
     } catch (e) {
         console.error("Erreur lors de la liaison du profil:", e);
@@ -194,7 +190,6 @@ export const createUserProfile = async (user: User): Promise<boolean> => {
     try {
         const { id, ...data } = user;
         await setDoc(doc(db, "users", id), cleanFirestoreData(data));
-        console.log(`✅ Profil créé: users/${id}`);
         return true;
     } catch (e) {
         console.error("❌ Erreur création profil:", e);
@@ -478,7 +473,6 @@ export const subscribeToMaintenance = (callback: (data: MaintenanceLog[]) => voi
       logs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       callback(logs);
     }, (error) => {
-      console.warn("Error subscribing to maintenance_logs:", error);
     });
 };
 

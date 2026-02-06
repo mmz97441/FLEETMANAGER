@@ -157,7 +157,6 @@ const App: React.FC = () => {
 
             // LOGIQUE DE RÉCUPÉRATION (Recovery)
             if (!existingProfile && firebaseUser.email) {
-                console.log("Profil introuvable par UID. Tentative de récupération par email...");
                 try {
                     await linkAuthToProfile(firebaseUser.email, firebaseUser.uid);
                     existingProfile = await getUserProfile(firebaseUser.uid);
@@ -453,7 +452,7 @@ const App: React.FC = () => {
 
   // Maintenance
   const handleAddMaintenance = async (log: MaintenanceLog) => {
-    console.log("Add Maintenance not fully implemented in firestore service yet", log);
+    // Add Maintenance not fully implemented in firestore service yet
   };
 
   // Issues
@@ -525,12 +524,11 @@ const App: React.FC = () => {
       const result = await deleteUserCompletely(userId, userEmail || '');
       
       if (!result.success) {
-        console.warn('Suppression partielle:', result.message);
+        // Suppression partielle
       }
     } catch (error) {
       // Fallback: supprimer seulement le profil Firestore
       // (la Cloud Function n'est peut-être pas encore déployée)
-      console.warn('Cloud Function non disponible, suppression Firestore uniquement');
       await deleteUserProfile(userId);
     }
     
@@ -600,9 +598,8 @@ const App: React.FC = () => {
           if (result) {
             updatedQuote.convertedToPackageId = result.packageId;
             updatedQuote.convertedAt = new Date().toISOString();
-            console.log(`✅ Devis ${id.slice(-6)} converti en colis ${result.packageId} (zone ${result.zone})`);
           } else {
-            console.warn(`⚠️ Conversion devis ${id.slice(-6)} en colis échouée (adresse non reconnue ?)`);
+            // Conversion failed (possibly unrecognized address)
           }
         } catch (err) {
           console.error('Erreur conversion devis → colis:', err);

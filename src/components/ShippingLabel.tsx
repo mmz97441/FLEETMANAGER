@@ -122,7 +122,7 @@ const ShippingLabel: React.FC<ShippingLabelProps> = ({
           lineColor: '#000000'
         });
       } catch (e) {
-        console.warn('Erreur génération code-barres:', e);
+        /* silenced */
       }
     }
   }, [data.orderNumber, data.barcode]);
