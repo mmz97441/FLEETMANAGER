@@ -576,14 +576,14 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
               formatDate(absenceData.startDate),
               formatDate(absenceData.endDate),
               days
-            ).catch(() => {});
+            ).catch(e => console.warn('[Notif in-app] Erreur:', e));
           }
           
           // Email
           const approverEmails = getAdminEmails(users);
           if (approverEmails.length > 0) {
             sendLeaveRequestEmail(absenceData, employee, approverEmails)
-              .catch(() => {});
+              .catch(e => console.warn('[Email] Erreur:', e));
           }
         }
         
@@ -684,8 +684,8 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
           new Date(proposalData.startDate).toLocaleDateString('fr-FR'),
           new Date(proposalData.endDate).toLocaleDateString('fr-FR'),
           0
-        ).catch(() => {});
-
+        ).catch(e => console.warn('[Notif] Erreur:', e));
+        
         // Email si disponible
         if (employee.email) {
           // TODO: sendModificationProposalEmail
@@ -747,7 +747,7 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
           new Date(absence.modificationProposal.proposedStartDate).toLocaleDateString('fr-FR'),
           new Date(absence.modificationProposal.proposedEndDate).toLocaleDateString('fr-FR'),
           days
-        ).catch(() => {});
+        ).catch(e => console.warn('[Notif] Erreur:', e));
       }
       
       alert('✅ Modification acceptée ! Vos congés sont maintenant validés.');
@@ -781,7 +781,7 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
           new Date(absence.startDate).toLocaleDateString('fr-FR'),
           new Date(absence.endDate).toLocaleDateString('fr-FR'),
           0
-        ).catch(() => {});
+        ).catch(e => console.warn('[Notif] Erreur:', e));
       }
       
       alert('Modification refusée. La demande est de nouveau en attente.');

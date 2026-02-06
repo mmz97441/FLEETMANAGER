@@ -230,6 +230,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
         details: `Ordre des stops modifié manuellement (${newStops.length} stops)`
       });
 
+      console.log('✅ Ordre des stops sauvegardé');
     } catch (error) {
       console.error('❌ Erreur sauvegarde ordre:', error);
       throw error;
@@ -1266,7 +1267,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
               returnReason: `Stop supprimé de la tournée ${mission.zone} — Retourner au hub ${mission.hubName}`
             });
           }
-        } catch (e) { /* silenced */ }
+        } catch (e) { console.warn('Erreur marquage retour colis:', pkgId, e); }
       }
 
       await logActivity({
@@ -1475,7 +1476,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                         driverName: `${currentUser.firstName} ${currentUser.lastName}`,
                         notes: `Changement groupé → ${label}`
                       });
-                    } catch (e) { /* silenced */ }
+                    } catch (e) { console.warn('Erreur:', pkgId, e); }
                   }
                   setSelectedPackageIds(new Set());
                   setIsChangingStatus(false);
@@ -2368,7 +2369,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                   client?.companyName || client?.firstName || 'Client',
                   result.successCount,
                   result.batchId || ''
-                ).catch(() => {});
+                ).catch(e => console.warn('[Notif] Erreur notif import:', e));
               }
             }
           }}
@@ -3181,7 +3182,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                       zone,
                       tour.stops.length,
                       vehicle?.plate || ''
-                    ).catch(() => {});
+                    ).catch(e => console.warn('[Notif] Erreur:', e));
                     
                     // Reset
                     setShowQuickDispatch(false);

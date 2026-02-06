@@ -1,10 +1,8 @@
 
-import React, { useState, useMemo, useEffect, useCallback, Suspense, lazy } from 'react';
+import React, { useState, useMemo, useEffect, Suspense, lazy } from 'react';
 // @ts-ignore
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { auth } from "./firebaseConfig";
-import { BrowserRouter, Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
-import { viewToPath, pathToView, VIEW_TO_PATH } from './routes';
 // Composants légers chargés immédiatement (shell UI)
 import Sidebar from './components/Sidebar';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -108,13 +106,8 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
 
-  // Navigation — synchronisée avec l'URL via React Router
-  const navigate = useNavigate();
-  const location = useLocation();
-  const currentView = pathToView(location.pathname);
-  const setCurrentView = useCallback((view: ViewState) => {
-    navigate(viewToPath(view));
-  }, [navigate]);
+  // Navigation
+  const [currentView, setCurrentView] = useState<ViewState>('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -164,6 +157,7 @@ const App: React.FC = () => {
 
             // LOGIQUE DE RÉCUPÉRATION (Recovery)
             if (!existingProfile && firebaseUser.email) {
+                console.log("Profil introuvable par UID. Tentative de récupération par email...");
                 try {
                     await linkAuthToProfile(firebaseUser.email, firebaseUser.uid);
                     existingProfile = await getUserProfile(firebaseUser.uid);
@@ -459,7 +453,7 @@ const App: React.FC = () => {
 
   // Maintenance
   const handleAddMaintenance = async (log: MaintenanceLog) => {
-    // Add Maintenance not fully implemented in firestore service yet
+    console.log("Add Maintenance not fully implemented in firestore service yet", log);
   };
 
   // Issues
@@ -531,11 +525,12 @@ const App: React.FC = () => {
       const result = await deleteUserCompletely(userId, userEmail || '');
       
       if (!result.success) {
-        // Suppression partielle
+        console.warn('Suppression partielle:', result.message);
       }
     } catch (error) {
       // Fallback: supprimer seulement le profil Firestore
       // (la Cloud Function n'est peut-être pas encore déployée)
+      console.warn('Cloud Function non disponible, suppression Firestore uniquement');
       await deleteUserProfile(userId);
     }
     
@@ -605,8 +600,9 @@ const App: React.FC = () => {
           if (result) {
             updatedQuote.convertedToPackageId = result.packageId;
             updatedQuote.convertedAt = new Date().toISOString();
+            console.log(`✅ Devis ${id.slice(-6)} converti en colis ${result.packageId} (zone ${result.zone})`);
           } else {
-            // Conversion failed (possibly unrecognized address)
+            console.warn(`⚠️ Conversion devis ${id.slice(-6)} en colis échouée (adresse non reconnue ?)`);
           }
         } catch (err) {
           console.error('Erreur conversion devis → colis:', err);
@@ -708,18 +704,18 @@ const App: React.FC = () => {
   }
 
   // Vérifier si c'est une page d'activation avec token
-  const urlParams = new URLSearchParams(location.search);
+  const urlParams = new URLSearchParams(window.location.search);
   const activationToken = urlParams.get('token');
-
+  
   // Si token présent ET pas encore connecté → afficher page d'activation
   if (activationToken && !currentUser) {
     return (
       <Suspense fallback={<div className="h-screen w-screen flex items-center justify-center bg-slate-50"><Loader2 size={48} className="animate-spin text-blue-600" /></div>}>
-        <ActivateAccount
-          token={activationToken}
+        <ActivateAccount 
+          token={activationToken} 
           onSuccess={() => {
             // Nettoyer l'URL après activation réussie
-            navigate('/', { replace: true });
+            window.history.replaceState({}, document.title, window.location.pathname);
           }}
         />
       </Suspense>
@@ -1004,7 +1000,6 @@ const App: React.FC = () => {
       case 'client_dashboard':
       case 'client_list':
       case 'client_team':
-      case 'client_shipments':
         // Sécurité : On filtre strictement les utilisateurs visibles par le client
         const companyTeam = users.filter(u => 
             u.companyName === currentUser.companyName && 
@@ -1173,11 +1168,4 @@ const App: React.FC = () => {
   );
 };
 
-// Wrapper avec BrowserRouter
-const AppWithRouter: React.FC = () => (
-  <BrowserRouter>
-    <App />
-  </BrowserRouter>
-);
-
-export default AppWithRouter;
+export default App;
