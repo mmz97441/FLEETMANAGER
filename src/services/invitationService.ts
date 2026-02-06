@@ -138,8 +138,6 @@ export const createInvitation = async (
   
   await addDoc(collection(db, "invitations"), invitation);
   
-  console.log(`✅ Invitation créée pour ${normalizedEmail}, expire le ${expiresAt}`);
-  
   return { token, expiresAt };
 };
 
@@ -152,7 +150,6 @@ export const validateInvitationToken = async (token: string): Promise<Invitation
     const querySnapshot = await getDocs(q);
     
     if (querySnapshot.empty) {
-      console.warn(`❌ Token non trouvé: ${token.substring(0, 8)}...`);
       return { valid: false, error: 'NOT_FOUND' };
     }
     
@@ -161,7 +158,6 @@ export const validateInvitationToken = async (token: string): Promise<Invitation
     
     // Vérifier si déjà utilisé
     if (invitation.used) {
-      console.warn(`❌ Token déjà utilisé: ${token.substring(0, 8)}...`);
       return { valid: false, error: 'ALREADY_USED', invitation };
     }
     
@@ -169,11 +165,9 @@ export const validateInvitationToken = async (token: string): Promise<Invitation
     const now = new Date();
     const expiresAt = new Date(invitation.expiresAt);
     if (now > expiresAt) {
-      console.warn(`❌ Token expiré: ${token.substring(0, 8)}...`);
       return { valid: false, error: 'EXPIRED', invitation };
     }
     
-    console.log(`✅ Token valide pour: ${invitation.email}`);
     return { valid: true, invitation };
     
   } catch (error) {
@@ -198,7 +192,6 @@ export const markInvitationAsUsed = async (token: string): Promise<boolean> => {
       usedAt: new Date().toISOString()
     });
     
-    console.log(`✅ Invitation marquée comme utilisée`);
     return true;
     
   } catch (error) {
@@ -266,9 +259,9 @@ export const getInvitationByEmail = async (email: string): Promise<Invitation | 
  */
 export const getActivationUrl = (token: string): string => {
   // En production, utiliser l'URL de l'app
-  const baseUrl = typeof window !== 'undefined' 
-    ? window.location.origin 
-    : 'https://delivrex.vercel.app';
+  const baseUrl = typeof window !== 'undefined'
+    ? window.location.origin
+    : (import.meta.env.VITE_APP_URL || 'https://delivrex.vercel.app');
   
   return `${baseUrl}/activate?token=${token}`;
 };

@@ -15,6 +15,9 @@ admin.initializeApp();
 const db = admin.firestore();
 const auth = admin.auth();
 
+// URL de l'application (configurable via Firebase Functions config ou variable d'environnement)
+const APP_URL = process.env.APP_URL || "https://delivrex.vercel.app";
+
 // ============================================================================
 // OPTIMISATION DE TOURNÉES MULTI-VÉHICULES (GMPRO)
 // ============================================================================
@@ -567,7 +570,7 @@ export const forcePasswordReset = functions
       
       // Générer le lien de reset
       const resetLink = await auth.generatePasswordResetLink(email, {
-        url: "https://delivrex.vercel.app", // URL de redirection après reset
+        url: APP_URL, // URL de redirection après reset
       });
 
       console.log(`✅ Lien de reset généré pour: ${email}`);

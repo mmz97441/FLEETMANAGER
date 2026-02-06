@@ -38,6 +38,12 @@ interface EmailDocument {
 }
 
 // ============================================================================
+// CONFIGURATION
+// ============================================================================
+
+const APP_URL = import.meta.env.VITE_APP_URL || '${APP_URL}';
+
+// ============================================================================
 // HELPERS
 // ============================================================================
 
@@ -150,7 +156,6 @@ export const sendEmail = async (
     if (options?.bcc) emailDoc.bcc = options.bcc;
 
     await addDoc(collection(db, "mail"), emailDoc);
-    console.log(`✅ Email envoyé à ${Array.isArray(to) ? to.join(', ') : to}`);
     return true;
   } catch (error) {
     console.error("❌ Erreur envoi email:", error);
@@ -211,7 +216,7 @@ export const sendIncidentCreatedEmail = async (
       ` : ''}
       
       <div style="text-align: center;">
-        <a href="https://delivrex.vercel.app" class="button">Voir dans FleetGenius</a>
+        <a href="${APP_URL}" class="button">Voir dans FleetGenius</a>
       </div>
     </div>
   `;
@@ -374,7 +379,7 @@ export const sendLeaveRequestEmail = async (
       ` : ''}
       
       <div style="text-align: center;">
-        <a href="https://delivrex.vercel.app" class="button">Valider / Refuser</a>
+        <a href="${APP_URL}" class="button">Valider / Refuser</a>
       </div>
     </div>
   `;
@@ -718,7 +723,7 @@ export const sendPasswordResetRequestEmail = async (
       <p>Pour réinitialiser votre mot de passe, rendez-vous sur la page de connexion et cliquez sur "Mot de passe oublié".</p>
       
       <div style="text-align: center;">
-        <a href="https://delivrex.vercel.app" class="button">Accéder à FleetGenius</a>
+        <a href="${APP_URL}" class="button">Accéder à FleetGenius</a>
       </div>
     </div>
   `;
