@@ -78,6 +78,16 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
   const [readStartTime, setReadStartTime] = useState<number | null>(null);
   const [signatureConfirmed, setSignatureConfirmed] = useState(false);
   const [fullName, setFullName] = useState('');
+
+  // Validation du nom : accepte "Prénom Nom" ou "Nom Prénom", insensible aux espaces multiples et accents
+  const isNameValid = (() => {
+    const normalize = (s: string) => s.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, ' ');
+    const input = normalize(fullName);
+    if (!input || !currentUser) return false;
+    const first = normalize(currentUser.firstName);
+    const last = normalize(currentUser.lastName);
+    return input === normalize(`${first} ${last}`) || input === normalize(`${last} ${first}`);
+  })();
   
   // Confirm modal
   const [confirmState, setConfirmState] = useState<{
@@ -806,7 +816,7 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
                     <div className="space-y-2">
                       <div>
                         <label className="block text-xs font-medium text-purple-700 mb-1">
-                          Tapez votre nom complet
+                          Tapez votre prénom et nom
                         </label>
                         <input
                           type="text"
@@ -833,7 +843,7 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
                   
                   <button
                     onClick={handleSign}
-                    disabled={!signatureConfirmed || fullName.trim().toLowerCase() !== `${currentUser.firstName} ${currentUser.lastName}`.toLowerCase()}
+                    disabled={!signatureConfirmed || !isNameValid}
                     className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-xl font-bold flex items-center justify-center gap-2 text-sm transition-colors"
                   >
                     <PenTool size={16} />
