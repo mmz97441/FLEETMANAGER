@@ -1,8 +1,10 @@
 
-import React, { useState, useMemo, useEffect, Suspense, lazy } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, Suspense, lazy } from 'react';
 // @ts-ignore
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { auth } from "./firebaseConfig";
+import { BrowserRouter, Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
+import { viewToPath, pathToView, VIEW_TO_PATH } from './routes';
 // Composants légers chargés immédiatement (shell UI)
 import Sidebar from './components/Sidebar';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -106,8 +108,13 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
 
-  // Navigation
-  const [currentView, setCurrentView] = useState<ViewState>('dashboard');
+  // Navigation — synchronisée avec l'URL via React Router
+  const navigate = useNavigate();
+  const location = useLocation();
+  const currentView = pathToView(location.pathname);
+  const setCurrentView = useCallback((view: ViewState) => {
+    navigate(viewToPath(view));
+  }, [navigate]);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -701,18 +708,18 @@ const App: React.FC = () => {
   }
 
   // Vérifier si c'est une page d'activation avec token
-  const urlParams = new URLSearchParams(window.location.search);
+  const urlParams = new URLSearchParams(location.search);
   const activationToken = urlParams.get('token');
-  
+
   // Si token présent ET pas encore connecté → afficher page d'activation
   if (activationToken && !currentUser) {
     return (
       <Suspense fallback={<div className="h-screen w-screen flex items-center justify-center bg-slate-50"><Loader2 size={48} className="animate-spin text-blue-600" /></div>}>
-        <ActivateAccount 
-          token={activationToken} 
+        <ActivateAccount
+          token={activationToken}
           onSuccess={() => {
             // Nettoyer l'URL après activation réussie
-            window.history.replaceState({}, document.title, window.location.pathname);
+            navigate('/', { replace: true });
           }}
         />
       </Suspense>
@@ -997,6 +1004,7 @@ const App: React.FC = () => {
       case 'client_dashboard':
       case 'client_list':
       case 'client_team':
+      case 'client_shipments':
         // Sécurité : On filtre strictement les utilisateurs visibles par le client
         const companyTeam = users.filter(u => 
             u.companyName === currentUser.companyName && 
@@ -1165,4 +1173,11 @@ const App: React.FC = () => {
   );
 };
 
-export default App;
+// Wrapper avec BrowserRouter
+const AppWithRouter: React.FC = () => (
+  <BrowserRouter>
+    <App />
+  </BrowserRouter>
+);
+
+export default AppWithRouter;
