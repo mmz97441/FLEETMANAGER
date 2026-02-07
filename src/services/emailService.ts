@@ -488,6 +488,62 @@ export const sendLeaveRejectedEmail = async (
   );
 };
 
+/**
+ * Email envoyé à l'employé quand un manager propose une modification de dates
+ */
+export const sendLeaveModificationProposalEmail = async (
+  absence: Absence,
+  employee: User,
+  proposerName: string,
+  proposedStartDate: string,
+  proposedEndDate: string,
+  reason: string
+): Promise<boolean> => {
+  const content = `
+    <div class="header" style="background: linear-gradient(135deg, #ea580c 0%, #c2410c 100%);">
+      <h1>📝 Modification Proposée</h1>
+      <p>De nouvelles dates vous sont proposées pour vos congés</p>
+    </div>
+    <div class="content">
+      <p>Bonjour ${employee.firstName},</p>
+
+      <p><strong>${proposerName}</strong> vous propose de modifier les dates de votre demande de ${getAbsenceTypeLabel(absence.type)} :</p>
+
+      <div class="info-box">
+        <div class="info-row">
+          <span class="info-label">Dates initiales</span>
+          <span class="info-value">${formatDate(absence.startDate)} → ${formatDate(absence.endDate)}</span>
+        </div>
+      </div>
+
+      <div class="alert alert-warning">
+        <strong>📅 Nouvelles dates proposées :</strong><br>
+        Du <strong>${formatDate(proposedStartDate)}</strong> au <strong>${formatDate(proposedEndDate)}</strong>
+      </div>
+
+      <h3>Motif de la modification</h3>
+      <div class="info-box">
+        <p style="margin: 0;">${reason}</p>
+      </div>
+
+      <p style="color: #64748b; font-size: 14px;">
+        Connectez-vous à FleetGenius pour accepter ou refuser cette proposition.
+      </p>
+
+      <div style="text-align: center;">
+        <a href="${APP_URL}" class="button">Voir la proposition</a>
+      </div>
+    </div>
+  `;
+
+  return sendEmail(
+    employee.email,
+    `📝 Modification proposée - Congés du ${formatDate(proposedStartDate)} au ${formatDate(proposedEndDate)}`,
+    content,
+    { type: 'leave_modification_proposal' }
+  );
+};
+
 // ============================================================================
 // ALERT EMAILS
 // ============================================================================

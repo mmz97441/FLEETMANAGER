@@ -18,6 +18,7 @@ import {
   sendLeaveRequestEmail,
   sendLeaveApprovedEmail,
   sendLeaveRejectedEmail,
+  sendLeaveModificationProposalEmail,
   getAdminEmails
 } from '../services/emailService';
 import { notifyLeaveRequest } from '../services/notificationService';
@@ -688,7 +689,14 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
         
         // Email si disponible
         if (employee.email) {
-          // TODO: sendModificationProposalEmail
+          sendLeaveModificationProposalEmail(
+            selectedAbsence,
+            employee,
+            `${currentUser.firstName} ${currentUser.lastName}`,
+            proposalData.startDate,
+            proposalData.endDate,
+            proposalData.reason
+          ).catch(e => console.warn('[Email] Erreur envoi proposition:', e));
         }
       }
       
