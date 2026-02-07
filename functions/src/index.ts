@@ -56,7 +56,6 @@ export const optimizeTours = functions
     const vehicleCount = model.vehicles.length;
 
     console.log(`🚛 Optimisation: ${shipmentCount} livraisons, ${vehicleCount} véhicules`);
-    console.log(`📤 Model reçu du frontend:`, JSON.stringify(model, null, 2));
 
     // Transformer le modèle pour GMPRO avec coûts de pénalité
     const gmproModel: any = {
@@ -83,7 +82,7 @@ export const optimizeTours = functions
       populateTransitionPolylines: false
     };
 
-    console.log(`📤 Model envoyé à GMPRO:`, JSON.stringify(gmproModel, null, 2));
+    // Model envoyé à GMPRO (log supprimé — trop volumineux pour la production)
 
     // 3. Obtenir le token OAuth2 via Application Default Credentials
     const googleAuth = new GoogleAuth({
@@ -112,7 +111,7 @@ export const optimizeTours = functions
     const projectId = "fleet-genius-app-485611";
     const url = `https://routeoptimization.googleapis.com/v1/projects/${projectId}:optimizeTours`;
 
-    console.log(`📡 Appel GMPRO: ${url}`);
+    // Appel GMPRO
 
     try {
       const response = await fetch(url, {
@@ -142,16 +141,14 @@ export const optimizeTours = functions
         );
       }
 
-      // 5. Log succès
-      console.log(`📦 GMPRO Response brute:`, JSON.stringify(responseData, null, 2));
-      
+      // 5. Log succès (résumé uniquement)
       const routeCount = responseData.routes?.length || 0;
       const totalVisits = responseData.routes?.reduce(
         (sum: number, r: any) => sum + (r.visits?.length || 0), 0
       ) || 0;
-      const totalDistance = responseData.routes?.reduce(
+      const totalDistance = (responseData.routes?.reduce(
         (sum: number, r: any) => sum + (r.metrics?.travelDistanceMeters || 0), 0
-      ) / 1000;
+      ) || 0) / 1000;
       const skippedCount = responseData.metrics?.skippedMandatoryShipmentCount || 0;
 
       console.log(`✅ Optimisation: ${routeCount} tournées, ${totalVisits} visits, ${totalDistance.toFixed(1)} km, ${skippedCount} skippés`);

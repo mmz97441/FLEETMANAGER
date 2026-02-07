@@ -493,7 +493,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
                   {hasHub ? (
                     <div className="flex items-center gap-2 text-green-600 text-xs bg-green-50 rounded-lg p-2">
                       <CheckCircle size={14} />
-                      <span>{stat.hub!.name}</span>
+                      <span>{stat.hub?.name}</span>
                     </div>
                   ) : (
                     <div className="flex items-center gap-2 text-amber-600 text-xs bg-amber-50 rounded-lg p-2">

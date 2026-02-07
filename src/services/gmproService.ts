@@ -123,7 +123,7 @@ const groupPackagesByStop = (
     if (!groups.has(key)) {
       groups.set(key, []);
     }
-    groups.get(key)!.push(pkg);
+    groups.get(key)?.push(pkg);
   }
   
   const stopGroups: StopGroup[] = [];
@@ -233,7 +233,7 @@ export const optimizeMultiVehicle = async (
       const shipment: GMPROModel['shipments'][0] = {
         deliveries: [{
           arrivalLocation: {
-            latitude: sg.coords!.lat, longitude: sg.coords!.lng
+            latitude: sg.coords!.lat, longitude: sg.coords!.lng // coords is guaranteed non-null by validStops filter above
           },
           duration: `${serviceTime * 60}s`
         }],
@@ -272,10 +272,10 @@ export const optimizeMultiVehicle = async (
     
     const vehicles = driversVehicles.map((dv) => ({
       startLocation: {
-        latitude: hubCoords!.lat, longitude: hubCoords!.lng
+        latitude: hubCoords.lat, longitude: hubCoords.lng
       },
       endLocation: {
-        latitude: hubCoords!.lat, longitude: hubCoords!.lng
+        latitude: hubCoords.lat, longitude: hubCoords.lng
       },
       label: `${dv.driver.firstName} ${dv.driver.lastName}${dv.vehicle ? ` (${dv.vehicle.plate})` : ''}`
     }));
@@ -362,11 +362,11 @@ export const optimizeMultiVehicle = async (
       
       const distanceKm = route.metrics?.travelDistanceMeters
         ? route.metrics.travelDistanceMeters / 1000
-        : estimateDistanceForStops(stops, hubCoords!);
+        : estimateDistanceForStops(stops, hubCoords);
       
       const durationMin = route.metrics?.travelDuration
         ? parseInt(route.metrics.travelDuration.replace('s', '')) / 60
-        : estimateDurationForStops(stops, hubCoords!);
+        : estimateDurationForStops(stops, hubCoords);
       
       tours.push({
         vehicleIndex: vehicleIdx,

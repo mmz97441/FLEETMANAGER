@@ -331,7 +331,7 @@ export const groupPackagesByAddress = (
     if (!groups.has(key)) {
       groups.set(key, []);
     }
-    groups.get(key)!.push(pkg);
+    groups.get(key)?.push(pkg);
   }
   
   return groups;
