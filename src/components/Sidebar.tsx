@@ -303,8 +303,11 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
           if (!checkAccess(item)) return null;
 
           // Fonction pour obtenir le badge count
-          const getBadgeCount = (badgeKey?: string): number => {
+          // Masque le badge quand l'utilisateur est sur la page concernée
+          const getBadgeCount = (badgeKey?: string, itemId?: ViewState): number => {
             if (!badgeKey || !pendingCounts) return 0;
+            // Si l'utilisateur est sur cette page, pas besoin du badge
+            if (itemId && currentView === itemId) return 0;
             if (badgeKey === 'docs') return pendingDocsCount;
             if (badgeKey === 'leaves') return pendingCounts.leaves;
             if (badgeKey === 'absences') return pendingCounts.absences;
@@ -323,7 +326,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
             const isActiveGroup = visibleSubItems.some(sub => sub.id === currentView);
             
             // Badge du groupe = somme des badges de tous les sous-items visibles
-            const groupBadge = visibleSubItems.reduce((sum, sub) => sum + getBadgeCount(sub.badgeKey), 0);
+            const groupBadge = visibleSubItems.reduce((sum, sub) => sum + getBadgeCount(sub.badgeKey, sub.id), 0);
 
             return (
               <div key={item.id} className="px-3">
@@ -372,7 +375,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
                 <div className={`space-y-1 overflow-hidden transition-all duration-300 ${isOpen || isCollapsed ? 'max-h-[500px] opacity-100' : 'max-h-0 opacity-0'}`}>
                   {visibleSubItems.map(subItem => {
                     const isActive = currentView === subItem.id;
-                    const itemBadge = getBadgeCount(subItem.badgeKey);
+                    const itemBadge = getBadgeCount(subItem.badgeKey, subItem.id);
                     
                     return (
                       <button
