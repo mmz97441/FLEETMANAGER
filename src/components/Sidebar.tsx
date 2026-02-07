@@ -11,13 +11,22 @@ import {
 import { ViewState, User, UserRole } from '../types';
 import { usePermissions, Permission, PermissionKey } from '../usePermissions';
 
+interface PendingCounts {
+  leaves: number;
+  absences: number;
+  issues: number;
+  maintenance: number;
+  quotes: number;
+}
+
 interface SidebarProps {
   currentView: ViewState;
   onChangeView: (view: ViewState) => void;
   isCollapsed: boolean;
   currentUser: User;
   onLogout: () => void;
-  pendingDocsCount?: number; // Nombre de documents en attente de signature
+  pendingDocsCount?: number;
+  pendingCounts?: PendingCounts;
 }
 
 // Structure de menu basée sur les permissions
@@ -40,7 +49,7 @@ type NavGroup = {
   badgeKey?: string;
 };
 
-const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapsed, currentUser, onLogout, pendingDocsCount = 0 }) => {
+const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapsed, currentUser, onLogout, pendingDocsCount = 0, pendingCounts }) => {
   const [openGroups, setOpenGroups] = useState<string[]>(['flotte', 'equipe']);
   
   // Hook des permissions
@@ -78,8 +87,8 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
       items: [
         { id: 'vehicles', label: 'Véhicules', icon: Truck, permission: Permission.VEHICLES_VIEW },
         { id: 'fuel', label: 'Carburant', icon: Droplet, permission: Permission.FUEL_VIEW },
-        { id: 'maintenance', label: 'Maintenance', icon: Wrench, permission: Permission.MAINTENANCE_VIEW },
-        { id: 'issues', label: 'Incidents', icon: AlertCircle, permission: Permission.ISSUES_VIEW },
+        { id: 'maintenance', label: 'Maintenance', icon: Wrench, permission: Permission.MAINTENANCE_VIEW, badgeKey: 'maintenance' },
+        { id: 'issues', label: 'Incidents', icon: AlertCircle, permission: Permission.ISSUES_VIEW, badgeKey: 'issues' },
       ]
     },
 
@@ -92,7 +101,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
       icon: Euro,
       permission: Permission.QUOTES_VIEW,
       items: [
-        { id: 'quotes', label: 'Demandes & Devis', icon: FileCheck, permission: Permission.QUOTES_VIEW },
+        { id: 'quotes', label: 'Demandes & Devis', icon: FileCheck, permission: Permission.QUOTES_VIEW, badgeKey: 'quotes' },
       ]
     },
 
@@ -129,8 +138,8 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
       badgeKey: 'docs', // Badge sur le groupe si docs en attente
       items: [
         { id: 'drivers', label: 'Chauffeurs', icon: Users, permission: Permission.DRIVERS_VIEW },
-        { id: 'leaves', label: 'Congés', icon: Palmtree, permission: Permission.ABSENCES_VIEW_OWN },
-        { id: 'absences', label: 'Absences', icon: CalendarDays, permission: Permission.ABSENCES_VIEW_OWN },
+        { id: 'leaves', label: 'Congés', icon: Palmtree, permission: Permission.ABSENCES_VIEW_OWN, badgeKey: 'leaves' },
+        { id: 'absences', label: 'Absences', icon: CalendarDays, permission: Permission.ABSENCES_VIEW_OWN, badgeKey: 'absences' },
         { id: 'company_docs', label: 'Documents', icon: FileSignature, permission: Permission.DOCS_VIEW_ALL, badgeKey: 'docs' },
         // Vue spéciale chauffeur pour ses propres documents
         { id: 'documents', label: 'Mes Documents', icon: FileCheck, permission: Permission.DOCS_VIEW_OWN, badgeKey: 'docs' },
@@ -295,8 +304,13 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
 
           // Fonction pour obtenir le badge count
           const getBadgeCount = (badgeKey?: string): number => {
-            if (!badgeKey) return 0;
+            if (!badgeKey || !pendingCounts) return 0;
             if (badgeKey === 'docs') return pendingDocsCount;
+            if (badgeKey === 'leaves') return pendingCounts.leaves;
+            if (badgeKey === 'absences') return pendingCounts.absences;
+            if (badgeKey === 'issues') return pendingCounts.issues;
+            if (badgeKey === 'maintenance') return pendingCounts.maintenance;
+            if (badgeKey === 'quotes') return pendingCounts.quotes;
             return 0;
           };
 
@@ -308,8 +322,8 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
             const isOpen = openGroups.includes(item.id);
             const isActiveGroup = visibleSubItems.some(sub => sub.id === currentView);
             
-            // Badge du groupe = somme des badges des sous-items visibles (ou badge propre du groupe)
-            const groupBadge = getBadgeCount(item.badgeKey);
+            // Badge du groupe = somme des badges de tous les sous-items visibles
+            const groupBadge = visibleSubItems.reduce((sum, sub) => sum + getBadgeCount(sub.badgeKey), 0);
 
             return (
               <div key={item.id} className="px-3">

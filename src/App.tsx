@@ -85,9 +85,10 @@ import { logActivity } from './services/activityLogService';
 import { convertQuoteToPackage } from './services/deliveryService';
 import { ActivityAction, ActivityCategory } from './types';
 
-import { 
-  ViewState, User, UserRole, Vehicle, FuelLog, MaintenanceLog, 
+import {
+  ViewState, User, UserRole, Vehicle, FuelLog, MaintenanceLog,
   Issue, LeaveRequest, QuoteRequest, QuoteStatus, IssueStatus,
+  LeaveStatus, AbsenceStatus,
   CompanyDocument, DocumentAcknowledgment, Absence, AbsenceDocument, AbsenceType
 } from './types';
 
@@ -312,6 +313,15 @@ const App: React.FC = () => {
       return false;
     }).length;
   }, [companyDocuments, documentAcknowledgments, currentUser]);
+
+  // Badges de comptage pour la navigation
+  const pendingCounts = useMemo(() => ({
+    leaves: leaves.filter(l => l.status === LeaveStatus.PENDING).length,
+    absences: absences.filter(a => a.status === AbsenceStatus.PENDING).length,
+    issues: issues.filter(i => i.status === IssueStatus.NEW).length,
+    maintenance: maintenanceLogs.filter(m => m.status === 'Pending').length,
+    quotes: quotes.filter(q => q.status === QuoteStatus.REQUESTED).length,
+  }), [leaves, absences, issues, maintenanceLogs, quotes]);
 
   // Liste complète des documents en attente (pour le modal d'alerte)
   const pendingDocumentsList = useMemo(() => {
@@ -1073,13 +1083,14 @@ const App: React.FC = () => {
 
         {/* Sidebar */}
         <div className={`fixed inset-y-0 left-0 z-50 transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} lg:relative lg:translate-x-0 transition-transform duration-300 ease-in-out`}>
-          <Sidebar 
+          <Sidebar
             currentView={currentView}
             onChangeView={handleViewChange}
             isCollapsed={isSidebarCollapsed}
             currentUser={currentUser}
             onLogout={handleLogout}
             pendingDocsCount={pendingDocumentsCount}
+            pendingCounts={pendingCounts}
           />
         </div>
 
