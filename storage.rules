@@ -34,8 +34,8 @@ service firebase.storage {
     // ============================================================
     // PREUVES DE LIVRAISON (signatures + photos)
     // ============================================================
-    // Structure: pod/{missionId}/{stopId}/signature.png
-    //            pod/{missionId}/{stopId}/photo-{n}.jpg
+    // Chemin: pod/{missionId}/{stopId}/signature.png
+    //         pod/{missionId}/{stopId}/photo-{n}.jpg
     // Lecture : tous les connectés (clients voient les POD de leurs colis)
     // Écriture : admin + chauffeurs (seuls à livrer)
     match /pod/{allPaths=**} {
@@ -46,8 +46,22 @@ service firebase.storage {
     }
 
     // ============================================================
+    // MANIFESTES D'ENLÈVEMENT (signatures pickup)
+    // ============================================================
+    // Chemin: pickups/{missionId}/{stopId}/client-signature.png
+    // Lecture : tous les connectés
+    // Écriture : admin + chauffeurs
+    match /pickups/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if (isAdminRole() || isDriver())
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    // ============================================================
     // PHOTOS INCIDENTS
     // ============================================================
+    // Chemin: issues/{vehicleId}/{timestamp}_{filename}
     // Lecture : tous les connectés
     // Écriture : admin + chauffeurs + mécaniciens (signalent des incidents)
     match /issues/{allPaths=**} {
@@ -58,11 +72,25 @@ service firebase.storage {
     }
 
     // ============================================================
-    // PHOTOS CARBURANT
+    // FACTURES INCIDENTS (devis/factures mécanicien)
     // ============================================================
+    // Chemin: invoices/{vehicleId}/{timestamp}_{filename}
+    // Lecture : tous les connectés
+    // Écriture : admin + mécaniciens
+    match /invoices/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if (isAdminRole() || isMechanic())
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    // ============================================================
+    // PHOTOS CARBURANT (tickets de caisse)
+    // ============================================================
+    // Chemin: fuel-receipts/{vehicleId}/{timestamp}_{filename}
     // Lecture : tous les connectés internes
     // Écriture : admin + chauffeurs (saisissent les pleins)
-    match /fuel/{allPaths=**} {
+    match /fuel-receipts/{allPaths=**} {
       allow read: if request.auth != null;
       allow write: if (isAdminRole() || isDriver())
         && request.resource.size < 10 * 1024 * 1024
@@ -72,6 +100,7 @@ service firebase.storage {
     // ============================================================
     // DOCUMENTS ABSENCES
     // ============================================================
+    // Chemin: absences/{absenceId}/{timestamp}_{filename}
     // Lecture : tous les connectés
     // Écriture : tous les internes (chaque employé peut joindre un justificatif)
     match /absences/{allPaths=**} {
