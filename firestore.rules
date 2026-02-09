@@ -106,18 +106,12 @@ service cloud.firestore {
     }
 
     // ============================================================
-    // CARBURANT (deux collections pour rétrocompatibilité)
+    // CARBURANT
     // ============================================================
     // Lecture : tous les connectés internes
     // Création : admin + chauffeurs (saisie de pleins)
     // Modification : admin uniquement
     // Suppression : admin uniquement
-    match /fuelLogs/{logId} {
-      allow read: if isInternalUser();
-      allow create: if isAdminRole() || isDriver();
-      allow update: if isAdminRole();
-      allow delete: if isAdminRole();
-    }
     match /fuel_logs/{logId} {
       allow read: if isInternalUser();
       allow create: if isAdminRole() || isDriver();
@@ -126,18 +120,12 @@ service cloud.firestore {
     }
 
     // ============================================================
-    // MAINTENANCE (deux collections pour rétrocompatibilité)
+    // MAINTENANCE
     // ============================================================
-    // Lecture : admin + mécaniciens
+    // Lecture : tous les internes
     // Création : admin + mécaniciens
     // Modification : admin + mécaniciens
     // Suppression : admin uniquement
-    match /maintenanceLogs/{logId} {
-      allow read: if isInternalUser();
-      allow create: if isAdminRole() || isMechanic();
-      allow update: if isAdminRole() || isMechanic();
-      allow delete: if isAdminRole();
-    }
     match /maintenance_logs/{logId} {
       allow read: if isInternalUser();
       allow create: if isAdminRole() || isMechanic();
