@@ -23,6 +23,8 @@ import {
   getMechanicEmails 
 } from '../services/emailService';
 import { usePermissions, Permission } from '../usePermissions';
+import { normalizeRole } from '../utils/roleUtils';
+import { useToast } from './shared/Toast';
 
 // ============================================================================
 // TYPES
@@ -46,19 +48,6 @@ type SortOrder = 'asc' | 'desc';
 // ============================================================================
 // HELPERS
 // ============================================================================
-
-const normalizeRole = (role: string | UserRole): UserRole => {
-  const r = String(role).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  if (r.includes('admin')) return UserRole.ADMIN;
-  if (r.includes('presiden')) return UserRole.PRESIDENT;
-  if (r.includes('direction') || r.includes('directeur')) return UserRole.DIRECTOR;
-  if (r.includes('secret')) return UserRole.SECRETARY;
-  if (r.includes('chauff') || r.includes('driver')) return UserRole.DRIVER;
-  if (r.includes('mecan') || r.includes('mech')) return UserRole.MECHANIC;
-  if (r.includes('client')) return UserRole.CLIENT;
-  if (r.includes('stag') || r.includes('intern')) return UserRole.INTERN;
-  return role as UserRole;
-};
 
 const getPriorityOrder = (priority: string): number => {
   switch(priority) {
@@ -113,6 +102,8 @@ const IssueManager: React.FC<IssueManagerProps> = ({
   onAddIssue, onResolveIssue, onAddMaintenance, preselectedVehicleId 
 }) => {
   
+  const { showToast } = useToast();
+
   // === PERMISSIONS ===
   const { hasPermission } = usePermissions();
   
@@ -351,7 +342,7 @@ const IssueManager: React.FC<IssueManagerProps> = ({
     if (e.target.files && e.target.files.length > 0) {
       const file = e.target.files[0];
       if (file.size > 5 * 1024 * 1024) {
-        alert("L'image est trop volumineuse (Max 5Mo)");
+        showToast("L'image est trop volumineuse (Max 5Mo)", 'warning');
         return;
       }
       const previewUrl = URL.createObjectURL(file);
@@ -432,7 +423,7 @@ const IssueManager: React.FC<IssueManagerProps> = ({
       setSelectedFiles([]);
     } catch (error) {
       console.error("Erreur création incident:", error);
-      alert("Erreur lors de l'envoi du rapport.");
+      showToast("Erreur lors de l'envoi du rapport.", 'error');
     } finally {
       setIsUploading(false);
     }

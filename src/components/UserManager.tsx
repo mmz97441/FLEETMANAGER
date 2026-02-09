@@ -4,11 +4,13 @@ import { User, UserRole } from '../types';
 import { Users, Plus, Shield, User as UserIcon, Settings, Briefcase, Truck, Edit, Save, X, Trash2, Mail, Search, Filter, LayoutGrid, List, Building2, UserPlus, AlertTriangle, CheckCircle, Calendar, HeartPulse, Send, Ban, RefreshCw, Key, MoreVertical, GraduationCap, Lock, AlertCircle } from 'lucide-react';
 import Modal from './shared/Modal';
 import ConfirmModal from './ConfirmModal';
+import { useToast } from './shared/Toast';
 import { sendUserInvitationEmail } from '../services/emailService';
 import { createInvitation, getActivationUrl, resendInvitation } from '../services/invitationService';
 import { toggleUserStatus, forcePasswordReset } from '../services/cloudFunctions';
 import { usePermissions, Permission } from '../usePermissions';
 import { validateName, validateEmail, validatePhone, ValidationResult } from '../utils/validation';
+import { normalizeRole } from '../utils/roleUtils';
 
 interface UserManagerProps {
   users: User[];
@@ -19,6 +21,8 @@ interface UserManagerProps {
 }
 
 const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser, onUpdateUser, onDeleteUser }) => {
+  const { showToast } = useToast();
+
   // === PERMISSIONS ===
   const { hasPermission } = usePermissions();
   
@@ -136,14 +140,9 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
     return Object.keys(errors).length === 0;
   };
 
-  // --- HELPER: NORMALISATION DES RÔLES ---
-  const normalizeRole = (role: string | undefined) => {
-      if (!role) return '';
-      return String(role).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  };
-
-  const isDriver = (role: string) => normalizeRole(role).includes('chauff') || normalizeRole(role).includes('driver');
-  const isClient = (role: string) => normalizeRole(role).includes('client');
+  // --- HELPER: CLASSIFICATION DES RÔLES ---
+  const isDriver = (role: string) => normalizeRole(role) === UserRole.DRIVER;
+  const isClient = (role: string) => normalizeRole(role) === UserRole.CLIENT;
 
   // --- STATS ---
   const stats = useMemo(() => {
@@ -369,7 +368,7 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
             
           } catch (error: any) {
             console.error('❌ Erreur création utilisateur:', error);
-            alert(`Erreur lors de la création de l'utilisateur: ${error.message}\n\nVeuillez réessayer.`);
+            showToast(`Erreur lors de la création de l'utilisateur: ${error.message}. Veuillez réessayer.`, 'error');
             // Ne pas fermer la modale en cas d'erreur
             setIsConfirmOpen(false);
             setPendingAction(null);
@@ -422,13 +421,13 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
           result.expiresAt
         );
         
-        alert(`✅ Invitation renvoyée à ${user.email}`);
+        showToast(`Invitation renvoyée à ${user.email}`, 'success');
       } else {
-        alert('❌ Erreur lors du renvoi de l\'invitation');
+        showToast('Erreur lors du renvoi de l\'invitation', 'error');
       }
     } catch (error) {
       console.error('Erreur renvoi invitation:', error);
-      alert('❌ Erreur lors du renvoi de l\'invitation');
+      showToast('Erreur lors du renvoi de l\'invitation', 'error');
     } finally {
       setActionLoading(null);
     }
@@ -450,14 +449,14 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
       const result = await toggleUserStatus(user.id, user.email, !isCurrentlyDisabled);
       
       if (result.success) {
-        alert(`✅ ${result.message}`);
+        showToast(result.message, 'success');
         // Rafraîchir la liste (le listener Firestore devrait le faire automatiquement)
       } else {
-        alert(`❌ ${result.message}`);
+        showToast(result.message, 'error');
       }
     } catch (error) {
       console.error('Erreur toggle status:', error);
-      alert('❌ Erreur lors de la modification du statut');
+      showToast('Erreur lors de la modification du statut', 'error');
     } finally {
       setActionLoading(null);
     }
@@ -476,13 +475,13 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
       const result = await forcePasswordReset(user.id, user.email);
       
       if (result.success) {
-        alert(`✅ ${result.message}`);
+        showToast(result.message, 'success');
       } else {
-        alert(`❌ ${result.message}`);
+        showToast(result.message, 'error');
       }
     } catch (error) {
       console.error('Erreur reset password:', error);
-      alert('❌ Erreur lors de l\'envoi du reset');
+      showToast('Erreur lors de l\'envoi du reset', 'error');
     } finally {
       setActionLoading(null);
     }

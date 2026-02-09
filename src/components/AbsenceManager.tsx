@@ -23,6 +23,8 @@ import {
 } from '../services/emailService';
 import { notifyLeaveRequest } from '../services/notificationService';
 import { usePermissions, Permission } from '../usePermissions';
+import { normalizeRole } from '../utils/roleUtils';
+import { useToast } from './shared/Toast';
 
 // ============================================================================
 // TYPES & INTERFACES
@@ -48,18 +50,14 @@ type CalendarView = 'month' | 'week';
 // HELPERS
 // ============================================================================
 
-const normalizeRole = (role: string | UserRole): string => {
-  return String(role).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-};
-
 const canManageAbsences = (user: User): boolean => {
   const r = normalizeRole(user.role);
-  return r.includes('admin') || r.includes('presid') || r.includes('direct') || r.includes('secret');
+  return r === UserRole.ADMIN || r === UserRole.PRESIDENT || r === UserRole.DIRECTOR || r === UserRole.SECRETARY;
 };
 
 const canValidateAbsences = (user: User): boolean => {
   const r = normalizeRole(user.role);
-  return r.includes('admin') || r.includes('presid') || r.includes('direct') || r.includes('secret');
+  return r === UserRole.ADMIN || r === UserRole.PRESIDENT || r === UserRole.DIRECTOR || r === UserRole.SECRETARY;
 };
 
 const getAbsenceTypeIcon = (type: AbsenceType) => {
@@ -185,6 +183,8 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
   defaultTypeFilter,
   customTitle
 }) => {
+  const { showToast } = useToast();
+
   // --- STATE ---
   const [viewMode, setViewMode] = useState<ViewMode>('today');
   const [calendarView, setCalendarView] = useState<CalendarView>('month');
@@ -539,7 +539,7 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
     try {
       if (editingAbsence) {
         await onUpdateAbsence(absenceData);
-        alert('✅ Demande mise à jour avec succès !');
+        showToast('Demande mise à jour avec succès !', 'success');
       } else {
         await onAddAbsence(absenceData);
         
@@ -588,13 +588,13 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
           }
         }
         
-        alert('✅ Demande de congé créée avec succès !');
+        showToast('Demande de congé créée avec succès !', 'success');
       }
 
       setIsFormModalOpen(false);
     } catch (error) {
       console.error('❌ Erreur lors de la sauvegarde:', error);
-      alert('❌ Erreur lors de la sauvegarde de la demande. Veuillez réessayer.');
+      showToast('Erreur lors de la sauvegarde de la demande. Veuillez réessayer.', 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -650,7 +650,7 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
   const handleProposeModification = async () => {
     if (!selectedAbsence || !proposalData.startDate || !proposalData.endDate) return;
     if (!proposalData.reason.trim()) {
-      alert('Veuillez indiquer la raison de la modification proposée.');
+      showToast('Veuillez indiquer la raison de la modification proposée.', 'warning');
       return;
     }
     
@@ -700,12 +700,12 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
         }
       }
       
-      alert('✅ Proposition de modification envoyée au collaborateur !');
+      showToast('Proposition de modification envoyée au collaborateur !', 'success');
       setIsProposalModalOpen(false);
       setIsDetailModalOpen(false);
     } catch (error) {
       console.error('Erreur proposition modification:', error);
-      alert('❌ Erreur lors de l\'envoi de la proposition');
+      showToast('Erreur lors de l\'envoi de la proposition', 'error');
     } finally {
       setIsProposing(false);
     }
@@ -758,11 +758,11 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
         ).catch(e => console.warn('[Notif] Erreur:', e));
       }
       
-      alert('✅ Modification acceptée ! Vos congés sont maintenant validés.');
+      showToast('Modification acceptée ! Vos congés sont maintenant validés.', 'success');
       setIsDetailModalOpen(false);
     } catch (error) {
       console.error('Erreur acceptation proposition:', error);
-      alert('❌ Erreur lors de l\'acceptation');
+      showToast('Erreur lors de l\'acceptation', 'error');
     }
   };
 
@@ -792,11 +792,11 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
         ).catch(e => console.warn('[Notif] Erreur:', e));
       }
       
-      alert('Modification refusée. La demande est de nouveau en attente.');
+      showToast('Modification refusée. La demande est de nouveau en attente.', 'info');
       setIsDetailModalOpen(false);
     } catch (error) {
       console.error('Erreur refus proposition:', error);
-      alert('❌ Erreur lors du refus');
+      showToast('Erreur lors du refus', 'error');
     }
   };
 

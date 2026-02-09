@@ -8,6 +8,7 @@
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import { GoogleAuth } from "google-auth-library";
+import { GoogleGenAI } from "@google/genai";
 
 // Initialiser Firebase Admin
 admin.initializeApp();
@@ -40,6 +41,16 @@ export const optimizeTours = functions
       throw new functions.https.HttpsError(
         "unauthenticated",
         "Vous devez être connecté pour optimiser les tournées."
+      );
+    }
+
+    // 1b. Vérifier le rôle (admin/président/directeur uniquement)
+    const callerDoc = await db.collection("users").doc(context.auth.uid).get();
+    const callerRole = String(callerDoc.data()?.role || "").toLowerCase();
+    if (!/(admin|pr[eé]sid|direct|secr[eé]tariat)/.test(callerRole)) {
+      throw new functions.https.HttpsError(
+        "permission-denied",
+        "Vous n'avez pas les droits pour optimiser les tournées."
       );
     }
 
@@ -978,6 +989,95 @@ export const activateAccount = functions
       throw new functions.https.HttpsError(
         "internal",
         `Erreur lors de l'activation: ${error.message}`
+      );
+    }
+  });
+
+// ============================================================================
+// PROXY GEMINI AI (clé API côté serveur uniquement)
+// ============================================================================
+
+/**
+ * Proxy sécurisé pour l'API Gemini.
+ * La clé API est stockée côté serveur (env GEMINI_API_KEY),
+ * jamais exposée dans le bundle client.
+ */
+export const askFleetGenius = functions
+  .region("europe-west1")
+  .runWith({ timeoutSeconds: 60, memory: "256MB" })
+  .https.onCall(async (data, context) => {
+    // 1. Vérifier l'authentification
+    if (!context.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "Vous devez être connecté pour utiliser l'assistant IA."
+      );
+    }
+
+    // 2. Vérifier le rôle (admin uniquement)
+    const callerDoc = await db.collection("users").doc(context.auth.uid).get();
+    const callerRole = String(callerDoc.data()?.role || "").toLowerCase();
+    if (!/(admin|pr[eé]sid|direct|secr[eé]tariat)/.test(callerRole)) {
+      throw new functions.https.HttpsError(
+        "permission-denied",
+        "Vous n'avez pas les droits pour utiliser l'assistant IA."
+      );
+    }
+
+    const { userPrompt, vehiclesSummary, fuelLogsSummary, maintenanceLogsSummary, usersCount } = data;
+
+    if (!userPrompt || typeof userPrompt !== "string") {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Le prompt utilisateur est requis."
+      );
+    }
+
+    // 3. Appeler Gemini avec la clé serveur
+    const apiKey = process.env.GEMINI_API_KEY || functions.config().gemini?.api_key;
+    if (!apiKey) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Clé API Gemini non configurée côté serveur."
+      );
+    }
+
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+
+      const SYSTEM_INSTRUCTION = `
+You are FleetGenius, an expert AI transport logistics assistant.
+Your goal is to help the CEO make decisions to optimize costs, improve safety, and manage maintenance.
+
+Data Context:
+- Vehicles: ${JSON.stringify(vehiclesSummary || [])}
+- Recent Fuel Logs (Last 10): ${JSON.stringify(fuelLogsSummary || [])}
+- Recent Maintenance (Last 5): ${JSON.stringify(maintenanceLogsSummary || [])}
+- Users count: ${usersCount || 0}
+
+Rules:
+1. Be concise, professional, and actionable.
+2. If asked about "problems", check vehicles with status 'ISSUE' or 'MAINTENANCE'.
+3. Use Markdown formatting.
+4. Reply in French.
+      `;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-2.0-flash",
+        contents: userPrompt,
+        config: {
+          systemInstruction: SYSTEM_INSTRUCTION,
+        },
+      });
+
+      return {
+        text: response.text || "Désolé, je n'ai pas pu analyser les données pour le moment.",
+      };
+    } catch (error: any) {
+      console.error("❌ Erreur Gemini:", error);
+      throw new functions.https.HttpsError(
+        "internal",
+        "Erreur de connexion avec le module IA."
       );
     }
   });

@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { ViewState, User, UserRole } from '../types';
 import { usePermissions, Permission, PermissionKey } from '../usePermissions';
+import { normalizeRole } from '../utils/roleUtils';
 
 interface PendingCounts {
   leaves: number;
@@ -238,33 +239,28 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
     return true;
   };
 
-  // Helper pour normaliser les rôles (pour l'affichage)
-  const normalizeRoleString = (role: string | UserRole) => {
-    return String(role).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  };
-
   // Label d'affichage du rôle
   const displayRoleLabel = useMemo(() => {
-    const r = normalizeRoleString(currentUser.role);
-    if (r.includes('direction') || r.includes('directeur')) return "Direction";
-    if (r.includes('presiden')) return "Présidence";
-    if (r.includes('secret')) return "Secrétariat";
-    if (r.includes('chauff') || r.includes('driver')) return "Chauffeur";
-    if (r.includes('mecan') || r.includes('mech')) return "Mécanicien";
-    if (r.includes('admin')) return "Admin";
-    if (r.includes('client')) return "Client";
-    if (r.includes('stag') || r.includes('intern')) return "Stagiaire";
+    const r = normalizeRole(currentUser.role);
+    if (r === UserRole.DIRECTOR) return "Direction";
+    if (r === UserRole.PRESIDENT) return "Présidence";
+    if (r === UserRole.SECRETARY) return "Secrétariat";
+    if (r === UserRole.DRIVER) return "Chauffeur";
+    if (r === UserRole.MECHANIC) return "Mécanicien";
+    if (r === UserRole.ADMIN) return "Admin";
+    if (r === UserRole.CLIENT) return "Client";
+    if (r === UserRole.INTERN) return "Stagiaire";
     return currentUser.role;
   }, [currentUser.role]);
 
   // Badge couleur selon le rôle
   const getRoleBadgeStyle = () => {
-    const r = normalizeRoleString(currentUser.role);
-    if (r.includes('presiden')) return 'text-amber-300 border-amber-500/50 bg-amber-900/30';
-    if (r.includes('direction') || r.includes('directeur')) return 'text-indigo-300 border-indigo-500/50 bg-indigo-900/30';
-    if (r.includes('secret')) return 'text-purple-300 border-purple-500/50 bg-purple-900/30';
-    if (r.includes('admin')) return 'text-red-300 border-red-500/50 bg-red-900/30';
-    if (r.includes('stag') || r.includes('intern')) return 'text-teal-300 border-teal-500/50 bg-teal-900/30';
+    const r = normalizeRole(currentUser.role);
+    if (r === UserRole.PRESIDENT) return 'text-amber-300 border-amber-500/50 bg-amber-900/30';
+    if (r === UserRole.DIRECTOR) return 'text-indigo-300 border-indigo-500/50 bg-indigo-900/30';
+    if (r === UserRole.SECRETARY) return 'text-purple-300 border-purple-500/50 bg-purple-900/30';
+    if (r === UserRole.ADMIN) return 'text-red-300 border-red-500/50 bg-red-900/30';
+    if (r === UserRole.INTERN) return 'text-teal-300 border-teal-500/50 bg-teal-900/30';
     return 'text-brand-400 border-brand-900 bg-brand-900/50';
   };
 

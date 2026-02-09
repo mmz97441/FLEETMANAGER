@@ -70,16 +70,17 @@ service cloud.firestore {
     // ============================================================
     // Lecture : tous les connectés (nécessaire pour afficher noms, rôles)
     // Création : admin ou soi-même (activation de compte)
-    // Modification : admin ou soi-même (profil)
+    // Modification : admin (tous champs) ou soi-même (profil, SAUF role/isDisabled)
     // Suppression : admin uniquement (Cloud Function préférée)
     match /users/{userId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && (
         request.auth.uid == userId || isAdminRole()
       );
-      allow update: if isAuthenticated() && (
-        request.auth.uid == userId || isAdminRole()
-      );
+      allow update: if isAdminRole()
+        || (isAuthenticated() && request.auth.uid == userId
+            && !request.resource.data.diff(resource.data).affectedKeys()
+                .hasAny(['role', 'isDisabled', 'disabledAt', 'disabledBy']));
       allow delete: if isAdminRole();
     }
 
@@ -92,7 +93,10 @@ service cloud.firestore {
     match /invitations/{invitationId} {
       allow read: if isAuthenticated();
       allow create, delete: if isAdminRole();
-      allow update: if isAuthenticated();
+      // Seuls les champs de consommation sont modifiables (activation de compte)
+      allow update: if isAuthenticated()
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['used', 'usedAt', 'usedBy', 'authUid', 'activationSuccess']);
     }
 
     // ============================================================
@@ -156,7 +160,8 @@ service cloud.firestore {
     // Suppression : admin uniquement
     match /leaves/{leaveId} {
       allow read: if isInternalUser();
-      allow create: if isInternalUser();
+      allow create: if isInternalUser()
+        && request.resource.data.userId == request.auth.uid;
       allow update: if isAdminRole()
         || resource.data.userId == request.auth.uid;
       allow delete: if isAdminRole();
@@ -171,7 +176,8 @@ service cloud.firestore {
     // Suppression : admin ou le créateur (si statut pending)
     match /absences/{absenceId} {
       allow read: if isInternalUser();
-      allow create: if isInternalUser();
+      allow create: if isInternalUser()
+        && request.resource.data.userId == request.auth.uid;
       allow update: if isAdminRole()
         || resource.data.userId == request.auth.uid;
       allow delete: if isAdminRole()
@@ -182,13 +188,15 @@ service cloud.firestore {
     // ============================================================
     // DEVIS / DEMANDES DE TRANSPORT
     // ============================================================
-    // Lecture : admin (tous) + clients (les leurs via subscription filtrée)
-    // Création : admin + clients
+    // Lecture : admin (tous) + clients (les leurs uniquement)
+    // Création : admin + clients (avec validation createdBy)
     // Modification : admin + le client créateur
     // Suppression : admin uniquement
     match /quotes/{quoteId} {
-      allow read: if isAdminRole() || isClient();
-      allow create: if isAdminRole() || isClient();
+      allow read: if isAdminRole()
+        || (isClient() && resource.data.createdBy == request.auth.uid);
+      allow create: if isAdminRole()
+        || (isClient() && request.resource.data.createdBy == request.auth.uid);
       allow update: if isAdminRole()
         || (isClient() && resource.data.createdBy == request.auth.uid);
       allow delete: if isAdminRole();
@@ -197,13 +205,17 @@ service cloud.firestore {
     // ============================================================
     // CARNET D'ADRESSES CLIENTS
     // ============================================================
-    // Lecture : admin + clients
-    // CRUD : admin + clients (chaque client gère ses adresses)
+    // Lecture : admin (tous) + clients (les leurs uniquement)
+    // CRUD : admin + clients (chaque client gère SES adresses via userId)
     match /savedAddresses/{addressId} {
-      allow read: if isAdminRole() || isClient();
-      allow create: if isAdminRole() || isClient();
-      allow update: if isAdminRole() || isClient();
-      allow delete: if isAdminRole() || isClient();
+      allow read: if isAdminRole()
+        || (isClient() && resource.data.userId == request.auth.uid);
+      allow create: if isAdminRole()
+        || (isClient() && request.resource.data.userId == request.auth.uid);
+      allow update: if isAdminRole()
+        || (isClient() && resource.data.userId == request.auth.uid);
+      allow delete: if isAdminRole()
+        || (isClient() && resource.data.userId == request.auth.uid);
     }
 
     // ============================================================
@@ -228,17 +240,18 @@ service cloud.firestore {
     // Modification/suppression : interdite (immuable)
     match /documentAcknowledgments/{ackId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
+      allow create: if isAuthenticated()
+        && request.resource.data.userId == request.auth.uid;
       allow update, delete: if false;
     }
 
     // ============================================================
     // MAIL (Trigger Email extension Firebase)
     // ============================================================
-    // Création : tous les internes + admin (envoi d'emails via template)
+    // Création : internes uniquement (envoi d'emails via template)
     // Lecture : interdite (seule l'extension lit)
     match /mail/{mailId} {
-      allow create: if isAuthenticated();
+      allow create: if isInternalUser() || isAdminRole();
       allow read, update, delete: if false;
     }
 
@@ -348,12 +361,13 @@ service cloud.firestore {
     }
 
     // --- Activity logs (logs d'activité) ---
-    // Création : tout connecté (chaque action est loguée)
-    // Lecture : tous les connectés
+    // Création : tout connecté (avec validation userId = auth.uid)
+    // Lecture : admin uniquement (données sensibles)
     // Modification/suppression : interdite (immuable)
     match /activity_logs/{logId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
+      allow read: if isAdminRole();
+      allow create: if isAuthenticated()
+        && request.resource.data.userId == request.auth.uid;
       allow update, delete: if false;
     }
 

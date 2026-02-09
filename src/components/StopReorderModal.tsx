@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { Mission, MissionStop, MissionStatus } from '../types';
 import Modal from './shared/Modal';
+import { useToast } from './shared/Toast';
 import { 
   GripVertical, ArrowUp, ArrowDown, MapPin, Package as PackageIcon, 
   Clock, Save, RotateCcw, AlertTriangle, CheckCircle, Building2,
@@ -20,6 +21,8 @@ const StopReorderModal: React.FC<StopReorderModalProps> = ({
   mission,
   onSave
 }) => {
+  const { showToast } = useToast();
+
   // État local des stops pour le drag-and-drop
   const [stops, setStops] = useState<MissionStop[]>(() => 
     [...mission.stops].sort((a, b) => a.sequence - b.sequence)
@@ -119,7 +122,7 @@ const StopReorderModal: React.FC<StopReorderModalProps> = ({
       onClose();
     } catch (error) {
       console.error('Erreur sauvegarde:', error);
-      alert('Erreur lors de la sauvegarde. Veuillez réessayer.');
+      showToast('Erreur lors de la sauvegarde. Veuillez réessayer.', 'error');
     } finally {
       setIsSaving(false);
     }

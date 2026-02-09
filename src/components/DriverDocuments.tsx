@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
 import { User } from '../types';
 import { FileText, CheckCircle, AlertTriangle, Upload, Calendar, Clock, Truck } from 'lucide-react';
+import { useToast } from './shared/Toast';
 
 interface DriverDocumentsProps {
   currentUser: User;
 }
 
 const DriverDocuments: React.FC<DriverDocumentsProps> = ({ currentUser }) => {
+  const { showToast } = useToast();
+
   const [lastScanDate, setLastScanDate] = useState<string>(currentUser.driverLicenseScanDate || '2023-01-01');
   const [fcoDate, setFcoDate] = useState<string>(currentUser.fcoDate || '2024-06-01');
   const [isUploading, setIsUploading] = useState(false);
@@ -29,7 +32,7 @@ const DriverDocuments: React.FC<DriverDocumentsProps> = ({ currentUser }) => {
       setTimeout(() => {
           setIsUploading(false);
           setLastScanDate(new Date().toISOString().split('T')[0]);
-          alert("Nouveau scan de permis validé et enregistré !");
+          showToast("Nouveau scan de permis validé et enregistré !", 'success');
       }, 1500);
   };
 

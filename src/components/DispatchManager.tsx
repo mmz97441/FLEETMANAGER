@@ -19,6 +19,7 @@ import { notifyMissionAssigned } from '../services/notificationService';
 import { logActivity } from '../services/activityLogService';
 import { ActivityAction } from '../types';
 import Modal from './shared/Modal';
+import { useToast } from './shared/Toast';
 import {
   Route, Package as PackageIcon, MapPin, Users, Truck, Play,
   CheckCircle, Loader2, AlertTriangle, Zap, Clock, Navigation,
@@ -53,6 +54,8 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
   selectedDate,
   onMissionCreated
 }) => {
+  const { showToast } = useToast();
+
   // États
   const [selectedZone, setSelectedZone] = useState<Zone | null>(null);
   const [selectedDriverIds, setSelectedDriverIds] = useState<Set<string>>(new Set());
@@ -205,7 +208,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
     if (isToday) {
       const minTime = getMinDepartureTime();
       if (plannedDepartureTime < minTime) {
-        alert(`L'heure de départ (${plannedDepartureTime}) est dans le passé. Minimum: ${minTime}`);
+        showToast(`L'heure de départ (${plannedDepartureTime}) est dans le passé. Minimum: ${minTime}`, 'warning');
         setPlannedDepartureTime(minTime);
         return;
       }
@@ -374,7 +377,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
       
     } catch (error) {
       console.error('Dispatch error:', error);
-      alert('Erreur lors du dispatch. Vérifiez la console pour plus de détails.');
+      showToast('Erreur lors du dispatch. Vérifiez la console pour plus de détails.', 'error');
       setIsDispatching(false);
     }
   };

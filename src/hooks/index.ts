@@ -1,9 +1,11 @@
 // Hooks personnalisés - FleetGenius Pro
 
+// Role normalization utility
+export { normalizeRole } from '../utils/roleUtils';
+
 // Véhicules
-export { 
-  useVehicles, 
-  normalizeRole,
+export {
+  useVehicles,
   getDriverId,
   getEffectiveStatus,
   getMaintenanceHealth,

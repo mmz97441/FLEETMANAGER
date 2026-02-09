@@ -18,6 +18,7 @@ import {
   XOctagon, Building2, UserCircle, Shield
 } from 'lucide-react';
 import { User, UserRole } from '../types';
+import { normalizeRole } from '../utils/roleUtils';
 
 interface HelpCenterProps {
   currentUser: User;
@@ -41,14 +42,6 @@ interface GuideItem {
   roles?: string[]; // Si spécifique à certains rôles dans la section
 }
 
-// Helper pour normaliser les rôles
-const normalizeRole = (role: string): string => {
-  if (!role) return '';
-  return role.toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z]/g, '');
-};
-
 const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
   const [activeTab, setActiveTab] = useState<'guide' | 'faq' | 'contact'>('guide');
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
@@ -56,14 +49,14 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
   const [expandedFaq, setExpandedFaq] = useState<number | null>(null);
 
   // Déterminer le profil utilisateur
-  const userRoleNorm = normalizeRole(String(currentUser.role || ''));
-  
-  const isPresident = userRoleNorm.includes('president') || userRoleNorm.includes('gerant');
-  const isDirector = userRoleNorm.includes('directeur') || userRoleNorm.includes('director');
-  const isAdmin = userRoleNorm.includes('admin') || userRoleNorm.includes('secretar') || userRoleNorm.includes('administrat');
-  const isDriver = userRoleNorm.includes('chauffeur') || userRoleNorm.includes('driver') || userRoleNorm.includes('livreur');
-  const isMechanic = userRoleNorm.includes('mecanic') || userRoleNorm.includes('technic') || userRoleNorm.includes('atelier');
-  const isIntern = userRoleNorm.includes('stagiai') || userRoleNorm.includes('intern');
+  const effectiveRole = normalizeRole(String(currentUser.role || ''));
+
+  const isPresident = effectiveRole === UserRole.PRESIDENT;
+  const isDirector = effectiveRole === UserRole.DIRECTOR;
+  const isAdmin = effectiveRole === UserRole.ADMIN || effectiveRole === UserRole.SECRETARY;
+  const isDriver = effectiveRole === UserRole.DRIVER;
+  const isMechanic = effectiveRole === UserRole.MECHANIC;
+  const isIntern = effectiveRole === UserRole.INTERN;
   const isManager = isPresident || isDirector;
   
   // Définir les tags de rôle pour le filtrage

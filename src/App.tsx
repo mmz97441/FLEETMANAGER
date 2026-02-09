@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useEffect, Suspense, lazy } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, Suspense, lazy } from 'react';
 // @ts-ignore
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { auth } from "./firebaseConfig";
@@ -91,6 +91,8 @@ import {
 } from './types';
 
 import { PermissionsProvider } from './usePermissions';
+import { normalizeRole } from './utils/roleUtils';
+import { ToastProvider, useToast } from './components/shared/Toast';
 
 // === Composant de chargement pour Suspense ===
 const PageLoader: React.FC = () => (
@@ -103,6 +105,8 @@ const PageLoader: React.FC = () => (
 );
 
 const App: React.FC = () => {
+  const { showToast } = useToast();
+
   // --- AUTH STATE ---
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
@@ -209,7 +213,7 @@ const App: React.FC = () => {
                 console.error("Aucun profil trouvé pour cet utilisateur (UID: " + firebaseUser.uid + "). Accès refusé.");
                 await signOut(auth);
                 setCurrentUser(null);
-                alert("Votre compte n'est pas associé à un profil autorisé. Contactez l'administrateur si vous pensez qu'il s'agit d'une erreur.");
+                showToast("Votre compte n'est pas associé à un profil autorisé. Contactez l'administrateur si vous pensez qu'il s'agit d'une erreur.", 'error');
             }
 
         } catch (error) {
@@ -273,21 +277,8 @@ const App: React.FC = () => {
   const pendingDocumentsCount = useMemo(() => {
     if (!currentUser) return 0;
     
-    // Helper pour normaliser les rôles
-    const normalizeRole = (role: string | UserRole): UserRole => {
-      const r = String(role).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      if (r.includes('admin')) return UserRole.ADMIN;
-      if (r.includes('presiden')) return UserRole.PRESIDENT;
-      if (r.includes('direction') || r.includes('directeur')) return UserRole.DIRECTOR;
-      if (r.includes('secret')) return UserRole.SECRETARY;
-      if (r.includes('chauff') || r.includes('driver')) return UserRole.DRIVER;
-      if (r.includes('mecan') || r.includes('mech')) return UserRole.MECHANIC;
-      if (r.includes('client')) return UserRole.CLIENT;
-      return role as UserRole;
-    };
-    
     const effectiveRole = normalizeRole(currentUser.role);
-    
+
     // Documents concernant l'utilisateur
     const myDocs = companyDocuments.filter(doc => {
       if (!doc.isActive) return false;
@@ -321,20 +312,8 @@ const App: React.FC = () => {
   const pendingDocumentsList = useMemo(() => {
     if (!currentUser) return [];
     
-    const normalizeRole = (role: string | UserRole): UserRole => {
-      const r = String(role).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      if (r.includes('admin')) return UserRole.ADMIN;
-      if (r.includes('presiden')) return UserRole.PRESIDENT;
-      if (r.includes('direction') || r.includes('directeur')) return UserRole.DIRECTOR;
-      if (r.includes('secret')) return UserRole.SECRETARY;
-      if (r.includes('chauff') || r.includes('driver')) return UserRole.DRIVER;
-      if (r.includes('mecan') || r.includes('mech')) return UserRole.MECHANIC;
-      if (r.includes('client')) return UserRole.CLIENT;
-      return role as UserRole;
-    };
-    
     const effectiveRole = normalizeRole(currentUser.role);
-    
+
     const myDocs = companyDocuments.filter(doc => {
       if (!doc.isActive) return false;
       if (doc.targetRoles.length === 0) return true;
@@ -368,183 +347,217 @@ const App: React.FC = () => {
     }
   }, [currentUser, pendingDocumentsList.length, documentAlertDismissed]);
 
-  // --- HANDLERS ---
-  
-  const handleViewChange = (view: ViewState) => {
+  // --- HANDLERS (stabilisés avec useCallback pour éviter les re-renders) ---
+
+  const handleViewChange = useCallback((view: ViewState) => {
     if (view !== 'issues') {
         setTargetIssueVehicleId(null);
     }
     setCurrentView(view);
     setIsMobileMenuOpen(false);
-  };
+  }, []);
 
-  const handleNavigateToVehicleIssues = (vehicleId: string) => {
+  const handleNavigateToVehicleIssues = useCallback((vehicleId: string) => {
       setTargetIssueVehicleId(vehicleId);
       setCurrentView('issues');
-  };
+  }, []);
 
-  const handleLogout = async () => {
+  const handleLogout = useCallback(async () => {
     try {
       await signOut(auth);
     } catch (error) {
       console.error("Logout failed", error);
     }
-  };
+  }, []);
 
   // Vehicles
-  const handleAddVehicle = async (vehicle: Vehicle) => {
-    await addVehicleToFirestore(vehicle);
-    if (currentUser) {
-      logActivity(currentUser, ActivityAction.VEHICLE_CREATED, {
-        targetType: 'vehicle',
-        targetId: vehicle.id,
-        targetName: `${vehicle.plate} - ${vehicle.brand} ${vehicle.model}`
-      });
+  const handleAddVehicle = useCallback(async (vehicle: Vehicle) => {
+    try {
+      await addVehicleToFirestore(vehicle);
+      if (currentUser) {
+        logActivity(currentUser, ActivityAction.VEHICLE_CREATED, {
+          targetType: 'vehicle',
+          targetId: vehicle.id,
+          targetName: `${vehicle.plate} - ${vehicle.make || ''} ${vehicle.model}`
+        });
+      }
+    } catch (error) {
+      console.error("Erreur ajout véhicule:", error);
     }
-  };
-  const handleUpdateVehicle = async (vehicle: Vehicle) => {
-    await updateVehicleInFirestore(vehicle);
-    if (currentUser) {
-      logActivity(currentUser, ActivityAction.VEHICLE_UPDATED, {
-        targetType: 'vehicle',
-        targetId: vehicle.id,
-        targetName: `${vehicle.plate} - ${vehicle.brand} ${vehicle.model}`
-      });
+  }, [currentUser]);
+
+  const handleUpdateVehicle = useCallback(async (vehicle: Vehicle) => {
+    try {
+      await updateVehicleInFirestore(vehicle);
+      if (currentUser) {
+        logActivity(currentUser, ActivityAction.VEHICLE_UPDATED, {
+          targetType: 'vehicle',
+          targetId: vehicle.id,
+          targetName: `${vehicle.plate} - ${vehicle.make || ''} ${vehicle.model}`
+        });
+      }
+    } catch (error) {
+      console.error("Erreur mise à jour véhicule:", error);
     }
-  };
-  const handleDeleteVehicle = async (id: string) => {
-    const vehicle = vehicles.find(v => v.id === id);
-    await deleteVehicleFromFirestore(id);
-    if (currentUser && vehicle) {
-      logActivity(currentUser, ActivityAction.VEHICLE_DELETED, {
-        targetType: 'vehicle',
-        targetId: id,
-        targetName: `${vehicle.plate} - ${vehicle.brand} ${vehicle.model}`
-      });
+  }, [currentUser]);
+
+  const handleDeleteVehicle = useCallback(async (id: string) => {
+    try {
+      const vehicle = vehicles.find(v => v.id === id);
+      await deleteVehicleFromFirestore(id);
+      if (currentUser && vehicle) {
+        logActivity(currentUser, ActivityAction.VEHICLE_DELETED, {
+          targetType: 'vehicle',
+          targetId: id,
+          targetName: `${vehicle.plate} - ${vehicle.make || ''} ${vehicle.model}`
+        });
+      }
+    } catch (error) {
+      console.error("Erreur suppression véhicule:", error);
     }
-  };
-  const handleSelectVehicle = (id: string) => {
+  }, [currentUser, vehicles]);
+
+  const handleSelectVehicle = useCallback((id: string) => {
     setSelectedVehicleId(id);
-  };
-  const closeVehicleDetail = () => {
+  }, []);
+
+  const closeVehicleDetail = useCallback(() => {
     setSelectedVehicleId(null);
-  };
+  }, []);
 
   // Fuel
-  const handleAddFuelLog = async (log: FuelLog) => {
-    await addFuelLogToFirestore(log);
-    if (currentUser) {
-      const vehicle = vehicles.find(v => v.id === log.vehicleId);
-      logActivity(currentUser, ActivityAction.FUEL_CREATED, {
-        targetType: 'fuel',
-        targetId: log.id,
-        targetName: vehicle ? `${vehicle.plate} - ${log.volume}L` : `${log.volume}L`,
-        details: {
-          metadata: { volume: log.volume, cost: log.cost, mileage: log.mileage }
-        }
-      });
+  const handleAddFuelLog = useCallback(async (log: FuelLog) => {
+    try {
+      await addFuelLogToFirestore(log);
+      if (currentUser) {
+        const vehicle = vehicles.find(v => v.id === log.vehicleId);
+        logActivity(currentUser, ActivityAction.FUEL_CREATED, {
+          targetType: 'fuel',
+          targetId: log.id,
+          targetName: vehicle ? `${vehicle.plate} - ${log.volume}L` : `${log.volume}L`,
+          details: {
+            metadata: { volume: log.volume, cost: log.cost, mileage: log.mileage }
+          }
+        });
+      }
+    } catch (error) {
+      console.error("Erreur ajout carburant:", error);
     }
-  };
+  }, [currentUser, vehicles]);
 
-  const handleUpdateFuelLog = async (log: FuelLog) => {
-    await updateFuelLogInFirestore(log);
-    if (currentUser) {
-      const vehicle = vehicles.find(v => v.id === log.vehicleId);
-      logActivity(currentUser, ActivityAction.FUEL_UPDATED, {
-        targetType: 'fuel',
-        targetId: log.id,
-        targetName: vehicle ? `${vehicle.plate} - ${log.volume}L` : `${log.volume}L`,
-        details: {
-          metadata: { volume: log.volume, cost: log.cost, mileage: log.mileage }
-        }
-      });
+  const handleUpdateFuelLog = useCallback(async (log: FuelLog) => {
+    try {
+      await updateFuelLogInFirestore(log);
+      if (currentUser) {
+        const vehicle = vehicles.find(v => v.id === log.vehicleId);
+        logActivity(currentUser, ActivityAction.FUEL_UPDATED, {
+          targetType: 'fuel',
+          targetId: log.id,
+          targetName: vehicle ? `${vehicle.plate} - ${log.volume}L` : `${log.volume}L`,
+          details: {
+            metadata: { volume: log.volume, cost: log.cost, mileage: log.mileage }
+          }
+        });
+      }
+    } catch (error) {
+      console.error("Erreur mise à jour carburant:", error);
     }
-  };
+  }, [currentUser, vehicles]);
 
   // Maintenance
-  const handleAddMaintenance = async (log: MaintenanceLog) => {
-    console.log("Add Maintenance not fully implemented in firestore service yet", log);
-  };
+  const handleAddMaintenance = useCallback(async (log: MaintenanceLog) => {
+    try {
+      // TODO: implémenter addMaintenanceLogToFirestore dans le service
+      console.warn("handleAddMaintenance: opération non implémentée", log.id);
+    } catch (error) {
+      console.error("Erreur ajout maintenance:", error);
+    }
+  }, []);
 
   // Issues
-  const handleAddIssue = async (issue: Issue) => {
-    setIssues(prev => [issue, ...prev]); 
-    await addIssueToFirestore(issue);
-    if (currentUser) {
-      const vehicle = vehicles.find(v => v.id === issue.vehicleId);
-      logActivity(currentUser, ActivityAction.ISSUE_CREATED, {
-        targetType: 'issue',
-        targetId: issue.id,
-        targetName: vehicle ? `${vehicle.plate} - ${issue.title}` : issue.title
-      });
+  const handleAddIssue = useCallback(async (issue: Issue) => {
+    try {
+      await addIssueToFirestore(issue);
+      if (currentUser) {
+        const vehicle = vehicles.find(v => v.id === issue.vehicleId);
+        logActivity(currentUser, ActivityAction.ISSUE_CREATED, {
+          targetType: 'issue',
+          targetId: issue.id,
+          targetName: vehicle ? `${vehicle.plate} - ${issue.description}` : issue.description
+        });
+      }
+    } catch (error) {
+      console.error("Erreur ajout incident:", error);
     }
-  };
+  }, [currentUser, vehicles]);
 
-  const handleResolveIssue = async (id: string, details?: any) => {
-    setIssues(prev => prev.map(i => i.id === id ? { ...i, ...details } : i));
-    const issueToUpdate = issues.find(i => i.id === id);
-    if (issueToUpdate) {
-        const updatedIssue = { ...issueToUpdate, ...details };
-        await updateIssueInFirestore(updatedIssue);
-        if (currentUser) {
-          const vehicle = vehicles.find(v => v.id === issueToUpdate.vehicleId);
-          logActivity(currentUser, ActivityAction.ISSUE_RESOLVED, {
-            targetType: 'issue',
-            targetId: id,
-            targetName: vehicle ? `${vehicle.plate} - ${issueToUpdate.title}` : issueToUpdate.title
-          });
-        }
+  const handleResolveIssue = useCallback(async (id: string, details?: Record<string, unknown>) => {
+    try {
+      const issueToUpdate = issues.find(i => i.id === id);
+      if (issueToUpdate) {
+          const updatedIssue = { ...issueToUpdate, ...details };
+          await updateIssueInFirestore(updatedIssue);
+          if (currentUser) {
+            const vehicle = vehicles.find(v => v.id === issueToUpdate.vehicleId);
+            logActivity(currentUser, ActivityAction.ISSUE_RESOLVED, {
+              targetType: 'issue',
+              targetId: id,
+              targetName: vehicle ? `${vehicle.plate} - ${issueToUpdate.description}` : issueToUpdate.description
+            });
+          }
+      }
+    } catch (error) {
+      console.error("Erreur résolution incident:", error);
     }
-  };
+  }, [currentUser, vehicles, issues]);
 
   // Users
-  const handleAddUser = async (newUser: User) => {
-    await createUserProfile(newUser);
-    if (currentUser) {
-      logActivity(currentUser, ActivityAction.USER_CREATED, {
-        targetType: 'user',
-        targetId: newUser.id,
-        targetName: `${newUser.firstName} ${newUser.lastName} (${newUser.role})`
-      });
+  const handleAddUser = useCallback(async (newUser: User) => {
+    try {
+      await createUserProfile(newUser);
+      if (currentUser) {
+        logActivity(currentUser, ActivityAction.USER_CREATED, {
+          targetType: 'user',
+          targetId: newUser.id,
+          targetName: `${newUser.firstName} ${newUser.lastName} (${newUser.role})`
+        });
+      }
+    } catch (error) {
+      console.error("Erreur ajout utilisateur:", error);
     }
-  };
+  }, [currentUser]);
 
-  const handleUpdateUser = async (updatedUser: User) => {
-    setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
-    await updateUserProfile(updatedUser);
-    if (currentUser) {
-      logActivity(currentUser, ActivityAction.USER_UPDATED, {
-        targetType: 'user',
-        targetId: updatedUser.id,
-        targetName: `${updatedUser.firstName} ${updatedUser.lastName}`
-      });
+  const handleUpdateUser = useCallback(async (updatedUser: User) => {
+    try {
+      await updateUserProfile(updatedUser);
+      if (currentUser) {
+        logActivity(currentUser, ActivityAction.USER_UPDATED, {
+          targetType: 'user',
+          targetId: updatedUser.id,
+          targetName: `${updatedUser.firstName} ${updatedUser.lastName}`
+        });
+      }
+    } catch (error) {
+      console.error("Erreur mise à jour utilisateur:", error);
     }
-  };
+  }, [currentUser]);
 
-  const handleDeleteUser = async (userId: string, email?: string) => {
-    // Optimistic update
-    setUsers(prev => prev.filter(u => u.id !== userId));
-    
-    // Trouver l'utilisateur avant suppression pour le log
+  const handleDeleteUser = useCallback(async (userId: string, email?: string) => {
     const userToDelete = users.find(u => u.id === userId);
     const userEmail = email || userToDelete?.email;
-    
+
     try {
-      // Essayer d'utiliser la Cloud Function (suppression complète)
       const { deleteUserCompletely } = await import('./services/cloudFunctions');
       const result = await deleteUserCompletely(userId, userEmail || '');
-      
+
       if (!result.success) {
         console.warn('Suppression partielle:', result.message);
       }
     } catch (error) {
-      // Fallback: supprimer seulement le profil Firestore
-      // (la Cloud Function n'est peut-être pas encore déployée)
       console.warn('Cloud Function non disponible, suppression Firestore uniquement');
       await deleteUserProfile(userId);
     }
-    
-    // Log après suppression
+
     if (currentUser && userToDelete) {
       logActivity(currentUser, ActivityAction.USER_DELETED, {
         targetType: 'user',
@@ -552,155 +565,178 @@ const App: React.FC = () => {
         targetName: `${userToDelete.firstName} ${userToDelete.lastName} (${userToDelete.role})`
       });
     }
-  };
+  }, [currentUser, users]);
 
   // Leaves
-  const handleAddLeave = async (leave: LeaveRequest) => {
-    await addLeaveToFirestore(leave);
-  };
-  const handleUpdateLeave = async (leave: LeaveRequest) => {
-    await updateLeaveInFirestore(leave);
-  };
-  const handleDeleteLeave = async (id: string) => {
-    await deleteLeaveFromFirestore(id);
-  };
+  const handleAddLeave = useCallback(async (leave: LeaveRequest) => {
+    try { await addLeaveToFirestore(leave); } catch (error) { console.error("Erreur ajout congé:", error); }
+  }, []);
+  const handleUpdateLeave = useCallback(async (leave: LeaveRequest) => {
+    try { await updateLeaveInFirestore(leave); } catch (error) { console.error("Erreur mise à jour congé:", error); }
+  }, []);
+  const handleDeleteLeave = useCallback(async (id: string) => {
+    try { await deleteLeaveFromFirestore(id); } catch (error) { console.error("Erreur suppression congé:", error); }
+  }, []);
 
   // Absences (nouveau système)
-  const handleAddAbsence = async (absence: Absence) => {
-    await addAbsenceToFirestore(absence);
-    if (currentUser) {
-      const user = users.find(u => u.id === absence.userId);
-      logActivity(currentUser, ActivityAction.ABSENCE_CREATED, {
-        targetType: 'absence',
-        targetId: absence.id,
-        targetName: user ? `${user.firstName} ${user.lastName} - ${absence.type}` : absence.type
-      });
-    }
-  };
-  const handleUpdateAbsence = async (absence: Absence) => {
-    await updateAbsenceInFirestore(absence);
-  };
-  const handleDeleteAbsence = async (id: string) => {
-    await deleteAbsenceFromFirestore(id);
-  };
-  const handleUploadAbsenceDocument = async (absenceId: string, file: File, docType: AbsenceDocument['type']): Promise<string> => {
-    return await uploadAbsenceDocument(absenceId, file, docType);
-  };
-
-  // Quotes
-  const handleAddQuote = async (quote: QuoteRequest) => {
-    await addQuoteToFirestore(quote);
-    if (currentUser) {
-      logActivity(currentUser, ActivityAction.QUOTE_CREATED, {
-        targetType: 'quote',
-        targetId: quote.id,
-        targetName: `Devis ${quote.id.slice(-6)} - ${quote.clientName}`
-      });
-    }
-  };
-  const handleUpdateQuoteStatus = async (id: string, status: QuoteStatus) => {
-    const quote = quotes.find(q => q.id === id);
-    if (quote) {
-      const updatedQuote = { ...quote, status };
-
-      // Si le devis est ACCEPTÉ → créer automatiquement un colis
-      if (status === QuoteStatus.ACCEPTED && currentUser) {
-        try {
-          const result = await convertQuoteToPackage(quote, currentUser);
-          if (result) {
-            updatedQuote.convertedToPackageId = result.packageId;
-            updatedQuote.convertedAt = new Date().toISOString();
-            console.log(`✅ Devis ${id.slice(-6)} converti en colis ${result.packageId} (zone ${result.zone})`);
-          } else {
-            console.warn(`⚠️ Conversion devis ${id.slice(-6)} en colis échouée (adresse non reconnue ?)`);
-          }
-        } catch (err) {
-          console.error('Erreur conversion devis → colis:', err);
-        }
-      }
-
-      await updateQuoteInFirestore(updatedQuote);
-
+  const handleAddAbsence = useCallback(async (absence: Absence) => {
+    try {
+      await addAbsenceToFirestore(absence);
       if (currentUser) {
-        const action = status === QuoteStatus.ACCEPTED ? ActivityAction.QUOTE_APPROVED 
-                     : status === QuoteStatus.REJECTED ? ActivityAction.QUOTE_REJECTED 
-                     : ActivityAction.QUOTE_UPDATED;
-        logActivity(currentUser, action, {
-          targetType: 'quote',
-          targetId: id,
-          targetName: `Devis ${id.slice(-6)} - ${quote.clientName}`,
-          details: status === QuoteStatus.ACCEPTED && updatedQuote.convertedToPackageId ? {
-            metadata: { convertedToPackageId: updatedQuote.convertedToPackageId }
-          } : undefined
+        const user = users.find(u => u.id === absence.userId);
+        logActivity(currentUser, ActivityAction.ABSENCE_CREATED, {
+          targetType: 'absence',
+          targetId: absence.id,
+          targetName: user ? `${user.firstName} ${user.lastName} - ${absence.type}` : absence.type
         });
       }
+    } catch (error) {
+      console.error("Erreur ajout absence:", error);
     }
-  };
-  const handleUpdateQuote = async (quote: QuoteRequest) => {
-    await updateQuoteInFirestore(quote);
-  };
+  }, [currentUser, users]);
 
-  // Company Documents (Ordres de service, Règlement intérieur...)
-  const handleAddCompanyDocument = async (doc: CompanyDocument) => {
-    await addCompanyDocumentToFirestore(doc);
-    if (currentUser) {
-      logActivity(currentUser, ActivityAction.DOCUMENT_CREATED, {
-        targetType: 'document',
-        targetId: doc.id,
-        targetName: doc.title
-      });
+  const handleUpdateAbsence = useCallback(async (absence: Absence) => {
+    try { await updateAbsenceInFirestore(absence); } catch (error) { console.error("Erreur mise à jour absence:", error); }
+  }, []);
+  const handleDeleteAbsence = useCallback(async (id: string) => {
+    try { await deleteAbsenceFromFirestore(id); } catch (error) { console.error("Erreur suppression absence:", error); }
+  }, []);
+  const handleUploadAbsenceDocument = useCallback(async (absenceId: string, file: File, docType: AbsenceDocument['type']): Promise<string> => {
+    return await uploadAbsenceDocument(absenceId, file, docType);
+  }, []);
+
+  // Quotes
+  const handleAddQuote = useCallback(async (quote: QuoteRequest) => {
+    try {
+      await addQuoteToFirestore(quote);
+      if (currentUser) {
+        logActivity(currentUser, ActivityAction.QUOTE_CREATED, {
+          targetType: 'quote',
+          targetId: quote.id,
+          targetName: `Devis ${quote.id.slice(-6)} - ${quote.clientName}`
+        });
+      }
+    } catch (error) {
+      console.error("Erreur ajout devis:", error);
     }
-  };
-  const handleUpdateCompanyDocument = async (doc: CompanyDocument) => {
-    await updateCompanyDocumentInFirestore(doc);
-    if (currentUser) {
-      logActivity(currentUser, ActivityAction.DOCUMENT_UPDATED, {
-        targetType: 'document',
-        targetId: doc.id,
-        targetName: doc.title
-      });
+  }, [currentUser]);
+
+  const handleUpdateQuoteStatus = useCallback(async (id: string, status: QuoteStatus) => {
+    try {
+      const quote = quotes.find(q => q.id === id);
+      if (quote) {
+        const updatedQuote = { ...quote, status };
+
+        if (status === QuoteStatus.ACCEPTED && currentUser) {
+          try {
+            const result = await convertQuoteToPackage(quote, currentUser);
+            if (result) {
+              updatedQuote.convertedToPackageId = result.packageId;
+              updatedQuote.convertedAt = new Date().toISOString();
+            }
+          } catch (err) {
+            console.error('Erreur conversion devis → colis:', err);
+          }
+        }
+
+        await updateQuoteInFirestore(updatedQuote);
+
+        if (currentUser) {
+          const action = status === QuoteStatus.ACCEPTED ? ActivityAction.QUOTE_APPROVED
+                       : status === QuoteStatus.REJECTED ? ActivityAction.QUOTE_REJECTED
+                       : ActivityAction.QUOTE_UPDATED;
+          logActivity(currentUser, action, {
+            targetType: 'quote',
+            targetId: id,
+            targetName: `Devis ${id.slice(-6)} - ${quote.clientName}`,
+            details: status === QuoteStatus.ACCEPTED && updatedQuote.convertedToPackageId ? {
+              metadata: { convertedToPackageId: updatedQuote.convertedToPackageId }
+            } : undefined
+          });
+        }
+      }
+    } catch (error) {
+      console.error("Erreur mise à jour statut devis:", error);
     }
-  };
-  const handleDeleteCompanyDocument = async (id: string) => {
-    const doc = companyDocuments.find(d => d.id === id);
-    await deleteCompanyDocumentFromFirestore(id);
-    if (currentUser && doc) {
-      logActivity(currentUser, ActivityAction.DOCUMENT_DELETED, {
-        targetType: 'document',
-        targetId: id,
-        targetName: doc.title
-      });
+  }, [currentUser, quotes]);
+
+  const handleUpdateQuote = useCallback(async (quote: QuoteRequest) => {
+    try { await updateQuoteInFirestore(quote); } catch (error) { console.error("Erreur mise à jour devis:", error); }
+  }, []);
+
+  // Company Documents
+  const handleAddCompanyDocument = useCallback(async (doc: CompanyDocument) => {
+    try {
+      await addCompanyDocumentToFirestore(doc);
+      if (currentUser) {
+        logActivity(currentUser, ActivityAction.DOCUMENT_CREATED, {
+          targetType: 'document', targetId: doc.id, targetName: doc.title
+        });
+      }
+    } catch (error) {
+      console.error("Erreur ajout document:", error);
     }
-  };
-  const handleAcknowledgeDocument = async (ack: DocumentAcknowledgment) => {
-    await addDocumentAcknowledgmentToFirestore(ack);
-    if (currentUser) {
-      const doc = companyDocuments.find(d => d.id === ack.documentId);
-      const action = ack.status === 'SIGNED' ? ActivityAction.DOCUMENT_SIGNED : ActivityAction.DOCUMENT_READ;
-      logActivity(currentUser, action, {
-        targetType: 'document',
-        targetId: ack.documentId,
-        targetName: doc?.title || ack.documentId
-      });
+  }, [currentUser]);
+
+  const handleUpdateCompanyDocument = useCallback(async (doc: CompanyDocument) => {
+    try {
+      await updateCompanyDocumentInFirestore(doc);
+      if (currentUser) {
+        logActivity(currentUser, ActivityAction.DOCUMENT_UPDATED, {
+          targetType: 'document', targetId: doc.id, targetName: doc.title
+        });
+      }
+    } catch (error) {
+      console.error("Erreur mise à jour document:", error);
     }
-  };
-  
+  }, [currentUser]);
+
+  const handleDeleteCompanyDocument = useCallback(async (id: string) => {
+    try {
+      const doc = companyDocuments.find(d => d.id === id);
+      await deleteCompanyDocumentFromFirestore(id);
+      if (currentUser && doc) {
+        logActivity(currentUser, ActivityAction.DOCUMENT_DELETED, {
+          targetType: 'document', targetId: id, targetName: doc.title
+        });
+      }
+    } catch (error) {
+      console.error("Erreur suppression document:", error);
+    }
+  }, [currentUser, companyDocuments]);
+
+  const handleAcknowledgeDocument = useCallback(async (ack: DocumentAcknowledgment) => {
+    try {
+      await addDocumentAcknowledgmentToFirestore(ack);
+      if (currentUser) {
+        const doc = companyDocuments.find(d => d.id === ack.documentId);
+        const action = ack.status === 'SIGNED' ? ActivityAction.DOCUMENT_SIGNED : ActivityAction.DOCUMENT_READ;
+        logActivity(currentUser, action, {
+          targetType: 'document', targetId: ack.documentId, targetName: doc?.title || ack.documentId
+        });
+      }
+    } catch (error) {
+      console.error("Erreur accusé de réception:", error);
+    }
+  }, [currentUser, companyDocuments]);
+
   // Client Team
-  const handleAddTeamMember = (user: User) => {
-      // Force le rôle CLIENT et la société du créateur pour la sécurité
+  const handleAddTeamMember = useCallback((user: User) => {
       const safeUser = {
           ...user,
           role: UserRole.CLIENT,
-          companyName: currentUser?.companyName // Héritage strict
+          companyName: currentUser?.companyName
       };
       handleAddUser(safeUser);
-  };
-  const handleUpdateTeamMember = (user: User) => {
+  }, [currentUser?.companyName, handleAddUser]);
+
+  const handleUpdateTeamMember = useCallback((user: User) => {
       handleUpdateUser(user);
-  };
-  const handleDeleteTeamMember = (userId: string) => {
+  }, [handleUpdateUser]);
+
+  const handleDeleteTeamMember = useCallback((userId: string) => {
       handleDeleteUser(userId);
-  };
+  }, [handleDeleteUser]);
 
   // --- RENDER ---
 
@@ -1179,4 +1215,11 @@ const App: React.FC = () => {
   );
 };
 
-export default App;
+// Wrap App with ToastProvider so useToast() works inside App
+const AppWithToast: React.FC = () => (
+  <ToastProvider>
+    <App />
+  </ToastProvider>
+);
+
+export default AppWithToast;

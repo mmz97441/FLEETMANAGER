@@ -41,6 +41,7 @@ import MissionKPIs from './MissionKPIs';
 import ImportReviewTable from './ImportReviewTable';
 import PODViewer from './PODViewer';
 import StopReorderModal from './StopReorderModal';
+import { useToast } from './shared/Toast';
 import {
   Truck, Package as PackageIcon, MapPin, Upload, Calendar, Clock,
   Users, CheckCircle, XCircle, AlertTriangle, Filter, Search,
@@ -63,6 +64,8 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   users,
   vehicles
 }) => {
+  const { showToast } = useToast();
+
   // États
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
   const [missions, setMissions] = useState<Mission[]>([]);
@@ -1331,7 +1334,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
     const mission = addingStopToMission;
 
     if (!newStopForm.contactName || !newStopForm.address || !newStopForm.city || !newStopForm.postalCode) {
-      alert('Veuillez remplir au minimum : destinataire, adresse, ville et code postal');
+      showToast('Veuillez remplir au minimum : destinataire, adresse, ville et code postal', 'warning');
       return;
     }
 
@@ -3066,7 +3069,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                     // Récupérer les colis sélectionnés
                     const selectedPkgs = packages.filter(p => selectedPackageIds.has(p.id));
                     if (selectedPkgs.length === 0) {
-                      alert('Aucun colis sélectionné');
+                      showToast('Aucun colis sélectionné', 'warning');
                       setIsQuickDispatching(false);
                       return;
                     }
@@ -3077,7 +3080,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                     const hub = hubs.find(h => h.id === quickDispatchHubId);
                     
                     if (!driver || !hub) {
-                      alert('Chauffeur ou hub non trouvé');
+                      showToast('Chauffeur ou hub non trouvé', 'error');
                       setIsQuickDispatching(false);
                       return;
                     }
@@ -3103,7 +3106,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                     );
                     
                     if (!result.success || result.tours.length === 0) {
-                      alert(`Erreur d'optimisation: ${result.error || 'Aucune tournée générée'}`);
+                      showToast(`Erreur d'optimisation: ${result.error || 'Aucune tournée générée'}`, 'error');
                       setIsQuickDispatching(false);
                       return;
                     }
@@ -3189,11 +3192,11 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                     setSelectedPackageIds(new Set());
                     setQuickDispatchDriverId('');
                     
-                    alert(`✅ Mission créée avec ${tour.stops.length} stops et ${packageIds.length} colis !`);
+                    showToast(`Mission créée avec ${tour.stops.length} stops et ${packageIds.length} colis !`, 'success');
                     
                   } catch (error) {
                     console.error('Erreur dispatch rapide:', error);
-                    alert('Erreur lors du dispatch. Voir la console pour plus de détails.');
+                    showToast('Erreur lors du dispatch. Voir la console pour plus de détails.', 'error');
                   }
                   
                   setIsQuickDispatching(false);

@@ -15,6 +15,7 @@ import { generateBatchLabelsHTML } from '../services/pickupService';
 import ShippingLabel, { quoteToLabelData, ShippingLabelData } from './ShippingLabel';
 import PODViewer from './PODViewer';
 import ClientKPIs from './ClientKPIs';
+import { useToast } from './shared/Toast';
 
 // ============================================================================
 // COMPOSANT InputField DÉFINI EN DEHORS pour éviter le bug de focus
@@ -217,6 +218,8 @@ interface ClientPortalProps {
 const COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444'];
 
 const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, quotes, companyUsers = [], onAddQuote, onUpdateQuoteStatus, onAddTeamMember, onUpdateTeamMember, onDeleteTeamMember }) => {
+  const { showToast } = useToast();
+
   // Navigation Local State REMOVED in favor of activeView prop
   const [listFilter, setListFilter] = useState<'active' | 'history'>('active');
   
@@ -535,10 +538,10 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                       activationUrl,
                       expiresAt
                     );
-                    alert(`✅ Un email d'invitation a été envoyé à ${pendingAction.data.email}`);
+                    showToast(`Un email d'invitation a été envoyé à ${pendingAction.data.email}`, 'success');
                   } catch (emailError) {
                     console.error('❌ Erreur envoi email invitation:', emailError);
-                    alert(`⚠️ Le compte a été créé mais l'email n'a pas pu être envoyé. Veuillez renvoyer l'invitation.`);
+                    showToast(`Le compte a été créé mais l'email n'a pas pu être envoyé. Veuillez renvoyer l'invitation.`, 'warning');
                   }
               }
               break;
@@ -570,7 +573,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   const handleQuoteSubmit = (e: React.FormEvent) => {
       e.preventDefault();
       if (!newRequest.originCity || !newRequest.destinationCity || !newRequest.goodsDescription || newRequest.volume <= 0) {
-          alert("Veuillez remplir les champs obligatoires.");
+          showToast("Veuillez remplir les champs obligatoires.", 'warning');
           return;
       }
 
@@ -664,7 +667,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
       if (pod) {
         setViewingPOD({ pod, quote });
       } else {
-        alert('La preuve de livraison n\'est pas encore disponible.');
+        showToast('La preuve de livraison n\'est pas encore disponible.', 'info');
       }
     } catch (e) {
       console.error('Erreur chargement POD:', e);
@@ -919,12 +922,12 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                             activationUrl,
                                             result.expiresAt
                                           );
-                                          alert(`✅ Invitation renvoyée à ${user.email}`);
+                                          showToast(`Invitation renvoyée à ${user.email}`, 'success');
                                         } else {
-                                          alert(`❌ Erreur lors du renvoi`);
+                                          showToast('Erreur lors du renvoi', 'error');
                                         }
                                       } catch (e) {
-                                        alert(`❌ Erreur lors de l'envoi`);
+                                        showToast('Erreur lors de l\'envoi', 'error');
                                       }
                                     }}
                                     className="w-full mt-3 py-2 rounded-lg bg-orange-100 hover:bg-orange-200 text-orange-700 font-bold text-sm transition-colors flex items-center justify-center gap-2"
@@ -1433,7 +1436,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                     </select>
                                 </div>
                                 <textarea rows={4} placeholder="Détaillez votre demande..." className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none text-sm"></textarea>
-                                <button type="button" onClick={() => alert("Message envoyé au support.")} className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-lg">
+                                <button type="button" onClick={() => showToast("Message envoyé au support.", 'success')} className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-lg">
                                     Envoyer le message
                                 </button>
                             </form>

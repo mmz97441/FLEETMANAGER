@@ -4,6 +4,7 @@ import { FuelLog, Vehicle, User, UserRole } from '../types';
 import { Droplet, Plus, TrendingUp, DollarSign, Calendar, Filter, X, Save, Car, ChevronDown, ChevronUp, Route, Gauge, Download, Eye, FileText, User as UserIcon, Search, Check, ExternalLink, Lock, Camera, Upload, AlertCircle, Edit2, AlertTriangle } from 'lucide-react';
 import Modal from './shared/Modal';
 import ConfirmModal from './ConfirmModal';
+import { useToast } from './shared/Toast';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { usePermissions, Permission } from '../usePermissions';
 
@@ -17,7 +18,8 @@ interface FuelManagerProps {
 }
 
 export const FuelManager: React.FC<FuelManagerProps> = ({ logs, vehicles, users, currentUser, onAddLog, onUpdateLog }) => {
-  
+  const { showToast } = useToast();
+
   // === PERMISSIONS ===
   const { hasPermission } = usePermissions();
   
@@ -557,7 +559,7 @@ export const FuelManager: React.FC<FuelManagerProps> = ({ logs, vehicles, users,
       setEditingLog(null);
     } catch (error) {
       console.error('Erreur modification:', error);
-      alert('Erreur lors de la modification');
+      showToast('Erreur lors de la modification', 'error');
     } finally {
       setIsEditSaving(false);
     }

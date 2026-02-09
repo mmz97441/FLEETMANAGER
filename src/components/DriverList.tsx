@@ -4,6 +4,7 @@ import { User, Vehicle, LeaveRequest, UserRole, LeaveStatus, VehicleStatus, Zone
 import { ShieldCheck, ShieldAlert, Truck, Calendar, CheckCircle2, AlertCircle, Clock, Battery, MapPin, Edit, X, Save, Plus, Lock } from 'lucide-react';
 import Modal from './shared/Modal';
 import AssignmentModal from './AssignmentModal';
+import { useToast } from './shared/Toast';
 import { getVehicleForDriver } from '../services/assignmentService';
 import { usePermissions, Permission } from '../usePermissions';
 
@@ -16,6 +17,8 @@ interface DriverListProps {
 }
 
 const DriverList: React.FC<DriverListProps> = ({ users, vehicles, leaves, currentUser, onUpdateUser }) => {
+  const { showToast } = useToast();
+
   // === PERMISSIONS ===
   const { hasPermission } = usePermissions();
   
@@ -81,7 +84,7 @@ const DriverList: React.FC<DriverListProps> = ({ users, vehicles, leaves, curren
           onUpdateUser(editingDriver);
           setEditingDriver(null);
           // Feedback utilisateur simple
-          alert("Profil chauffeur mis à jour avec succès.");
+          showToast("Profil chauffeur mis à jour avec succès.", 'success');
       }
   };
   
