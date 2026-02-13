@@ -258,6 +258,11 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   const [showScanner, setShowScanner] = useState(false);
   const [scannedBarcodes, setScannedBarcodes] = useState<string[]>([]);
   const [stopPackages, setStopPackages] = useState<Package[]>([]);
+
+  // Delivery multi-package scan state
+  const [deliveryScannedBarcodes, setDeliveryScannedBarcodes] = useState<string[]>([]);
+  const [showDeliveryScanner, setShowDeliveryScanner] = useState(false);
+  const [deliveryStopPackages, setDeliveryStopPackages] = useState<Package[]>([]);
   
   // Return to hub workflow
   const [returnPackages, setReturnPackages] = useState<Package[]>([]);
@@ -320,10 +325,25 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
     return unsub;
   }, [isPickupStop, currentStop?.id]);
 
+  // Charger les colis pour les stops DELIVERY avec multi-colis
+  useEffect(() => {
+    if (isPickupStop || !currentStop?.packageIds?.length || currentStop.packageCount <= 1) {
+      setDeliveryStopPackages([]);
+      return;
+    }
+    const unsub = subscribeToPackages((pkgs) => {
+      const filtered = pkgs.filter(p => currentStop.packageIds.includes(p.id));
+      setDeliveryStopPackages(filtered);
+    });
+    return unsub;
+  }, [isPickupStop, currentStop?.id, currentStop?.packageCount]);
+
   // Reset scan quand on change de stop
   useEffect(() => {
     setScannedBarcodes([]);
     setShowScanner(false);
+    setDeliveryScannedBarcodes([]);
+    setShowDeliveryScanner(false);
   }, [currentStop?.id]);
 
   // Charger les colis "À retourner" pour ce chauffeur
@@ -337,6 +357,18 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
     });
     return unsub;
   }, [currentUser.id]);
+
+  // Multi-colis : détecter si le stop actuel a plusieurs colis
+  const isMultiPackageStop = (currentStop?.packageCount || 0) > 1;
+  const allDeliveryPackagesScanned = !isMultiPackageStop || deliveryScannedBarcodes.length >= (currentStop?.packageCount || 0);
+
+  // Handler scan pour livraisons multi-colis
+  const handleDeliveryBarcodeScan = (barcode: string) => {
+    setDeliveryScannedBarcodes(prev => {
+      if (prev.some(b => b.toUpperCase() === barcode.toUpperCase())) return prev;
+      return [...prev, barcode];
+    });
+  };
 
   const nextPendingStopIndex = useMemo(() => {
     return sortedStops.findIndex(s => s.status === StopStatus.PENDING || s.status === StopStatus.ARRIVED);
@@ -678,6 +710,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
       setDeliveryLocation(DeliveryLocation.HAND_DELIVERY);
       setShowSignature(false);
       setUploadProgress(null);
+      setDeliveryScannedBarcodes([]);
+      setShowDeliveryScanner(false);
 
       showNotif(allDone ? '🎉 Tournée terminée !' : `✅ Stop ${currentStop.sequence} livré !`);
     } catch (err) {
@@ -1202,6 +1236,71 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                 {/* ===== MODE LIVRAISON (DELIVERY) ===== */}
                 {currentStop.status === StopStatus.ARRIVED && !isPickupStop && (
                   <>
+                    {/* === ALERTE MULTI-COLIS + SCAN OBLIGATOIRE === */}
+                    {isMultiPackageStop && (
+                      <div className="bg-orange-50 border-2 border-orange-300 rounded-xl p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-lg">📦</span>
+                            <span className="text-sm font-bold text-orange-800">
+                              {currentStop.packageCount} COLIS à livrer
+                            </span>
+                          </div>
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
+                            allDeliveryPackagesScanned
+                              ? 'bg-green-100 text-green-700'
+                              : 'bg-orange-100 text-orange-700'
+                          }`}>
+                            {deliveryScannedBarcodes.length}/{currentStop.packageCount} scannés
+                          </span>
+                        </div>
+
+                        {/* Liste des colis avec statut de scan */}
+                        <div className="space-y-1">
+                          {deliveryStopPackages.map((pkg) => {
+                            const scanned = deliveryScannedBarcodes.some(
+                              b => b.toUpperCase() === (pkg.barcode || pkg.orderNumber).toUpperCase()
+                            );
+                            return (
+                              <div key={pkg.id} className={`flex items-center justify-between px-2 py-1.5 rounded-lg text-xs ${
+                                scanned ? 'bg-green-50 border border-green-200' : 'bg-white border border-orange-200'
+                              }`}>
+                                <span className="font-mono font-bold">{pkg.orderNumber}</span>
+                                {pkg.packageIndex && pkg.packageTotal && (
+                                  <span className="text-slate-400">Colis {pkg.packageIndex}/{pkg.packageTotal}</span>
+                                )}
+                                <span>{scanned ? '✅' : '⬜'}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Barre progression scan */}
+                        <div className="h-2 bg-orange-100 rounded-full overflow-hidden">
+                          <div
+                            className="h-full rounded-full transition-all duration-300 bg-green-500"
+                            style={{ width: `${(deliveryScannedBarcodes.length / currentStop.packageCount) * 100}%` }}
+                          />
+                        </div>
+
+                        {/* Bouton scanner */}
+                        {!allDeliveryPackagesScanned && (
+                          <button
+                            onClick={() => setShowDeliveryScanner(true)}
+                            className="w-full flex items-center justify-center gap-2 py-2.5 bg-orange-500 text-white rounded-lg font-bold text-sm active:scale-95 transition-transform"
+                          >
+                            📷 Scanner les colis ({deliveryScannedBarcodes.length}/{currentStop.packageCount})
+                          </button>
+                        )}
+
+                        {allDeliveryPackagesScanned && (
+                          <p className="text-xs text-green-700 font-bold text-center">
+                            ✅ Tous les colis ont été scannés
+                          </p>
+                        )}
+                      </div>
+                    )}
+
                     {/* Barre de progression upload */}
                     {uploadProgress && uploadProgress.step !== 'done' && uploadProgress.step !== 'error' && (
                       <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
@@ -1343,11 +1442,18 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                       </p>
                     )}
 
+                    {/* Alerte si multi-colis non tous scannés */}
+                    {isMultiPackageStop && !allDeliveryPackagesScanned && (
+                      <p className="text-[11px] text-orange-600 font-medium text-center px-2">
+                        📦 Scannez les {currentStop.packageCount} colis avant de valider la livraison
+                      </p>
+                    )}
+
                     {/* Boutons Livré / Échec */}
                     <div className="flex gap-2 pt-1">
                       <button
                         onClick={handleDeliverySuccess}
-                        disabled={isProcessing || !signatureData || !recipientName.trim()}
+                        disabled={isProcessing || !signatureData || !recipientName.trim() || (isMultiPackageStop && !allDeliveryPackagesScanned)}
                         className="flex-1 flex items-center justify-center gap-2 py-3.5 bg-green-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         {isProcessing ? <Loader2 size={18} className="animate-spin" /> : <CheckCircle size={18} />}
@@ -1514,7 +1620,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
           </div>
         )}
 
-        {/* Scanner code-barres (plein écran, lazy-loaded) */}
+        {/* Scanner code-barres enlèvement (plein écran, lazy-loaded) */}
         {showScanner && (
           <Suspense fallback={
             <div className="fixed inset-0 z-50 bg-black flex items-center justify-center">
@@ -1530,6 +1636,26 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
               expectedBarcodes={stopPackages.map(p => (p.barcode || p.orderNumber))}
               alreadyScanned={scannedBarcodes}
               title={`Scan enlèvement — ${currentStop?.contactName || ''}`}
+            />
+          </Suspense>
+        )}
+
+        {/* Scanner code-barres livraison multi-colis (plein écran, lazy-loaded) */}
+        {showDeliveryScanner && (
+          <Suspense fallback={
+            <div className="fixed inset-0 z-50 bg-black flex items-center justify-center">
+              <div className="text-center text-white">
+                <Loader2 size={32} className="animate-spin mx-auto mb-3" />
+                <p className="text-sm">Chargement du scanner...</p>
+              </div>
+            </div>
+          }>
+            <BarcodeScanner
+              onScan={handleDeliveryBarcodeScan}
+              onClose={() => setShowDeliveryScanner(false)}
+              expectedBarcodes={deliveryStopPackages.map(p => (p.barcode || p.orderNumber))}
+              alreadyScanned={deliveryScannedBarcodes}
+              title={`Scan livraison — ${currentStop?.contactName || ''} (${deliveryScannedBarcodes.length}/${currentStop?.packageCount || 0})`}
             />
           </Suspense>
         )}

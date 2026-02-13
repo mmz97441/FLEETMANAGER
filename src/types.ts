@@ -801,6 +801,11 @@ export interface Package {
   externalId: string;              // "C0004911-15087911"
   orderNumber: string;             // "15087911" → code barre
   barcode?: string;                // Code barre si différent de orderNumber
+
+  // Multi-colis (Solution A — 1 ligne = 1 destinataire + Quantity)
+  packageGroupId?: string;         // ID commun aux colis issus d'une même ligne d'import
+  packageIndex?: number;           // Position dans le groupe (1, 2, 3...)
+  packageTotal?: number;           // Nombre total de colis dans le groupe
   
   // Destination
   address: string;

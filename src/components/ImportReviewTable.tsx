@@ -61,7 +61,7 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
       warning: active.filter(r => r._status === 'warning').length,
       error: active.filter(r => r._status === 'error').length,
       deleted: rows.filter(r => r._status === 'deleted').length,
-      totalPackages: active.filter(r => r._status !== 'error').length,
+      totalPackages: active.filter(r => r._status !== 'error').reduce((sum, r) => sum + (r.quantity || 1), 0),
       zones: Object.values(Zone).reduce((acc, z) => {
         acc[z] = active.filter(r => r.zone === z && r._status !== 'error').length;
         return acc;
@@ -125,6 +125,9 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
       case 'floor':
       case 'serviceTime':
         (row as any)[field] = parseInt(editValue) || 0;
+        break;
+      case 'quantity':
+        (row as any)[field] = Math.max(1, parseInt(editValue) || 1);
         break;
       case 'volume':
       case 'weight':
@@ -345,6 +348,7 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
                 <th className="px-2 py-2.5 text-left font-bold text-slate-500 w-14">Zone</th>
                 <th className="px-2 py-2.5 text-left font-bold text-slate-500 w-24">Téléphone</th>
                 <th className="px-2 py-2.5 text-left font-bold text-slate-500 w-20">Créneau</th>
+                <th className="px-2 py-2.5 text-center font-bold text-slate-500 w-10">Qté</th>
                 <th className="px-2 py-2.5 text-left font-bold text-slate-500 w-8">Ét.</th>
                 <th className="px-2 py-2.5 text-center font-bold text-slate-500 w-8"></th>
               </tr>
@@ -441,6 +445,17 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
                       )}
                     </td>
 
+                    {/* Quantité */}
+                    <td className="px-2 py-2 text-center">
+                      {(row.quantity || 1) > 1 ? (
+                        <span className="px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded font-bold text-[10px]" title={`${row.quantity} colis seront générés`}>
+                          {row.quantity}
+                        </span>
+                      ) : (
+                        <EditableCell rowIdx={realIdx} field="quantity" value={row.quantity || 1} />
+                      )}
+                    </td>
+
                     {/* Étage */}
                     <td className="px-2 py-2 text-center">
                       <EditableCell rowIdx={realIdx} field="floor" value={row.floor} />
@@ -472,7 +487,7 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
 
               {filteredRows.length === 0 && (
                 <tr>
-                  <td colSpan={12} className="text-center py-8 text-slate-400">
+                  <td colSpan={13} className="text-center py-8 text-slate-400">
                     Aucune ligne ne correspond aux filtres.
                   </td>
                 </tr>
@@ -486,7 +501,12 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
       <div className="bg-white rounded-xl border border-slate-200 p-4">
         <div className="flex items-center justify-between">
           <div className="text-sm text-slate-600">
-            <span className="font-bold text-green-600">{stats.valid + stats.warning}</span> colis prêts à créer
+            <span className="font-bold text-green-600">{stats.totalPackages}</span> colis prêts à créer
+            {stats.totalPackages > (stats.valid + stats.warning) && (
+              <span className="ml-1 text-orange-500 text-xs">
+                ({stats.valid + stats.warning} lignes, dont multi-colis)
+              </span>
+            )}
             {stats.error > 0 && (
               <span className="ml-2 text-red-500">
                 ({stats.error} en erreur seront ignorés)
@@ -519,7 +539,7 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
               ) : (
                 <>
                   <PackageIcon size={16} />
-                  Valider et créer {stats.valid + stats.warning} colis
+                  Valider et créer {stats.totalPackages} colis
                 </>
               )}
             </button>

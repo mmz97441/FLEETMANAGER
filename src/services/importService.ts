@@ -33,6 +33,7 @@ interface ClientFileRow {
   Weight: string | number;       // "0"
   Service_Time: string | number; // "30"
   Tour: string;                  // "PREM"
+  Quantity?: string | number;    // "3" — nombre de colis pour ce destinataire (défaut 1)
 }
 
 export interface ImportResult {
@@ -412,6 +413,7 @@ export interface ReviewRow {
   comment: string;
   volume: number;
   weight: number;
+  quantity: number;              // Nombre de colis pour ce destinataire (défaut 1)
 
   // Raw data pour référence
   _rawAddress: string;
@@ -460,11 +462,18 @@ export const parseExcelForReview = async (file: File): Promise<ReviewResult> => 
       }
     }
 
+    // Parser la quantité
+    const rawQty = raw.Quantity;
+    const quantity = rawQty ? (typeof rawQty === 'string' ? parseInt(rawQty) || 1 : rawQty || 1) : 1;
+    if (rawQty && quantity < 1) errors.push('Quantité invalide (doit être ≥ 1)');
+    if (quantity > 50) errors.push('Quantité trop élevée (max 50)');
+
     // Warnings non bloquants
     if (!raw.Telephone) warnings.push('Pas de téléphone');
     if (!raw.Start && !raw.End) warnings.push('Pas de créneau horaire');
     const svcTime = typeof raw.Service_Time === 'string' ? parseInt(raw.Service_Time) || 5 : raw.Service_Time || 5;
     if (svcTime > 60) warnings.push(`Temps de service élevé (${svcTime} min)`);
+    if (quantity > 1) warnings.push(`Multi-colis : ${quantity} colis seront générés (${String(raw.Order_Number)} → ${String(Number(raw.Order_Number) + quantity - 1)})`);
 
     // Détection de doublons
     const existingDup = reviewRows.find(r =>
@@ -495,6 +504,7 @@ export const parseExcelForReview = async (file: File): Promise<ReviewResult> => 
       comment: raw.Comment || '',
       volume: typeof raw.Volume === 'string' ? parseFloat(raw.Volume) || 0 : raw.Volume || 0,
       weight: typeof raw.Weight === 'string' ? parseFloat(raw.Weight) || 0 : raw.Weight || 0,
+      quantity: Math.max(1, quantity),
       _rawAddress: raw.Address || ''
     });
   }
@@ -534,6 +544,12 @@ export const revalidateRow = async (row: ReviewRow, allRows: ReviewRow[]): Promi
   if (!row.contactPhone) warnings.push('Pas de téléphone');
   if (!row.timeWindowStart && !row.timeWindowEnd) warnings.push('Pas de créneau horaire');
   if (row.serviceTime > 60) warnings.push(`Temps de service élevé (${row.serviceTime} min)`);
+
+  // Validation quantité
+  const qty = row.quantity || 1;
+  if (qty < 1) errors.push('Quantité invalide (doit être ≥ 1)');
+  if (qty > 50) errors.push('Quantité trop élevée (max 50)');
+  if (qty > 1) warnings.push(`Multi-colis : ${qty} colis seront générés (${row.orderNumber} → ${/^\d+$/.test(row.orderNumber) ? String(Number(row.orderNumber) + qty - 1) : `${row.orderNumber}-${qty}`})`);
 
   const existingDup = allRows.find(r =>
     r._rowIndex !== row._rowIndex &&
@@ -596,40 +612,63 @@ export const confirmReviewedImport = async (
       continue;
     }
 
-    const initialMovement: PackageMovement = {
-      timestamp: new Date().toISOString(),
-      action: 'IMPORTED',
-      notes: `Importé et validé depuis ${fileName}`
-    };
+    // Nombre de colis à générer pour cette ligne
+    const qty = Math.max(1, row.quantity || 1);
+    const baseOrderNumber = row.orderNumber;
+    const isNumericOrder = /^\d+$/.test(baseOrderNumber);
+    const packageGroupId = qty > 1 ? `GRP-${Date.now()}-${Math.random().toString(36).substring(2, 7)}` : undefined;
 
-    const pkg: Omit<Package, 'id' | 'createdAt' | 'updatedAt'> = {
-      clientId: client.id,
-      clientName,
-      importBatchId: batchId,
-      externalId: row.externalId,
-      orderNumber: row.orderNumber,
-      barcode: `GFL-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`,
-      address: row.address,
-      city: row.city,
-      postalCode: row.postalCode,
-      zone: row.zone as Zone,
-      floor: row.floor,
-      hasElevator: row.hasElevator,
-      contactName: row.contactName,
-      contactPhone: row.contactPhone || undefined,
-      timeWindowStart: row.timeWindowStart || undefined,
-      timeWindowEnd: row.timeWindowEnd || undefined,
-      serviceTime: row.serviceTime || 5,
-      comment: row.comment || undefined,
-      volume: row.volume || undefined,
-      weight: row.weight || undefined,
-      status: PackageStatus.PENDING,
-      movements: [initialMovement]
-    };
+    for (let q = 0; q < qty; q++) {
+      // Générer le numéro de commande incrémenté
+      const orderNumber = qty === 1
+        ? baseOrderNumber
+        : isNumericOrder
+          ? String(Number(baseOrderNumber) + q)
+          : `${baseOrderNumber}-${q + 1}`;
 
-    result.packages.push(pkg);
-    zonePackages[row.zone as Zone].push(pkg);
-    result.successCount++;
+      const initialMovement: PackageMovement = {
+        timestamp: new Date().toISOString(),
+        action: 'IMPORTED',
+        notes: qty > 1
+          ? `Importé depuis ${fileName} — Colis ${q + 1}/${qty} (groupe ${packageGroupId})`
+          : `Importé et validé depuis ${fileName}`
+      };
+
+      const pkg: Omit<Package, 'id' | 'createdAt' | 'updatedAt'> = {
+        clientId: client.id,
+        clientName,
+        importBatchId: batchId,
+        externalId: row.externalId,
+        orderNumber,
+        barcode: `GFL-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`,
+        address: row.address,
+        city: row.city,
+        postalCode: row.postalCode,
+        zone: row.zone as Zone,
+        floor: row.floor,
+        hasElevator: row.hasElevator,
+        contactName: row.contactName,
+        contactPhone: row.contactPhone || undefined,
+        timeWindowStart: row.timeWindowStart || undefined,
+        timeWindowEnd: row.timeWindowEnd || undefined,
+        serviceTime: row.serviceTime || 5,
+        comment: row.comment || undefined,
+        volume: row.volume || undefined,
+        weight: row.weight || undefined,
+        status: PackageStatus.PENDING,
+        movements: [initialMovement],
+        // Champs multi-colis
+        ...(qty > 1 ? {
+          packageGroupId,
+          packageIndex: q + 1,
+          packageTotal: qty
+        } : {})
+      };
+
+      result.packages.push(pkg);
+      zonePackages[row.zone as Zone].push(pkg);
+    }
+    result.successCount += qty;
   }
 
   // Zone breakdown
