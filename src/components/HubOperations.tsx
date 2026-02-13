@@ -80,6 +80,7 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
   const [loadingComplete, setLoadingComplete] = useState(false);
 
   const today = new Date().toISOString().split('T')[0];
+  const [hubSelectedDate, setHubSelectedDate] = useState(today);
   const isDriver = currentUser.role === UserRole.DRIVER;
 
   // ============================================================================
@@ -89,9 +90,21 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
   useEffect(() => {
     const unsub1 = subscribeToHubs(setHubs);
     const unsub2 = subscribeToPackages(setPackages);
-    const unsub3 = subscribeToMissions(setMissions, { date: today });
+    // Charger missions de la date sélectionnée + missions en retard (non terminées)
+    const unsub3 = subscribeToMissions((allMissions) => {
+      const filtered = allMissions.filter(m => {
+        if (m.date === hubSelectedDate) return true;
+        // Si on regarde aujourd'hui, aussi montrer missions en retard
+        if (hubSelectedDate === today && m.date < today &&
+            m.status !== 'Terminé' && m.status !== 'Annulé') {
+          return true;
+        }
+        return false;
+      });
+      setMissions(filtered);
+    });
     return () => { unsub1(); unsub2(); unsub3(); };
-  }, [today]);
+  }, [hubSelectedDate, today]);
 
   // Auto-select hub
   useEffect(() => {

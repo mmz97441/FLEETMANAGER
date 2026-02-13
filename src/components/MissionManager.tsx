@@ -146,22 +146,35 @@ const MissionManager: React.FC<MissionManagerProps> = ({
     assignedPostalCodes: '' // Séparés par virgule
   });
 
-  // Charger les données
+  // Charger les données — inclut aussi les missions en retard (jours passés, non terminées)
+  const todayStr = new Date().toISOString().split('T')[0];
   useEffect(() => {
-    const unsubMissions = subscribeToMissions(setMissions, { date: selectedDate });
+    const unsubMissions = subscribeToMissions((allMissions) => {
+      // Garder : missions de la date sélectionnée + missions en retard non terminées
+      const filtered = allMissions.filter(m => {
+        if (m.date === selectedDate) return true;
+        // Si on regarde aujourd'hui, montrer aussi les missions en retard
+        if (selectedDate === todayStr && m.date < todayStr &&
+            m.status !== MissionStatus.COMPLETED && m.status !== MissionStatus.CANCELLED) {
+          return true;
+        }
+        return false;
+      });
+      setMissions(filtered);
+    });
     const unsubPackages = subscribeToPackages(setPackages);
     const unsubImports = subscribeToImportBatches(setImportBatches);
     const unsubHubs = subscribeToHubs(setHubs);
-    
+
     setIsLoading(false);
-    
+
     return () => {
       unsubMissions();
       unsubPackages();
       unsubImports();
       unsubHubs();
     };
-  }, [selectedDate]);
+  }, [selectedDate, todayStr]);
 
   // Calcul des stats
   const stats = useMemo(() => calculateMissionStats(missions), [missions]);
@@ -721,13 +734,58 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           ))}
         </select>
         
-        <input
-          type="date"
-          value={selectedDate}
-          onChange={(e) => setSelectedDate(e.target.value)}
-          className="px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
-        />
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => {
+              const d = new Date(selectedDate + 'T00:00:00');
+              d.setDate(d.getDate() - 1);
+              setSelectedDate(d.toISOString().split('T')[0]);
+            }}
+            className="px-2.5 py-2.5 border border-slate-300 rounded-xl hover:bg-slate-50 transition-colors font-bold text-slate-500"
+          >
+            ◀
+          </button>
+          <input
+            type="date"
+            value={selectedDate}
+            onChange={(e) => setSelectedDate(e.target.value)}
+            className="px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
+          />
+          <button
+            onClick={() => {
+              const d = new Date(selectedDate + 'T00:00:00');
+              d.setDate(d.getDate() + 1);
+              setSelectedDate(d.toISOString().split('T')[0]);
+            }}
+            className="px-2.5 py-2.5 border border-slate-300 rounded-xl hover:bg-slate-50 transition-colors font-bold text-slate-500"
+          >
+            ▶
+          </button>
+          {selectedDate !== todayStr && (
+            <button
+              onClick={() => setSelectedDate(todayStr)}
+              className="px-3 py-2.5 bg-brand-50 text-brand-600 border border-brand-200 rounded-xl text-xs font-bold hover:bg-brand-100 transition-colors"
+            >
+              Aujourd'hui
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* Alerte missions en retard */}
+      {selectedDate === todayStr && missions.some(m => m.date < todayStr && m.status !== MissionStatus.COMPLETED && m.status !== MissionStatus.CANCELLED) && (
+        <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-center gap-3">
+          <span className="text-lg">⚠️</span>
+          <div>
+            <p className="text-sm font-bold text-red-800">
+              {missions.filter(m => m.date < todayStr && m.status !== MissionStatus.COMPLETED && m.status !== MissionStatus.CANCELLED).length} mission(s) en retard
+            </p>
+            <p className="text-xs text-red-600">
+              Missions de jours précédents non terminées — Nécessitent une action
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Liste des missions */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">

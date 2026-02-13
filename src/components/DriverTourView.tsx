@@ -105,8 +105,19 @@ const DriverTourView: React.FC<DriverTourViewProps> = ({ currentUser, vehicles }
   // SUBSCRIPTIONS
   // ============================================================================
 
+  // Charger missions du chauffeur : date du jour + missions en cours/retard
   useEffect(() => {
-    const unsub1 = subscribeToMissions(setMissions, { date: today, driverId: currentUser.id });
+    const unsub1 = subscribeToMissions((allMissions) => {
+      const filtered = allMissions.filter(m => {
+        if (m.date === today) return true;
+        // Missions en cours d'un autre jour (en retard)
+        if (m.status === MissionStatus.IN_PROGRESS) return true;
+        // Missions dispatchées en retard
+        if (m.status === MissionStatus.DISPATCHED && m.date <= today) return true;
+        return false;
+      });
+      setMissions(filtered);
+    }, { driverId: currentUser.id });
     const unsub2 = subscribeToPackages(setPackages);
     return () => { unsub1(); unsub2(); };
   }, [today, currentUser.id]);

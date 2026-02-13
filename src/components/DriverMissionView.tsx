@@ -263,6 +263,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   const [deliveryScannedBarcodes, setDeliveryScannedBarcodes] = useState<string[]>([]);
   const [showDeliveryScanner, setShowDeliveryScanner] = useState(false);
   const [deliveryStopPackages, setDeliveryStopPackages] = useState<Package[]>([]);
+  const [scanBypassConfirmed, setScanBypassConfirmed] = useState(false); // Bypass si scanner HS
+  const [manualBarcodeInput, setManualBarcodeInput] = useState(''); // Saisie manuelle N° colis
   
   // Return to hub workflow
   const [returnPackages, setReturnPackages] = useState<Package[]>([]);
@@ -274,13 +276,25 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   const returnPhotoInputRef = useRef<HTMLInputElement>(null);
 
   const today = new Date().toISOString().split('T')[0];
+  const [selectedDriverDate, setSelectedDriverDate] = useState(today);
 
   // === Abonnement missions du chauffeur ===
+  // On s'abonne SANS filtre de date pour récupérer aussi les missions
+  // en retard (jours passés non terminées) + missions futures dispatchées
   useEffect(() => {
-    hasAutoSelectedRef.current = false; // reset si le jour change
+    hasAutoSelectedRef.current = false;
     const unsub = subscribeToMissions((data) => {
-      // Les filtres sont appliqués par subscribeToMissions
-      const myMissions = data.filter(m => m.status !== MissionStatus.CANCELLED);
+      // Garder : missions de la date sélectionnée + missions en cours quelle que soit la date
+      const myMissions = data.filter(m => {
+        if (m.status === MissionStatus.CANCELLED) return false;
+        // Toujours montrer les missions en cours (même d'un autre jour)
+        if (m.status === MissionStatus.IN_PROGRESS) return true;
+        // Montrer les missions dispatchées non terminées (en retard)
+        if (m.status === MissionStatus.DISPATCHED && m.date <= today) return true;
+        // Montrer les missions de la date sélectionnée
+        if (m.date === selectedDriverDate) return true;
+        return false;
+      });
       setMissions(myMissions);
       setLoading(false);
 
@@ -289,16 +303,15 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
         const active = myMissions.find(m => m.status === MissionStatus.IN_PROGRESS);
         if (active) {
           setActiveMissionId(active.id);
-          // Trouver le premier stop en attente pour cette mission
           const sorted = [...active.stops].sort((a, b) => a.sequence - b.sequence);
           const pendingIdx = sorted.findIndex(s => s.status === StopStatus.PENDING || s.status === StopStatus.ARRIVED);
           setActiveStopIndex(pendingIdx >= 0 ? pendingIdx : 0);
         }
         hasAutoSelectedRef.current = true;
       }
-    }, { date: today, driverId: currentUser.id });
+    }, { driverId: currentUser.id });
     return unsub;
-  }, [currentUser.id, today]);
+  }, [currentUser.id, selectedDriverDate, today]);
 
   // === Données dérivées ===
   const activeMission = useMemo(() =>
@@ -344,6 +357,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
     setShowScanner(false);
     setDeliveryScannedBarcodes([]);
     setShowDeliveryScanner(false);
+    setScanBypassConfirmed(false);
+    setManualBarcodeInput('');
   }, [currentStop?.id]);
 
   // Charger les colis "À retourner" pour ce chauffeur
@@ -360,7 +375,18 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
 
   // Multi-colis : détecter si le stop actuel a plusieurs colis
   const isMultiPackageStop = (currentStop?.packageCount || 0) > 1;
-  const allDeliveryPackagesScanned = !isMultiPackageStop || deliveryScannedBarcodes.length >= (currentStop?.packageCount || 0);
+  const allDeliveryPackagesScanned = !isMultiPackageStop || scanBypassConfirmed || deliveryScannedBarcodes.length >= (currentStop?.packageCount || 0);
+
+  // Saisie manuelle d'un code-barres (fallback si scanner HS)
+  const handleManualBarcodeSubmit = () => {
+    const code = manualBarcodeInput.trim();
+    if (!code) return;
+    setDeliveryScannedBarcodes(prev => {
+      if (prev.some(b => b.toUpperCase() === code.toUpperCase())) return prev;
+      return [...prev, code];
+    });
+    setManualBarcodeInput('');
+  };
 
   // Handler scan pour livraisons multi-colis
   const handleDeliveryBarcodeScan = (barcode: string) => {
@@ -712,6 +738,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
       setUploadProgress(null);
       setDeliveryScannedBarcodes([]);
       setShowDeliveryScanner(false);
+      setScanBypassConfirmed(false);
+      setManualBarcodeInput('');
 
       showNotif(allDone ? '🎉 Tournée terminée !' : `✅ Stop ${currentStop.sequence} livré !`);
     } catch (err) {
@@ -1283,20 +1311,65 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                           />
                         </div>
 
-                        {/* Bouton scanner */}
+                        {/* Boutons scanner + saisie manuelle */}
                         {!allDeliveryPackagesScanned && (
-                          <button
-                            onClick={() => setShowDeliveryScanner(true)}
-                            className="w-full flex items-center justify-center gap-2 py-2.5 bg-orange-500 text-white rounded-lg font-bold text-sm active:scale-95 transition-transform"
-                          >
-                            📷 Scanner les colis ({deliveryScannedBarcodes.length}/{currentStop.packageCount})
-                          </button>
+                          <div className="space-y-2">
+                            <button
+                              onClick={() => setShowDeliveryScanner(true)}
+                              className="w-full flex items-center justify-center gap-2 py-2.5 bg-orange-500 text-white rounded-lg font-bold text-sm active:scale-95 transition-transform"
+                            >
+                              📷 Scanner les colis ({deliveryScannedBarcodes.length}/{currentStop.packageCount})
+                            </button>
+
+                            {/* Saisie manuelle (si caméra HS) */}
+                            <div className="flex gap-1.5">
+                              <input
+                                type="text"
+                                value={manualBarcodeInput}
+                                onChange={(e) => setManualBarcodeInput(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleManualBarcodeSubmit()}
+                                placeholder="Saisir N° manuellement"
+                                className="flex-1 px-2.5 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:ring-1 focus:ring-orange-300"
+                              />
+                              <button
+                                onClick={handleManualBarcodeSubmit}
+                                disabled={!manualBarcodeInput.trim()}
+                                className="px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 disabled:opacity-40"
+                              >
+                                OK
+                              </button>
+                            </div>
+
+                            {/* Bypass — scanner HS, confirmer sans scan */}
+                            <button
+                              onClick={() => {
+                                if (window.confirm(`Confirmer la livraison de ${currentStop.packageCount} colis SANS scan ?\n\nUtilisez cette option uniquement si le scanner ne fonctionne pas.`)) {
+                                  setScanBypassConfirmed(true);
+                                }
+                              }}
+                              className="w-full flex items-center justify-center gap-1 py-2 text-slate-400 text-[11px] font-medium hover:text-orange-500 transition-colors"
+                            >
+                              🔓 Scanner indisponible ? Valider sans scan
+                            </button>
+                          </div>
                         )}
 
-                        {allDeliveryPackagesScanned && (
+                        {allDeliveryPackagesScanned && !scanBypassConfirmed && (
                           <p className="text-xs text-green-700 font-bold text-center">
                             ✅ Tous les colis ont été scannés
                           </p>
+                        )}
+
+                        {scanBypassConfirmed && (
+                          <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg">
+                            <span className="text-xs text-amber-700 font-medium">⚠️ Validation sans scan — Les {currentStop.packageCount} colis seront marqués livrés</span>
+                            <button
+                              onClick={() => setScanBypassConfirmed(false)}
+                              className="text-xs text-amber-600 underline font-medium whitespace-nowrap"
+                            >
+                              Annuler
+                            </button>
+                          </div>
                         )}
                       </div>
                     )}
@@ -1831,13 +1904,61 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
         </div>
       )}
 
-      {/* Header */}
-      <div>
-        <h2 className="text-xl font-bold text-slate-800">Mes tournées</h2>
-        <p className="text-sm text-slate-500">
-          {new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-        </p>
+      {/* Header + sélecteur de date */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-bold text-slate-800">Mes tournées</h2>
+          <p className="text-sm text-slate-500">
+            {new Date(selectedDriverDate + 'T00:00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+          </p>
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => {
+              const d = new Date(selectedDriverDate + 'T00:00:00');
+              d.setDate(d.getDate() - 1);
+              setSelectedDriverDate(d.toISOString().split('T')[0]);
+            }}
+            className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors text-sm"
+          >
+            ◀
+          </button>
+          <input
+            type="date"
+            value={selectedDriverDate}
+            onChange={(e) => setSelectedDriverDate(e.target.value)}
+            className="px-2 py-1.5 border border-slate-200 rounded-lg text-xs font-medium text-slate-700"
+          />
+          <button
+            onClick={() => {
+              const d = new Date(selectedDriverDate + 'T00:00:00');
+              d.setDate(d.getDate() + 1);
+              setSelectedDriverDate(d.toISOString().split('T')[0]);
+            }}
+            className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors text-sm"
+          >
+            ▶
+          </button>
+          {selectedDriverDate !== today && (
+            <button
+              onClick={() => setSelectedDriverDate(today)}
+              className="px-2 py-1 bg-blue-50 text-blue-600 rounded-lg text-[10px] font-bold"
+            >
+              Aujourd'hui
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* Badge missions en retard */}
+      {missions.some(m => m.date < today && m.status !== MissionStatus.COMPLETED) && (
+        <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 flex items-center gap-2">
+          <span className="text-red-500 text-sm font-bold">⚠️</span>
+          <span className="text-xs text-red-700 font-medium">
+            {missions.filter(m => m.date < today && m.status !== MissionStatus.COMPLETED).length} mission(s) en retard
+          </span>
+        </div>
+      )}
 
       {/* Liste des missions */}
       {missions.map(mission => {
@@ -1846,9 +1967,22 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
         const statusColors = MISSION_STATUS_COLORS[mission.status];
         const isCompleted = mission.status === MissionStatus.COMPLETED;
         const isInProgress = mission.status === MissionStatus.IN_PROGRESS;
+        const isOverdue = mission.date < today && !isCompleted;
 
         return (
-          <div key={mission.id} className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+          <div key={mission.id} className={`bg-white rounded-2xl border overflow-hidden shadow-sm ${isOverdue ? 'border-red-300 ring-1 ring-red-200' : 'border-slate-200'}`}>
+            {/* Badge retard */}
+            {isOverdue && (
+              <div className="bg-red-500 text-white text-[10px] font-bold text-center py-1">
+                ⚠️ EN RETARD — Prévue le {new Date(mission.date + 'T00:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}
+              </div>
+            )}
+            {/* Date si différente d'aujourd'hui (mais pas en retard) */}
+            {!isOverdue && mission.date !== today && (
+              <div className="bg-slate-100 text-slate-500 text-[10px] font-medium text-center py-1">
+                {new Date(mission.date + 'T00:00:00').toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' })}
+              </div>
+            )}
             <div className="p-4">
               <div className="flex items-center justify-between mb-3">
                 <div>
