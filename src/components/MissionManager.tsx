@@ -179,25 +179,57 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   // Calcul des stats
   const stats = useMemo(() => calculateMissionStats(missions), [missions]);
   
+  // Index inversé : packageId → missionId (pour recherche rapide par N° colis)
+  const packageToMissionMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of missions) {
+      for (const stop of m.stops) {
+        for (const pkgId of stop.packageIds) {
+          map.set(pkgId, m.id);
+        }
+      }
+    }
+    return map;
+  }, [missions]);
+
   // Filtrage des missions
   const filteredMissions = useMemo(() => {
     let result = missions;
-    
+
     if (selectedZone !== 'all') {
       result = result.filter(m => m.zone === selectedZone);
     }
-    
+
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
+
+      // Chercher si le terme correspond à un numéro de colis (orderNumber ou barcode)
+      const matchingPackageIds = packages
+        .filter(p =>
+          p.orderNumber.toLowerCase().includes(term) ||
+          (p.barcode && p.barcode.toLowerCase().includes(term)) ||
+          p.contactName.toLowerCase().includes(term)
+        )
+        .map(p => p.id);
+
+      // Missions qui matchent par colis OU par champs classiques
+      const missionIdsFromPackages = new Set(
+        matchingPackageIds
+          .map(pid => packageToMissionMap.get(pid))
+          .filter(Boolean)
+      );
+
       result = result.filter(m =>
         m.driverName?.toLowerCase().includes(term) ||
         m.vehiclePlate?.toLowerCase().includes(term) ||
-        m.hubName.toLowerCase().includes(term)
+        m.hubName.toLowerCase().includes(term) ||
+        m.zone?.toLowerCase().includes(term) ||
+        missionIdsFromPackages.has(m.id)
       );
     }
-    
+
     return result;
-  }, [missions, selectedZone, searchTerm]);
+  }, [missions, packages, packageToMissionMap, selectedZone, searchTerm]);
 
   // Clients disponibles pour l'import
   const clients = useMemo(() => 
@@ -716,7 +748,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
-            placeholder="Rechercher par chauffeur, véhicule..."
+            placeholder="Rechercher par chauffeur, véhicule, N° colis..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
@@ -1606,6 +1638,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                     const term = searchTerm.toLowerCase();
                     return (
                       p.orderNumber.toLowerCase().includes(term) ||
+                      (p.barcode && p.barcode.toLowerCase().includes(term)) ||
                       p.contactName.toLowerCase().includes(term) ||
                       p.address.toLowerCase().includes(term) ||
                       p.city.toLowerCase().includes(term)

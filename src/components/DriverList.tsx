@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { User, Vehicle, LeaveRequest, UserRole, LeaveStatus, VehicleStatus, Zone, ZONE_COLORS } from '../types';
-import { ShieldCheck, ShieldAlert, Truck, Calendar, CheckCircle2, AlertCircle, Clock, Battery, MapPin, Edit, X, Save, Plus, Lock } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, Truck, Calendar, CheckCircle2, AlertCircle, Clock, Battery, MapPin, Edit, X, Save, Plus, Lock, Search } from 'lucide-react';
 import Modal from './shared/Modal';
 import AssignmentModal from './AssignmentModal';
 import { getVehicleForDriver } from '../services/assignmentService';
@@ -25,15 +25,38 @@ const DriverList: React.FC<DriverListProps> = ({ users, vehicles, leaves, curren
 
   // === HOOKS (doivent être appelés avant tout return conditionnel) ===
   const [editingDriver, setEditingDriver] = useState<User | null>(null);
-  
+  const [driverSearchTerm, setDriverSearchTerm] = useState('');
+
   // État pour le modal d'assignation
   const [assignmentModal, setAssignmentModal] = useState<{
     isOpen: boolean;
     driver: User | null;
   }>({ isOpen: false, driver: null });
 
-  // Filtrer uniquement les chauffeurs
-  const drivers = users.filter(u => u.role === UserRole.DRIVER);
+  // Filtrer uniquement les chauffeurs, trier alphabétiquement, filtrer par recherche
+  const drivers = useMemo(() => {
+    let result = users.filter(u => u.role === UserRole.DRIVER);
+
+    // Tri alphabétique par nom puis prénom
+    result.sort((a, b) => {
+      const nameA = `${a.lastName} ${a.firstName}`.toLowerCase();
+      const nameB = `${b.lastName} ${b.firstName}`.toLowerCase();
+      return nameA.localeCompare(nameB, 'fr');
+    });
+
+    // Filtre recherche
+    if (driverSearchTerm.trim()) {
+      const term = driverSearchTerm.toLowerCase();
+      result = result.filter(d =>
+        d.firstName.toLowerCase().includes(term) ||
+        d.lastName.toLowerCase().includes(term) ||
+        d.email.toLowerCase().includes(term) ||
+        (d.zone && d.zone.toLowerCase().includes(term))
+      );
+    }
+
+    return result;
+  }, [users, driverSearchTerm]);
 
   // === VÉRIFICATION D'ACCÈS (après tous les hooks) ===
   if (!canViewDrivers) {
@@ -96,13 +119,25 @@ const DriverList: React.FC<DriverListProps> = ({ users, vehicles, leaves, curren
 
   return (
     <div className="space-y-6 animate-fade-in relative">
-        <div className="flex justify-between items-center">
+        <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">
             <div>
                 <h2 className="text-2xl font-bold text-slate-800">Effectif Chauffeurs</h2>
                 <p className="text-slate-600 font-medium">Vue d'ensemble de la disponibilité et des affectations.</p>
             </div>
-            <div className="bg-white px-4 py-2 rounded-lg border border-slate-200 text-sm font-bold text-slate-700 shadow-sm">
-                Total : {drivers.length} Chauffeurs
+            <div className="flex items-center gap-3">
+                <div className="relative">
+                    <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                        type="text"
+                        value={driverSearchTerm}
+                        onChange={(e) => setDriverSearchTerm(e.target.value)}
+                        placeholder="Rechercher un chauffeur..."
+                        className="pl-9 pr-4 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-brand-500 w-56"
+                    />
+                </div>
+                <div className="bg-white px-4 py-2 rounded-lg border border-slate-200 text-sm font-bold text-slate-700 shadow-sm whitespace-nowrap">
+                    {drivers.length} Chauffeur{drivers.length > 1 ? 's' : ''}
+                </div>
             </div>
         </div>
 

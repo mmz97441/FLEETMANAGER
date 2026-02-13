@@ -179,7 +179,7 @@ export const useVehicles = ({
   // === STATE ===
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
-  const [sortBy, setSortBy] = useState<SortOption>('wear_desc');
+  const [sortBy, setSortBy] = useState<SortOption>('plate');
   const [viewMode, setViewMode] = useState<ViewMode>('list');
 
   // === PERMISSIONS (via hook) ===
