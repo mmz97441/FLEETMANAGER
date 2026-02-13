@@ -13,9 +13,11 @@ import {
   ClientFinancialData,
   FinancialIndicator,
   ProductRevenue,
+  ProductFamily,
   FinancialSheetType,
   ParsedFinancialSheet,
 } from '../types';
+import { getProductFamilies, addProductFamily } from './firestore';
 
 // ============================================================================
 // DÉTECTION DU TYPE DE FEUILLE
@@ -422,16 +424,87 @@ export const parseFinancialExcel = async (file: File): Promise<FinancialImportPr
   };
 };
 
+// ============================================================================
+// MATCHING FAMILLES DE PRODUIT
+// ============================================================================
+
 /**
- * Construit l'objet ClientFinancialData final prêt pour Firestore
+ * Statut d'un produit par rapport au référentiel
+ */
+export interface ProductMatchStatus {
+  product: ProductRevenue;
+  matchedFamily: ProductFamily | null;  // null = nouvelle famille à créer
+  isNew: boolean;
+}
+
+/**
+ * Compare les produits du fichier Excel avec les familles existantes.
+ * Matching par nom normalisé (insensible casse + accents).
+ */
+export const matchProductsToFamilies = async (
+  products: ProductRevenue[]
+): Promise<ProductMatchStatus[]> => {
+  const families = await getProductFamilies();
+
+  return products.map(product => {
+    const normalizedProduct = normalize(product.product);
+
+    // Chercher une correspondance exacte (normalisée)
+    const match = families.find(f => f.normalizedName === normalizedProduct);
+
+    return {
+      product,
+      matchedFamily: match || null,
+      isNew: !match
+    };
+  });
+};
+
+/**
+ * Crée les familles de produit manquantes et retourne les produits
+ * enrichis avec leur productFamilyId.
+ */
+export const ensureProductFamilies = async (
+  matchStatuses: ProductMatchStatus[]
+): Promise<ProductRevenue[]> => {
+  const enriched: ProductRevenue[] = [];
+
+  for (const status of matchStatuses) {
+    let familyId: string;
+
+    if (status.matchedFamily) {
+      // Famille existante → utiliser son ID
+      familyId = status.matchedFamily.id;
+    } else {
+      // Nouvelle famille → créer automatiquement
+      familyId = await addProductFamily({
+        name: status.product.product,
+        normalizedName: normalize(status.product.product),
+        createdAt: new Date().toISOString(),
+        createdBy: 'import'
+      });
+    }
+
+    enriched.push({
+      ...status.product,
+      productFamilyId: familyId
+    });
+  }
+
+  return enriched;
+};
+
+/**
+ * Construit l'objet ClientFinancialData final prêt pour Firestore.
+ * Les productBreakdown doivent déjà avoir leur productFamilyId renseigné.
  */
 export const buildClientFinancialData = (
   preview: FinancialImportPreview,
   importedBy: { id: string; firstName: string; lastName: string },
+  enrichedProducts?: ProductRevenue[],
   clientId?: string
 ): Omit<ClientFinancialData, 'id'> => {
   const ident = preview.identification;
-  const products = preview.productBreakdown;
 
   return {
     companyName: ident?.companyName || 'Non renseigné',
@@ -450,7 +523,7 @@ export const buildClientFinancialData = (
     bfr: ident?.bfr || { yearN: 0, yearN1: 0 },
     tresorerie: ident?.tresorerie || { yearN: 0, yearN1: 0 },
 
-    productBreakdown: products?.products || [],
+    productBreakdown: enrichedProducts || preview.productBreakdown?.products || [],
 
     clientId: clientId || undefined,
 

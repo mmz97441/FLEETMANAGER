@@ -712,7 +712,7 @@ export const toggleAddressFavorite = async (addressId: string, isFavorite: boole
 // DONNÉES FINANCIÈRES CLIENT
 // ============================================================================
 
-import { ClientFinancialData } from '../types';
+import { ClientFinancialData, ProductFamily } from '../types';
 
 export const addClientFinancialData = async (data: Omit<ClientFinancialData, 'id'>): Promise<string> => {
   const docRef = await addDoc(collection(db, "client_financials"), data);
@@ -730,4 +730,30 @@ export const subscribeToClientFinancials = (callback: (data: ClientFinancialData
 
 export const deleteClientFinancialData = async (id: string): Promise<void> => {
   await deleteDoc(doc(db, "client_financials", id));
+};
+
+// ============================================================================
+// FAMILLES DE PRODUIT (Référentiel)
+// ============================================================================
+
+export const subscribeToProductFamilies = (callback: (families: ProductFamily[]) => void) => {
+  return onSnapshot(collection(db, "product_families"), (snapshot) => {
+    const items = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ProductFamily));
+    items.sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+    callback(items);
+  });
+};
+
+export const getProductFamilies = async (): Promise<ProductFamily[]> => {
+  const snapshot = await getDocs(collection(db, "product_families"));
+  return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ProductFamily));
+};
+
+export const addProductFamily = async (data: Omit<ProductFamily, 'id'>): Promise<string> => {
+  const docRef = await addDoc(collection(db, "product_families"), data);
+  return docRef.id;
+};
+
+export const deleteProductFamily = async (id: string): Promise<void> => {
+  await deleteDoc(doc(db, "product_families", id));
 };

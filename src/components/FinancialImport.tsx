@@ -15,18 +15,22 @@ import {
   TrendingUp, PieChart, Eye, Trash2, Download, ChevronRight, Info,
   ArrowUpRight, ArrowDownRight, Minus, RefreshCw, FileText
 } from 'lucide-react';
-import { User, ClientFinancialData, FinancialIndicator } from '../types';
+import { User, ClientFinancialData, FinancialIndicator, ProductFamily } from '../types';
 import {
   parseFinancialExcel,
   FinancialImportPreview,
   ParsedIdentification,
   ParsedProductBreakdown,
-  buildClientFinancialData
+  buildClientFinancialData,
+  matchProductsToFamilies,
+  ensureProductFamilies,
+  ProductMatchStatus
 } from '../services/financialImportService';
 import {
   addClientFinancialData,
   subscribeToClientFinancials,
-  deleteClientFinancialData
+  deleteClientFinancialData,
+  subscribeToProductFamilies
 } from '../services/firestore';
 import Modal from './shared/Modal';
 import ConfirmModal from './ConfirmModal';
@@ -90,14 +94,19 @@ const FinancialImport: React.FC<FinancialImportProps> = ({ currentUser, users })
   const [editedIdentification, setEditedIdentification] = useState<ParsedIdentification | null>(null);
   const [editedProducts, setEditedProducts] = useState<ParsedProductBreakdown | null>(null);
 
+  // Matching familles de produit
+  const [productMatches, setProductMatches] = useState<ProductMatchStatus[]>([]);
+  const [productFamilies, setProductFamilies] = useState<ProductFamily[]>([]);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
 
-  // --- Charger l'historique ---
+  // --- Charger l'historique + familles de produit ---
   useEffect(() => {
-    const unsub = subscribeToClientFinancials(setHistory);
-    return () => unsub();
+    const unsub1 = subscribeToClientFinancials(setHistory);
+    const unsub2 = subscribeToProductFamilies(setProductFamilies);
+    return () => { unsub1(); unsub2(); };
   }, []);
 
   // --- Drag & Drop ---
@@ -134,6 +143,7 @@ const FinancialImport: React.FC<FinancialImportProps> = ({ currentUser, users })
     setParseError(null);
     setPreview(null);
     setSaveSuccess(false);
+    setProductMatches([]);
     setIsParsing(true);
 
     try {
@@ -141,6 +151,12 @@ const FinancialImport: React.FC<FinancialImportProps> = ({ currentUser, users })
       setPreview(result);
       setEditedIdentification(result.identification);
       setEditedProducts(result.productBreakdown);
+
+      // Matcher les produits avec les familles existantes
+      if (result.productBreakdown && result.productBreakdown.products.length > 0) {
+        const matches = await matchProductsToFamilies(result.productBreakdown.products);
+        setProductMatches(matches);
+      }
 
       // Défaut : ouvrir l'onglet qui a du contenu
       if (result.hasIdentification) {
@@ -161,14 +177,25 @@ const FinancialImport: React.FC<FinancialImportProps> = ({ currentUser, users })
 
     setIsSaving(true);
     try {
-      // Reconstruire le preview avec les données éditées
+      // 1. Auto-créer les familles de produit manquantes et enrichir les produits avec familyId
+      let enrichedProducts = editedProducts?.products;
+      if (productMatches.length > 0) {
+        // Re-matcher avec les données potentiellement éditées
+        const updatedMatches = productMatches.map((m, i) => ({
+          ...m,
+          product: editedProducts?.products[i] || m.product
+        }));
+        enrichedProducts = await ensureProductFamilies(updatedMatches);
+      }
+
+      // 2. Reconstruire le preview avec les données éditées
       const editedPreview: FinancialImportPreview = {
         ...preview,
         identification: editedIdentification,
         productBreakdown: editedProducts
       };
 
-      const data = buildClientFinancialData(editedPreview, currentUser);
+      const data = buildClientFinancialData(editedPreview, currentUser, enrichedProducts);
       await addClientFinancialData(data);
       setSaveSuccess(true);
 
@@ -178,6 +205,7 @@ const FinancialImport: React.FC<FinancialImportProps> = ({ currentUser, users })
         setPreview(null);
         setEditedIdentification(null);
         setEditedProducts(null);
+        setProductMatches([]);
         setSaveSuccess(false);
       }, 2000);
     } catch (err) {
@@ -193,6 +221,7 @@ const FinancialImport: React.FC<FinancialImportProps> = ({ currentUser, users })
     setPreview(null);
     setEditedIdentification(null);
     setEditedProducts(null);
+    setProductMatches([]);
     setParseError(null);
     setSaveSuccess(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -317,7 +346,14 @@ const FinancialImport: React.FC<FinancialImportProps> = ({ currentUser, users })
       {saveSuccess && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-6 flex items-center gap-3">
           <CheckCircle size={20} className="text-emerald-500" />
-          <p className="font-medium text-emerald-700">Données financières importées avec succès !</p>
+          <div>
+            <p className="font-medium text-emerald-700">Données financières importées avec succès !</p>
+            {productMatches.filter(m => m.isNew).length > 0 && (
+              <p className="text-sm text-emerald-600 mt-1">
+                {productMatches.filter(m => m.isNew).length} nouvelle{productMatches.filter(m => m.isNew).length > 1 ? 's' : ''} famille{productMatches.filter(m => m.isNew).length > 1 ? 's' : ''} de produit créée{productMatches.filter(m => m.isNew).length > 1 ? 's' : ''} automatiquement.
+              </p>
+            )}
+          </div>
         </div>
       )}
 
@@ -392,6 +428,11 @@ const FinancialImport: React.FC<FinancialImportProps> = ({ currentUser, users })
                     {editedProducts.products.length}
                   </span>
                 )}
+                {productMatches.filter(m => m.isNew).length > 0 && (
+                  <span className="ml-1 px-1.5 py-0.5 text-xs bg-amber-100 text-amber-700 rounded-full">
+                    +{productMatches.filter(m => m.isNew).length} nouvelles
+                  </span>
+                )}
               </button>
             )}
           </div>
@@ -412,6 +453,7 @@ const FinancialImport: React.FC<FinancialImportProps> = ({ currentUser, users })
               <ProductBreakdownPreview
                 data={editedProducts}
                 onUpdate={updateProduct}
+                productMatches={productMatches}
               />
             )}
           </div>
@@ -630,10 +672,14 @@ const IdentificationPreview: React.FC<{
 const ProductBreakdownPreview: React.FC<{
   data: ParsedProductBreakdown;
   onUpdate: (index: number, field: 'product' | 'caHT' | 'percentage', value: string) => void;
-}> = ({ data, onUpdate }) => {
+  productMatches: ProductMatchStatus[];
+}> = ({ data, onUpdate, productMatches }) => {
   // Couleurs pour les barres de progression
   const colors = ['bg-indigo-500', 'bg-emerald-500', 'bg-amber-500', 'bg-rose-500', 'bg-cyan-500', 'bg-violet-500', 'bg-orange-500', 'bg-teal-500'];
   const maxCA = Math.max(...data.products.map(p => p.caHT), 1);
+
+  const newCount = productMatches.filter(m => m.isNew).length;
+  const existingCount = productMatches.filter(m => !m.isNew).length;
 
   return (
     <div className="space-y-4">
@@ -646,40 +692,72 @@ const ProductBreakdownPreview: React.FC<{
         </span>
       </div>
 
+      {/* Résumé familles */}
+      {productMatches.length > 0 && (
+        <div className="flex items-center gap-3 px-4 py-3 bg-slate-50 rounded-xl text-sm">
+          <Info size={16} className="text-slate-400 flex-shrink-0" />
+          <span className="text-slate-600">
+            {existingCount > 0 && (
+              <><span className="font-medium text-emerald-700">{existingCount} famille{existingCount > 1 ? 's' : ''} existante{existingCount > 1 ? 's' : ''}</span></>
+            )}
+            {existingCount > 0 && newCount > 0 && ' · '}
+            {newCount > 0 && (
+              <><span className="font-medium text-amber-700">{newCount} nouvelle{newCount > 1 ? 's' : ''} famille{newCount > 1 ? 's' : ''}</span> (seront créées automatiquement)</>
+            )}
+          </span>
+        </div>
+      )}
+
       <div className="space-y-3">
-        {data.products.map((product, i) => (
-          <div key={i} className="flex items-center gap-3">
-            {/* Nom produit */}
-            <input
-              type="text"
-              value={product.product}
-              onChange={(e) => onUpdate(i, 'product', e.target.value)}
-              className="w-40 px-2 py-1.5 border border-slate-200 rounded text-sm focus:ring-1 focus:ring-indigo-500 outline-none"
-            />
+        {data.products.map((product, i) => {
+          const match = productMatches[i];
+          const isNew = match?.isNew ?? true;
 
-            {/* Barre de progression */}
-            <div className="flex-1 flex items-center gap-2">
-              <div className="flex-1 bg-slate-100 rounded-full h-6 relative overflow-hidden">
-                <div
-                  className={`h-full rounded-full ${colors[i % colors.length]} transition-all`}
-                  style={{ width: `${Math.max((product.caHT / maxCA) * 100, 2)}%` }}
-                />
-                <span className="absolute inset-0 flex items-center justify-center text-xs font-medium text-slate-700">
-                  {formatPercent(product.percentage)}
-                </span>
+          return (
+            <div key={i} className="flex items-center gap-3">
+              {/* Badge nouveau / existant */}
+              <div className="w-6 flex-shrink-0" title={isNew ? 'Nouvelle famille — sera créée' : `Famille existante : ${match?.matchedFamily?.name}`}>
+                {isNew ? (
+                  <span className="inline-block w-5 h-5 rounded-full bg-amber-100 text-amber-600 text-xs font-bold flex items-center justify-center" title="Nouvelle famille">N</span>
+                ) : (
+                  <CheckCircle size={18} className="text-emerald-500" />
+                )}
               </div>
-            </div>
 
-            {/* CA HT */}
-            <input
-              type="text"
-              value={product.caHT || ''}
-              onChange={(e) => onUpdate(i, 'caHT', e.target.value)}
-              className="w-28 text-right px-2 py-1.5 border border-slate-200 rounded text-sm focus:ring-1 focus:ring-indigo-500 outline-none"
-              placeholder="0"
-            />
-          </div>
-        ))}
+              {/* Nom produit */}
+              <input
+                type="text"
+                value={product.product}
+                onChange={(e) => onUpdate(i, 'product', e.target.value)}
+                className={`w-40 px-2 py-1.5 border rounded text-sm focus:ring-1 focus:ring-indigo-500 outline-none ${
+                  isNew ? 'border-amber-300 bg-amber-50/50' : 'border-slate-200'
+                }`}
+              />
+
+              {/* Barre de progression */}
+              <div className="flex-1 flex items-center gap-2">
+                <div className="flex-1 bg-slate-100 rounded-full h-6 relative overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${colors[i % colors.length]} transition-all`}
+                    style={{ width: `${Math.max((product.caHT / maxCA) * 100, 2)}%` }}
+                  />
+                  <span className="absolute inset-0 flex items-center justify-center text-xs font-medium text-slate-700">
+                    {formatPercent(product.percentage)}
+                  </span>
+                </div>
+              </div>
+
+              {/* CA HT */}
+              <input
+                type="text"
+                value={product.caHT || ''}
+                onChange={(e) => onUpdate(i, 'caHT', e.target.value)}
+                className="w-28 text-right px-2 py-1.5 border border-slate-200 rounded text-sm focus:ring-1 focus:ring-indigo-500 outline-none"
+                placeholder="0"
+              />
+            </div>
+          );
+        })}
       </div>
     </div>
   );

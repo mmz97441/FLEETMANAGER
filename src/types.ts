@@ -1209,10 +1209,23 @@ export interface FinancialIndicator {
 }
 
 /**
+ * Famille de produit (référentiel centralisé)
+ * Permet la cohérence entre imports : "Carburant" sera toujours le même produit.
+ */
+export interface ProductFamily {
+  id: string;
+  name: string;                    // Nom canonique ("Carburant", "Gaz", "Tabac"...)
+  normalizedName: string;          // Nom normalisé pour matching (minuscule, sans accents)
+  createdAt: string;
+  createdBy?: string;              // 'import' si auto-créé à l'import
+}
+
+/**
  * Répartition du CA par produit
  */
 export interface ProductRevenue {
   product: string;                 // "Carburant", "Gaz", "Tabac", etc.
+  productFamilyId?: string;        // Lien vers ProductFamily.id (rempli à l'import)
   caHT: number;                    // CA HT en euros
   percentage: number;              // % du CA total
 }
