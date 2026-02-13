@@ -38,6 +38,7 @@ const PermissionsManager = lazy(() => import('./components/PermissionsManager'))
 const DeliveryScheduleSettings = lazy(() => import('./components/DeliveryScheduleSettings'));
 const HubOperations = lazy(() => import('./components/HubOperations'));
 const DriverTourView = lazy(() => import('./components/DriverTourView'));
+const FinancialImport = lazy(() => import('./components/FinancialImport'));
 
 // FIREBASE SERVICES
 import { 
@@ -996,14 +997,7 @@ const App: React.FC = () => {
       case 'import_export':
         return (
           <div className="p-8">
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8 text-center">
-              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <span className="text-3xl">📥</span>
-              </div>
-              <h2 className="text-2xl font-bold text-slate-800 mb-2">Imports / Exports</h2>
-              <p className="text-slate-500 mb-4">Exporter vos données en Excel, importer un historique...</p>
-              <span className="inline-block px-3 py-1 bg-green-100 text-green-700 text-sm font-bold rounded-full">À venir</span>
-            </div>
+            <FinancialImport currentUser={currentUser} users={users} />
           </div>
         );
 

@@ -1195,3 +1195,77 @@ export interface PostalCodeMapping {
   city: string;                    // "Saint-Denis"
   hubId?: string;                  // Hub par défaut pour ce code postal
 }
+
+// ============================================================================
+// DONNÉES FINANCIÈRES CLIENT (Import Excel multi-feuilles)
+// ============================================================================
+
+/**
+ * Indicateur financier avec valeurs année N et N-1
+ */
+export interface FinancialIndicator {
+  yearN: number;
+  yearN1: number;
+}
+
+/**
+ * Répartition du CA par produit
+ */
+export interface ProductRevenue {
+  product: string;                 // "Carburant", "Gaz", "Tabac", etc.
+  caHT: number;                    // CA HT en euros
+  percentage: number;              // % du CA total
+}
+
+/**
+ * Données financières complètes d'un client (issues d'un classeur Excel)
+ */
+export interface ClientFinancialData {
+  id: string;
+
+  // Identification entreprise (feuille 1)
+  companyName: string;             // Raison sociale
+  siret?: string;
+  naf?: string;                    // Code NAF / APE
+  address?: string;
+  activity?: string;               // Activité principale
+  legalForm?: string;              // Forme juridique
+
+  // Indicateurs financiers (feuille 1)
+  caHT: FinancialIndicator;                  // Chiffre d'affaires HT
+  margeCommerciale: FinancialIndicator;      // Marge commerciale
+  valeurAjoutee: FinancialIndicator;         // Valeur ajoutée
+  ebe: FinancialIndicator;                   // Excédent Brut d'Exploitation
+  resultatExploitation: FinancialIndicator;  // Résultat d'exploitation
+  resultatNet: FinancialIndicator;           // Résultat net
+  bfr: FinancialIndicator;                   // Besoin en Fonds de Roulement
+  tresorerie: FinancialIndicator;            // Trésorerie nette
+
+  // Répartition du CA par produit (feuille 2)
+  productBreakdown: ProductRevenue[];
+
+  // Lien optionnel vers un client existant
+  clientId?: string;
+
+  // Métadonnées d'import
+  fileName: string;
+  importedBy: string;
+  importedByName: string;
+  importedAt: string;
+}
+
+/**
+ * Types de feuilles détectées dans un classeur Excel
+ */
+export type FinancialSheetType = 'identification' | 'product_breakdown' | 'unknown';
+
+/**
+ * Résultat du parsing d'une feuille Excel financière
+ */
+export interface ParsedFinancialSheet {
+  sheetName: string;
+  type: FinancialSheetType;
+  rawData: any[][];                // Données brutes (tableau de tableaux)
+  parsed: boolean;                 // Parsing réussi ?
+  error?: string;                  // Message d'erreur si échec
+}

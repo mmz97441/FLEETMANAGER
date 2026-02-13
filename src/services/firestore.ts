@@ -707,3 +707,27 @@ export const toggleAddressFavorite = async (addressId: string, isFavorite: boole
     updatedAt: new Date().toISOString()
   });
 };
+
+// ============================================================================
+// DONNÉES FINANCIÈRES CLIENT
+// ============================================================================
+
+import { ClientFinancialData } from '../types';
+
+export const addClientFinancialData = async (data: Omit<ClientFinancialData, 'id'>): Promise<string> => {
+  const docRef = await addDoc(collection(db, "client_financials"), data);
+  return docRef.id;
+};
+
+export const subscribeToClientFinancials = (callback: (data: ClientFinancialData[]) => void) => {
+  return onSnapshot(collection(db, "client_financials"), (snapshot) => {
+    const items = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ClientFinancialData));
+    // Trier par date d'import (plus récent en premier)
+    items.sort((a, b) => (b.importedAt || '').localeCompare(a.importedAt || ''));
+    callback(items);
+  });
+};
+
+export const deleteClientFinancialData = async (id: string): Promise<void> => {
+  await deleteDoc(doc(db, "client_financials", id));
+};
