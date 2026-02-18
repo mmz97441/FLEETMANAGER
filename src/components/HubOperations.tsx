@@ -172,9 +172,13 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
     return vehicles.find(v => v.id === driverMission.vehicleId) || null;
   }, [driverMission, vehicles]);
 
-  // Barcodes attendus pour le scanner
-  const expectedBarcodes = useMemo(() => 
-    driverPackages.toLoad.map(p => (p.barcode || p.orderNumber).toUpperCase()),
+  // Barcodes attendus pour le scanner (inclure barcode GFL + orderNumber + externalId)
+  const expectedBarcodes = useMemo(() =>
+    driverPackages.toLoad.flatMap(p => [
+      p.barcode?.trim().toUpperCase(),
+      p.orderNumber?.trim().toUpperCase(),
+      p.externalId?.trim().toUpperCase()
+    ].filter(Boolean) as string[]),
     [driverPackages.toLoad]
   );
 
@@ -200,10 +204,13 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
 
   // --- RÉCEPTION : Scan un colis → AT_HUB ---
   const handleReceptionScan = async (barcode: string) => {
-    const code = barcode.trim();
-    const pkg = packages.find(p =>
-      (p.barcode || p.orderNumber).trim().toUpperCase() === code.toUpperCase()
-    );
+    const code = barcode.trim().toUpperCase();
+    const pkg = packages.find(p => {
+      const bc = (p.barcode || '').trim().toUpperCase();
+      const on = (p.orderNumber || '').trim().toUpperCase();
+      const eid = (p.externalId || '').trim().toUpperCase();
+      return bc === code || on === code || eid === code;
+    });
 
     if (!pkg) {
       showNotif('warning', `Code ${code} — colis non trouvé dans le système`);
@@ -276,10 +283,13 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
 
   // --- CHARGEMENT : Scan un colis → vérification chauffeur ---
   const handleLoadingScan = async (barcode: string) => {
-    const code = barcode.trim();
-    const pkg = packages.find(p =>
-      (p.barcode || p.orderNumber).trim().toUpperCase() === code.toUpperCase()
-    );
+    const code = barcode.trim().toUpperCase();
+    const pkg = packages.find(p => {
+      const bc = (p.barcode || '').trim().toUpperCase();
+      const on = (p.orderNumber || '').trim().toUpperCase();
+      const eid = (p.externalId || '').trim().toUpperCase();
+      return bc === code || on === code || eid === code;
+    });
 
     if (!pkg) {
       showNotif('warning', `Code ${code} — colis non trouvé dans le système`);

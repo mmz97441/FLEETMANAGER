@@ -17,6 +17,50 @@ import {
   getHubByZone
 } from './missionService';
 
+/**
+ * Normalise un numéro de téléphone vers le format international +262
+ * Gère la notation scientifique Excel (ex: 2.62693E+11 → +262693...)
+ * Formats acceptés :
+ *   0692XXXXXX → +262692XXXXXX
+ *   262692XXXXXX → +262692XXXXXX
+ *   +262692XXXXXX → +262692XXXXXX
+ *   2.62693E+11 → +262693...
+ */
+const normalizePhone = (phone: string | number | undefined): string | undefined => {
+  if (phone === undefined || phone === null || phone === '') return undefined;
+
+  // Convertir number → string sans notation scientifique
+  let str = typeof phone === 'number'
+    ? Number.isFinite(phone) ? BigInt(Math.round(phone)).toString() : String(phone)
+    : String(phone).trim();
+
+  // Gérer la notation scientifique sous forme de string ("2.62693E+11")
+  if (/[\dEe.+]+E[+\-]?\d+/i.test(str)) {
+    try { str = BigInt(Math.round(Number(str))).toString(); } catch { /* keep as-is */ }
+  }
+
+  // Retirer tout sauf chiffres et + initial
+  const plus = str.startsWith('+');
+  str = str.replace(/\D/g, '');
+
+  if (!str || str.length < 6) return undefined;
+
+  // Déjà en international +262...
+  if (plus && str.startsWith('262')) return `+${str}`;
+
+  // International sans + (262XXXXXXXXX, 12 digits)
+  if (str.startsWith('262') && str.length >= 12) return `+${str}`;
+
+  // Local avec 0 (0692XXXXXX, 10 digits) → +262692XXXXXX
+  if (str.startsWith('0') && str.length === 10) return `+262${str.substring(1)}`;
+
+  // 9 digits sans 0 (692XXXXXX) → +262692XXXXXX
+  if (str.length === 9 && /^[26]/.test(str)) return `+262${str}`;
+
+  // Format inconnu, retourner tel quel avec +
+  return plus ? `+${str}` : str;
+};
+
 // Structure attendue du fichier client
 interface ClientFileRow {
   Id: string;                    // "C0004911-15087911"
@@ -185,7 +229,7 @@ const rowToPackage = async (
     floor,
     hasElevator,
     contactName: row.Contact,
-    contactPhone: row.Telephone || undefined,
+    contactPhone: normalizePhone(row.Telephone),
     timeWindowStart: row.Start || undefined,
     timeWindowEnd: row.End || undefined,
     serviceTime,
@@ -495,7 +539,7 @@ export const parseExcelForReview = async (file: File): Promise<ReviewResult> => 
       city,
       zone,
       contactName: raw.Contact || '',
-      contactPhone: raw.Telephone || '',
+      contactPhone: normalizePhone(raw.Telephone) || '',
       floor: typeof raw.Floor === 'string' ? parseInt(raw.Floor) || 0 : raw.Floor || 0,
       hasElevator: raw.Elevator === '1' || raw.Elevator === 1 || raw.Elevator === 'true',
       timeWindowStart: raw.Start || '',
@@ -648,7 +692,7 @@ export const confirmReviewedImport = async (
         floor: row.floor,
         hasElevator: row.hasElevator,
         contactName: row.contactName,
-        contactPhone: row.contactPhone || undefined,
+        contactPhone: normalizePhone(row.contactPhone),
         timeWindowStart: row.timeWindowStart || undefined,
         timeWindowEnd: row.timeWindowEnd || undefined,
         serviceTime: row.serviceTime || 5,

@@ -918,7 +918,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
         scannedPackageIds: scannedIds,
         missingPackageIds: missingIds,
         unknownBarcodes: scannedBarcodes.filter(b => {
-          const codes = stopPackages.map(p => (p.barcode || p.orderNumber).toUpperCase());
+          const codes = stopPackages.flatMap(p =>
+            [p.barcode, p.orderNumber, p.externalId].filter(Boolean).map(c => c!.trim().toUpperCase())
+          );
           return !codes.includes(b.toUpperCase());
         }),
         signatureBase64
@@ -1286,8 +1288,10 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                         {/* Liste des colis avec statut de scan */}
                         <div className="space-y-1">
                           {deliveryStopPackages.map((pkg) => {
+                            const pkgCodes = [pkg.barcode, pkg.orderNumber, pkg.externalId]
+                              .filter(Boolean).map(c => c!.trim().toUpperCase());
                             const scanned = deliveryScannedBarcodes.some(
-                              b => b.toUpperCase() === (pkg.barcode || pkg.orderNumber).toUpperCase()
+                              b => pkgCodes.includes(b.toUpperCase())
                             );
                             return (
                               <div key={pkg.id} className={`flex items-center justify-between px-2 py-1.5 rounded-lg text-xs ${
@@ -1706,7 +1710,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
             <BarcodeScanner
               onScan={handleBarcodeScan}
               onClose={() => setShowScanner(false)}
-              expectedBarcodes={stopPackages.map(p => (p.barcode || p.orderNumber))}
+              expectedBarcodes={stopPackages.flatMap(p => [p.barcode, p.orderNumber, p.externalId].filter(Boolean) as string[])}
               alreadyScanned={scannedBarcodes}
               title={`Scan enlèvement — ${currentStop?.contactName || ''}`}
             />
@@ -1726,7 +1730,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
             <BarcodeScanner
               onScan={handleDeliveryBarcodeScan}
               onClose={() => setShowDeliveryScanner(false)}
-              expectedBarcodes={deliveryStopPackages.map(p => (p.barcode || p.orderNumber))}
+              expectedBarcodes={deliveryStopPackages.flatMap(p => [p.barcode, p.orderNumber, p.externalId].filter(Boolean) as string[])}
               alreadyScanned={deliveryScannedBarcodes}
               title={`Scan livraison — ${currentStop?.contactName || ''} (${deliveryScannedBarcodes.length}/${currentStop?.packageCount || 0})`}
             />

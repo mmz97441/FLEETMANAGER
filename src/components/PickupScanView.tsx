@@ -62,8 +62,9 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
     const missingPkgs: PickupPackage[] = [];
 
     expectedPackages.forEach(pkg => {
-      const code = (pkg.barcode || pkg.orderNumber).toUpperCase();
-      if (scannedSet.has(code)) {
+      const codes = [pkg.barcode, pkg.orderNumber, pkg.externalId]
+        .filter(Boolean).map(c => c!.trim().toUpperCase());
+      if (codes.some(c => scannedSet.has(c))) {
         scannedPkgs.push(pkg);
       } else {
         missingPkgs.push(pkg);
@@ -71,7 +72,9 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
     });
 
     // Codes scannés qui ne correspondent à aucun colis prévu
-    const expectedCodes = new Set(expectedPackages.map(p => (p.barcode || p.orderNumber).toUpperCase()));
+    const expectedCodes = new Set(expectedPackages.flatMap(p =>
+      [p.barcode, p.orderNumber, p.externalId].filter(Boolean).map(c => c!.trim().toUpperCase())
+    ));
     const unknownCodes = scannedBarcodes.filter(b => !expectedCodes.has(b.toUpperCase()));
 
     return { scanned: scannedPkgs, missing: missingPkgs, unknown: unknownCodes };
@@ -94,8 +97,9 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
   }, [expectedPackages, searchTerm]);
 
   const isScanned = (pkg: PickupPackage) => {
-    const code = (pkg.barcode || pkg.orderNumber).toUpperCase();
-    return scannedBarcodes.some(b => b.toUpperCase() === code);
+    const codes = [pkg.barcode, pkg.orderNumber, pkg.externalId]
+      .filter(Boolean).map(c => c!.trim().toUpperCase());
+    return scannedBarcodes.some(b => codes.includes(b.toUpperCase()));
   };
 
   const handleFinalize = () => {
