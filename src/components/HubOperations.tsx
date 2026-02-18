@@ -532,14 +532,16 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
                         </div>
                         <div>
                           <p className="text-sm font-medium text-slate-800">{pkg.contactName}</p>
-                          <p className="text-[11px] text-slate-500">{pkg.barcode || pkg.orderNumber} • {pkg.clientName}</p>
+                          <p className="text-[11px] text-slate-500">{pkg.orderNumber} • {pkg.clientName}</p>
                         </div>
                       </div>
-                      <div className="text-right">
+                      <div className="text-right flex items-center gap-2">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${PACKAGE_STATUS_COLORS[pkg.status]?.bg || 'bg-slate-100'} ${PACKAGE_STATUS_COLORS[pkg.status]?.text || 'text-slate-600'}`}>
+                          {pkg.status}
+                        </span>
                         <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${ZONE_COLORS[pkg.zone as Zone]?.bg || 'bg-slate-100'} ${ZONE_COLORS[pkg.zone as Zone]?.text || 'text-slate-600'}`}>
                           {pkg.zone}
                         </span>
-                        <p className="text-[10px] text-slate-400 mt-0.5">{pkg.city}</p>
                       </div>
                     </div>
                   ))

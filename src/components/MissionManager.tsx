@@ -1613,6 +1613,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                   />
                 </th>
                 <th className="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase">N° Commande</th>
+                <th className="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase">Code interne</th>
                 <th className="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase">Destinataire</th>
                 <th className="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase">Adresse</th>
                 <th className="px-3 py-3 text-center text-xs font-bold text-slate-500 uppercase">Zone</th>
@@ -1627,7 +1628,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
             <tbody className="divide-y divide-slate-100">
               {todayPackages.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-8 text-center text-slate-500">
+                  <td colSpan={11} className="px-4 py-8 text-center text-slate-500">
                     Aucun colis pour cette date
                   </td>
                 </tr>
@@ -1688,6 +1689,14 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                           <span className="font-mono font-medium text-slate-800 text-sm">
                             {pkg.orderNumber}
                           </span>
+                        </td>
+                        {/* Code interne GFL */}
+                        <td className="px-3 py-2">
+                          {pkg.barcode && (
+                            <span className="font-mono text-xs text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">
+                              {pkg.barcode}
+                            </span>
+                          )}
                         </td>
                         {/* Destinataire */}
                         <td className="px-3 py-2">
