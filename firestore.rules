@@ -272,12 +272,12 @@ service cloud.firestore {
     // --- Packages (colis) ---
     // Lecture : tous les connectés (clients voient leurs colis)
     // Création : admin uniquement (import de fichiers)
-    // Modification : admin + chauffeurs (scan, livraison, retour, transfert)
+    // Modification : admin + chauffeurs + internes (hub ops: scan, réception, chargement)
     // Suppression : admin uniquement
     match /packages/{packageId} {
       allow read: if isAuthenticated();
       allow create: if isAdminRole();
-      allow update: if isAdminRole() || isDriver();
+      allow update: if isInternalUser();
       allow delete: if isAdminRole();
     }
 

@@ -200,12 +200,13 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
 
   // --- RÉCEPTION : Scan un colis → AT_HUB ---
   const handleReceptionScan = async (barcode: string) => {
-    const pkg = packages.find(p => 
-      (p.barcode || p.orderNumber).toUpperCase() === barcode.toUpperCase()
+    const code = barcode.trim();
+    const pkg = packages.find(p =>
+      (p.barcode || p.orderNumber).trim().toUpperCase() === code.toUpperCase()
     );
 
     if (!pkg) {
-      showNotif('warning', `Code ${barcode} — colis non trouvé`);
+      showNotif('warning', `Code ${code} — colis non trouvé dans le système`);
       return;
     }
 
@@ -234,11 +235,15 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
         currentHubId: selectedHubId
       });
 
-      setScannedCodes(prev => [...prev, barcode]);
-      showNotif('success', `✅ ${barcode} — ${pkg.contactName} réceptionné`);
-    } catch (err) {
+      setScannedCodes(prev => [...prev, code]);
+      showNotif('success', `✅ ${code} — ${pkg.contactName} réceptionné`);
+    } catch (err: any) {
       console.error('Reception error:', err);
-      showNotif('error', `❌ Erreur réception ${barcode}`);
+      const isPermission = err?.code === 'permission-denied' || err?.message?.includes('permission');
+      showNotif('error', isPermission
+        ? `🔒 Permission refusée — votre rôle ne permet pas cette action`
+        : `❌ Erreur réception ${code}`
+      );
     }
   };
 
@@ -271,12 +276,13 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
 
   // --- CHARGEMENT : Scan un colis → vérification chauffeur ---
   const handleLoadingScan = async (barcode: string) => {
+    const code = barcode.trim();
     const pkg = packages.find(p =>
-      (p.barcode || p.orderNumber).toUpperCase() === barcode.toUpperCase()
+      (p.barcode || p.orderNumber).trim().toUpperCase() === code.toUpperCase()
     );
 
     if (!pkg) {
-      showNotif('warning', `Code ${barcode} — colis non trouvé dans le système`);
+      showNotif('warning', `Code ${code} — colis non trouvé dans le système`);
       return;
     }
 
@@ -341,9 +347,13 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
       }
       
       showNotif('success', `✅ ${pkg.contactName} — chargé`);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Loading error:', err);
-      showNotif('error', `❌ Erreur chargement ${barcode}`);
+      const isPermission = err?.code === 'permission-denied' || err?.message?.includes('permission');
+      showNotif('error', isPermission
+        ? `🔒 Permission refusée — votre rôle ne permet pas cette action`
+        : `❌ Erreur chargement ${code}`
+      );
     }
   };
 
@@ -417,9 +427,9 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
         </div>
       </div>
 
-      {/* Notification */}
+      {/* Notification — fixed z-[60] pour rester visible au-dessus du scanner (z-50) */}
       {notification && (
-        <div className={`px-4 py-3 rounded-xl text-sm font-bold flex items-center gap-2 ${
+        <div className={`fixed top-4 left-4 right-4 z-[60] px-4 py-3 rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg animate-fade-in ${
           notification.type === 'success' ? 'bg-green-50 text-green-700 border border-green-200' :
           notification.type === 'error' ? 'bg-red-50 text-red-700 border border-red-200' :
           'bg-amber-50 text-amber-700 border border-amber-200'
