@@ -38,7 +38,9 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   const [error, setError] = useState<string | null>(null);
   
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const isRunningRef = useRef(false);
   const lastScanTime = useRef(0);
+  const feedbackScanRef = useRef<(barcode: string) => void>();
   const scannerContainerId = 'barcode-scanner-container';
 
   // Feedback haptique + visuel
@@ -64,8 +66,8 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
     setLastScanResult(isExpected ? 'success' : 'unknown');
 
     // Vibration différente : succès = double pulse, erreur = single long
-    try { 
-      navigator.vibrate?.(isExpected ? [100, 50, 100] : [300]); 
+    try {
+      navigator.vibrate?.(isExpected ? [100, 50, 100] : [300]);
     } catch {}
 
     // Remonter au parent
@@ -73,6 +75,23 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
 
     setTimeout(() => setLastScanResult(null), 2000);
   }, [onScan, expectedBarcodes, alreadyScanned, lastScanned]);
+
+  // Garder la ref toujours à jour pour éviter de relancer le scanner
+  useEffect(() => {
+    feedbackScanRef.current = feedbackScan;
+  }, [feedbackScan]);
+
+  // Helper pour arrêter proprement le scanner
+  const stopScanner = useCallback(async () => {
+    const scanner = scannerRef.current;
+    if (!scanner) return;
+    if (isRunningRef.current) {
+      try { await scanner.stop(); } catch {}
+      isRunningRef.current = false;
+    }
+    try { scanner.clear(); } catch {}
+    scannerRef.current = null;
+  }, []);
 
   // Démarrer le scanner caméra
   useEffect(() => {
@@ -92,12 +111,19 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
             aspectRatio: 1.5,
           },
           (decodedText) => {
-            if (mounted) feedbackScan(decodedText);
+            if (mounted) feedbackScanRef.current?.(decodedText);
           },
           () => {} // Ignore erreurs de scan continu
         );
 
-        if (mounted) setIsScanning(true);
+        if (mounted) {
+          isRunningRef.current = true;
+          setIsScanning(true);
+        } else {
+          // Le composant a été démonté pendant le démarrage, nettoyer
+          try { await scanner.stop(); } catch {}
+          try { scanner.clear(); } catch {}
+        }
       } catch (err: any) {
         console.error('Scanner error:', err);
         if (mounted) {
@@ -117,21 +143,13 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
     return () => {
       mounted = false;
       clearTimeout(timer);
-      if (scannerRef.current) {
-        scannerRef.current.stop().catch(() => {});
-        scannerRef.current.clear();
-        scannerRef.current = null;
-      }
+      stopScanner();
     };
-  }, [manualMode, feedbackScan]);
+  }, [manualMode, stopScanner]);
 
   // Switch vers mode manuel
   const switchToManual = async () => {
-    if (scannerRef.current) {
-      try { await scannerRef.current.stop(); } catch {}
-      scannerRef.current.clear();
-      scannerRef.current = null;
-    }
+    await stopScanner();
     setIsScanning(false);
     setManualMode(true);
     setError(null);
@@ -153,11 +171,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
 
   // Fermer proprement
   const handleClose = async () => {
-    if (scannerRef.current) {
-      try { await scannerRef.current.stop(); } catch {}
-      try { scannerRef.current.clear(); } catch {}
-      scannerRef.current = null;
-    }
+    await stopScanner();
     onClose();
   };
 
