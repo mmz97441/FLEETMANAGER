@@ -78,6 +78,8 @@ export interface User {
     granted: string[];  // Permissions ajoutées
     revoked: string[];  // Permissions retirées
   };
+  // Référence client plateforme (pour auto-matching à l'import)
+  clientReference?: string;
 }
 
 export interface Driver {
@@ -847,7 +849,19 @@ export interface Package {
   // Retour hub (si stop supprimé ou annulation)
   returnProof?: ReturnProof;
   returnReason?: string;           // Raison du retour (visible chauffeur)
-  
+
+  // Financier (import plateforme)
+  amountTotal?: number;            // Montant total (TTC)
+  amountPaid?: number;             // Total déjà payé
+  amountDue?: number;              // Reste à payer (amountTotal - amountPaid)
+  paymentStatus?: 'paid' | 'partial' | 'unpaid' | 'overpaid';
+  shippingFees?: number;           // Frais transport
+  taxesAndDuties?: number;         // Total taxes & douanes
+  contactEmail?: string;           // Email destinataire
+  packageLabel?: string;           // Intitulé Colis
+  platformReference?: string;      // Référence plateforme
+  platformStatus?: string;         // Statut brut plateforme
+
   // Timestamps
   createdAt: string;
   updatedAt: string;

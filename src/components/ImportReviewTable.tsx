@@ -17,7 +17,7 @@
 
 import React, { useState, useMemo, useCallback } from 'react';
 import {
-  ReviewRow, ReviewResult, revalidateRow, confirmReviewedImport
+  ReviewRow, ReviewResult, revalidateRow, confirmReviewedImport, ImportFormat
 } from '../services/importService';
 import { User, Zone, ZONE_COLORS } from '../types';
 import { logActivity } from '../services/activityLogService';
@@ -45,6 +45,7 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
   onCancel
 }) => {
   const [rows, setRows] = useState<ReviewRow[]>(reviewResult.rows);
+  const isPlatform = reviewResult.format === 'platform';
   const [editingCell, setEditingCell] = useState<{ rowIdx: number; field: string } | null>(null);
   const [editValue, setEditValue] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -131,7 +132,21 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
         break;
       case 'volume':
       case 'weight':
+      case 'amountTotal':
+      case 'amountPaid':
+      case 'shippingFees':
+      case 'taxesAndDuties':
         (row as any)[field] = parseFloat(editValue) || 0;
+        if (field === 'amountTotal' || field === 'amountPaid') {
+          row.amountDue = Math.round((row.amountTotal - row.amountPaid) * 100) / 100;
+          row.paymentStatus = row.amountTotal <= 0 ? 'paid'
+            : row.amountPaid >= row.amountTotal ? (row.amountPaid > row.amountTotal ? 'overpaid' : 'paid')
+            : row.amountPaid > 0 ? 'partial' : 'unpaid';
+        }
+        break;
+      case 'contactEmail':
+      case 'packageLabel':
+        (row as any)[field] = editValue;
         break;
       case 'hasElevator':
         (row as any)[field] = editValue === 'true' || editValue === '1';
@@ -350,6 +365,14 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
                 <th className="px-2 py-2.5 text-left font-bold text-slate-500 w-20">Créneau</th>
                 <th className="px-2 py-2.5 text-center font-bold text-slate-500 w-10">Qté</th>
                 <th className="px-2 py-2.5 text-left font-bold text-slate-500 w-8">Ét.</th>
+                {isPlatform && (
+                  <>
+                    <th className="px-2 py-2.5 text-right font-bold text-slate-500 w-20">Total</th>
+                    <th className="px-2 py-2.5 text-right font-bold text-slate-500 w-20">Payé</th>
+                    <th className="px-2 py-2.5 text-right font-bold text-slate-500 w-20">Reste</th>
+                    <th className="px-2 py-2.5 text-center font-bold text-slate-500 w-16">Paiement</th>
+                  </>
+                )}
                 <th className="px-2 py-2.5 text-center font-bold text-slate-500 w-8"></th>
               </tr>
             </thead>
@@ -461,6 +484,35 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
                       <EditableCell rowIdx={realIdx} field="floor" value={row.floor} />
                     </td>
 
+                    {/* Colonnes financières (format plateforme) */}
+                    {isPlatform && (
+                      <>
+                        <td className="px-2 py-2 text-right font-mono">
+                          <EditableCell rowIdx={realIdx} field="amountTotal" value={row.amountTotal.toFixed(2)} />
+                        </td>
+                        <td className="px-2 py-2 text-right font-mono">
+                          <EditableCell rowIdx={realIdx} field="amountPaid" value={row.amountPaid.toFixed(2)} />
+                        </td>
+                        <td className={`px-2 py-2 text-right font-mono font-bold ${
+                          row.amountDue > 0 ? 'text-red-600' : 'text-green-600'
+                        }`}>
+                          {row.amountDue.toFixed(2)}
+                        </td>
+                        <td className="px-2 py-2 text-center">
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                            row.paymentStatus === 'paid' ? 'bg-green-100 text-green-700' :
+                            row.paymentStatus === 'partial' ? 'bg-orange-100 text-orange-700' :
+                            row.paymentStatus === 'unpaid' ? 'bg-red-100 text-red-700' :
+                            'bg-blue-100 text-blue-700'
+                          }`}>
+                            {row.paymentStatus === 'paid' ? 'Payé' :
+                             row.paymentStatus === 'partial' ? 'Partiel' :
+                             row.paymentStatus === 'unpaid' ? 'Impayé' : 'Trop payé'}
+                          </span>
+                        </td>
+                      </>
+                    )}
+
                     {/* Actions */}
                     <td className="px-2 py-2 text-center">
                       {isDeleted ? (
@@ -487,7 +539,7 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
 
               {filteredRows.length === 0 && (
                 <tr>
-                  <td colSpan={13} className="text-center py-8 text-slate-400">
+                  <td colSpan={isPlatform ? 17 : 13} className="text-center py-8 text-slate-400">
                     Aucune ligne ne correspond aux filtres.
                   </td>
                 </tr>

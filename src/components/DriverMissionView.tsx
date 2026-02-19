@@ -13,7 +13,7 @@
  * - Vue progression en temps réel
  */
 
-import React, { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from 'react';
 import {
   Mission, MissionStatus, MissionType, MissionStop, StopStatus,
   PackageStatus, FailureReason, Package, DeliveryLocation,
@@ -266,6 +266,11 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   const [scanBypassConfirmed, setScanBypassConfirmed] = useState(false); // Bypass si scanner HS
   const [manualBarcodeInput, setManualBarcodeInput] = useState(''); // Saisie manuelle N° colis
   
+  // Payment alert
+  const [allMissionPackages, setAllMissionPackages] = useState<Package[]>([]);
+  const [showPaymentAlert, setShowPaymentAlert] = useState(false);
+  const [pendingNextStopIndex, setPendingNextStopIndex] = useState<number | null>(null);
+
   // Return to hub workflow
   const [returnPackages, setReturnPackages] = useState<Package[]>([]);
   const [showReturnModal, setShowReturnModal] = useState(false);
@@ -338,9 +343,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
     return unsub;
   }, [isPickupStop, currentStop?.id]);
 
-  // Charger les colis pour les stops DELIVERY avec multi-colis
+  // Charger les colis pour les stops DELIVERY (multi-colis + paiement)
   useEffect(() => {
-    if (isPickupStop || !currentStop?.packageIds?.length || currentStop.packageCount <= 1) {
+    if (isPickupStop || !currentStop?.packageIds?.length) {
       setDeliveryStopPackages([]);
       return;
     }
@@ -349,7 +354,25 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
       setDeliveryStopPackages(filtered);
     });
     return unsub;
-  }, [isPickupStop, currentStop?.id, currentStop?.packageCount]);
+  }, [isPickupStop, currentStop?.id]);
+
+  // Charger TOUS les colis de la mission (pour badges paiement sur stops)
+  useEffect(() => {
+    if (!activeMission) {
+      setAllMissionPackages([]);
+      return;
+    }
+    const allPkgIds = activeMission.stops.flatMap(s => s.packageIds || []);
+    if (allPkgIds.length === 0) {
+      setAllMissionPackages([]);
+      return;
+    }
+    const unsub = subscribeToPackages((pkgs) => {
+      const filtered = pkgs.filter(p => allPkgIds.includes(p.id));
+      setAllMissionPackages(filtered);
+    });
+    return unsub;
+  }, [activeMission?.id]);
 
   // Reset scan quand on change de stop
   useEffect(() => {
@@ -376,6 +399,43 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   // Multi-colis : détecter si le stop actuel a plusieurs colis
   const isMultiPackageStop = (currentStop?.packageCount || 0) > 1;
   const allDeliveryPackagesScanned = !isMultiPackageStop || scanBypassConfirmed || deliveryScannedBarcodes.length >= (currentStop?.packageCount || 0);
+
+  // Paiement : calcul montant dû pour un stop donné
+  const getStopPaymentInfo = useCallback((stop: MissionStop) => {
+    const stopPkgs = allMissionPackages.filter(p => (stop.packageIds || []).includes(p.id));
+    const pkgsWithDue = stopPkgs.filter(p => (p.amountDue || 0) > 0);
+    const totalDue = pkgsWithDue.reduce((sum, p) => sum + (p.amountDue || 0), 0);
+    return { totalDue: Math.round(totalDue * 100) / 100, packages: pkgsWithDue };
+  }, [allMissionPackages]);
+
+  // Paiement du stop actuel (via packages chargés en direct)
+  const currentStopPayment = useMemo(() => {
+    const pkgsWithDue = deliveryStopPackages.filter(p => (p.amountDue || 0) > 0);
+    const totalDue = pkgsWithDue.reduce((sum, p) => sum + (p.amountDue || 0), 0);
+    return { totalDue: Math.round(totalDue * 100) / 100, packages: pkgsWithDue };
+  }, [deliveryStopPackages]);
+
+  // "Suivant" avec vérification paiement
+  const handleNextStop = useCallback((targetIndex: number) => {
+    const targetStop = sortedStops[targetIndex];
+    if (targetStop && targetStop.type === 'DELIVERY') {
+      const { totalDue } = getStopPaymentInfo(targetStop);
+      if (totalDue > 0) {
+        setPendingNextStopIndex(targetIndex);
+        setShowPaymentAlert(true);
+        return;
+      }
+    }
+    setActiveStopIndex(targetIndex);
+  }, [sortedStops, getStopPaymentInfo]);
+
+  const confirmPaymentAlert = () => {
+    if (pendingNextStopIndex !== null) {
+      setActiveStopIndex(pendingNextStopIndex);
+    }
+    setShowPaymentAlert(false);
+    setPendingNextStopIndex(null);
+  };
 
   // Saisie manuelle d'un code-barres (fallback si scanner HS)
   const handleManualBarcodeSubmit = () => {
@@ -1113,27 +1173,36 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
 
           {/* Mini liste stops scrollable */}
           <div className="border-t border-slate-100 px-2 py-2 flex gap-1.5 overflow-x-auto">
-            {sortedStops.map((stop, idx) => (
-              <button
-                key={stop.id}
-                onClick={() => setActiveStopIndex(idx)}
-                className={`flex-shrink-0 w-9 h-9 rounded-full text-xs font-bold flex items-center justify-center transition-all ${
-                  idx === activeStopIndex
-                    ? 'bg-blue-600 text-white ring-2 ring-blue-300 scale-110'
-                    : stop.status === StopStatus.COMPLETED
-                      ? 'bg-green-100 text-green-700'
-                      : stop.status === StopStatus.FAILED || stop.status === StopStatus.SKIPPED
-                        ? 'bg-red-100 text-red-700'
-                        : stop.status === StopStatus.ARRIVED
-                          ? 'bg-blue-100 text-blue-700'
-                          : 'bg-slate-100 text-slate-600'
-                }`}
-              >
-                {stop.status === StopStatus.COMPLETED ? '✓' :
-                 stop.status === StopStatus.FAILED ? '✗' :
-                 stop.sequence}
-              </button>
-            ))}
+            {sortedStops.map((stop, idx) => {
+              const stopDue = getStopPaymentInfo(stop).totalDue;
+              return (
+                <div key={stop.id} className="relative flex-shrink-0">
+                  <button
+                    onClick={() => setActiveStopIndex(idx)}
+                    className={`w-9 h-9 rounded-full text-xs font-bold flex items-center justify-center transition-all ${
+                      idx === activeStopIndex
+                        ? 'bg-blue-600 text-white ring-2 ring-blue-300 scale-110'
+                        : stop.status === StopStatus.COMPLETED
+                          ? 'bg-green-100 text-green-700'
+                          : stop.status === StopStatus.FAILED || stop.status === StopStatus.SKIPPED
+                            ? 'bg-red-100 text-red-700'
+                            : stop.status === StopStatus.ARRIVED
+                              ? 'bg-blue-100 text-blue-700'
+                              : 'bg-slate-100 text-slate-600'
+                    }`}
+                  >
+                    {stop.status === StopStatus.COMPLETED ? '✓' :
+                     stop.status === StopStatus.FAILED ? '✗' :
+                     stop.sequence}
+                  </button>
+                  {stopDue > 0 && stop.status !== StopStatus.COMPLETED && stop.status !== StopStatus.FAILED && (
+                    <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center text-[8px] text-white font-bold">
+                      💰
+                    </span>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
 
@@ -1175,6 +1244,33 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
               <p className="text-sm text-slate-600 mb-2">
                 📍 {currentStop.address}, {currentStop.postalCode} {currentStop.city}
               </p>
+
+              {/* ALERTE PAIEMENT */}
+              {currentStopPayment.totalDue > 0 && (
+                <div className="mb-3 p-3 bg-red-600 text-white rounded-xl border-2 border-red-700 shadow-lg animate-pulse">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-lg">💰</span>
+                    <span className="text-base font-black uppercase tracking-wide">
+                      ENCAISSEMENT REQUIS
+                    </span>
+                  </div>
+                  <p className="text-2xl font-black">
+                    {currentStopPayment.totalDue.toFixed(2)} EUR
+                  </p>
+                  {currentStopPayment.packages.length > 1 && (
+                    <div className="mt-2 pt-2 border-t border-red-400 space-y-1">
+                      {currentStopPayment.packages.map(pkg => (
+                        <p key={pkg.id} className="text-xs font-medium">
+                          Colis {pkg.orderNumber} : {(pkg.amountDue || 0).toFixed(2)} EUR
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-xs mt-2 font-medium opacity-90">
+                    Demander le paiement en especes au client avant de valider la livraison
+                  </p>
+                </div>
+              )}
 
               {/* Info rapides */}
               <div className="flex flex-wrap gap-2 text-xs">
@@ -1566,6 +1662,47 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
           </div>
         )}
 
+        {/* MODAL ALERTE PAIEMENT (Suivant) */}
+        {showPaymentAlert && pendingNextStopIndex !== null && (() => {
+          const targetStop = sortedStops[pendingNextStopIndex];
+          const payInfo = targetStop ? getStopPaymentInfo(targetStop) : { totalDue: 0, packages: [] };
+          return (
+            <div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl">
+                <div className="bg-red-600 p-4 text-white">
+                  <p className="text-lg font-black text-center">ENCAISSEMENT REQUIS</p>
+                  <p className="text-sm text-center opacity-90 mt-1">au prochain arret</p>
+                </div>
+                <div className="p-5">
+                  <p className="text-center text-3xl font-black text-red-600 mb-4">
+                    {payInfo.totalDue.toFixed(2)} EUR
+                  </p>
+                  <p className="text-sm text-slate-600 text-center mb-3">
+                    <span className="font-bold">{targetStop?.contactName}</span>
+                    <br />{targetStop?.address}
+                  </p>
+                  {payInfo.packages.length > 0 && (
+                    <div className="space-y-1 mb-4">
+                      {payInfo.packages.map(pkg => (
+                        <div key={pkg.id} className="flex justify-between text-xs bg-red-50 px-3 py-1.5 rounded-lg">
+                          <span className="font-medium">{pkg.orderNumber}</span>
+                          <span className="font-bold text-red-600">{(pkg.amountDue || 0).toFixed(2)} EUR</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <button
+                    onClick={confirmPaymentAlert}
+                    className="w-full py-3.5 bg-red-600 text-white rounded-xl font-black text-base hover:bg-red-700 transition-colors"
+                  >
+                    J'ai compris
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* Navigation entre stops */}
         <div className="flex gap-2">
           <button
@@ -1577,14 +1714,14 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
           </button>
           {nextPendingStopIndex >= 0 && nextPendingStopIndex !== activeStopIndex && (
             <button
-              onClick={() => setActiveStopIndex(nextPendingStopIndex)}
+              onClick={() => handleNextStop(nextPendingStopIndex)}
               className="flex-1 flex items-center justify-center gap-1 py-3 bg-blue-600 text-white rounded-xl text-sm font-bold"
             >
               Prochain stop <ChevronRight size={16} />
             </button>
           )}
           <button
-            onClick={() => setActiveStopIndex(Math.min(sortedStops.length - 1, activeStopIndex + 1))}
+            onClick={() => handleNextStop(Math.min(sortedStops.length - 1, activeStopIndex + 1))}
             disabled={activeStopIndex >= sortedStops.length - 1}
             className="flex-1 flex items-center justify-center gap-1 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 disabled:opacity-30"
           >

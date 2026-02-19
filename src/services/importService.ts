@@ -61,6 +61,105 @@ const normalizePhone = (phone: string | number | undefined): string | undefined 
   return plus ? `+${str}` : str;
 };
 
+/**
+ * Parse un nombre potentiellement au format français (virgule décimale)
+ * Ex: "12,50" → 12.5, "1 234,56" → 1234.56
+ */
+const parseFrenchNumber = (val: string | number | undefined | null): number => {
+  if (val === undefined || val === null || val === '') return 0;
+  if (typeof val === 'number') return val;
+  // Retirer espaces de milliers, remplacer virgule par point
+  const cleaned = String(val).replace(/\s/g, '').replace(',', '.');
+  const num = parseFloat(cleaned);
+  return isNaN(num) ? 0 : num;
+};
+
+/**
+ * Extraire code postal + ville depuis le champ "Commune" du format plateforme
+ * Ex: "97450 SAINT LOUIS" → { postalCode: "97450", city: "SAINT LOUIS" }
+ * Ex: "97400 Saint-Denis" → { postalCode: "97400", city: "Saint-Denis" }
+ */
+const parseCommune = (commune: string | undefined): { postalCode: string; city: string } => {
+  if (!commune) return { postalCode: '', city: '' };
+  const trimmed = commune.trim();
+  // Chercher un code postal en début (97XXX ou autre format 5 digits)
+  const match = trimmed.match(/^(\d{5})\s+(.+)$/);
+  if (match) {
+    return { postalCode: match[1], city: match[2].trim() };
+  }
+  // Sinon chercher un code postal n'importe où
+  const cpMatch = trimmed.match(/\b(\d{5})\b/);
+  if (cpMatch) {
+    const city = trimmed.replace(cpMatch[0], '').trim();
+    return { postalCode: cpMatch[1], city };
+  }
+  return { postalCode: '', city: trimmed };
+};
+
+/**
+ * Mapper les statuts de la plateforme vers PackageStatus
+ */
+const mapPlatformStatus = (status: string | undefined): PackageStatus => {
+  if (!status) return PackageStatus.PENDING;
+  const s = status.trim().toLowerCase();
+  if (s.includes('livré') || s.includes('livre') || s.includes('delivered')) return PackageStatus.DELIVERED;
+  if (s.includes('transit') || s.includes('expédié') || s.includes('expedie')) return PackageStatus.IN_TRANSIT;
+  if (s.includes('retour') || s.includes('return')) return PackageStatus.RETURN_REQUESTED;
+  if (s.includes('échec') || s.includes('echoué') || s.includes('failed')) return PackageStatus.FAILED;
+  if (s.includes('collecté') || s.includes('collected')) return PackageStatus.COLLECTED;
+  if (s.includes('hub') || s.includes('entrepôt') || s.includes('entrepot')) return PackageStatus.AT_HUB;
+  return PackageStatus.PENDING;
+};
+
+/**
+ * Calculer le statut de paiement
+ */
+const computePaymentStatus = (total: number, paid: number): 'paid' | 'partial' | 'unpaid' | 'overpaid' => {
+  if (total <= 0) return 'paid'; // Gratuit ou négatif = rien à payer
+  if (paid >= total) return paid > total ? 'overpaid' : 'paid';
+  if (paid > 0) return 'partial';
+  return 'unpaid';
+};
+
+/**
+ * Détecte le format du fichier (legacy vs plateforme) à partir des en-têtes
+ */
+export type ImportFormat = 'legacy' | 'platform';
+
+const detectFormat = (headers: string[]): ImportFormat => {
+  const h = headers.map(s => s.trim());
+  // Plateforme : colonnes françaises spécifiques
+  if (h.includes('Référence') || h.includes('Client Nom') || h.includes('Commune') || h.includes('Montant Total')) {
+    return 'platform';
+  }
+  return 'legacy';
+};
+
+// Structure du fichier plateforme
+interface PlatformFileRow {
+  'Date Création'?: string;
+  'Référence'?: string;
+  'Statut Colis'?: string;
+  'Paiement'?: string;
+  'Référence Client'?: string;
+  'Client Intitulé'?: string;
+  'Client Nom'?: string;
+  'Email'?: string;
+  'Téléphone Mobile'?: string;
+  'Forfait'?: string;
+  'Intitulé Colis'?: string;
+  'Volume (en cm3)'?: string | number;
+  'Volume (en kg)'?: string | number;
+  'Poids (en kg)'?: string | number;
+  'Frais transport'?: string | number;
+  'Total taxes & douanes'?: string | number;
+  'Montant Total'?: string | number;
+  'Total Payé'?: string | number;
+  'Adresse Ligne 1'?: string;
+  'Adresse Ligne 2'?: string;
+  'Commune'?: string;
+}
+
 // Structure attendue du fichier client
 interface ClientFileRow {
   Id: string;                    // "C0004911-15087911"
@@ -117,6 +216,42 @@ export const parseExcelFile = async (file: File): Promise<ClientFileRow[]> => {
       }
     };
     
+    reader.onerror = () => reject(new Error('Erreur lors de la lecture du fichier'));
+    reader.readAsBinaryString(file);
+  });
+};
+
+/**
+ * Parse un fichier Excel/CSV de manière générique (sans typage de colonnes)
+ */
+const parseExcelFileGeneric = async (file: File): Promise<{ headers: string[]; rows: Record<string, string>[] }> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = e.target?.result;
+        const workbook = XLSX.read(data, { type: 'binary' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+
+        // Extraire les en-têtes
+        const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
+        const headers: string[] = [];
+        for (let c = range.s.c; c <= range.e.c; c++) {
+          const cell = worksheet[XLSX.utils.encode_cell({ r: range.s.r, c })];
+          headers.push(cell ? String(cell.v).trim() : `Col${c}`);
+        }
+
+        const rows = XLSX.utils.sheet_to_json<Record<string, string>>(worksheet, {
+          raw: false,
+          defval: ''
+        });
+
+        resolve({ headers, rows });
+      } catch (error) {
+        reject(new Error('Erreur lors de la lecture du fichier'));
+      }
+    };
     reader.onerror = () => reject(new Error('Erreur lors de la lecture du fichier'));
     reader.readAsBinaryString(file);
   });
@@ -449,6 +584,7 @@ export interface ReviewRow {
   zone: Zone | '';
   contactName: string;
   contactPhone: string;
+  contactEmail: string;
   floor: number;
   hasElevator: boolean;
   timeWindowStart: string;
@@ -458,6 +594,17 @@ export interface ReviewRow {
   volume: number;
   weight: number;
   quantity: number;              // Nombre de colis pour ce destinataire (défaut 1)
+
+  // Champs financiers (format plateforme)
+  amountTotal: number;
+  amountPaid: number;
+  amountDue: number;
+  paymentStatus: 'paid' | 'partial' | 'unpaid' | 'overpaid';
+  shippingFees: number;
+  taxesAndDuties: number;
+  packageLabel: string;
+  platformReference: string;
+  platformStatus: string;
 
   // Raw data pour référence
   _rawAddress: string;
@@ -470,87 +617,182 @@ export interface ReviewResult {
   warningCount: number;
   errorCount: number;
   fileName: string;
+  format: ImportFormat;
 }
 
 /**
- * Parse un fichier Excel et retourne les lignes PRÊTES POUR REVUE
- * (ne crée rien en base).
+ * Parse un fichier Excel/CSV et retourne les lignes PRÊTES POUR REVUE
+ * Détecte automatiquement le format (legacy vs plateforme).
  */
 export const parseExcelForReview = async (file: File): Promise<ReviewResult> => {
-  const rawRows = await parseExcelFile(file);
+  const { headers, rows: rawRows } = await parseExcelFileGeneric(file);
+  const format = detectFormat(headers);
   const reviewRows: ReviewRow[] = [];
 
-  for (let i = 0; i < rawRows.length; i++) {
-    const raw = rawRows[i];
-    const errors: string[] = [];
-    const warnings: string[] = [];
+  if (format === 'platform') {
+    // ──── FORMAT PLATEFORME ────
+    for (let i = 0; i < rawRows.length; i++) {
+      const raw = rawRows[i] as unknown as PlatformFileRow;
+      const errors: string[] = [];
+      const warnings: string[] = [];
 
-    // Parse adresse
-    const { address, postalCode, city } = parseAddress(raw.Address || '');
+      // Parse commune → postalCode + city
+      const { postalCode, city } = parseCommune(raw['Commune']);
+      const addr1 = (raw['Adresse Ligne 1'] || '').trim();
+      const addr2 = (raw['Adresse Ligne 2'] || '').trim();
+      const address = addr2 ? `${addr1}, ${addr2}` : addr1;
 
-    // Validations
-    if (!raw.Address) errors.push('Adresse manquante');
-    if (!raw.Order_Number) errors.push('N° commande manquant');
-    if (!raw.Contact) errors.push('Contact manquant');
+      // Validations
+      if (!address) errors.push('Adresse manquante');
+      if (!raw['Référence']) errors.push('Référence manquante');
+      if (!raw['Client Nom']) errors.push('Nom client manquant');
+      if (!postalCode && raw['Commune']) errors.push('Code postal non détecté dans Commune');
+      if (!postalCode && !raw['Commune']) errors.push('Commune manquante');
 
-    if (!postalCode && raw.Address) errors.push('Code postal non détecté');
-
-    // Détecter zone
-    let zone: Zone | '' = '';
-    if (postalCode) {
-      const detected = await getZoneFromPostalCode(postalCode);
-      if (detected) {
-        zone = detected;
-      } else {
-        errors.push(`Code postal ${postalCode} non reconnu`);
+      // Détecter zone
+      let zone: Zone | '' = '';
+      if (postalCode) {
+        const detected = await getZoneFromPostalCode(postalCode);
+        if (detected) {
+          zone = detected;
+        } else {
+          errors.push(`Code postal ${postalCode} non reconnu`);
+        }
       }
+
+      // Financier
+      const amountTotal = parseFrenchNumber(raw['Montant Total']);
+      const amountPaid = parseFrenchNumber(raw['Total Payé']);
+      const amountDue = Math.round((amountTotal - amountPaid) * 100) / 100;
+      const paymentStatus = computePaymentStatus(amountTotal, amountPaid);
+
+      // Warnings
+      if (!raw['Téléphone Mobile']) warnings.push('Pas de téléphone');
+      if (amountDue > 0) warnings.push(`Reste à payer : ${amountDue.toFixed(2)} €`);
+
+      // Doublon
+      const refStr = String(raw['Référence'] || '');
+      const existingDup = reviewRows.find(r =>
+        r.orderNumber === refStr && r._status !== 'deleted'
+      );
+      if (existingDup) warnings.push(`Doublon possible (même référence que ligne ${existingDup._rowIndex})`);
+
+      const status = errors.length > 0 ? 'error' : warnings.length > 0 ? 'warning' : 'valid';
+
+      reviewRows.push({
+        _rowIndex: i + 2,
+        _status: status,
+        _errors: errors,
+        _warnings: warnings,
+        externalId: (raw['Référence Client'] || '').trim(),
+        orderNumber: refStr,
+        address,
+        postalCode,
+        city,
+        zone,
+        contactName: (raw['Client Nom'] || '').trim(),
+        contactPhone: normalizePhone(raw['Téléphone Mobile']) || '',
+        contactEmail: (raw['Email'] || '').trim(),
+        floor: 0,
+        hasElevator: false,
+        timeWindowStart: '06:00',  // Défaut plateforme
+        timeWindowEnd: '20:00',    // Défaut plateforme
+        serviceTime: 3,            // Défaut plateforme : 3 min
+        comment: '',
+        volume: parseFrenchNumber(raw['Volume (en cm3)']) || parseFrenchNumber(raw['Volume (en kg)']),
+        weight: parseFrenchNumber(raw['Poids (en kg)']),
+        quantity: 1,
+        // Financier
+        amountTotal,
+        amountPaid,
+        amountDue,
+        paymentStatus,
+        shippingFees: parseFrenchNumber(raw['Frais transport']),
+        taxesAndDuties: parseFrenchNumber(raw['Total taxes & douanes']),
+        packageLabel: (raw['Intitulé Colis'] || '').trim(),
+        platformReference: refStr,
+        platformStatus: (raw['Statut Colis'] || '').trim(),
+        _rawAddress: `${addr1}${addr2 ? ', ' + addr2 : ''}, ${raw['Commune'] || ''}`
+      });
     }
+  } else {
+    // ──── FORMAT LEGACY ────
+    for (let i = 0; i < rawRows.length; i++) {
+      const raw = rawRows[i] as unknown as ClientFileRow;
+      const errors: string[] = [];
+      const warnings: string[] = [];
 
-    // Parser la quantité
-    const rawQty = raw.Quantity;
-    const quantity = rawQty ? (typeof rawQty === 'string' ? parseInt(rawQty) || 1 : rawQty || 1) : 1;
-    if (rawQty && quantity < 1) errors.push('Quantité invalide (doit être ≥ 1)');
-    if (quantity > 50) errors.push('Quantité trop élevée (max 50)');
+      const { address, postalCode, city } = parseAddress(raw.Address || '');
 
-    // Warnings non bloquants
-    if (!raw.Telephone) warnings.push('Pas de téléphone');
-    if (!raw.Start && !raw.End) warnings.push('Pas de créneau horaire');
-    const svcTime = typeof raw.Service_Time === 'string' ? parseInt(raw.Service_Time) || 5 : raw.Service_Time || 5;
-    if (svcTime > 60) warnings.push(`Temps de service élevé (${svcTime} min)`);
-    if (quantity > 1) warnings.push(`Multi-colis : ${quantity} colis seront générés (${String(raw.Order_Number)} → ${String(Number(raw.Order_Number) + quantity - 1)})`);
+      if (!raw.Address) errors.push('Adresse manquante');
+      if (!raw.Order_Number) errors.push('N° commande manquant');
+      if (!raw.Contact) errors.push('Contact manquant');
+      if (!postalCode && raw.Address) errors.push('Code postal non détecté');
 
-    // Détection de doublons
-    const existingDup = reviewRows.find(r =>
-      r.orderNumber === String(raw.Order_Number) && r._status !== 'deleted'
-    );
-    if (existingDup) warnings.push(`Doublon possible (même N° commande que ligne ${existingDup._rowIndex})`);
+      let zone: Zone | '' = '';
+      if (postalCode) {
+        const detected = await getZoneFromPostalCode(postalCode);
+        if (detected) {
+          zone = detected;
+        } else {
+          errors.push(`Code postal ${postalCode} non reconnu`);
+        }
+      }
 
-    const status = errors.length > 0 ? 'error' : warnings.length > 0 ? 'warning' : 'valid';
+      const rawQty = raw.Quantity;
+      const quantity = rawQty ? (typeof rawQty === 'string' ? parseInt(rawQty) || 1 : rawQty || 1) : 1;
+      if (rawQty && quantity < 1) errors.push('Quantité invalide (doit être ≥ 1)');
+      if (quantity > 50) errors.push('Quantité trop élevée (max 50)');
 
-    reviewRows.push({
-      _rowIndex: i + 2,
-      _status: status,
-      _errors: errors,
-      _warnings: warnings,
-      externalId: raw.Id || '',
-      orderNumber: String(raw.Order_Number || ''),
-      address,
-      postalCode,
-      city,
-      zone,
-      contactName: raw.Contact || '',
-      contactPhone: normalizePhone(raw.Telephone) || '',
-      floor: typeof raw.Floor === 'string' ? parseInt(raw.Floor) || 0 : raw.Floor || 0,
-      hasElevator: raw.Elevator === '1' || raw.Elevator === 1 || raw.Elevator === 'true',
-      timeWindowStart: raw.Start || '',
-      timeWindowEnd: raw.End || '',
-      serviceTime: svcTime,
-      comment: raw.Comment || '',
-      volume: typeof raw.Volume === 'string' ? parseFloat(raw.Volume) || 0 : raw.Volume || 0,
-      weight: typeof raw.Weight === 'string' ? parseFloat(raw.Weight) || 0 : raw.Weight || 0,
-      quantity: Math.max(1, quantity),
-      _rawAddress: raw.Address || ''
-    });
+      if (!raw.Telephone) warnings.push('Pas de téléphone');
+      if (!raw.Start && !raw.End) warnings.push('Pas de créneau horaire');
+      const svcTime = typeof raw.Service_Time === 'string' ? parseInt(raw.Service_Time) || 5 : raw.Service_Time || 5;
+      if (svcTime > 60) warnings.push(`Temps de service élevé (${svcTime} min)`);
+      if (quantity > 1) warnings.push(`Multi-colis : ${quantity} colis seront générés (${String(raw.Order_Number)} → ${String(Number(raw.Order_Number) + quantity - 1)})`);
+
+      const existingDup = reviewRows.find(r =>
+        r.orderNumber === String(raw.Order_Number) && r._status !== 'deleted'
+      );
+      if (existingDup) warnings.push(`Doublon possible (même N° commande que ligne ${existingDup._rowIndex})`);
+
+      const status = errors.length > 0 ? 'error' : warnings.length > 0 ? 'warning' : 'valid';
+
+      reviewRows.push({
+        _rowIndex: i + 2,
+        _status: status,
+        _errors: errors,
+        _warnings: warnings,
+        externalId: raw.Id || '',
+        orderNumber: String(raw.Order_Number || ''),
+        address,
+        postalCode,
+        city,
+        zone,
+        contactName: raw.Contact || '',
+        contactPhone: normalizePhone(raw.Telephone) || '',
+        contactEmail: '',
+        floor: typeof raw.Floor === 'string' ? parseInt(raw.Floor) || 0 : raw.Floor || 0,
+        hasElevator: raw.Elevator === '1' || raw.Elevator === 1 || raw.Elevator === 'true',
+        timeWindowStart: raw.Start || '',
+        timeWindowEnd: raw.End || '',
+        serviceTime: svcTime,
+        comment: raw.Comment || '',
+        volume: typeof raw.Volume === 'string' ? parseFloat(raw.Volume) || 0 : raw.Volume || 0,
+        weight: typeof raw.Weight === 'string' ? parseFloat(raw.Weight) || 0 : raw.Weight || 0,
+        quantity: Math.max(1, quantity),
+        // Pas de champs financiers pour le format legacy
+        amountTotal: 0,
+        amountPaid: 0,
+        amountDue: 0,
+        paymentStatus: 'paid',
+        shippingFees: 0,
+        taxesAndDuties: 0,
+        packageLabel: '',
+        platformReference: '',
+        platformStatus: '',
+        _rawAddress: raw.Address || ''
+      });
+    }
   }
 
   return {
@@ -559,7 +801,8 @@ export const parseExcelForReview = async (file: File): Promise<ReviewResult> => 
     validCount: reviewRows.filter(r => r._status === 'valid').length,
     warningCount: reviewRows.filter(r => r._status === 'warning').length,
     errorCount: reviewRows.filter(r => r._status === 'error').length,
-    fileName: file.name
+    fileName: file.name,
+    format
   };
 };
 
@@ -693,6 +936,7 @@ export const confirmReviewedImport = async (
         hasElevator: row.hasElevator,
         contactName: row.contactName,
         contactPhone: normalizePhone(row.contactPhone),
+        contactEmail: row.contactEmail || undefined,
         timeWindowStart: row.timeWindowStart || undefined,
         timeWindowEnd: row.timeWindowEnd || undefined,
         serviceTime: row.serviceTime || 5,
@@ -706,6 +950,18 @@ export const confirmReviewedImport = async (
           packageGroupId,
           packageIndex: q + 1,
           packageTotal: qty
+        } : {}),
+        // Champs financiers (si renseignés)
+        ...(row.amountTotal ? {
+          amountTotal: row.amountTotal,
+          amountPaid: row.amountPaid,
+          amountDue: row.amountDue,
+          paymentStatus: row.paymentStatus,
+          shippingFees: row.shippingFees || undefined,
+          taxesAndDuties: row.taxesAndDuties || undefined,
+          packageLabel: row.packageLabel || undefined,
+          platformReference: row.platformReference || undefined,
+          platformStatus: row.platformStatus || undefined,
         } : {})
       };
 

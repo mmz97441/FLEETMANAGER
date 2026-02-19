@@ -2520,7 +2520,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
             <div className="border-2 border-dashed border-slate-300 rounded-xl p-6 text-center hover:border-brand-400 transition-colors">
               <input
                 type="file"
-                accept=".xlsx,.xls"
+                accept=".xlsx,.xls,.csv"
                 onChange={handleFileSelect}
                 className="hidden"
                 id="excel-upload"
@@ -2540,7 +2540,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                   <>
                     <Upload size={32} className="mx-auto text-slate-400 mb-2" />
                     <p className="text-slate-600">Cliquez pour sélectionner un fichier</p>
-                    <p className="text-sm text-slate-400">.xlsx ou .xls</p>
+                    <p className="text-sm text-slate-400">.xlsx, .xls ou .csv</p>
                   </>
                 )}
               </label>
