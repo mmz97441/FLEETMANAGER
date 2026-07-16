@@ -17,40 +17,47 @@ service cloud.firestore {
     }
 
     // Rôles d'administration (gestion complète)
-    // Utilise regex (.matches) pour gérer les variantes Unicode (é vs e+accent combinant),
-    // les différences de casse et les espaces éventuels.
+    // Utilise regex (.matches) pour gérer les variantes Unicode (é vs e+accent combinant)
+    // et les différences de casse. Les patterns sont ancrés (^...$) pour éviter qu'un
+    // rôle "sous-président-stagiaire" matche /président/ et obtienne un faux positif.
     function isAdminRole() {
-      return request.auth != null && getUserRole().matches('(?i)(admin|pr.*sid.*|direct.*|secr.*tariat)');
+      return request.auth != null && getUserRole().matches('(?i)^(admin|pr[eé]sident[e]?|directeur|directrice|direction|secr[eé]taire|secr[eé]tariat)$');
     }
 
     // Rôles internes (tous sauf Client)
     function isInternalUser() {
-      return request.auth != null && getUserRole().matches('(?i)(admin|pr.*sid.*|direct.*|secr.*tariat|chauffeur|m.*canicien|stagiaire)');
+      return request.auth != null && getUserRole().matches('(?i)^(admin|pr[eé]sident[e]?|directeur|directrice|direction|secr[eé]taire|secr[eé]tariat|chauffeur|chauffeuse|m[eé]canicien|m[eé]canicienne|stagiaire)$');
     }
 
     // Rôles opérationnels (chauffeurs, mécaniciens)
     function isOperationalRole() {
-      return request.auth != null && getUserRole().matches('(?i)(chauffeur|m.*canicien)');
+      return request.auth != null && getUserRole().matches('(?i)^(chauffeur|chauffeuse|m[eé]canicien|m[eé]canicienne)$');
     }
 
     // Est un chauffeur
     function isDriver() {
-      return request.auth != null && getUserRole().matches('(?i)chauffeur');
+      return request.auth != null && getUserRole().matches('(?i)^(chauffeur|chauffeuse)$');
     }
 
     // Est un mécanicien
     function isMechanic() {
-      return request.auth != null && getUserRole().matches('(?i)m.*canicien');
+      return request.auth != null && getUserRole().matches('(?i)^(m[eé]canicien|m[eé]canicienne)$');
     }
 
     // Est un client
     function isClient() {
-      return request.auth != null && getUserRole().matches('(?i)client');
+      return request.auth != null && getUserRole().matches('(?i)^client$');
     }
 
     // Est un stagiaire
     function isIntern() {
-      return request.auth != null && getUserRole().matches('(?i)stagiaire');
+      return request.auth != null && getUserRole().matches('(?i)^stagiaire$');
+    }
+
+    // Champs sensibles d'un profil utilisateur qu'un user ne doit JAMAIS modifier sur lui-même
+    // (escalade de privilèges sinon : un chauffeur ferait updateDoc({ role: 'Admin' }))
+    function userImmutableFields() {
+      return ['role', 'customPermissions', 'id', 'createdAt', 'originalUserId', 'email'];
     }
 
     // Vérifie que l'utilisateur est authentifié
@@ -77,8 +84,13 @@ service cloud.firestore {
       allow create: if isAuthenticated() && (
         request.auth.uid == userId || isAdminRole()
       );
+      // Update : admin = tous les champs. Self-update = OK SAUF champs sensibles
+      // (role, customPermissions, etc.). Sinon escalade de privilèges triviale.
       allow update: if isAuthenticated() && (
-        request.auth.uid == userId || isAdminRole()
+        isAdminRole() ||
+        (request.auth.uid == userId
+         && !request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny(userImmutableFields()))
       );
       allow delete: if isAdminRole();
     }
@@ -86,13 +98,16 @@ service cloud.firestore {
     // ============================================================
     // INVITATIONS
     // ============================================================
-    // Admin : CRUD complet (créer, renvoyer, supprimer)
-    // Tout connecté : lecture + update (marquer comme "used" lors de l'activation)
-    // Note : la Cloud Function validateInvitationToken gère la logique métier
+    // Admin uniquement : CRUD complet (créer, renvoyer, supprimer, lire).
+    // Les documents contiennent le `token` d'activation : les exposer en lecture
+    // à tout compte authentifié (y compris un client) permettait de récupérer le
+    // token d'une invitation admin en attente et de l'activer → escalade de
+    // privilèges. La validation publique du token passe par la Cloud Function
+    // validateInvitationToken (Admin SDK), et l'activation par activateAccount :
+    // le client n'a donc jamais besoin de lire ni modifier cette collection.
     match /invitations/{invitationId} {
-      allow read: if isAuthenticated();
-      allow create, delete: if isAdminRole();
-      allow update: if isAuthenticated();
+      allow read: if isAdminRole();
+      allow create, update, delete: if isAdminRole();
     }
 
     // ============================================================
@@ -182,13 +197,23 @@ service cloud.firestore {
     // ============================================================
     // DEVIS / DEMANDES DE TRANSPORT
     // ============================================================
-    // Lecture : admin (tous) + clients (les leurs via subscription filtrée)
-    // Création : admin + clients
-    // Modification : admin + le client créateur
+    // Lecture : admin (tous) + clients (uniquement les leurs, vérifié côté rules)
+    // Création : admin + client (doit être à son nom, pas de falsification)
+    // Modification : admin + le client créateur uniquement
     // Suppression : admin uniquement
     match /quotes/{quoteId} {
-      allow read: if isAdminRole() || isClient();
-      allow create: if isAdminRole() || isClient();
+      allow read: if isAdminRole()
+        || (isClient() && (
+          resource.data.clientId == request.auth.uid
+          || resource.data.requesterId == request.auth.uid
+          || resource.data.createdBy == request.auth.uid
+        ));
+      allow create: if isAdminRole()
+        || (isClient() && (
+          request.resource.data.clientId == request.auth.uid
+          || request.resource.data.requesterId == request.auth.uid
+          || request.resource.data.createdBy == request.auth.uid
+        ));
       allow update: if isAdminRole()
         || (isClient() && resource.data.createdBy == request.auth.uid);
       allow delete: if isAdminRole();
@@ -197,13 +222,19 @@ service cloud.firestore {
     // ============================================================
     // CARNET D'ADRESSES CLIENTS
     // ============================================================
-    // Lecture : admin + clients
-    // CRUD : admin + clients (chaque client gère ses adresses)
+    // Lecture : admin (tout) + client (uniquement les adresses de sa société)
+    // CRUD : admin (tout) + client (uniquement ses propres adresses)
+    // Note: la query frontend filtre déjà par companyName ; on verrouille ici.
     match /savedAddresses/{addressId} {
-      allow read: if isAdminRole() || isClient();
-      allow create: if isAdminRole() || isClient();
-      allow update: if isAdminRole() || isClient();
-      allow delete: if isAdminRole() || isClient();
+      allow read: if isAdminRole()
+        || (isClient() && resource.data.companyName == getUserData().companyName);
+      allow create: if isAdminRole()
+        || (isClient() && request.resource.data.companyName == getUserData().companyName);
+      allow update: if isAdminRole()
+        || (isClient() && resource.data.companyName == getUserData().companyName
+            && request.resource.data.companyName == resource.data.companyName);
+      allow delete: if isAdminRole()
+        || (isClient() && resource.data.companyName == getUserData().companyName);
     }
 
     // ============================================================
@@ -224,21 +255,24 @@ service cloud.firestore {
     // ACCUSÉS DE RÉCEPTION DOCUMENTS
     // ============================================================
     // Lecture : tous les connectés
-    // Création : tout connecté (accuser réception d'un document)
+    // Création : tout connecté MAIS l'accusé doit être à SON nom (pas de falsification)
     // Modification/suppression : interdite (immuable)
     match /documentAcknowledgments/{ackId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
+      allow create: if isAuthenticated()
+        && request.resource.data.userId == request.auth.uid;
       allow update, delete: if false;
     }
 
     // ============================================================
     // MAIL (Trigger Email extension Firebase)
     // ============================================================
-    // Création : tous les internes + admin (envoi d'emails via template)
-    // Lecture : interdite (seule l'extension lit)
+    // Création : utilisateurs internes uniquement (admin/staff/chauffeurs pour incidents).
+    // Les clients ne doivent JAMAIS envoyer d'emails (phishing).
+    // TODO: déplacer tout envoi de mail vers une Cloud Function callable qui construit
+    // le template côté serveur (résout aussi le XSS sur les interpolations HTML).
     match /mail/{mailId} {
-      allow create: if isAuthenticated();
+      allow create: if isInternalUser();
       allow read, update, delete: if false;
     }
 
@@ -348,12 +382,13 @@ service cloud.firestore {
     }
 
     // --- Activity logs (logs d'activité) ---
-    // Création : tout connecté (chaque action est loguée)
+    // Création : tout connecté MAIS le log doit être à SON nom (pas de falsification)
     // Lecture : tous les connectés
     // Modification/suppression : interdite (immuable)
     match /activity_logs/{logId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
+      allow create: if isAuthenticated()
+        && request.resource.data.userId == request.auth.uid;
       allow update, delete: if false;
     }
 
