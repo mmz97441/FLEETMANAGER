@@ -14,6 +14,7 @@
  */
 
 import React, { useState, useEffect, useMemo, lazy, Suspense } from 'react';
+import { packageMatchesCode, packageScanCodes } from '../utils/barcode';
 import {
   Package as PackageIcon, Truck, ArrowDownToLine, ArrowUpFromLine,
   ScanBarcode, CheckCircle, AlertTriangle, Search, Filter,
@@ -159,9 +160,9 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
     return vehicles.find(v => v.id === driverMission.vehicleId) || null;
   }, [driverMission, vehicles]);
 
-  // Barcodes attendus pour le scanner
-  const expectedBarcodes = useMemo(() => 
-    driverPackages.toLoad.map(p => (p.barcode || p.orderNumber).toUpperCase()),
+  // Barcodes attendus pour le scanner (tracking interne + N° colis client + N° commande)
+  const expectedBarcodes = useMemo(() =>
+    driverPackages.toLoad.flatMap(p => packageScanCodes(p)),
     [driverPackages.toLoad]
   );
 
@@ -187,9 +188,7 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
 
   // --- RÉCEPTION : Scan un colis → AT_HUB ---
   const handleReceptionScan = async (barcode: string) => {
-    const pkg = packages.find(p => 
-      (p.barcode || p.orderNumber).toUpperCase() === barcode.toUpperCase()
-    );
+    const pkg = packages.find(p => packageMatchesCode(p, barcode));
 
     if (!pkg) {
       showNotif('warning', `Code ${barcode} — colis non trouvé`);
@@ -258,9 +257,7 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
 
   // --- CHARGEMENT : Scan un colis → vérification chauffeur ---
   const handleLoadingScan = async (barcode: string) => {
-    const pkg = packages.find(p =>
-      (p.barcode || p.orderNumber).toUpperCase() === barcode.toUpperCase()
-    );
+    const pkg = packages.find(p => packageMatchesCode(p, barcode));
 
     if (!pkg) {
       showNotif('warning', `Code ${barcode} — colis non trouvé dans le système`);

@@ -19,11 +19,13 @@ import {
   Package as PackageIcon, CheckCircle, XCircle, Camera,
   Loader2, PenTool, Search, AlertTriangle, ChevronDown, ChevronUp
 } from 'lucide-react';
+import { packageMatchesCode, packageDisplayCode } from '../utils/barcode';
 
 interface PickupPackage {
   id: string;
   orderNumber: string;
   barcode?: string;
+  externalId?: string;             // N° colis client (étiquette d'origine, ex: BR0513)
   contactName: string;
   address: string;
   city: string;
@@ -55,15 +57,13 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
   const [signatureData, setSignatureData] = useState<string | null>(null);
   const [showSignature, setShowSignature] = useState(false);
 
-  // Mapper les scans aux colis
+  // Mapper les scans aux colis (tracking interne, N° colis client ou N° commande)
   const { scanned, missing, unknown } = useMemo(() => {
-    const scannedSet = new Set(scannedBarcodes.map(b => b.toUpperCase()));
     const scannedPkgs: PickupPackage[] = [];
     const missingPkgs: PickupPackage[] = [];
 
     expectedPackages.forEach(pkg => {
-      const code = (pkg.barcode || pkg.orderNumber).toUpperCase();
-      if (scannedSet.has(code)) {
+      if (scannedBarcodes.some(b => packageMatchesCode(pkg, b))) {
         scannedPkgs.push(pkg);
       } else {
         missingPkgs.push(pkg);
@@ -71,8 +71,7 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
     });
 
     // Codes scannés qui ne correspondent à aucun colis prévu
-    const expectedCodes = new Set(expectedPackages.map(p => (p.barcode || p.orderNumber).toUpperCase()));
-    const unknownCodes = scannedBarcodes.filter(b => !expectedCodes.has(b.toUpperCase()));
+    const unknownCodes = scannedBarcodes.filter(b => !expectedPackages.some(p => packageMatchesCode(p, b)));
 
     return { scanned: scannedPkgs, missing: missingPkgs, unknown: unknownCodes };
   }, [expectedPackages, scannedBarcodes]);
@@ -89,14 +88,13 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
     return expectedPackages.filter(p =>
       p.orderNumber.toLowerCase().includes(term) ||
       (p.barcode || '').toLowerCase().includes(term) ||
+      (p.externalId || '').toLowerCase().includes(term) ||
       p.contactName.toLowerCase().includes(term)
     );
   }, [expectedPackages, searchTerm]);
 
-  const isScanned = (pkg: PickupPackage) => {
-    const code = (pkg.barcode || pkg.orderNumber).toUpperCase();
-    return scannedBarcodes.some(b => b.toUpperCase() === code);
-  };
+  const isScanned = (pkg: PickupPackage) =>
+    scannedBarcodes.some(b => packageMatchesCode(pkg, b));
 
   const handleFinalize = () => {
     const scannedIds = scanned.map(p => p.id);
@@ -206,7 +204,7 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className={`font-mono text-xs font-bold ${scanned ? 'text-green-700' : 'text-slate-800'}`}>
-                          {pkg.barcode || pkg.orderNumber}
+                          {packageDisplayCode(pkg)}
                         </span>
                         {scanned && (
                           <span className="px-1.5 py-0.5 bg-green-100 text-green-700 rounded text-[9px] font-bold">

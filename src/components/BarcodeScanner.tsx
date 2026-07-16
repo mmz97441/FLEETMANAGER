@@ -58,8 +58,9 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
       return;
     }
 
-    // Vérifier si attendu
-    const isExpected = expectedBarcodes.length === 0 || expectedBarcodes.includes(barcode);
+    // Vérifier si attendu (insensible à la casse)
+    const isExpected = expectedBarcodes.length === 0 ||
+      expectedBarcodes.some(b => b.toUpperCase() === barcode.toUpperCase());
     setLastScanned(barcode);
     setLastScanResult(isExpected ? 'success' : 'unknown');
 

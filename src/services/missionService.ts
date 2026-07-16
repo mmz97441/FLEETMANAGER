@@ -25,7 +25,7 @@ import {
   Hub, Zone, Package, PackageStatus, PackageMovement,
   Mission, MissionType, MissionStatus, MissionStop, StopStatus,
   ImportBatch, ImportBatchStatus, ImportBatchZoneBreakdown,
-  PackageTransfer, TransferStatus, ProofOfDelivery,
+  PackageTransfer, TransferStatus, TransferReason, ProofOfDelivery,
   PostalCodeMapping, User, UserRole
 } from '../types';
 
@@ -536,6 +536,197 @@ export const confirmTransfer = async (transferId: string, toSignatureUrl?: strin
     confirmedAt: now,
     updatedAt: now
   });
+};
+
+/**
+ * Retrouve un colis dispatché à partir d'un code scanné (tracking GFL,
+ * N° colis client type BR0513, ou N° de commande). Utilisé pour les
+ * transferts en route : le colis peut appartenir à n'importe quelle tournée.
+ */
+export const findDispatchedPackageByCode = async (code: string): Promise<Package | null> => {
+  const cleaned = code.trim();
+  if (!cleaned) return null;
+  const values = [...new Set([cleaned, cleaned.toUpperCase()])];
+
+  for (const field of ['barcode', 'externalId', 'orderNumber'] as const) {
+    for (const value of values) {
+      const snap = await getDocs(query(
+        collection(db, PACKAGES_COLLECTION),
+        where(field, '==', value),
+        limit(5)
+      ));
+      if (snap.empty) continue;
+      const pkgs = snap.docs.map(d => ({ id: d.id, ...d.data() } as Package));
+      // Préférer un colis encore en cours (rattaché à une mission, non livré)
+      const active = pkgs.find(p =>
+        p.missionId &&
+        p.status !== PackageStatus.DELIVERED &&
+        p.status !== PackageStatus.RETURNED
+      );
+      if (active) return active;
+      return pkgs[0];
+    }
+  }
+  return null;
+};
+
+export interface RoadTransferInput {
+  packages: Package[];                       // Colis à récupérer (tournées d'autres chauffeurs)
+  toMission: Mission;                        // Mission du chauffeur receveur
+  toDriver: { id: string; name: string };
+  reason: TransferReason;
+  location?: { lat: number; lng: number };
+  notes?: string;
+}
+
+/**
+ * TRANSFERT EN ROUTE : le chauffeur receveur a scanné des colis remis par un
+ * autre chauffeur (point de rencontre). Pour chaque colis :
+ * - retiré de la tournée d'origine (stop vidé → SKIPPED, compteurs à jour)
+ * - ajouté à la tournée du receveur (nouveaux stops groupés par adresse)
+ * - colis mis à jour (mission, stop, chauffeur, mouvement TRANSFERRED)
+ * - un document package_transfers par tournée d'origine (traçabilité)
+ */
+export const transferPackagesToDriver = async (input: RoadTransferInput): Promise<number> => {
+  const { packages: pkgs, toMission, toDriver, reason, location, notes } = input;
+  if (pkgs.length === 0) throw new Error('Aucun colis à transférer');
+  const now = new Date().toISOString();
+
+  // --- 1. Grouper par mission d'origine et les retirer de ces tournées ---
+  const byOriginMission = new Map<string, Package[]>();
+  for (const p of pkgs) {
+    if (!p.missionId || p.missionId === toMission.id) continue;
+    if (!byOriginMission.has(p.missionId)) byOriginMission.set(p.missionId, []);
+    byOriginMission.get(p.missionId)!.push(p);
+  }
+
+  const originMissions = new Map<string, Mission>();
+  for (const [missionId, missionPkgs] of byOriginMission) {
+    const mSnap = await getDoc(doc(db, MISSIONS_COLLECTION, missionId));
+    if (!mSnap.exists()) continue;
+    const mission = { id: mSnap.id, ...mSnap.data() } as Mission;
+    originMissions.set(missionId, mission);
+
+    const removedIds = new Set(missionPkgs.map(p => p.id));
+    const newStops = mission.stops.map(s => {
+      const remaining = s.packageIds.filter(id => !removedIds.has(id));
+      if (remaining.length === s.packageIds.length) return s;
+      if (remaining.length === 0) {
+        return {
+          ...s,
+          packageIds: [],
+          packageCount: 0,
+          status: StopStatus.SKIPPED,
+          notes: `${s.notes ? s.notes + ' — ' : ''}Colis transférés à ${toDriver.name}`
+        };
+      }
+      return { ...s, packageIds: remaining, packageCount: remaining.length };
+    });
+
+    await updateDoc(doc(db, MISSIONS_COLLECTION, missionId), {
+      stops: newStops,
+      totalPackages: Math.max(0, (mission.totalPackages || 0) - missionPkgs.length),
+      updatedAt: now
+    });
+  }
+
+  // --- 2. Ajouter les colis à la tournée du receveur (stops groupés par adresse) ---
+  const toSnap = await getDoc(doc(db, MISSIONS_COLLECTION, toMission.id));
+  if (!toSnap.exists()) throw new Error('Votre tournée est introuvable');
+  const freshTo = { id: toSnap.id, ...toSnap.data() } as Mission;
+
+  let maxSeq = freshTo.stops.reduce((m, s) => Math.max(m, s.sequence), 0);
+  const byAddress = new Map<string, Package[]>();
+  for (const p of pkgs) {
+    const key = `${p.address.toLowerCase().trim()}|${p.postalCode}|${p.city.toLowerCase().trim()}`;
+    if (!byAddress.has(key)) byAddress.set(key, []);
+    byAddress.get(key)!.push(p);
+  }
+
+  const addedStops: MissionStop[] = [];
+  for (const group of byAddress.values()) {
+    const first = group[0];
+    maxSeq += 1;
+    addedStops.push(cleanUndefined({
+      id: `transfer-${now.replace(/[:.]/g, '')}-${maxSeq}`,
+      sequence: maxSeq,
+      type: 'DELIVERY',
+      address: first.address,
+      city: first.city,
+      postalCode: first.postalCode,
+      coordinates: first.coordinates,
+      floor: first.floor,
+      hasElevator: first.hasElevator,
+      contactName: first.contactName,
+      contactPhone: first.contactPhone,
+      packageIds: group.map(p => p.id),
+      packageCount: group.length,
+      timeWindowStart: first.timeWindowStart,
+      timeWindowEnd: first.timeWindowEnd,
+      serviceTime: first.serviceTime || 5,
+      notes: 'Reçu par transfert en route',
+      status: StopStatus.PENDING
+    }) as MissionStop);
+  }
+
+  await updateDoc(doc(db, MISSIONS_COLLECTION, toMission.id), {
+    stops: [...freshTo.stops, ...addedStops],
+    totalPackages: (freshTo.totalPackages || 0) + pkgs.length,
+    updatedAt: now
+  });
+
+  // --- 3. Mettre à jour chaque colis ---
+  for (const p of pkgs) {
+    const stop = addedStops.find(s => s.packageIds.includes(p.id))!;
+    const fromMission = p.missionId ? originMissions.get(p.missionId) : undefined;
+    const movement: PackageMovement = cleanUndefined({
+      timestamp: now,
+      action: 'TRANSFERRED' as const,
+      driverId: toDriver.id,
+      driverName: toDriver.name,
+      vehicleId: toMission.vehicleId,
+      vehiclePlate: toMission.vehiclePlate,
+      location,
+      notes: `Transfert en route${fromMission?.driverName ? ` — de ${fromMission.driverName}` : ''} à ${toDriver.name}${notes ? ` (${notes})` : ''}`
+    }) as PackageMovement;
+
+    await updateDoc(doc(db, PACKAGES_COLLECTION, p.id), cleanUndefined({
+      missionId: toMission.id,
+      stopId: stop.id,
+      currentDriverId: toDriver.id,
+      currentVehicleId: toMission.vehicleId,
+      movements: [...(p.movements || []), movement],
+      updatedAt: now
+    }));
+  }
+
+  // --- 4. Traçabilité : un document de transfert par tournée d'origine ---
+  for (const [missionId, missionPkgs] of byOriginMission) {
+    const fromMission = originMissions.get(missionId);
+    if (!fromMission) continue;
+    await addTransfer({
+      packageIds: missionPkgs.map(p => p.id),
+      packageCount: missionPkgs.length,
+      fromDriverId: fromMission.driverId || '',
+      fromDriverName: fromMission.driverName || 'Inconnu',
+      fromVehicleId: fromMission.vehicleId || '',
+      fromVehiclePlate: fromMission.vehiclePlate || '',
+      fromMissionId: missionId,
+      toDriverId: toDriver.id,
+      toDriverName: toDriver.name,
+      toVehicleId: toMission.vehicleId || '',
+      toVehiclePlate: toMission.vehiclePlate || '',
+      toMissionId: toMission.id,
+      location,
+      timestamp: now,
+      reason,
+      notes,
+      status: TransferStatus.CONFIRMED,
+      confirmedAt: now
+    });
+  }
+
+  return pkgs.length;
 };
 
 // ============================================================================

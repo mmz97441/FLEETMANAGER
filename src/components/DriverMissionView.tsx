@@ -30,6 +30,8 @@ import {
 import { uploadAndCreatePOD, uploadFailurePOD, UploadProgress } from '../services/podService';
 import { finalizePickup } from '../services/pickupService';
 import PickupScanView from './PickupScanView';
+import TransferReceiveModal from './TransferReceiveModal';
+import { packageMatchesCode, packageScanCodes, packageDisplayCode } from '../utils/barcode';
 const BarcodeScanner = lazy(() => import('./BarcodeScanner'));
 import {
   Truck, Package as PackageIcon, MapPin, Clock, Phone,
@@ -257,6 +259,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   // Pickup/Scan state
   const [showScanner, setShowScanner] = useState(false);
   const [scannedBarcodes, setScannedBarcodes] = useState<string[]>([]);
+  const [scanBypass, setScanBypass] = useState(false); // validation sans scan complet (tracée)
+  const [showTransferModal, setShowTransferModal] = useState(false); // réception de colis en route
   const [stopPackages, setStopPackages] = useState<Package[]>([]);
   
   // Return to hub workflow
@@ -325,7 +329,16 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   useEffect(() => {
     setScannedBarcodes([]);
     setShowScanner(false);
+    setScanBypass(false);
   }, [currentStop?.id]);
+
+  // Scan de contrôle à la livraison : chaque colis du stop doit être scanné
+  // (étiquette client BR… ou tracking GFL…) avant de pouvoir valider.
+  const deliveryScannedCount = stopPackages.filter(p =>
+    scannedBarcodes.some(b => packageMatchesCode(p, b))
+  ).length;
+  const scanRequirementMet =
+    stopPackages.length === 0 || deliveryScannedCount === stopPackages.length || scanBypass;
 
   // Charger les colis "À retourner" pour ce chauffeur
   useEffect(() => {
@@ -577,6 +590,12 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
 
   // Livraison réussie
   const handleDeliverySuccess = async () => {
+    // Trace du scan de contrôle (pour POD + historique colis)
+    const scanTrace = stopPackages.length === 0
+      ? undefined
+      : deliveryScannedCount === stopPackages.length
+        ? `Colis scannés: ${deliveryScannedCount}/${stopPackages.length}`
+        : `⚠️ Validé sans scan complet (${deliveryScannedCount}/${stopPackages.length} scannés)`;
     if (!activeMission || !currentStop) return;
     setIsProcessing(true);
     try {
@@ -631,7 +650,10 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
         signatureBase64: signatureData || undefined,
         photosBase64: capturedPhotos,
         coordinates: coords || { lat: 0, lng: 0 },
-        notes: recipientName ? `${deliveryLocation} — Réceptionné par: ${recipientName}` : undefined
+        notes: [
+          recipientName ? `${deliveryLocation} — Réceptionné par: ${recipientName}` : null,
+          scanTrace || null
+        ].filter(Boolean).join(' • ') || undefined
       }, setUploadProgress);
 
       if (podResult) {
@@ -651,7 +673,10 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
               vehicleId: activeMission.vehicleId,
               vehiclePlate: activeMission.vehiclePlate,
               location: coords,
-              notes: recipientName ? `Réceptionné par: ${recipientName}` : undefined
+              notes: [
+                recipientName ? `Réceptionné par: ${recipientName}` : null,
+                scanTrace || null
+              ].filter(Boolean).join(' • ') || undefined
             },
             {
               missionId: activeMission.id,
@@ -856,10 +881,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
         expectedPackageIds: currentStop.packageIds,
         scannedPackageIds: scannedIds,
         missingPackageIds: missingIds,
-        unknownBarcodes: scannedBarcodes.filter(b => {
-          const codes = stopPackages.map(p => (p.barcode || p.orderNumber).toUpperCase());
-          return !codes.includes(b.toUpperCase());
-        }),
+        unknownBarcodes: scannedBarcodes.filter(b => !stopPackages.some(p => packageMatchesCode(p, b))),
         signatureBase64
       });
 
@@ -1207,6 +1229,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                       id: p.id,
                       orderNumber: p.orderNumber,
                       barcode: p.barcode,
+                      externalId: p.externalId,
                       contactName: p.contactName,
                       address: p.address,
                       city: `${p.postalCode} ${p.city}`,
@@ -1225,6 +1248,58 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                 {/* ===== MODE LIVRAISON (DELIVERY) ===== */}
                 {currentStop.status === StopStatus.ARRIVED && !isPickupStop && (
                   <>
+                    {/* Scan de contrôle des colis avant remise */}
+                    {stopPackages.length > 0 && (
+                      <div className="bg-white border border-slate-200 rounded-xl p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs font-bold text-slate-700">
+                            📷 Colis scannés : {deliveryScannedCount}/{stopPackages.length}
+                          </p>
+                          <button
+                            onClick={() => setShowScanner(true)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold active:scale-95 transition-transform"
+                          >
+                            <Camera size={14} />
+                            Scanner
+                          </button>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {stopPackages.map(p => {
+                            const ok = scannedBarcodes.some(b => packageMatchesCode(p, b));
+                            return (
+                              <span
+                                key={p.id}
+                                className={`px-2 py-1 rounded-lg text-[11px] font-mono font-bold border ${
+                                  ok
+                                    ? 'bg-green-50 border-green-300 text-green-700'
+                                    : 'bg-slate-50 border-slate-200 text-slate-500'
+                                }`}
+                              >
+                                {ok ? '✓ ' : ''}{packageDisplayCode(p)}
+                              </span>
+                            );
+                          })}
+                        </div>
+                        {!scanRequirementMet && (
+                          <button
+                            onClick={() => {
+                              if (window.confirm('Valider la livraison sans avoir scanné tous les colis ?\nCette action sera tracée dans l\'historique.')) {
+                                setScanBypass(true);
+                              }
+                            }}
+                            className="text-[11px] text-slate-400 underline"
+                          >
+                            Impossible de scanner un colis ?
+                          </button>
+                        )}
+                        {scanBypass && (
+                          <p className="text-[11px] text-amber-600 font-medium">
+                            ⚠️ Validation sans scan complet — tracée dans l'historique du colis
+                          </p>
+                        )}
+                      </div>
+                    )}
+
                     {/* Barre de progression upload */}
                     {uploadProgress && uploadProgress.step !== 'done' && uploadProgress.step !== 'error' && (
                       <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
@@ -1370,7 +1445,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                     <div className="flex gap-2 pt-1">
                       <button
                         onClick={handleDeliverySuccess}
-                        disabled={isProcessing || !signatureData || !recipientName.trim()}
+                        disabled={isProcessing || !signatureData || !recipientName.trim() || !scanRequirementMet}
                         className="flex-1 flex items-center justify-center gap-2 py-3.5 bg-green-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         {isProcessing ? <Loader2 size={18} className="animate-spin" /> : <CheckCircle size={18} />}
@@ -1432,6 +1507,14 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
           </button>
         </div>
 
+        {/* Recevoir des colis d'un autre chauffeur (transfert en route) */}
+        <button
+          onClick={() => setShowTransferModal(true)}
+          className="w-full flex items-center justify-center gap-2 py-3 bg-white border border-blue-200 rounded-xl text-sm font-medium text-blue-700 active:scale-95 transition-transform"
+        >
+          🔁 Recevoir des colis (transfert)
+        </button>
+
         {/* Bouton retour liste */}
         <button
           onClick={() => setActiveMissionId(null)}
@@ -1439,6 +1522,19 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
         >
           <ArrowLeft size={14} /> Voir toutes mes tournées
         </button>
+
+        {/* === MODAL TRANSFERT EN ROUTE === */}
+        {showTransferModal && activeMission && (
+          <TransferReceiveModal
+            currentUser={currentUser}
+            toMission={activeMission}
+            onClose={() => setShowTransferModal(false)}
+            onDone={(count) => {
+              setShowTransferModal(false);
+              showNotif(`🔁 ${count} colis récupéré${count > 1 ? 's' : ''} dans votre tournée`);
+            }}
+          />
+        )}
 
         {/* === MODAL ÉCHEC === */}
         {showFailureModal && (
@@ -1550,9 +1646,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
             <BarcodeScanner
               onScan={handleBarcodeScan}
               onClose={() => setShowScanner(false)}
-              expectedBarcodes={stopPackages.map(p => (p.barcode || p.orderNumber))}
+              expectedBarcodes={stopPackages.flatMap(p => packageScanCodes(p))}
               alreadyScanned={scannedBarcodes}
-              title={`Scan enlèvement — ${currentStop?.contactName || ''}`}
+              title={`${isPickupStop ? 'Scan enlèvement' : 'Scan livraison'} — ${currentStop?.contactName || ''}`}
             />
           </Suspense>
         )}
