@@ -436,11 +436,14 @@ export const validateExcelFormat = async (file: File): Promise<{ valid: boolean;
     // Vérifier les colonnes obligatoires
     const firstRow = rows[0];
     const requiredFields = ['Address', 'Order_Number', 'Contact'];
-    
-    for (const field of requiredFields) {
-      if (!(field in firstRow)) {
-        errors.push(`Colonne obligatoire manquante: ${field}`);
-      }
+
+    const missing = requiredFields.filter(field => !(field in firstRow));
+    for (const field of missing) {
+      errors.push(`Colonne obligatoire manquante: ${field}`);
+    }
+    if (missing.length > 0) {
+      // Aide au diagnostic : montrer ce que contient réellement le fichier
+      errors.push(`Colonnes trouvées dans le fichier: ${Object.keys(firstRow).join(', ')}`);
     }
     
     // Vérifier quelques lignes
