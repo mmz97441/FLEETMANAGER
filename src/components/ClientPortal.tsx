@@ -1261,15 +1261,26 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                 <div className="col-span-2 text-right">Actions</div>
                             </div>
 
-                            {/* Lignes */}
+                            {/* Lignes — regroupées par jour d'import */}
                             <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto">
-                                {filtered.map(pkg => {
+                                {filtered.map((pkg, idx) => {
+                                    // En-tête de jour quand la date change (liste triée par date décroissante)
+                                    const dayOf = (p: PackageType) => new Date(p.createdAt).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+                                    const day = dayOf(pkg);
+                                    const isNewDay = idx === 0 || dayOf(filtered[idx - 1]) !== day;
+                                    const dayCount = isNewDay ? filtered.filter(p => dayOf(p) === day).length : 0;
                                     const statusColors = PACKAGE_STATUS_COLORS[pkg.status] || { bg: 'bg-slate-100', text: 'text-slate-700' };
                                     const lastMove = pkg.movements?.[pkg.movements.length - 1];
                                     
                                     const isExpanded = expandedShipmentId === pkg.id;
                                     return (
                                         <React.Fragment key={pkg.id}>
+                                        {isNewDay && (
+                                            <div className="px-4 py-2 bg-indigo-50/70 border-y border-indigo-100 flex items-center justify-between sticky top-0 z-10">
+                                                <p className="text-xs font-bold text-indigo-800 capitalize">📅 {day}</p>
+                                                <span className="text-[11px] font-bold text-indigo-500">{dayCount} colis</span>
+                                            </div>
+                                        )}
                                         <div
                                             onClick={(e) => {
                                                 // Ne pas déplier quand on clique sur un bouton/checkbox de la ligne

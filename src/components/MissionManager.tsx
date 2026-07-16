@@ -39,12 +39,13 @@ import Modal from './shared/Modal';
 import DispatchManager from './DispatchManager';
 import MissionKPIs from './MissionKPIs';
 import ImportReviewTable from './ImportReviewTable';
+import PackageTimeline from './PackageTimeline';
 import PODViewer from './PODViewer';
 import StopReorderModal from './StopReorderModal';
 import {
   Truck, Package as PackageIcon, MapPin, Upload, Calendar, Clock,
   Users, CheckCircle, XCircle, AlertTriangle, Filter, Search,
-  ChevronRight, ChevronDown, Download, RefreshCw, Play, Pause,
+  ChevronRight, ChevronDown, ChevronUp, Download, RefreshCw, Play, Pause,
   Eye, Edit, Trash2, Plus, FileSpreadsheet, Route, Loader2,
   Building2, Navigation, BarChart3, TrendingUp, ArrowRight, Phone, Zap,
   Printer, ArrowUp, ArrowDown, GripVertical
@@ -94,6 +95,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   
   // Edit/Delete colis (admin)
   const [editingPkg, setEditingPkg] = useState<Package | null>(null);
+  const [expandedPkgTimelineId, setExpandedPkgTimelineId] = useState<string | null>(null);
   const [editPkgForm, setEditPkgForm] = useState<Record<string, any>>({});
   const [isSavingPkg, setIsSavingPkg] = useState(false);
   const [deletingPkg, setDeletingPkg] = useState<Package | null>(null);
@@ -1562,14 +1564,15 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                     const isSelected = selectedPackageIds.has(pkg.id);
                     const isDispatched = !!(pkg.missionId || pkg.currentDriverId);
                     
+                    const isTimelineOpen = expandedPkgTimelineId === pkg.id;
                     return (
+                      <React.Fragment key={pkg.id}>
                       <tr
-                        key={pkg.id}
                         className={`transition-colors ${
-                          isDispatched 
-                            ? 'bg-slate-100 opacity-60 cursor-not-allowed' 
-                            : isSelected 
-                              ? 'bg-brand-50 hover:bg-slate-50' 
+                          isDispatched
+                            ? 'bg-slate-100 opacity-60 cursor-not-allowed'
+                            : isSelected
+                              ? 'bg-brand-50 hover:bg-slate-50'
                               : 'hover:bg-slate-50'
                         }`}
                       >
@@ -1721,6 +1724,16 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
+                                setExpandedPkgTimelineId(isTimelineOpen ? null : pkg.id);
+                              }}
+                              className="p-1.5 rounded-lg text-slate-500 hover:bg-blue-50 hover:text-blue-600 transition-colors"
+                              title={isTimelineOpen ? 'Masquer le suivi' : 'Suivi du colis (timeline)'}
+                            >
+                              {isTimelineOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 setEditPkgForm({
                                   contactName: pkg.contactName,
                                   contactPhone: pkg.contactPhone || '',
@@ -1755,6 +1768,19 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                           </div>
                         </td>
                       </tr>
+
+                      {/* Timeline du colis (vue admin : détails internes inclus) */}
+                      {isTimelineOpen && (
+                        <tr>
+                          <td colSpan={11} className="px-8 py-3 bg-slate-50/70 border-t border-slate-100">
+                            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">
+                              Suivi du colis {pkg.externalId || pkg.barcode || pkg.orderNumber}
+                            </p>
+                            <PackageTimeline movements={pkg.movements || []} showInternalDetails />
+                          </td>
+                        </tr>
+                      )}
+                      </React.Fragment>
                     );
                   })
               )}
