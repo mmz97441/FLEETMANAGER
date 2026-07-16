@@ -477,6 +477,7 @@ export interface ReviewRow {
   _status: 'valid' | 'warning' | 'error' | 'deleted';
   _errors: string[];              // Messages d'erreur pour cette ligne
   _warnings: string[];            // Avertissements (non bloquants)
+  _multiColis?: { index: number; total: number }; // Colis i/N d'un même point de livraison
 
   // Champs éditables
   externalId: string;
@@ -549,12 +550,6 @@ export const parseExcelForReview = async (file: File): Promise<ReviewResult> => 
     const svcTime = typeof raw.Service_Time === 'string' ? parseInt(raw.Service_Time) || 5 : raw.Service_Time || 5;
     if (svcTime > 60) warnings.push(`Temps de service élevé (${svcTime} min)`);
 
-    // Détection de doublons
-    const existingDup = reviewRows.find(r =>
-      r.orderNumber === String(raw.Order_Number) && r._status !== 'deleted'
-    );
-    if (existingDup) warnings.push(`Doublon possible (même N° commande que ligne ${existingDup._rowIndex})`);
-
     const status = errors.length > 0 ? 'error' : warnings.length > 0 ? 'warning' : 'valid';
 
     reviewRows.push({
@@ -582,6 +577,8 @@ export const parseExcelForReview = async (file: File): Promise<ReviewResult> => 
     });
   }
 
+  annotateMultiColisAndDuplicates(reviewRows);
+
   return {
     rows: reviewRows,
     totalRows: reviewRows.length,
@@ -590,6 +587,47 @@ export const parseExcelForReview = async (file: File): Promise<ReviewResult> => 
     errorCount: reviewRows.filter(r => r._status === 'error').length,
     fileName: file.name
   };
+};
+
+/**
+ * Plusieurs lignes avec la même commande + même adresse = UN point de livraison
+ * multi-colis (cas normal : une pharmacie reçoit 3 cartons) → numérotées 1/N.
+ * Un VRAI doublon = le même N° colis présent sur plusieurs lignes → avertissement.
+ */
+const deliveryGroupKey = (r: ReviewRow): string =>
+  `${r.orderNumber}|${r.address.toLowerCase().trim()}|${r.postalCode}`;
+
+const annotateMultiColisAndDuplicates = (reviewRows: ReviewRow[]): void => {
+  const byDelivery = new Map<string, ReviewRow[]>();
+  const byColis = new Map<string, ReviewRow[]>();
+
+  for (const r of reviewRows) {
+    if (r._status === 'deleted') continue;
+    const gKey = deliveryGroupKey(r);
+    if (!byDelivery.has(gKey)) byDelivery.set(gKey, []);
+    byDelivery.get(gKey)!.push(r);
+
+    const cKey = r.externalId.trim().toUpperCase();
+    if (cKey) {
+      if (!byColis.has(cKey)) byColis.set(cKey, []);
+      byColis.get(cKey)!.push(r);
+    }
+  }
+
+  for (const group of byDelivery.values()) {
+    if (group.length > 1) {
+      group.forEach((r, i) => { r._multiColis = { index: i + 1, total: group.length }; });
+    }
+  }
+
+  for (const [colis, dups] of byColis) {
+    if (dups.length > 1) {
+      for (const r of dups) {
+        r._warnings.push(`Doublon : N° colis ${colis} présent sur ${dups.length} lignes`);
+        if (r._status === 'valid') r._status = 'warning';
+      }
+    }
+  }
 };
 
 /**
@@ -618,16 +656,32 @@ export const revalidateRow = async (row: ReviewRow, allRows: ReviewRow[]): Promi
   if (!row.timeWindowStart && !row.timeWindowEnd) warnings.push('Pas de créneau horaire');
   if (row.serviceTime > 60) warnings.push(`Temps de service élevé (${row.serviceTime} min)`);
 
-  const existingDup = allRows.find(r =>
-    r._rowIndex !== row._rowIndex &&
-    r.orderNumber === row.orderNumber &&
-    r._status !== 'deleted'
-  );
-  if (existingDup) warnings.push(`Doublon possible (même N° commande que ligne ${existingDup._rowIndex})`);
+  // Vrai doublon = même N° colis qu'une autre ligne
+  const colisKey = row.externalId.trim().toUpperCase();
+  if (colisKey) {
+    const dup = allRows.find(r =>
+      r._rowIndex !== row._rowIndex &&
+      r._status !== 'deleted' &&
+      r.externalId.trim().toUpperCase() === colisKey
+    );
+    if (dup) warnings.push(`Doublon : N° colis ${row.externalId} aussi présent ligne ${dup._rowIndex}`);
+  }
+
+  // Multi-colis : même commande + même adresse = un point de livraison groupé
+  const updated = { ...row, zone };
+  const gKey = deliveryGroupKey(updated);
+  const groupRowIndexes = allRows
+    .filter(r => r._rowIndex !== row._rowIndex && r._status !== 'deleted' && deliveryGroupKey(r) === gKey)
+    .map(r => r._rowIndex)
+    .concat(row._rowIndex)
+    .sort((a, b) => a - b);
+  const multiColis = groupRowIndexes.length > 1
+    ? { index: groupRowIndexes.indexOf(row._rowIndex) + 1, total: groupRowIndexes.length }
+    : undefined;
 
   return {
-    ...row,
-    zone,
+    ...updated,
+    _multiColis: multiColis,
     _errors: errors,
     _warnings: warnings,
     _status: errors.length > 0 ? 'error' : warnings.length > 0 ? 'warning' : 'valid'

@@ -390,7 +390,17 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
 
                     {/* N° colis (identifiant physique sur le carton, ex: BR0513) */}
                     <td className="px-2 py-2 font-mono">
-                      <EditableCell rowIdx={realIdx} field="externalId" value={row.externalId} />
+                      <div className="flex items-center gap-1">
+                        <EditableCell rowIdx={realIdx} field="externalId" value={row.externalId} />
+                        {row._multiColis && (
+                          <span
+                            className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 whitespace-nowrap"
+                            title={`Point de livraison avec ${row._multiColis.total} colis (même commande, même adresse)`}
+                          >
+                            {row._multiColis.index}/{row._multiColis.total}
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     {/* N° commande */}

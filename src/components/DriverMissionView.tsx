@@ -307,9 +307,10 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   const currentStop = sortedStops[activeStopIndex] || null;
   const isPickupStop = currentStop?.type === 'PICKUP';
 
-  // Charger les colis pour les stops de type PICKUP
+  // Charger les colis du stop courant (PICKUP : pour le scan ; DELIVERY : pour
+  // afficher au chauffeur les N° de colis à remettre)
   useEffect(() => {
-    if (!isPickupStop || !currentStop?.packageIds?.length) {
+    if (!currentStop?.packageIds?.length) {
       setStopPackages([]);
       return;
     }
@@ -318,7 +319,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
       setStopPackages(filtered);
     });
     return unsub;
-  }, [isPickupStop, currentStop?.id]);
+  }, [currentStop?.id]);
 
   // Reset scan quand on change de stop
   useEffect(() => {
@@ -1131,6 +1132,28 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                   </span>
                 )}
               </div>
+
+              {/* Liste des colis à remettre à ce point de livraison */}
+              {!isPickupStop && stopPackages.length > 0 && (
+                <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded-lg">
+                  <p className="text-[10px] font-bold text-blue-700 uppercase tracking-wide mb-1.5">
+                    {stopPackages.length > 1 ? `${stopPackages.length} colis à remettre` : 'Colis à remettre'}
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {stopPackages.map((p, i) => (
+                      <span
+                        key={p.id}
+                        className="px-2 py-1 bg-white border border-blue-200 rounded-lg text-[11px] font-mono font-bold text-blue-800"
+                      >
+                        {p.externalId || p.barcode}
+                        {stopPackages.length > 1 && (
+                          <span className="ml-1 font-sans font-medium text-blue-500">{i + 1}/{stopPackages.length}</span>
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {currentStop.notes && (
                 <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
