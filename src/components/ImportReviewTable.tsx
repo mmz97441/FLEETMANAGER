@@ -88,6 +88,7 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
         r.address.toLowerCase().includes(term) ||
         r.city.toLowerCase().includes(term) ||
         r.orderNumber.includes(term) ||
+        r.externalId.toLowerCase().includes(term) ||
         r.postalCode.includes(term)
       );
     }
@@ -337,6 +338,7 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
               <tr className="bg-slate-50 border-b border-slate-200">
                 <th className="px-2 py-2.5 text-left font-bold text-slate-500 w-8">#</th>
                 <th className="px-2 py-2.5 text-left font-bold text-slate-500 w-6">St.</th>
+                <th className="px-2 py-2.5 text-left font-bold text-slate-500 min-w-[90px]">N° Colis</th>
                 <th className="px-2 py-2.5 text-left font-bold text-slate-500 min-w-[100px]">N° Cmd</th>
                 <th className="px-2 py-2.5 text-left font-bold text-slate-500 min-w-[130px]">Contact</th>
                 <th className="px-2 py-2.5 text-left font-bold text-slate-500 min-w-[200px]">Adresse</th>
@@ -384,6 +386,11 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
                           </div>
                         )}
                       </div>
+                    </td>
+
+                    {/* N° colis (identifiant physique sur le carton, ex: BR0513) */}
+                    <td className="px-2 py-2 font-mono">
+                      <EditableCell rowIdx={realIdx} field="externalId" value={row.externalId} />
                     </td>
 
                     {/* N° commande */}
@@ -472,7 +479,7 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
 
               {filteredRows.length === 0 && (
                 <tr>
-                  <td colSpan={12} className="text-center py-8 text-slate-400">
+                  <td colSpan={13} className="text-center py-8 text-slate-400">
                     Aucune ligne ne correspond aux filtres.
                   </td>
                 </tr>
