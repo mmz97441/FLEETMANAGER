@@ -152,25 +152,23 @@ export const parseExcelFile = async (file: File): Promise<ClientFileRow[]> => {
  * Parse l'adresse pour extraire rue, code postal et ville
  */
 const parseAddress = (fullAddress: string): { address: string; postalCode: string; city: string } => {
-  // Format attendu: "6 RUE DE L ETANG ZI BEL AIR,97450,SAINT LOUIS"
+  // Formats rencontrés :
+  //   "6 RUE DE L ETANG ZI BEL AIR,97450,SAINT LOUIS"
+  //   "2 RUE SAINT JOSEPH OUVRIER,,97400,SAINT DENIS"          (complément vide)
+  //   "14 RUE DU GENERAL DE GAULLE,CENTRE COMMERCIAL,97438,SAINTE MARIE"
+  // → on localise le code postal parmi les segments au lieu de supposer sa position
   const parts = fullAddress.split(',').map(p => p.trim());
-  
-  if (parts.length >= 3) {
+  const cpIndex = parts.findIndex(p => /^974\d{2}$/.test(p));
+
+  if (cpIndex !== -1) {
     return {
-      address: parts[0],
-      postalCode: parts[1],
-      city: parts[2]
+      address: parts.slice(0, cpIndex).filter(Boolean).join(', '),
+      postalCode: parts[cpIndex],
+      city: parts.slice(cpIndex + 1).filter(Boolean).join(' ')
     };
-  } else if (parts.length === 2) {
-    // Essayer de détecter le code postal
-    const cp = extractPostalCodeFromAddress(fullAddress);
-    if (cp) {
-      return {
-        address: parts[0],
-        postalCode: cp,
-        city: parts[1].replace(cp, '').trim()
-      };
-    }
+  }
+
+  if (parts.length === 2) {
     return {
       address: parts[0],
       postalCode: '',
