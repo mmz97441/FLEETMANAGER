@@ -185,7 +185,9 @@ export const extractPostalCodeFromAddress = (address: string): string | null => 
       return trimmed;
     }
   }
-  return null;
+  // Certains clients envoient l'adresse sans virgules ("144 RUE GEORGES POMPIDOU  97433 SALAZIE")
+  const match = address.match(/\b(974\d{2})\b/);
+  return match ? match[1] : null;
 };
 
 // ============================================================================

@@ -17,6 +17,27 @@ import {
   getHubByZone
 } from './missionService';
 
+/**
+ * Génère un suffixe de barcode collision-résistant (10 chars base36 = ~3.7e15 combinaisons).
+ * Avant : 5 chars base36 = ~60M → collision quasi-garantie sur gros imports.
+ * Préfère crypto.randomUUID() (CSPRNG) avec fallback Math.random pour les vieux navigateurs.
+ */
+function generateBarcodeSuffix(length = 10): string {
+  let raw: string;
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    // UUID v4 → 32 chars hex. On les convertit en base36 et on prend `length` chars.
+    raw = crypto.randomUUID().replace(/-/g, '');
+    const num = BigInt('0x' + raw);
+    raw = num.toString(36).toUpperCase();
+  } else {
+    // Fallback : concaténation de plusieurs Math.random pour avoir assez d'entropie
+    raw = (Math.random().toString(36) + Math.random().toString(36))
+      .replace(/[^a-z0-9]/g, '')
+      .toUpperCase();
+  }
+  return raw.slice(0, length).padEnd(length, '0');
+}
+
 // Structure attendue du fichier client
 interface ClientFileRow {
   Id: string;                    // "C0004911-15087911"
@@ -46,32 +67,82 @@ export interface ImportResult {
   zoneBreakdown: ImportBatchZoneBreakdown[];
 }
 
+// Variantes d'en-têtes rencontrées dans les fichiers clients (fautes de frappe,
+// espaces au lieu d'underscores, libellés français). Clé = en-tête en minuscules.
+const HEADER_ALIASES: Record<string, keyof ClientFileRow> = {
+  'id': 'Id',
+  'numéro colis': 'Id',
+  'numero colis': 'Id',
+  'address': 'Address',
+  'adress': 'Address',
+  'adresse': 'Address',
+  'floor': 'Floor',
+  'etage': 'Floor',
+  'étage': 'Floor',
+  'elevator': 'Elevator',
+  'ascenseur': 'Elevator',
+  'order_number': 'Order_Number',
+  'order number': 'Order_Number',
+  'n° commande': 'Order_Number',
+  'contact': 'Contact',
+  'telephone': 'Telephone',
+  'téléphone': 'Telephone',
+  'comment': 'Comment',
+  'commentaire': 'Comment',
+  'start': 'Start',
+  'end': 'End',
+  'volume': 'Volume',
+  'weight': 'Weight',
+  'poids': 'Weight',
+  'service_time': 'Service_Time',
+  'service time': 'Service_Time',
+  'tour': 'Tour',
+  'tournée': 'Tour',
+  'tournee': 'Tour'
+};
+
+/**
+ * Normalise les clés d'une ligne vers les noms de colonnes canoniques.
+ * Les colonnes inconnues sont conservées telles quelles.
+ */
+const canonicalizeRow = (row: Record<string, unknown>): ClientFileRow => {
+  const normalized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(row)) {
+    const canonical = HEADER_ALIASES[key.trim().toLowerCase()] || key;
+    // Ne pas écraser une valeur déjà présente par une valeur vide (colonnes dupliquées)
+    if (!(canonical in normalized) || normalized[canonical] === '') {
+      normalized[canonical] = value;
+    }
+  }
+  return normalized as unknown as ClientFileRow;
+};
+
 /**
  * Parse un fichier Excel et extrait les données
  */
 export const parseExcelFile = async (file: File): Promise<ClientFileRow[]> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    
+
     reader.onload = (e) => {
       try {
         const data = e.target?.result;
         const workbook = XLSX.read(data, { type: 'binary' });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
-        
+
         // Convertir en JSON avec header
-        const jsonData = XLSX.utils.sheet_to_json<ClientFileRow>(worksheet, {
+        const jsonData = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, {
           raw: false,
           defval: ''
         });
-        
-        resolve(jsonData);
+
+        resolve(jsonData.map(canonicalizeRow));
       } catch (error) {
         reject(new Error('Erreur lors de la lecture du fichier Excel'));
       }
     };
-    
+
     reader.onerror = () => reject(new Error('Erreur lors de la lecture du fichier'));
     reader.readAsBinaryString(file);
   });
@@ -106,10 +177,22 @@ const parseAddress = (fullAddress: string): { address: string; postalCode: strin
       city: parts[1]
     };
   }
-  
+
+  // Adresse sans virgules ("144 RUE GEORGES POMPIDOU  97433 SALAZIE") :
+  // on découpe autour du code postal — avant = rue, après = ville
+  const cp = extractPostalCodeFromAddress(fullAddress);
+  if (cp) {
+    const cpIndex = fullAddress.indexOf(cp);
+    return {
+      address: fullAddress.slice(0, cpIndex).replace(/[\s.,]+$/, '').trim(),
+      postalCode: cp,
+      city: fullAddress.slice(cpIndex + cp.length).trim()
+    };
+  }
+
   return {
     address: fullAddress,
-    postalCode: extractPostalCodeFromAddress(fullAddress) || '',
+    postalCode: '',
     city: ''
   };
 };
@@ -158,10 +241,9 @@ const rowToPackage = async (
   const orderNumber = String(row.Order_Number);
   
   // Générer un tracking number unique FleetGenius
-  // Format : GFL-YYMMDD-XXXXX (ex: GFL-260202-A3F7K)
+  // Format : GFL-YYMMDD-XXXXXXXXXX (10 chars CSPRNG, ~3.7e15 combinaisons)
   const dateStr = new Date().toISOString().slice(2, 10).replace(/-/g, '');
-  const rand = Math.random().toString(36).substring(2, 7).toUpperCase();
-  const trackingNumber = `GFL-${dateStr}-${rand}`;
+  const trackingNumber = `GFL-${dateStr}-${generateBarcodeSuffix()}`;
   
   // Créer le mouvement initial
   const initialMovement: PackageMovement = {
@@ -608,7 +690,7 @@ export const confirmReviewedImport = async (
       importBatchId: batchId,
       externalId: row.externalId,
       orderNumber: row.orderNumber,
-      barcode: `GFL-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`,
+      barcode: `GFL-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${generateBarcodeSuffix()}`,
       address: row.address,
       city: row.city,
       postalCode: row.postalCode,
