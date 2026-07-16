@@ -1408,7 +1408,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
         <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
         <input
           type="text"
-          placeholder="Rechercher par n° commande, destinataire, adresse..."
+          placeholder="Rechercher par n° colis, n° commande, destinataire, adresse..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
@@ -1510,7 +1510,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                           .filter(p => {
                             if (!searchTerm) return true;
                             const term = searchTerm.toLowerCase();
-                            return p.orderNumber.toLowerCase().includes(term) || p.contactName.toLowerCase().includes(term);
+                            return p.orderNumber.toLowerCase().includes(term) || (p.externalId || '').toLowerCase().includes(term) || p.contactName.toLowerCase().includes(term);
                           })
                           .slice(0, 50)
                           .map(p => p.id);
@@ -1548,6 +1548,8 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                     const term = searchTerm.toLowerCase();
                     return (
                       p.orderNumber.toLowerCase().includes(term) ||
+                      (p.externalId || '').toLowerCase().includes(term) ||
+                      (p.barcode || '').toLowerCase().includes(term) ||
                       p.contactName.toLowerCase().includes(term) ||
                       p.address.toLowerCase().includes(term) ||
                       p.city.toLowerCase().includes(term)
@@ -1592,11 +1594,14 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                             className="w-4 h-4 rounded border-slate-300 text-brand-500 focus:ring-brand-500"
                           />
                         </td>
-                        {/* N° commande */}
+                        {/* N° commande + N° colis client */}
                         <td className="px-3 py-2">
                           <span className="font-mono font-medium text-slate-800 text-sm">
                             {pkg.orderNumber}
                           </span>
+                          {pkg.externalId && (
+                            <p className="font-mono text-[10px] text-slate-400">{pkg.externalId}</p>
+                          )}
                         </td>
                         {/* Destinataire */}
                         <td className="px-3 py-2">

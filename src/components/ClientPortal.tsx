@@ -1224,6 +1224,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                         if (shipmentSearch) {
                             const term = shipmentSearch.toLowerCase();
                             return (
+                                (p.externalId || '').toLowerCase().includes(term) ||
                                 (p.barcode || '').toLowerCase().includes(term) ||
                                 p.orderNumber.toLowerCase().includes(term) ||
                                 p.contactName.toLowerCase().includes(term) ||
@@ -1282,8 +1283,8 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
 
                                             {/* Code-barres */}
                                             <div className="md:col-span-2">
-                                                <p className="font-mono text-xs font-bold text-slate-800">{pkg.barcode || pkg.orderNumber}</p>
-                                                <p className="text-[10px] text-slate-400">Réf: {pkg.orderNumber}</p>
+                                                <p className="font-mono text-xs font-bold text-slate-800">{pkg.externalId || pkg.barcode || pkg.orderNumber}</p>
+                                                <p className="text-[10px] text-slate-400">Cmd: {pkg.orderNumber}</p>
                                             </div>
 
                                             {/* Destinataire */}
