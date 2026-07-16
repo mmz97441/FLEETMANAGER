@@ -5,6 +5,7 @@ import { Package, MapPin, Calendar, Plus, CheckCircle, XCircle, Clock, Truck, Eu
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import Modal from './shared/Modal';
 import ConfirmModal from './ConfirmModal';
+import PackageTimeline from './PackageTimeline';
 import { sendUserInvitationEmail } from '../services/emailService';
 import { createInvitation, getActivationUrl, resendInvitation } from '../services/invitationService';
 import { subscribeToSavedAddresses, addSavedAddress, incrementAddressUsage } from '../services/firestore';
@@ -273,6 +274,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   const [clientPackages, setClientPackages] = useState<PackageType[]>([]);
   const [shipmentSearch, setShipmentSearch] = useState('');
   const [shipmentFilter, setShipmentFilter] = useState<'all' | 'pending' | 'transit' | 'delivered' | 'failed'>('all');
+  const [expandedShipmentId, setExpandedShipmentId] = useState<string | null>(null); // timeline dépliée
   const [selectedLabels, setSelectedLabels] = useState<Set<string>>(new Set());
 
   // Charger la config créneaux au montage
@@ -1265,8 +1267,16 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                     const statusColors = PACKAGE_STATUS_COLORS[pkg.status] || { bg: 'bg-slate-100', text: 'text-slate-700' };
                                     const lastMove = pkg.movements?.[pkg.movements.length - 1];
                                     
+                                    const isExpanded = expandedShipmentId === pkg.id;
                                     return (
-                                        <div key={pkg.id} className="grid grid-cols-1 md:grid-cols-12 gap-2 px-4 py-3 items-center hover:bg-slate-50 transition-colors">
+                                        <React.Fragment key={pkg.id}>
+                                        <div
+                                            onClick={(e) => {
+                                                // Ne pas déplier quand on clique sur un bouton/checkbox de la ligne
+                                                if ((e.target as HTMLElement).closest('button, input')) return;
+                                                setExpandedShipmentId(isExpanded ? null : pkg.id);
+                                            }}
+                                            className="grid grid-cols-1 md:grid-cols-12 gap-2 px-4 py-3 items-center hover:bg-slate-50 transition-colors cursor-pointer">
                                             {/* Checkbox */}
                                             <div className="hidden md:flex col-span-1 items-center">
                                                 <input
@@ -1341,8 +1351,28 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                                         <Eye size={14} />
                                                     </button>
                                                 )}
+
+                                                {/* Chevron timeline */}
+                                                <button
+                                                    onClick={() => setExpandedShipmentId(isExpanded ? null : pkg.id)}
+                                                    title={isExpanded ? 'Masquer le suivi' : 'Voir le suivi du colis'}
+                                                    className="p-2 bg-slate-100 hover:bg-blue-100 text-slate-600 hover:text-blue-700 rounded-lg transition-colors"
+                                                >
+                                                    {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                                                </button>
                                             </div>
                                         </div>
+
+                                        {/* Timeline du colis (dépliable) */}
+                                        {isExpanded && (
+                                            <div className="px-6 pb-4 pt-1 bg-slate-50/70 border-t border-slate-100">
+                                                <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">
+                                                    Suivi du colis {pkg.externalId || pkg.barcode || pkg.orderNumber}
+                                                </p>
+                                                <PackageTimeline movements={pkg.movements || []} />
+                                            </div>
+                                        )}
+                                        </React.Fragment>
                                     );
                                 })}
 
