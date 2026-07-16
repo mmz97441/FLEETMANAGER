@@ -478,6 +478,11 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
           <LogOut size={18} />
           {!isCollapsed && <span className="text-sm font-medium">Déconnexion</span>}
         </button>
+
+        {/* Version de l'application (diagnostic cache navigateur) */}
+        <p className={`text-[10px] text-slate-600 text-center ${isCollapsed ? '' : 'tracking-wide'}`} title={`Version ${__APP_VERSION__} — build du ${__BUILD_DATE__}`}>
+          {isCollapsed ? `v${__APP_VERSION__}` : `v${__APP_VERSION__} · ${__BUILD_DATE__}`}
+        </p>
       </div>
     </div>
   );

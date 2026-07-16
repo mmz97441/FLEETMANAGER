@@ -182,6 +182,11 @@ const Login: React.FC = () => {
               </div>
             </div>
           </div>
+
+          {/* Version de l'application (diagnostic cache navigateur) */}
+          <p className="mt-4 text-center text-[11px] text-slate-400">
+            v{__APP_VERSION__} · build du {__BUILD_DATE__}
+          </p>
         </div>
       </div>
     </div>
