@@ -12,7 +12,7 @@
  */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Html5Qrcode } from 'html5-qrcode';
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { Camera, Keyboard, X, Loader2, AlertTriangle } from 'lucide-react';
 
 interface BarcodeScannerProps {
@@ -82,14 +82,34 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
     let mounted = true;
     const startScanner = async () => {
       try {
-        const scanner = new Html5Qrcode(scannerContainerId);
+        // Config critique pour les codes-barres 1D (Code128) sur mobile :
+        // - useBarCodeDetectorIfSupported : utilise le détecteur natif du navigateur
+        //   (BarcodeDetector), bien plus fiable que ZXing sur les codes 1D — sans lui
+        //   la caméra tourne mais ne décode jamais l'étiquette.
+        // - formatsToSupport : restreint aux formats réellement utilisés (Code128 pour
+        //   les étiquettes BR… et GFL…, + secours) → détection plus rapide et fiable.
+        const scanner = new Html5Qrcode(scannerContainerId, {
+          formatsToSupport: [
+            Html5QrcodeSupportedFormats.CODE_128,
+            Html5QrcodeSupportedFormats.CODE_39,
+            Html5QrcodeSupportedFormats.EAN_13,
+            Html5QrcodeSupportedFormats.QR_CODE,
+          ],
+          experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+          verbose: false,
+        });
         scannerRef.current = scanner;
 
         await scanner.start(
           { facingMode: 'environment' },  // Caméra arrière
           {
             fps: 10,
-            qrbox: { width: 280, height: 120 },
+            // Zone de visée adaptée à la largeur réelle de la caméra (évite une box
+            // plus large que le flux vidéo sur petits écrans, qui bloque la détection)
+            qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
+              const width = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.85);
+              return { width, height: Math.floor(width * 0.45) };
+            },
             aspectRatio: 1.5,
           },
           (decodedText) => {
