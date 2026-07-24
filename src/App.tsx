@@ -7,6 +7,7 @@ import { auth } from "./firebaseConfig";
 import Sidebar from './components/Sidebar';
 import ErrorBoundary from './components/ErrorBoundary';
 import MobileNavBar from './components/MobileNavBar';
+import QuickScanButton from './components/QuickScanButton';
 import NotificationCenter from './components/NotificationCenter';
 import Login from './components/Login';
 import { Menu, Loader2, WifiOff } from 'lucide-react';
@@ -398,7 +399,7 @@ const App: React.FC = () => {
       logActivity(currentUser, ActivityAction.VEHICLE_CREATED, {
         targetType: 'vehicle',
         targetId: vehicle.id,
-        targetName: `${vehicle.plate} - ${vehicle.brand} ${vehicle.model}`
+        targetName: `${vehicle.plate} - ${vehicle.make || ''} ${vehicle.model}`.trim()
       });
     }
   };
@@ -408,7 +409,7 @@ const App: React.FC = () => {
       logActivity(currentUser, ActivityAction.VEHICLE_UPDATED, {
         targetType: 'vehicle',
         targetId: vehicle.id,
-        targetName: `${vehicle.plate} - ${vehicle.brand} ${vehicle.model}`
+        targetName: `${vehicle.plate} - ${vehicle.make || ''} ${vehicle.model}`.trim()
       });
     }
   };
@@ -419,7 +420,7 @@ const App: React.FC = () => {
       logActivity(currentUser, ActivityAction.VEHICLE_DELETED, {
         targetType: 'vehicle',
         targetId: id,
-        targetName: `${vehicle.plate} - ${vehicle.brand} ${vehicle.model}`
+        targetName: `${vehicle.plate} - ${vehicle.make || ''} ${vehicle.model}`.trim()
       });
     }
   };
@@ -1148,12 +1149,15 @@ const App: React.FC = () => {
 
         {/* Mobile Nav n'est affiché que si on n'est pas Client (car menu différent) */}
         {currentUser.role !== UserRole.CLIENT && (
-            <MobileNavBar 
-              currentView={currentView} 
+            <MobileNavBar
+              currentView={currentView}
               onChangeView={handleViewChange}
               onOpenMenu={() => setIsMobileMenuOpen(true)}
             />
         )}
+
+        {/* Raccourci scan rapide — disponible sur tous les écrans (usage interne) */}
+        {currentUser.role !== UserRole.CLIENT && <QuickScanButton />}
 
         {/* MODAL ALERTE DOCUMENTS NON SIGNÉS */}
         <Suspense fallback={null}>

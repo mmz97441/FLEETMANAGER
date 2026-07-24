@@ -570,6 +570,52 @@ export const findDispatchedPackageByCode = async (code: string): Promise<Package
   return null;
 };
 
+/**
+ * Recherche un colis par n'importe quel code : tracking interne GFL,
+ * N° colis client (externalId, ex BR0513), ou N° de commande (ex 13926865).
+ * Repli : si le code scanné se termine par un suffixe d'index (ex "13926865-002"
+ * ou "13926865002" pour "colis 02"), on réessaie sur le N° de commande nu —
+ * les étiquettes clients encodent souvent commande + rang du colis.
+ * Retourne le colis le plus récent en cas d'homonymes.
+ */
+export const findPackageByCode = async (code: string): Promise<Package | null> => {
+  const cleaned = code.trim();
+  if (!cleaned) return null;
+
+  const tryValues = async (values: string[]): Promise<Package | null> => {
+    const uniq = [...new Set(values.filter(Boolean))];
+    for (const field of ['barcode', 'externalId', 'orderNumber'] as const) {
+      for (const value of uniq) {
+        const snap = await getDocs(query(
+          collection(db, PACKAGES_COLLECTION),
+          where(field, '==', value),
+          limit(5)
+        ));
+        if (!snap.empty) {
+          return snap.docs
+            .map(d => ({ id: d.id, ...d.data() } as Package))
+            .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())[0];
+        }
+      }
+    }
+    return null;
+  };
+
+  // 1) Tentative directe (code tel quel + majuscules)
+  const direct = await tryValues([cleaned, cleaned.toUpperCase()]);
+  if (direct) return direct;
+
+  // 2) Repli : retirer un suffixe d'index de colis ("-002", " 02/02"→ base, ou 3 chiffres finaux)
+  const base = cleaned.replace(/[-\s/].*$/, '').replace(/\d{3}$/, m =>
+    // ne retire les 3 derniers chiffres que si le reste est un numéro de commande plausible (≥6 chiffres)
+    cleaned.replace(/[-\s/].*$/, '').length - 3 >= 6 ? '' : m
+  );
+  if (base && base !== cleaned) {
+    return await tryValues([base, base.toUpperCase()]);
+  }
+  return null;
+};
+
 export interface RoadTransferInput {
   packages: Package[];                       // Colis à récupérer (tournées d'autres chauffeurs)
   toMission: Mission;                        // Mission du chauffeur receveur
