@@ -82,18 +82,22 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
     let mounted = true;
     const startScanner = async () => {
       try {
-        // Config critique pour les codes-barres 1D (Code128) sur mobile :
-        // - useBarCodeDetectorIfSupported : utilise le détecteur natif du navigateur
-        //   (BarcodeDetector), bien plus fiable que ZXing sur les codes 1D — sans lui
-        //   la caméra tourne mais ne décode jamais l'étiquette.
-        // - formatsToSupport : restreint aux formats réellement utilisés (Code128 pour
-        //   les étiquettes BR… et GFL…, + secours) → détection plus rapide et fiable.
+        // Formats à décoder. Les étiquettes rencontrées sont variées :
+        // - clients (BOIRON) : codes 2D DataMatrix + QR imprimés sur le carton
+        // - étiquettes FleetGenius (GFL…) : Code128 via jsbarcode
+        // On active donc 1D ET 2D. useBarCodeDetectorIfSupported utilise le
+        // détecteur natif du navigateur quand il existe (Android/Chrome, fiable
+        // sur 1D) ; sur iPhone/Safari il n'existe pas → repli sur ZXing, qui est
+        // performant sur les codes 2D.
         const scanner = new Html5Qrcode(scannerContainerId, {
           formatsToSupport: [
+            Html5QrcodeSupportedFormats.DATA_MATRIX,
+            Html5QrcodeSupportedFormats.QR_CODE,
             Html5QrcodeSupportedFormats.CODE_128,
             Html5QrcodeSupportedFormats.CODE_39,
             Html5QrcodeSupportedFormats.EAN_13,
-            Html5QrcodeSupportedFormats.QR_CODE,
+            Html5QrcodeSupportedFormats.PDF_417,
+            Html5QrcodeSupportedFormats.AZTEC,
           ],
           experimentalFeatures: { useBarCodeDetectorIfSupported: true },
           verbose: false,
