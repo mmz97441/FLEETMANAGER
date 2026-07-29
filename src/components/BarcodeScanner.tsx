@@ -77,6 +77,22 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
     setTimeout(() => setLastScanResult(null), 2000);
   }, [onScan, expectedBarcodes, alreadyScanned, lastScanned]);
 
+  // Référence toujours à jour vers feedbackScan, pour que l'effet caméra ne
+  // dépende PAS de feedbackScan (sinon il redémarre la caméra à chaque scan,
+  // ce qui déclenchait "Cannot clear while scan is ongoing" → écran d'erreur).
+  const feedbackScanRef = useRef(feedbackScan);
+  useEffect(() => { feedbackScanRef.current = feedbackScan; }, [feedbackScan]);
+
+  // Arrêt propre : clear() UNIQUEMENT après que stop() soit terminé, sinon
+  // html5-qrcode lève "Cannot clear while scan is ongoing, close it first".
+  const stopAndClear = useCallback(async () => {
+    const s = scannerRef.current;
+    scannerRef.current = null;
+    if (!s) return;
+    try { await s.stop(); } catch {}
+    try { s.clear(); } catch {}
+  }, []);
+
   // Démarrer le scanner caméra
   useEffect(() => {
     if (manualMode) return;
@@ -119,7 +135,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
             },
           },
           (decodedText) => {
-            if (mounted) feedbackScan(decodedText);
+            if (mounted) feedbackScanRef.current(decodedText);
           },
           () => {} // Ignore erreurs de scan continu
         );
@@ -152,13 +168,9 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
     return () => {
       mounted = false;
       clearTimeout(timer);
-      if (scannerRef.current) {
-        scannerRef.current.stop().catch(() => {});
-        scannerRef.current.clear();
-        scannerRef.current = null;
-      }
+      void stopAndClear();
     };
-  }, [manualMode, feedbackScan]);
+  }, [manualMode, stopAndClear]);
 
   // Allumer / éteindre la torche
   const toggleTorch = async () => {
@@ -173,11 +185,9 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
 
   // Switch vers mode manuel
   const switchToManual = async () => {
-    if (scannerRef.current) {
-      try { await scannerRef.current.stop(); } catch {}
-      scannerRef.current.clear();
-      scannerRef.current = null;
-    }
+    await stopAndClear();
+    setTorchOn(false);
+    setTorchAvailable(false);
     setIsScanning(false);
     setManualMode(true);
     setError(null);
@@ -193,17 +203,13 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   const handleManualSubmit = () => {
     const code = manualInput.trim();
     if (!code) return;
-    feedbackScan(code);
+    feedbackScanRef.current(code);
     setManualInput('');
   };
 
   // Fermer proprement
   const handleClose = async () => {
-    if (scannerRef.current) {
-      try { await scannerRef.current.stop(); } catch {}
-      try { scannerRef.current.clear(); } catch {}
-      scannerRef.current = null;
-    }
+    await stopAndClear();
     onClose();
   };
 
