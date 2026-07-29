@@ -21,6 +21,7 @@ interface BarcodeScannerProps {
   expectedBarcodes?: string[];        // Liste des codes attendus (pour feedback couleur)
   alreadyScanned?: string[];          // Codes déjà scannés (pour anti-doublon visuel)
   title?: string;
+  progress?: { done: number; total: number }; // Compteur permanent pour le scan en rafale
 }
 
 const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
@@ -28,7 +29,8 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   onClose,
   expectedBarcodes = [],
   alreadyScanned = [],
-  title = 'Scanner un code-barres'
+  title = 'Scanner un code-barres',
+  progress
 }) => {
   const [isScanning, setIsScanning] = useState(false);
   const [manualMode, setManualMode] = useState(false);
@@ -125,7 +127,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
         await scanner.start(
           { facingMode: 'environment' },  // Caméra arrière
           {
-            fps: 10,
+            fps: 15, // acquisition plus rapide pour le scan en rafale
             // Zone de visée CARRÉE : les étiquettes clients (BOIRON) sont des
             // DataMatrix carrés — une zone paysage les cadrait mal. Carré ~72%
             // du plus petit côté du flux → bon cadrage 2D sur iPhone et Android.
@@ -233,6 +235,22 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Compteur permanent — scan en rafale (enlèvement de plusieurs colis) */}
+      {!manualMode && progress && progress.total > 0 && (
+        <div className={`px-4 py-2.5 ${progress.done >= progress.total ? 'bg-green-600' : 'bg-brand-600'} text-white`}>
+          <div className="flex items-center justify-between text-sm font-bold">
+            <span>{progress.done >= progress.total ? '✅ Tous les colis scannés' : '📦 Scan en cours'}</span>
+            <span className="tabular-nums">{progress.done} / {progress.total}</span>
+          </div>
+          <div className="mt-1 h-1.5 bg-black/20 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-white/90 rounded-full transition-all duration-200"
+              style={{ width: `${Math.min(100, Math.round((progress.done / progress.total) * 100))}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Feedback flash */}
       {lastScanResult && (
