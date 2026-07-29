@@ -194,7 +194,7 @@ const App: React.FC = () => {
                         });
                         // Vérification continue du rôle en temps réel
                         const updatedRole = String(updatedProfile.role || '').toLowerCase();
-                        if (updatedRole.includes('client') && !['client_dashboard', 'client_list', 'client_team', 'help', 'settings'].includes(currentView)) {
+                        if (updatedRole.includes('client') && !['client_dashboard', 'client_list', 'client_shipments', 'client_team', 'help', 'settings'].includes(currentView)) {
                              setCurrentView('client_dashboard');
                         }
                         // Stagiaire ne peut pas accéder au dashboard
@@ -1010,18 +1010,20 @@ const App: React.FC = () => {
 
       case 'client_dashboard':
       case 'client_list':
+      case 'client_shipments':
       case 'client_team':
         // Sécurité : On filtre strictement les utilisateurs visibles par le client
-        const companyTeam = users.filter(u => 
-            u.companyName === currentUser.companyName && 
+        const companyTeam = users.filter(u =>
+            u.companyName === currentUser.companyName &&
             (u.role === UserRole.CLIENT || String(u.role).toLowerCase().includes('client'))
         );
-        
-        return <ClientPortal 
+
+        return <ClientPortal
             activeView={currentView}
             currentUser={currentUser}
             quotes={quotes}
             companyUsers={companyTeam}
+            onNavigate={handleViewChange}
             onAddQuote={handleAddQuote}
             onUpdateQuoteStatus={handleUpdateQuoteStatus}
             onAddTeamMember={handleAddTeamMember}

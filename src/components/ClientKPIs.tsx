@@ -28,9 +28,12 @@ import { exportReportExcel, printReportPDF } from '../utils/clientReport';
 
 type Period = 'today' | 'week' | 'month';
 
+type ShipmentFilter = 'all' | 'pending' | 'transit' | 'delivered' | 'failed';
+
 interface ClientKPIsProps {
   packages: Package[];
   clientName?: string;
+  onDrillDown?: (filter: ShipmentFilter) => void;
 }
 
 // ============================================================================
@@ -72,7 +75,15 @@ const isInRange = (dateStr: string, start: string, end: string) =>
 // COMPOSANT
 // ============================================================================
 
-const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages, clientName = 'Client' }) => {
+const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages, clientName = 'Client', onDrillDown }) => {
+  // Rend une carte KPI cliquable (drill-down vers la liste filtrée) si onDrillDown fourni
+  const drill = (filter: ShipmentFilter) => onDrillDown ? {
+    onClick: () => onDrillDown(filter),
+    role: 'button' as const,
+    tabIndex: 0,
+    title: 'Voir ces colis'
+  } : {};
+  const drillClass = onDrillDown ? ' cursor-pointer hover:shadow-md hover:border-indigo-300 transition-all active:scale-95' : '';
   const [period, setPeriod] = useState<Period>('today');
   const dateRange = useMemo(() => getDateRange(period), [period]);
   const periodLabel = useMemo(() => {
@@ -287,43 +298,43 @@ const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages, clientName = 'Client'
       {/* === PIPELINE === */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {/* Total */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4 text-center">
+        <div className={"bg-white rounded-xl border border-slate-200 p-4 text-center" + drillClass} {...drill('all')}>
           <div className="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center mx-auto mb-2">
             <PackageIcon size={20} className="text-indigo-600" />
           </div>
           <p className="text-2xl font-black text-slate-800">{pipeline.total}</p>
           <p className="text-[10px] text-slate-500 font-medium uppercase">Total</p>
         </div>
-        
+
         {/* En attente */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4 text-center">
+        <div className={"bg-white rounded-xl border border-slate-200 p-4 text-center" + drillClass} {...drill('pending')}>
           <div className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center mx-auto mb-2">
             <Clock size={20} className="text-slate-600" />
           </div>
           <p className="text-2xl font-black text-slate-600">{pipeline.pending}</p>
           <p className="text-[10px] text-slate-500 font-medium uppercase">En attente</p>
         </div>
-        
+
         {/* En transit */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4 text-center">
+        <div className={"bg-white rounded-xl border border-slate-200 p-4 text-center" + drillClass} {...drill('transit')}>
           <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center mx-auto mb-2">
             <Truck size={20} className="text-blue-600" />
           </div>
           <p className="text-2xl font-black text-blue-600">{pipeline.inTransit}</p>
           <p className="text-[10px] text-slate-500 font-medium uppercase">En transit</p>
         </div>
-        
+
         {/* Livrés */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4 text-center">
+        <div className={"bg-white rounded-xl border border-slate-200 p-4 text-center" + drillClass} {...drill('delivered')}>
           <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center mx-auto mb-2">
             <CheckCircle size={20} className="text-green-600" />
           </div>
           <p className="text-2xl font-black text-green-600">{pipeline.delivered}</p>
           <p className="text-[10px] text-slate-500 font-medium uppercase">Livrés</p>
         </div>
-        
+
         {/* Échecs */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4 text-center">
+        <div className={"bg-white rounded-xl border border-slate-200 p-4 text-center" + drillClass} {...drill('failed')}>
           <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center mx-auto mb-2">
             <XCircle size={20} className="text-red-600" />
           </div>

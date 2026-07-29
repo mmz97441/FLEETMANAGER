@@ -208,6 +208,7 @@ interface ClientPortalProps {
   currentUser: User;
   quotes: QuoteRequest[];
   companyUsers?: User[];
+  onNavigate?: (view: ViewState) => void;
   onAddQuote: (quote: QuoteRequest) => void;
   onUpdateQuoteStatus: (id: string, status: QuoteStatus) => void;
   onAddTeamMember?: (user: User) => void;
@@ -217,7 +218,7 @@ interface ClientPortalProps {
 
 const COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444'];
 
-const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, quotes, companyUsers = [], onAddQuote, onUpdateQuoteStatus, onAddTeamMember, onUpdateTeamMember, onDeleteTeamMember }) => {
+const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, quotes, companyUsers = [], onNavigate, onAddQuote, onUpdateQuoteStatus, onAddTeamMember, onUpdateTeamMember, onDeleteTeamMember }) => {
   // Navigation Local State REMOVED in favor of activeView prop
   const [listFilter, setListFilter] = useState<'active' | 'history'>('active');
   
@@ -758,7 +759,14 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
 
         {/* --- VIEW: DASHBOARD --- */}
         {activeView === 'client_dashboard' && (
-            <ClientKPIs packages={clientPackages} clientName={currentUser.companyName || `${currentUser.firstName} ${currentUser.lastName}`} />
+            <ClientKPIs
+              packages={clientPackages}
+              clientName={currentUser.companyName || `${currentUser.firstName} ${currentUser.lastName}`}
+              onDrillDown={(filter) => {
+                setShipmentFilter(filter);
+                onNavigate?.('client_shipments');
+              }}
+            />
         )}
 
         {/* --- VIEW: TEAM MANAGEMENT --- */}
