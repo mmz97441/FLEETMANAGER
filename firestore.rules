@@ -49,11 +49,6 @@ service cloud.firestore {
       return request.auth != null && getUserRole().matches('(?i)^client$');
     }
 
-    // Est un stagiaire
-    function isIntern() {
-      return request.auth != null && getUserRole().matches('(?i)^stagiaire$');
-    }
-
     // Champs sensibles d'un profil utilisateur qu'un user ne doit JAMAIS modifier sur lui-même
     // (escalade de privilèges sinon : un chauffeur ferait updateDoc({ role: 'Admin' }))
     function userImmutableFields() {
