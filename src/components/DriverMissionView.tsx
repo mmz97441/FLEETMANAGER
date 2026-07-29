@@ -31,6 +31,7 @@ import { uploadAndCreatePOD, uploadFailurePOD, UploadProgress } from '../service
 import { finalizePickup } from '../services/pickupService';
 import PickupScanView from './PickupScanView';
 import TransferReceiveModal from './TransferReceiveModal';
+import ScanGateDialog from './ScanGateDialog';
 import { packageMatchesCode, packageScanCodes, packageDisplayCode } from '../utils/barcode';
 const BarcodeScanner = lazy(() => import('./BarcodeScanner'));
 import {
@@ -260,6 +261,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   const [showScanner, setShowScanner] = useState(false);
   const [scannedBarcodes, setScannedBarcodes] = useState<string[]>([]);
   const [scanBypass, setScanBypass] = useState(false); // validation sans scan complet (tracée)
+  const [showScanGate, setShowScanGate] = useState(false); // garde-fou "colis manquants"
   const [showTransferModal, setShowTransferModal] = useState(false); // réception de colis en route
   const [stopPackages, setStopPackages] = useState<Package[]>([]);
   
@@ -337,8 +339,11 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   const deliveryScannedCount = stopPackages.filter(p =>
     scannedBarcodes.some(b => packageMatchesCode(p, b))
   ).length;
-  const scanRequirementMet =
-    stopPackages.length === 0 || deliveryScannedCount === stopPackages.length || scanBypass;
+  const allStopScanned = stopPackages.length === 0 || deliveryScannedCount === stopPackages.length;
+  const scanRequirementMet = allStopScanned || scanBypass;
+  const missingStopCodes = stopPackages
+    .filter(p => !scannedBarcodes.some(b => packageMatchesCode(p, b)))
+    .map(packageDisplayCode);
 
   // Charger les colis "À retourner" pour ce chauffeur
   useEffect(() => {
@@ -1280,21 +1285,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                             );
                           })}
                         </div>
-                        {!scanRequirementMet && (
-                          <button
-                            onClick={() => {
-                              if (window.confirm('Valider la livraison sans avoir scanné tous les colis ?\nCette action sera tracée dans l\'historique.')) {
-                                setScanBypass(true);
-                              }
-                            }}
-                            className="text-[11px] text-slate-400 underline"
-                          >
-                            Impossible de scanner un colis ?
-                          </button>
-                        )}
-                        {scanBypass && (
+                        {!allStopScanned && (
                           <p className="text-[11px] text-amber-600 font-medium">
-                            ⚠️ Validation sans scan complet — tracée dans l'historique du colis
+                            ⚠️ {missingStopCodes.length} colis non scanné{missingStopCodes.length > 1 ? 's' : ''} — à scanner avant de valider
                           </p>
                         )}
                       </div>
@@ -1444,8 +1437,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                     {/* Boutons Livré / Échec */}
                     <div className="flex gap-2 pt-1">
                       <button
-                        onClick={handleDeliverySuccess}
-                        disabled={isProcessing || !signatureData || !recipientName.trim() || !scanRequirementMet}
+                        onClick={() => { if (allStopScanned) { handleDeliverySuccess(); } else { setShowScanGate(true); } }}
+                        disabled={isProcessing || !signatureData || !recipientName.trim()}
                         className="flex-1 flex items-center justify-center gap-2 py-3.5 bg-green-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         {isProcessing ? <Loader2 size={18} className="animate-spin" /> : <CheckCircle size={18} />}
@@ -1522,6 +1515,18 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
         >
           <ArrowLeft size={14} /> Voir toutes mes tournées
         </button>
+
+        {/* === GARDE-FOU : colis manquants avant validation livraison === */}
+        {showScanGate && currentStop && (
+          <ScanGateDialog
+            clientName={currentStop.contactName || 'ce client'}
+            missingCodes={missingStopCodes}
+            total={stopPackages.length}
+            actionLabel="Forcer la livraison"
+            onCancel={() => setShowScanGate(false)}
+            onForce={() => { setShowScanGate(false); setScanBypass(true); handleDeliverySuccess(); }}
+          />
+        )}
 
         {/* === MODAL TRANSFERT EN ROUTE === */}
         {showTransferModal && activeMission && (

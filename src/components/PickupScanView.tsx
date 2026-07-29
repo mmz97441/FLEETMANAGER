@@ -20,6 +20,7 @@ import {
   Loader2, PenTool, Search, AlertTriangle, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { packageMatchesCode, packageDisplayCode } from '../utils/barcode';
+import ScanGateDialog from './ScanGateDialog';
 
 interface PickupPackage {
   id: string;
@@ -56,6 +57,7 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [signatureData, setSignatureData] = useState<string | null>(null);
   const [showSignature, setShowSignature] = useState(false);
+  const [showGate, setShowGate] = useState(false);
 
   // Mapper les scans aux colis (tracking interne, N° colis client ou N° commande)
   const { scanned, missing, unknown } = useMemo(() => {
@@ -96,10 +98,19 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
   const isScanned = (pkg: PickupPackage) =>
     scannedBarcodes.some(b => packageMatchesCode(pkg, b));
 
-  const handleFinalize = () => {
+  const doFinalize = () => {
     const scannedIds = scanned.map(p => p.id);
     const missingIds = missing.map(p => p.id);
     onComplete(scannedIds, missingIds, signatureData || undefined);
+  };
+
+  const handleFinalize = () => {
+    // Garde-fou : bloquer si des colis attendus n'ont pas été scannés
+    if (!allScanned && scannedCount >= 0 && total > 0) {
+      setShowGate(true);
+      return;
+    }
+    doFinalize();
   };
 
   return (
@@ -313,6 +324,18 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
         <p className="text-[11px] text-amber-600 text-center">
           ⚠️ {missing.length} colis manquants — Ils resteront en "En attente"
         </p>
+      )}
+
+      {/* Garde-fou : colis manquants avant de valider l'enlèvement */}
+      {showGate && (
+        <ScanGateDialog
+          clientName={clientName || 'ce client'}
+          missingCodes={missing.map(packageDisplayCode)}
+          total={total}
+          actionLabel="Forcer l'enlèvement (colis manquants)"
+          onCancel={() => setShowGate(false)}
+          onForce={() => { setShowGate(false); doFinalize(); }}
+        />
       )}
     </div>
   );
