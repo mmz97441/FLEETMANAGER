@@ -13,7 +13,7 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
-import { Camera, Keyboard, X, Loader2, AlertTriangle } from 'lucide-react';
+import { Camera, Keyboard, X, Loader2, AlertTriangle, Flashlight, FlashlightOff } from 'lucide-react';
 
 interface BarcodeScannerProps {
   onScan: (barcode: string) => void;
@@ -36,7 +36,9 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   const [lastScanned, setLastScanned] = useState<string | null>(null);
   const [lastScanResult, setLastScanResult] = useState<'success' | 'duplicate' | 'unknown' | null>(null);
   const [error, setError] = useState<string | null>(null);
-  
+  const [torchOn, setTorchOn] = useState(false);
+  const [torchAvailable, setTorchAvailable] = useState(false);
+
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const lastScanTime = useRef(0);
   const scannerContainerId = 'barcode-scanner-container';
@@ -108,13 +110,13 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
           { facingMode: 'environment' },  // Caméra arrière
           {
             fps: 10,
-            // Zone de visée adaptée à la largeur réelle de la caméra (évite une box
-            // plus large que le flux vidéo sur petits écrans, qui bloque la détection)
+            // Zone de visée CARRÉE : les étiquettes clients (BOIRON) sont des
+            // DataMatrix carrés — une zone paysage les cadrait mal. Carré ~72%
+            // du plus petit côté du flux → bon cadrage 2D sur iPhone et Android.
             qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
-              const width = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.85);
-              return { width, height: Math.floor(width * 0.45) };
+              const size = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.72);
+              return { width: size, height: size };
             },
-            aspectRatio: 1.5,
           },
           (decodedText) => {
             if (mounted) feedbackScan(decodedText);
@@ -122,7 +124,15 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
           () => {} // Ignore erreurs de scan continu
         );
 
-        if (mounted) setIsScanning(true);
+        if (mounted) {
+          setIsScanning(true);
+          // Détecter la disponibilité de la torche (Android surtout ; iOS ne la
+          // supporte pas via le web, le bouton reste alors masqué)
+          try {
+            const torch = scanner.getRunningTrackCameraCapabilities().torchFeature();
+            if (torch.isSupported()) setTorchAvailable(true);
+          } catch {}
+        }
       } catch (err: any) {
         console.error('Scanner error:', err);
         if (mounted) {
@@ -149,6 +159,17 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
       }
     };
   }, [manualMode, feedbackScan]);
+
+  // Allumer / éteindre la torche
+  const toggleTorch = async () => {
+    if (!scannerRef.current) return;
+    try {
+      await scannerRef.current.getRunningTrackCameraCapabilities().torchFeature().apply(!torchOn);
+      setTorchOn(!torchOn);
+    } catch {
+      setTorchAvailable(false);
+    }
+  };
 
   // Switch vers mode manuel
   const switchToManual = async () => {
@@ -191,9 +212,20 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 bg-black/80">
         <h3 className="text-white font-bold text-sm">{title}</h3>
-        <button onClick={handleClose} className="text-white/70 hover:text-white p-1">
-          <X size={22} />
-        </button>
+        <div className="flex items-center gap-1">
+          {!manualMode && torchAvailable && (
+            <button
+              onClick={toggleTorch}
+              title={torchOn ? 'Éteindre la lampe' : 'Allumer la lampe'}
+              className={`p-1.5 rounded-lg ${torchOn ? 'text-amber-300 bg-white/10' : 'text-white/70 hover:text-white'}`}
+            >
+              {torchOn ? <Flashlight size={20} /> : <FlashlightOff size={20} />}
+            </button>
+          )}
+          <button onClick={handleClose} className="text-white/70 hover:text-white p-1">
+            <X size={22} />
+          </button>
+        </div>
       </div>
 
       {/* Feedback flash */}
@@ -229,13 +261,14 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
             {isScanning && (
               <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
                 <div className="absolute inset-0 bg-black/30" />
-                <div className="relative w-72 h-28 border-2 border-white/80 rounded-lg">
+                {/* Viseur carré — adapté aux DataMatrix/QR (codes carrés) et aux 1D */}
+                <div className="relative w-64 h-64 max-w-[72vw] max-h-[72vw] border-2 border-white/80 rounded-lg">
                   <div className="absolute -top-1 -left-1 w-6 h-6 border-t-4 border-l-4 border-green-400 rounded-tl-lg" />
                   <div className="absolute -top-1 -right-1 w-6 h-6 border-t-4 border-r-4 border-green-400 rounded-tr-lg" />
                   <div className="absolute -bottom-1 -left-1 w-6 h-6 border-b-4 border-l-4 border-green-400 rounded-bl-lg" />
                   <div className="absolute -bottom-1 -right-1 w-6 h-6 border-b-4 border-r-4 border-green-400 rounded-br-lg" />
                   {/* Ligne de scan animée */}
-                  <div className="absolute top-0 left-2 right-2 h-0.5 bg-green-400 animate-pulse" style={{ top: '50%' }} />
+                  <div className="absolute left-2 right-2 h-0.5 bg-green-400 animate-pulse" style={{ top: '50%' }} />
                 </div>
               </div>
             )}
