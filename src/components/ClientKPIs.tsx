@@ -17,9 +17,10 @@ import {
 import {
   TrendingUp, Package as PackageIcon, CheckCircle, XCircle,
   Clock, MapPin, AlertTriangle, ArrowUp, ArrowDown, Minus,
-  Truck, BarChart3
+  Truck, BarChart3, FileSpreadsheet, Printer
 } from 'lucide-react';
 import { Package, PackageStatus, Zone, ZONE_COLORS, FailureReason } from '../types';
+import { exportReportExcel, printReportPDF } from '../utils/clientReport';
 
 // ============================================================================
 // TYPES
@@ -29,6 +30,7 @@ type Period = 'today' | 'week' | 'month';
 
 interface ClientKPIsProps {
   packages: Package[];
+  clientName?: string;
 }
 
 // ============================================================================
@@ -70,9 +72,15 @@ const isInRange = (dateStr: string, start: string, end: string) =>
 // COMPOSANT
 // ============================================================================
 
-const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages }) => {
+const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages, clientName = 'Client' }) => {
   const [period, setPeriod] = useState<Period>('today');
   const dateRange = useMemo(() => getDateRange(period), [period]);
+  const periodLabel = useMemo(() => {
+    const fr = (d: string) => new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+    if (period === 'today') return `Aujourd'hui (${fr(dateRange.start)})`;
+    if (period === 'week') return `Semaine du ${fr(dateRange.start)} au ${fr(dateRange.end)}`;
+    return new Date(dateRange.start).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+  }, [period, dateRange]);
   const today = new Date().toISOString().split('T')[0];
 
   // Packages de la période
@@ -239,8 +247,8 @@ const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages }) => {
         </p>
       </div>
 
-      {/* Filtre période */}
-      <div className="flex items-center gap-2">
+      {/* Filtre période + export rapports */}
+      <div className="flex items-center gap-2 flex-wrap">
         {(['today', 'week', 'month'] as Period[]).map(p => (
           <button
             key={p}
@@ -254,6 +262,26 @@ const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages }) => {
             {p === 'today' ? "Aujourd'hui" : p === 'week' ? 'Semaine' : 'Mois'}
           </button>
         ))}
+
+        {/* Boutons d'export — rapport de la période sélectionnée */}
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={() => exportReportExcel(periodPackages, clientName, periodLabel)}
+            disabled={periodPackages.length === 0}
+            title="Exporter le rapport en Excel"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-bold bg-green-600 text-white hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            <FileSpreadsheet size={16} /> Excel
+          </button>
+          <button
+            onClick={() => printReportPDF(periodPackages, clientName, periodLabel)}
+            disabled={periodPackages.length === 0}
+            title="Rapport imprimable / PDF"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-bold bg-slate-800 text-white hover:bg-slate-900 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            <Printer size={16} /> PDF
+          </button>
+        </div>
       </div>
 
       {/* === PIPELINE === */}

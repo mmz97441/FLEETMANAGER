@@ -758,7 +758,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
 
         {/* --- VIEW: DASHBOARD --- */}
         {activeView === 'client_dashboard' && (
-            <ClientKPIs packages={clientPackages} />
+            <ClientKPIs packages={clientPackages} clientName={currentUser.companyName || `${currentUser.firstName} ${currentUser.lastName}`} />
         )}
 
         {/* --- VIEW: TEAM MANAGEMENT --- */}
