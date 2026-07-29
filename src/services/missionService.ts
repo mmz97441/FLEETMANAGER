@@ -28,6 +28,7 @@ import {
   PackageTransfer, TransferStatus, TransferReason, ProofOfDelivery,
   PostalCodeMapping, User, UserRole
 } from '../types';
+import { extractScanTokens } from '../utils/barcode';
 
 // Collections Firestore
 const HUBS_COLLECTION = 'hubs';
@@ -579,39 +580,29 @@ export const findDispatchedPackageByCode = async (code: string): Promise<Package
  * Retourne le colis le plus récent en cas d'homonymes.
  */
 export const findPackageByCode = async (code: string): Promise<Package | null> => {
-  const cleaned = code.trim();
-  if (!cleaned) return null;
+  // Candidats extraits du code scanné : chaîne brute, N° colis (BR…),
+  // N° commande, version sans suffixe de rang. Couvre les DataMatrix clients.
+  const candidates = [
+    code.trim(),
+    code.trim().toUpperCase(),
+    ...extractScanTokens(code),
+  ].filter(Boolean);
+  const uniq = [...new Set(candidates)];
+  if (uniq.length === 0) return null;
 
-  const tryValues = async (values: string[]): Promise<Package | null> => {
-    const uniq = [...new Set(values.filter(Boolean))];
-    for (const field of ['barcode', 'externalId', 'orderNumber'] as const) {
-      for (const value of uniq) {
-        const snap = await getDocs(query(
-          collection(db, PACKAGES_COLLECTION),
-          where(field, '==', value),
-          limit(5)
-        ));
-        if (!snap.empty) {
-          return snap.docs
-            .map(d => ({ id: d.id, ...d.data() } as Package))
-            .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())[0];
-        }
+  for (const field of ['barcode', 'externalId', 'orderNumber'] as const) {
+    for (const value of uniq) {
+      const snap = await getDocs(query(
+        collection(db, PACKAGES_COLLECTION),
+        where(field, '==', value),
+        limit(5)
+      ));
+      if (!snap.empty) {
+        return snap.docs
+          .map(d => ({ id: d.id, ...d.data() } as Package))
+          .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())[0];
       }
     }
-    return null;
-  };
-
-  // 1) Tentative directe (code tel quel + majuscules)
-  const direct = await tryValues([cleaned, cleaned.toUpperCase()]);
-  if (direct) return direct;
-
-  // 2) Repli : retirer un suffixe d'index de colis ("-002", " 02/02"→ base, ou 3 chiffres finaux)
-  const base = cleaned.replace(/[-\s/].*$/, '').replace(/\d{3}$/, m =>
-    // ne retire les 3 derniers chiffres que si le reste est un numéro de commande plausible (≥6 chiffres)
-    cleaned.replace(/[-\s/].*$/, '').length - 3 >= 6 ? '' : m
-  );
-  if (base && base !== cleaned) {
-    return await tryValues([base, base.toUpperCase()]);
   }
   return null;
 };
