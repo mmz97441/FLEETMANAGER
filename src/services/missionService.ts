@@ -130,7 +130,8 @@ export const DEFAULT_POSTAL_CODE_MAPPINGS: PostalCodeMapping[] = [
   { postalCode: '97422', zone: Zone.SUD, city: 'La Plaine des Cafres' },
   { postalCode: '97418', zone: Zone.SUD, city: 'La Plaine des Cafres' },
   { postalCode: '97442', zone: Zone.SUD, city: 'Saint-Philippe' },
-  
+  { postalCode: '97429', zone: Zone.SUD, city: 'Petite-Île' },
+
   // ZONE EST
   { postalCode: '97440', zone: Zone.EST, city: 'Saint-André' },
   { postalCode: '97470', zone: Zone.EST, city: 'Saint-Benoît' },
@@ -140,8 +141,10 @@ export const DEFAULT_POSTAL_CODE_MAPPINGS: PostalCodeMapping[] = [
   { postalCode: '97441', zone: Zone.EST, city: 'Sainte-Suzanne' },
   { postalCode: '97412', zone: Zone.EST, city: 'Bras-Panon' },
   { postalCode: '97433', zone: Zone.EST, city: 'Salazie' },
-  
+  { postalCode: '97439', zone: Zone.EST, city: 'Sainte-Rose' },
+
   // ZONE OUEST
+  { postalCode: '97420', zone: Zone.OUEST, city: 'Le Port' },
   { postalCode: '97460', zone: Zone.OUEST, city: 'Saint-Paul' },
   { postalCode: '97434', zone: Zone.OUEST, city: 'Saint-Gilles-les-Bains' },
   { postalCode: '97435', zone: Zone.OUEST, city: 'Saint-Gilles-les-Hauts' },
