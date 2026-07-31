@@ -55,7 +55,8 @@ import {
   addIssueToFirestore,
   updateIssueInFirestore,
   subscribeToUsers,
-  getUserProfile, 
+  getUserProfile,
+  recordUserLogin,
   subscribeToUserProfile, 
   createUserProfile,
   updateUserProfile,
@@ -172,6 +173,9 @@ const App: React.FC = () => {
             if (existingProfile) {
                 // ACCÈS AUTORISÉ
                 setCurrentUser(existingProfile);
+
+                // Enregistrer la dernière connexion (non bloquant)
+                recordUserLogin(firebaseUser.uid);
 
                 // REDIRECTION SÉCURITÉ CLIENT
                 // Si l'utilisateur est un client, on le force vers le tableau de bord client

@@ -73,6 +73,9 @@ export interface User {
   isDisabled?: boolean;
   disabledAt?: string;
   disabledBy?: string;
+
+  // Dernière connexion (mise à jour à chaque ouverture de l'app)
+  lastLoginAt?: string;
   // Permissions personnalisées (exceptions au template de rôle)
   customPermissions?: {
     granted: string[];  // Permissions ajoutées

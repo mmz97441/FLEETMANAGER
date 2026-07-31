@@ -1,7 +1,8 @@
 
 import React, { useState, useMemo } from 'react';
 import { User, UserRole } from '../types';
-import { Users, Plus, Shield, User as UserIcon, Settings, Briefcase, Truck, Edit, Save, X, Trash2, Mail, Search, Filter, LayoutGrid, List, Building2, UserPlus, AlertTriangle, CheckCircle, Calendar, HeartPulse, Send, Ban, RefreshCw, Key, MoreVertical, GraduationCap, Lock, AlertCircle } from 'lucide-react';
+import { Users, Plus, Shield, User as UserIcon, Settings, Briefcase, Truck, Edit, Save, X, Trash2, Mail, Search, Filter, LayoutGrid, List, Building2, UserPlus, AlertTriangle, CheckCircle, Calendar, HeartPulse, Send, Ban, RefreshCw, Key, MoreVertical, GraduationCap, Lock, AlertCircle, Clock } from 'lucide-react';
+import { timeAgo, formatDateTimeFr } from '../utils/timeAgo';
 import Modal from './shared/Modal';
 import ConfirmModal from './ConfirmModal';
 import { sendUserInvitationEmail } from '../services/emailService';
@@ -708,7 +709,12 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
                                 <Mail size={14} className="text-slate-400" />
                                 <span className="truncate">{user.email}</span>
                             </div>
-                            
+
+                            <div className="flex items-center gap-2 text-xs text-slate-500" title={user.lastLoginAt ? `Dernière connexion : ${formatDateTimeFr(user.lastLoginAt)}` : ''}>
+                                <Clock size={13} className={user.lastLoginAt ? 'text-slate-400' : 'text-slate-300'} />
+                                <span>Dernière connexion : <span className={`font-semibold ${user.lastLoginAt ? 'text-slate-700' : 'text-slate-400'}`}>{timeAgo(user.lastLoginAt)}</span></span>
+                            </div>
+
                             {isClient(user.role) && user.companyName && (
                                 <div className="flex items-center gap-2 text-sm text-slate-600 bg-indigo-50 p-2 rounded-lg border border-indigo-100">
                                     <Building2 size={14} className="text-indigo-500" />
@@ -760,6 +766,7 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
                                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Utilisateur</th>
                                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Rôle</th>
                                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Statut</th>
+                                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Dernière connexion</th>
                                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Détails</th>
                                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Actions</th>
                             </tr>
@@ -807,6 +814,9 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
                                                 <CheckCircle size={12} /> Actif
                                             </span>
                                         )}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap" title={user.lastLoginAt ? formatDateTimeFr(user.lastLoginAt) : ''}>
+                                        <span className={`text-sm ${user.lastLoginAt ? 'text-slate-700' : 'text-slate-400'}`}>{timeAgo(user.lastLoginAt)}</span>
                                     </td>
                                     <td className="px-6 py-4">
                                         {isClient(user.role) ? (

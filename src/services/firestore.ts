@@ -212,6 +212,16 @@ export const updateUserProfile = async (user: User) => {
     }
 };
 
+/** Enregistre la date de dernière connexion (appelé à chaque ouverture de l'app). */
+export const recordUserLogin = async (uid: string) => {
+    try {
+        await updateDoc(doc(db, "users", uid), { lastLoginAt: new Date().toISOString() });
+    } catch (e) {
+        // Non bloquant : ne pas empêcher la connexion si l'écriture échoue
+        console.error("Error recording last login:", e);
+    }
+};
+
 export const deleteUserProfile = async (uid: string) => {
     try {
         await deleteDoc(doc(db, "users", uid));
@@ -329,11 +339,13 @@ export const subscribeToFuelLogs = (callback: (data: FuelLog[]) => void) => {
         id: doc.id,
         vehicleId: data.vehicleId,
         date: data.date,
-        cost: Number(data.cost),
-        mileage: Number(data.mileage),
-        volume: Number(data.liters || data.volume), 
-        fullTank: true, 
-        adBlueVolume: Number(data.adBlueLiters || 0), 
+        // `|| 0` protège des NaN qui propagent dans tous les KPIs Dashboard
+        // (reduce + .toFixed sur NaN → "NaN €" dans l'UI)
+        cost: Number(data.cost) || 0,
+        mileage: Number(data.mileage) || 0,
+        volume: Number(data.liters || data.volume) || 0,
+        fullTank: true,
+        adBlueVolume: Number(data.adBlueLiters || 0),
         adBlueCost: Number(data.adBlueCost || 0),
         station: data.station,
         receiptUrl: data.receiptUrl,
