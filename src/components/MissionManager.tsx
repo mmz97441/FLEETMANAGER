@@ -15,6 +15,7 @@ import {
   subscribeToHubs,
   subscribeToPackages,
   subscribeToImportBatches,
+  getPackagesByIds,
   calculateMissionStats,
   getAvailableDriversForZone,
   getDriversWithVehicles,
@@ -96,6 +97,10 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   // Edit/Delete colis (admin)
   const [editingPkg, setEditingPkg] = useState<Package | null>(null);
   const [expandedPkgTimelineId, setExpandedPkgTimelineId] = useState<string | null>(null);
+  // Consultation d'un lot d'import
+  const [viewingBatch, setViewingBatch] = useState<ImportBatch | null>(null);
+  const [batchPackages, setBatchPackages] = useState<Package[]>([]);
+  const [loadingBatch, setLoadingBatch] = useState(false);
   type PkgSortKey = 'orderNumber' | 'externalId' | 'contactName' | 'city' | 'zone' | 'status' | 'createdAt';
   const [pkgSort, setPkgSort] = useState<{ key: PkgSortKey; dir: 'asc' | 'desc' }>({ key: 'createdAt', dir: 'desc' });
   const togglePkgSort = (key: PkgSortKey) =>
@@ -624,6 +629,23 @@ const MissionManager: React.FC<MissionManagerProps> = ({
     />
   );
 
+  // Ouvre la consultation d'un lot d'import (colis importés)
+  const openBatch = async (batch: ImportBatch) => {
+    setViewingBatch(batch);
+    setBatchPackages([]);
+    setLoadingBatch(true);
+    try {
+      const ids = (batch.zoneBreakdown || []).flatMap(z => z.packageIds || []);
+      const pkgs = ids.length > 0
+        ? await getPackagesByIds(ids)
+        : packages.filter(p => p.clientId === batch.clientId); // repli si pas d'IDs stockés
+      setBatchPackages(pkgs);
+    } catch (e) {
+      console.error('Erreur chargement lot:', e);
+    }
+    setLoadingBatch(false);
+  };
+
   // Render Imports
   const renderImports = () => (
     <div className="space-y-6">
@@ -654,7 +676,12 @@ const MissionManager: React.FC<MissionManagerProps> = ({
         ) : (
           <div className="divide-y divide-slate-100">
             {importBatches.map(batch => (
-              <div key={batch.id} className="p-4 hover:bg-slate-50 transition-colors">
+              <div
+                key={batch.id}
+                onClick={() => openBatch(batch)}
+                title="Cliquer pour revoir les colis importés"
+                className="p-4 hover:bg-slate-50 transition-colors cursor-pointer"
+              >
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center">
@@ -705,6 +732,87 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           </div>
         )}
       </div>
+
+      {/* Modal consultation d'un lot d'import */}
+      {viewingBatch && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center sm:p-4" onClick={() => setViewingBatch(null)}>
+          <div className="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col animate-slide-up" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="p-4 border-b border-slate-200 flex items-start justify-between shrink-0">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center shrink-0">
+                  <FileSpreadsheet size={20} className="text-slate-600" />
+                </div>
+                <div className="min-w-0">
+                  <p className="font-bold text-slate-800 truncate">{viewingBatch.fileName}</p>
+                  <p className="text-xs text-slate-500">
+                    {viewingBatch.clientName} • {new Date(viewingBatch.importedAt).toLocaleString('fr-FR')} • {viewingBatch.totalRows} lignes
+                  </p>
+                </div>
+              </div>
+              <button onClick={() => setViewingBatch(null)} className="p-2 rounded-full hover:bg-slate-100 shrink-0">
+                <XCircle size={20} className="text-slate-400" />
+              </button>
+            </div>
+
+            {/* Erreurs du lot */}
+            {viewingBatch.errors && viewingBatch.errors.length > 0 && (
+              <div className="mx-4 mt-3 p-2 bg-red-50 border border-red-200 rounded-lg shrink-0">
+                <p className="text-xs font-bold text-red-700 mb-1">{viewingBatch.errors.length} ligne(s) en erreur (non importées) :</p>
+                <ul className="text-[11px] text-red-600 list-disc list-inside max-h-20 overflow-y-auto">
+                  {viewingBatch.errors.slice(0, 20).map((e, i) => (
+                    <li key={i}>{e.row > 0 ? `Ligne ${e.row}: ` : ''}{e.message}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Contenu : colis importés */}
+            <div className="overflow-auto p-4">
+              {loadingBatch ? (
+                <div className="py-10 text-center text-slate-400"><Loader2 size={24} className="animate-spin mx-auto mb-2" /> Chargement des colis…</div>
+              ) : batchPackages.length === 0 ? (
+                <div className="py-10 text-center text-slate-400">Aucun colis rattaché à ce lot.</div>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-left">
+                      <th className="px-2 py-2 font-bold text-slate-500">N° Colis</th>
+                      <th className="px-2 py-2 font-bold text-slate-500">N° Cmd</th>
+                      <th className="px-2 py-2 font-bold text-slate-500">Destinataire</th>
+                      <th className="px-2 py-2 font-bold text-slate-500">Adresse</th>
+                      <th className="px-2 py-2 font-bold text-slate-500">CP / Ville</th>
+                      <th className="px-2 py-2 font-bold text-slate-500 text-center">Zone</th>
+                      <th className="px-2 py-2 font-bold text-slate-500 text-center">Statut</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {batchPackages.map(p => {
+                      const zc = ZONE_COLORS[p.zone] || { bg: 'bg-slate-100', text: 'text-slate-600' };
+                      const sc = PACKAGE_STATUS_COLORS[p.status] || { bg: 'bg-slate-100', text: 'text-slate-600' };
+                      return (
+                        <tr key={p.id} className="hover:bg-slate-50">
+                          <td className="px-2 py-2 font-mono font-bold text-slate-800">{p.externalId || p.barcode || '—'}</td>
+                          <td className="px-2 py-2 font-mono text-slate-600">{p.orderNumber}</td>
+                          <td className="px-2 py-2">{p.contactName}</td>
+                          <td className="px-2 py-2 text-slate-500">{p.address}</td>
+                          <td className="px-2 py-2 text-slate-500">{p.postalCode} {p.city}</td>
+                          <td className="px-2 py-2 text-center"><span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${zc.bg} ${zc.text}`}>{p.zone}</span></td>
+                          <td className="px-2 py-2 text-center"><span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${sc.bg} ${sc.text}`}>{p.status}</span></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <div className="p-3 border-t border-slate-200 text-xs text-slate-500 shrink-0">
+              {batchPackages.length} colis importés · {viewingBatch.successCount} réussis / {viewingBatch.totalRows} lignes
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 

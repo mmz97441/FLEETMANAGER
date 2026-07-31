@@ -538,6 +538,22 @@ export const updateImportBatch = async (batch: ImportBatch): Promise<void> => {
   await updateDoc(doc(db, IMPORTS_COLLECTION, id), cleanUndefined(data));
 };
 
+/**
+ * Récupère des colis par leurs identifiants (pour reconsulter un lot d'import).
+ * Fiable même pour les imports anciens (hors des 500 colis récents chargés en
+ * temps réel), car on lit directement les documents demandés.
+ */
+export const getPackagesByIds = async (ids: string[]): Promise<Package[]> => {
+  const uniq = [...new Set(ids.filter(Boolean))];
+  const out: Package[] = [];
+  for (const id of uniq) {
+    const snap = await getDoc(doc(db, PACKAGES_COLLECTION, id));
+    if (snap.exists()) out.push({ id: snap.id, ...snap.data() } as Package);
+  }
+  return out.sort((a, b) =>
+    (a.externalId || a.orderNumber || '').localeCompare(b.externalId || b.orderNumber || ''));
+};
+
 // ============================================================================
 // TRANSFERS
 // ============================================================================
