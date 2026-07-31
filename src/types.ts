@@ -578,6 +578,7 @@ export type ViewState =
   | 'notifications_settings'
   | 'api_diagnostic'
   | 'delivery_schedule'
+  | 'zone_management'
   | 'client_shipments'
   | 'hub_operations'
   | 'driver_tour'

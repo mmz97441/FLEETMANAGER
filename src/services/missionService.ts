@@ -9,6 +9,7 @@ import {
   collection,
   doc,
   addDoc,
+  setDoc,
   updateDoc,
   deleteDoc,
   getDoc,
@@ -178,6 +179,47 @@ export const getZoneFromPostalCode = async (postalCode: string): Promise<Zone | 
   const mappings = await getPostalCodeMappings();
   const mapping = mappings.find(m => m.postalCode === postalCode);
   return mapping?.zone || null;
+};
+
+// ---- Gestion des correspondances code postal → zone (page d'administration) ----
+
+/** Recharge les correspondances depuis Firestore en ignorant le cache. */
+export const getPostalCodeMappingsFresh = async (): Promise<PostalCodeMapping[]> => {
+  postalCodeCache = null;
+  return getPostalCodeMappings();
+};
+
+/**
+ * Crée / met à jour une correspondance. Le code postal sert d'identifiant de
+ * document (pas de doublon possible) et le cache est invalidé.
+ */
+export const savePostalCodeMapping = async (m: PostalCodeMapping): Promise<void> => {
+  const code = m.postalCode.trim();
+  await setDoc(doc(db, POSTAL_CODES_COLLECTION, code), cleanUndefined({
+    postalCode: code,
+    zone: m.zone,
+    city: m.city?.trim() || '',
+    hubId: m.hubId
+  }));
+  postalCodeCache = null;
+};
+
+/** Supprime une correspondance et invalide le cache. */
+export const deletePostalCodeMapping = async (postalCode: string): Promise<void> => {
+  await deleteDoc(doc(db, POSTAL_CODES_COLLECTION, postalCode.trim()));
+  postalCodeCache = null;
+};
+
+/**
+ * Écrit les correspondances par défaut dans Firestore (utile au premier
+ * remplissage de la page de gestion quand la collection est vide).
+ */
+export const seedDefaultPostalCodeMappings = async (): Promise<number> => {
+  for (const m of DEFAULT_POSTAL_CODE_MAPPINGS) {
+    await setDoc(doc(db, POSTAL_CODES_COLLECTION, m.postalCode), cleanUndefined({ ...m }));
+  }
+  postalCodeCache = null;
+  return DEFAULT_POSTAL_CODE_MAPPINGS.length;
 };
 
 export const extractPostalCodeFromAddress = (address: string): string | null => {

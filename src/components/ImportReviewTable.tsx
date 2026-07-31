@@ -51,6 +51,8 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [isConfirming, setIsConfirming] = useState(false);
   const [showDeletedRows, setShowDeletedRows] = useState(false);
+  const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set()); // par _rowIndex
+  const [bulkZone, setBulkZone] = useState<Zone | ''>('');
 
   // === Stats dynamiques ===
   const stats = useMemo(() => {
@@ -157,6 +159,37 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
     const restored = await revalidateRow({ ...newRows[rowIdx], _status: 'valid' }, newRows);
     newRows[rowIdx] = restored;
     setRows(newRows);
+  };
+
+  // === Sélection multiple ===
+  const toggleRowSelect = (rowIndex: number) => {
+    setSelectedRows(prev => {
+      const next = new Set(prev);
+      next.has(rowIndex) ? next.delete(rowIndex) : next.add(rowIndex);
+      return next;
+    });
+  };
+
+  // Attribuer une zone à toutes les lignes sélectionnées (utile pour les colis
+  // dont le code postal n'est pas reconnu → zone "?"). Revalide chaque ligne.
+  const applyBulkZone = async () => {
+    if (!bulkZone || selectedRows.size === 0) return;
+    let newRows = [...rows];
+    for (let i = 0; i < newRows.length; i++) {
+      if (selectedRows.has(newRows[i]._rowIndex) && newRows[i]._status !== 'deleted') {
+        const withZone = { ...newRows[i], zone: bulkZone as Zone };
+        // Revalider : la zone étant désormais définie, l'erreur "code postal non reconnu" disparaît
+        const errors = withZone._errors.filter(e => !/code postal/i.test(e) && !/zone/i.test(e));
+        newRows[i] = {
+          ...withZone,
+          _errors: errors,
+          _status: errors.length > 0 ? 'error' : (withZone._warnings.length > 0 ? 'warning' : 'valid')
+        };
+      }
+    }
+    setRows(newRows);
+    setSelectedRows(new Set());
+    setBulkZone('');
   };
 
   // === Confirmer l'import ===
@@ -330,12 +363,58 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
         />
       </div>
 
+      {/* === BARRE ACTION GROUPÉE (attribution de zone) === */}
+      {selectedRows.size > 0 && (
+        <div className="bg-brand-50 border border-brand-200 rounded-xl p-3 flex flex-wrap items-center gap-3">
+          <span className="text-sm font-bold text-brand-700">{selectedRows.size} ligne{selectedRows.size > 1 ? 's' : ''} sélectionnée{selectedRows.size > 1 ? 's' : ''}</span>
+          <div className="flex items-center gap-2 ml-auto flex-wrap">
+            <span className="text-xs text-slate-500">Attribuer la zone :</span>
+            <select
+              value={bulkZone}
+              onChange={e => setBulkZone(e.target.value as Zone)}
+              className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none"
+            >
+              <option value="">— Choisir —</option>
+              {Object.values(Zone).map(z => <option key={z} value={z}>{z}</option>)}
+            </select>
+            <button
+              onClick={applyBulkZone}
+              disabled={!bulkZone}
+              className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-bold hover:bg-brand-700 disabled:opacity-40"
+            >
+              Appliquer
+            </button>
+            <button
+              onClick={() => setSelectedRows(new Set())}
+              className="px-3 py-2 text-slate-500 text-sm hover:underline"
+            >
+              Désélectionner
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* === TABLE === */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
+                <th className="px-2 py-2.5 text-center font-bold text-slate-500 w-8">
+                  <input
+                    type="checkbox"
+                    title="Tout sélectionner (lignes affichées)"
+                    checked={filteredRows.length > 0 && filteredRows.every(r => selectedRows.has(r._rowIndex))}
+                    onChange={e => {
+                      setSelectedRows(prev => {
+                        const next = new Set(prev);
+                        filteredRows.forEach(r => e.target.checked ? next.add(r._rowIndex) : next.delete(r._rowIndex));
+                        return next;
+                      });
+                    }}
+                    className="w-4 h-4 rounded border-slate-300 text-brand-500 focus:ring-brand-500"
+                  />
+                </th>
                 <th className="px-2 py-2.5 text-left font-bold text-slate-500 w-8">#</th>
                 <th className="px-2 py-2.5 text-left font-bold text-slate-500 w-6">St.</th>
                 <th className="px-2 py-2.5 text-left font-bold text-slate-500 min-w-[90px]">N° Colis</th>
@@ -366,8 +445,19 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
                 return (
                   <tr
                     key={row._rowIndex}
-                    className={`border-b border-slate-100 hover:bg-slate-50/50 transition-colors ${rowBg}`}
+                    className={`border-b border-slate-100 hover:bg-slate-50/50 transition-colors ${rowBg} ${selectedRows.has(row._rowIndex) ? 'bg-brand-50/40' : ''}`}
                   >
+                    {/* Sélection */}
+                    <td className="px-2 py-2 text-center">
+                      <input
+                        type="checkbox"
+                        checked={selectedRows.has(row._rowIndex)}
+                        onChange={() => toggleRowSelect(row._rowIndex)}
+                        disabled={isDeleted}
+                        className="w-4 h-4 rounded border-slate-300 text-brand-500 focus:ring-brand-500"
+                      />
+                    </td>
+
                     {/* Numéro ligne */}
                     <td className="px-2 py-2 text-slate-400 font-mono">{row._rowIndex}</td>
 
@@ -489,7 +579,7 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
 
               {filteredRows.length === 0 && (
                 <tr>
-                  <td colSpan={13} className="text-center py-8 text-slate-400">
+                  <td colSpan={14} className="text-center py-8 text-slate-400">
                     Aucune ligne ne correspond aux filtres.
                   </td>
                 </tr>

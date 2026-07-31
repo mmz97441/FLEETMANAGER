@@ -37,6 +37,7 @@ const HelpCenter = lazy(() => import('./components/HelpCenter'));
 const DriverMissionView = lazy(() => import('./components/DriverMissionView'));
 const PermissionsManager = lazy(() => import('./components/PermissionsManager'));
 const DeliveryScheduleSettings = lazy(() => import('./components/DeliveryScheduleSettings'));
+const ZoneManager = lazy(() => import('./components/ZoneManager'));
 const HubOperations = lazy(() => import('./components/HubOperations'));
 const DriverTourView = lazy(() => import('./components/DriverTourView'));
 
@@ -963,6 +964,13 @@ const App: React.FC = () => {
         return (
           <div className="p-4 md:p-8">
             <DeliveryScheduleSettings currentUser={currentUser} />
+          </div>
+        );
+
+      case 'zone_management':
+        return (
+          <div className="p-4 md:p-8">
+            <ZoneManager />
           </div>
         );
 

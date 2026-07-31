@@ -29,6 +29,7 @@ export const VIEW_TO_PATH: Record<ViewState, string> = {
   notifications_settings: '/notifications-settings',
   api_diagnostic: '/api-diagnostic',
   delivery_schedule: '/delivery-schedule',
+  zone_management: '/zone-management',
   hub_operations: '/hub-operations',
   driver_tour: '/driver-tour',
   import_export: '/import-export',

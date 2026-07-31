@@ -96,6 +96,18 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   // Edit/Delete colis (admin)
   const [editingPkg, setEditingPkg] = useState<Package | null>(null);
   const [expandedPkgTimelineId, setExpandedPkgTimelineId] = useState<string | null>(null);
+  type PkgSortKey = 'orderNumber' | 'externalId' | 'contactName' | 'city' | 'zone' | 'status' | 'createdAt';
+  const [pkgSort, setPkgSort] = useState<{ key: PkgSortKey; dir: 'asc' | 'desc' }>({ key: 'createdAt', dir: 'desc' });
+  const togglePkgSort = (key: PkgSortKey) =>
+    setPkgSort(s => s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' });
+  const pkgSortVal = (p: Package, key: PkgSortKey): string =>
+    key === 'externalId' ? (p.externalId || '') :
+    key === 'contactName' ? (p.contactName || '') :
+    key === 'city' ? (p.city || '') :
+    key === 'zone' ? String(p.zone || '') :
+    key === 'status' ? String(p.status || '') :
+    key === 'createdAt' ? (p.createdAt || '') :
+    (p.orderNumber || '');
   const [editPkgForm, setEditPkgForm] = useState<Record<string, any>>({});
   const [isSavingPkg, setIsSavingPkg] = useState(false);
   const [deletingPkg, setDeletingPkg] = useState<Package | null>(null);
@@ -1524,22 +1536,37 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                     className="w-4 h-4 rounded border-slate-300 text-brand-500 focus:ring-brand-500"
                   />
                 </th>
-                <th className="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase">N° Commande</th>
-                <th className="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase">Destinataire</th>
-                <th className="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase">Adresse</th>
-                <th className="px-3 py-3 text-center text-xs font-bold text-slate-500 uppercase">Zone</th>
-                <th className="px-2 py-3 text-center text-xs font-bold text-slate-500 uppercase">Créneau début</th>
-                <th className="px-2 py-3 text-center text-xs font-bold text-slate-500 uppercase">Créneau fin</th>
-                <th className="px-3 py-3 text-center text-xs font-bold text-slate-500 uppercase">Statut</th>
-                <th className="px-3 py-3 text-center text-xs font-bold text-slate-500 uppercase">Affecté à</th>
-                <th className="px-2 py-3 text-center text-xs font-bold text-slate-500 uppercase">Actions</th>
-                <th className="px-2 py-3 text-center text-xs font-bold text-slate-500 uppercase">Gérer</th>
+                {(() => {
+                  const SortTh = ({ label, k, align = 'left' }: { label: string; k: PkgSortKey; align?: 'left' | 'center' }) => (
+                    <th
+                      onClick={() => togglePkgSort(k)}
+                      className={`px-3 py-3 text-${align} text-xs font-bold text-slate-500 uppercase cursor-pointer select-none hover:text-slate-700`}
+                    >
+                      {label}{pkgSort.key === k ? (pkgSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
+                    </th>
+                  );
+                  return (
+                    <>
+                      <SortTh label="N° Commande" k="orderNumber" />
+                      <SortTh label="Destinataire" k="contactName" />
+                      <th className="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase">Adresse</th>
+                      <SortTh label="Zone" k="zone" align="center" />
+                      <th className="px-2 py-3 text-center text-xs font-bold text-slate-500 uppercase">Créneau début</th>
+                      <th className="px-2 py-3 text-center text-xs font-bold text-slate-500 uppercase">Créneau fin</th>
+                      <SortTh label="Statut" k="status" align="center" />
+                      <SortTh label="Importé le" k="createdAt" align="center" />
+                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-500 uppercase">Affecté à</th>
+                      <th className="px-2 py-3 text-center text-xs font-bold text-slate-500 uppercase">Actions</th>
+                      <th className="px-2 py-3 text-center text-xs font-bold text-slate-500 uppercase">Gérer</th>
+                    </>
+                  );
+                })()}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {todayPackages.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-8 text-center text-slate-500">
+                  <td colSpan={12} className="px-4 py-8 text-center text-slate-500">
                     Aucun colis pour cette date
                   </td>
                 </tr>
@@ -1556,6 +1583,12 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                       p.address.toLowerCase().includes(term) ||
                       p.city.toLowerCase().includes(term)
                     );
+                  })
+                  .sort((a, b) => {
+                    const dir = pkgSort.dir === 'asc' ? 1 : -1;
+                    const va = pkgSortVal(a, pkgSort.key);
+                    const vb = pkgSortVal(b, pkgSort.key);
+                    return va < vb ? -dir : va > vb ? dir : 0;
                   })
                   .slice(0, 50)
                   .map(pkg => {
@@ -1669,6 +1702,17 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                             </span>
                           )}
                         </td>
+                        {/* Importé le */}
+                        <td className="px-3 py-2 text-center text-xs text-slate-500 whitespace-nowrap">
+                          {pkg.createdAt ? (
+                            <>
+                              {new Date(pkg.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit' })}
+                              <span className="block text-[10px] text-slate-400">
+                                {new Date(pkg.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </>
+                          ) : '—'}
+                        </td>
                         {/* Affecté à */}
                         <td className="px-3 py-2 text-center">
                           {pkg.currentDriverId ? (
@@ -1772,7 +1816,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                       {/* Timeline du colis (vue admin : détails internes inclus) */}
                       {isTimelineOpen && (
                         <tr>
-                          <td colSpan={11} className="px-8 py-3 bg-slate-50/70 border-t border-slate-100">
+                          <td colSpan={12} className="px-8 py-3 bg-slate-50/70 border-t border-slate-100">
                             <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">
                               Suivi du colis {pkg.externalId || pkg.barcode || pkg.orderNumber}
                             </p>
