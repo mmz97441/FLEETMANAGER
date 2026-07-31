@@ -31,6 +31,7 @@ import { uploadAndCreatePOD, uploadFailurePOD, UploadProgress } from '../service
 import { finalizePickup } from '../services/pickupService';
 import PickupScanView from './PickupScanView';
 import TransferReceiveModal from './TransferReceiveModal';
+import ClaimScanModal from './ClaimScanModal';
 import ScanGateDialog from './ScanGateDialog';
 import { packageMatchesCode, packageScanCodes, packageDisplayCode } from '../utils/barcode';
 const BarcodeScanner = lazy(() => import('./BarcodeScanner'));
@@ -263,6 +264,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   const [scanBypass, setScanBypass] = useState(false); // validation sans scan complet (tracée)
   const [showScanGate, setShowScanGate] = useState(false); // garde-fou "colis manquants"
   const [showTransferModal, setShowTransferModal] = useState(false); // réception de colis en route
+  const [showClaimModal, setShowClaimModal] = useState(false); // prise en charge par scan
   const [stopPackages, setStopPackages] = useState<Package[]>([]);
   
   // Return to hub workflow
@@ -1508,6 +1510,14 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
           🔁 Recevoir des colis (transfert)
         </button>
 
+        {/* Prendre en charge des colis par scan (importés non affectés) */}
+        <button
+          onClick={() => setShowClaimModal(true)}
+          className="w-full flex items-center justify-center gap-2 py-3 bg-green-600 text-white rounded-xl text-sm font-bold active:scale-95 transition-transform"
+        >
+          📦 Prendre en charge des colis (scan)
+        </button>
+
         {/* Bouton retour liste */}
         <button
           onClick={() => setActiveMissionId(null)}
@@ -1537,6 +1547,18 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
             onDone={(count) => {
               setShowTransferModal(false);
               showNotif(`🔁 ${count} colis récupéré${count > 1 ? 's' : ''} dans votre tournée`);
+            }}
+          />
+        )}
+
+        {/* === MODAL PRISE EN CHARGE PAR SCAN === */}
+        {showClaimModal && (
+          <ClaimScanModal
+            currentUser={currentUser}
+            onClose={() => setShowClaimModal(false)}
+            onDone={(count) => {
+              setShowClaimModal(false);
+              showNotif(`📦 ${count} colis pris en charge dans votre tournée`);
             }}
           />
         )}
@@ -1837,6 +1859,26 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
           {new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
         </p>
       </div>
+
+      {/* Prendre en charge des colis par scan (même sans tournée active) */}
+      <button
+        onClick={() => setShowClaimModal(true)}
+        className="w-full flex items-center justify-center gap-2 py-3.5 bg-green-600 text-white rounded-xl text-sm font-bold active:scale-95 transition-transform shadow-sm"
+      >
+        📦 Prendre en charge des colis (scan)
+      </button>
+
+      {/* Modal prise en charge (vue liste) */}
+      {showClaimModal && (
+        <ClaimScanModal
+          currentUser={currentUser}
+          onClose={() => setShowClaimModal(false)}
+          onDone={(count) => {
+            setShowClaimModal(false);
+            showNotif(`📦 ${count} colis pris en charge dans votre tournée`);
+          }}
+        />
+      )}
 
       {/* Liste des missions */}
       {missions.map(mission => {

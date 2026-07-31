@@ -675,6 +675,8 @@ export interface RoadTransferInput {
   reason: TransferReason;
   location?: { lat: number; lng: number };
   notes?: string;
+  newStatus?: PackageStatus;                 // Statut à appliquer aux colis (ex : IN_DELIVERY à la prise en charge)
+  claimMode?: boolean;                       // true = prise en charge (scan terrain) plutôt que transfert entre tournées
 }
 
 /**
@@ -686,8 +688,8 @@ export interface RoadTransferInput {
  * - un document package_transfers par tournée d'origine (traçabilité)
  */
 export const transferPackagesToDriver = async (input: RoadTransferInput): Promise<number> => {
-  const { packages: pkgs, toMission, toDriver, reason, location, notes } = input;
-  if (pkgs.length === 0) throw new Error('Aucun colis à transférer');
+  const { packages: pkgs, toMission, toDriver, reason, location, notes, newStatus, claimMode } = input;
+  if (pkgs.length === 0) throw new Error('Aucun colis à traiter');
   const now = new Date().toISOString();
 
   // --- 1. Grouper par mission d'origine et les retirer de ces tournées ---
@@ -762,7 +764,7 @@ export const transferPackagesToDriver = async (input: RoadTransferInput): Promis
       timeWindowStart: first.timeWindowStart,
       timeWindowEnd: first.timeWindowEnd,
       serviceTime: first.serviceTime || 5,
-      notes: 'Reçu par transfert en route',
+      notes: claimMode ? 'Pris en charge par scan' : 'Reçu par transfert en route',
       status: StopStatus.PENDING
     }) as MissionStop);
   }
@@ -779,13 +781,15 @@ export const transferPackagesToDriver = async (input: RoadTransferInput): Promis
     const fromMission = p.missionId ? originMissions.get(p.missionId) : undefined;
     const movement: PackageMovement = cleanUndefined({
       timestamp: now,
-      action: 'TRANSFERRED' as const,
+      action: claimMode ? 'OUT_FOR_DELIVERY' as const : 'TRANSFERRED' as const,
       driverId: toDriver.id,
       driverName: toDriver.name,
       vehicleId: toMission.vehicleId,
       vehiclePlate: toMission.vehiclePlate,
       location,
-      notes: `Transfert en route${fromMission?.driverName ? ` — de ${fromMission.driverName}` : ''} à ${toDriver.name}${notes ? ` (${notes})` : ''}`
+      notes: claimMode
+        ? `Pris en charge pour livraison par ${toDriver.name}${fromMission?.driverName ? ` (récupéré de ${fromMission.driverName})` : ''}`
+        : `Transfert en route${fromMission?.driverName ? ` — de ${fromMission.driverName}` : ''} à ${toDriver.name}${notes ? ` (${notes})` : ''}`
     }) as PackageMovement;
 
     await updateDoc(doc(db, PACKAGES_COLLECTION, p.id), cleanUndefined({
@@ -793,6 +797,7 @@ export const transferPackagesToDriver = async (input: RoadTransferInput): Promis
       stopId: stop.id,
       currentDriverId: toDriver.id,
       currentVehicleId: toMission.vehicleId,
+      ...(newStatus ? { status: newStatus } : {}),
       movements: [...(p.movements || []), movement],
       updatedAt: now
     }));
@@ -825,6 +830,84 @@ export const transferPackagesToDriver = async (input: RoadTransferInput): Promis
   }
 
   return pkgs.length;
+};
+
+/**
+ * Récupère (ou crée) la tournée de LIVRAISON du jour d'un chauffeur.
+ * Une seule mission DELIVERY par chauffeur et par jour, alimentée au fil des
+ * prises en charge par scan.
+ */
+export const getOrCreateDriverDeliveryMission = async (
+  driver: { id: string; name: string },
+  date: string,
+  vehicle?: { id?: string; plate?: string }
+): Promise<Mission> => {
+  const snap = await getDocs(query(
+    collection(db, MISSIONS_COLLECTION),
+    where('driverId', '==', driver.id),
+    where('date', '==', date),
+    limit(20)
+  ));
+  const existing = snap.docs
+    .map(d => ({ id: d.id, ...d.data() } as Mission))
+    .find(m => m.type === MissionType.DELIVERY && m.status !== MissionStatus.COMPLETED);
+  if (existing) return existing;
+
+  const now = new Date().toISOString();
+  const mission: Omit<Mission, 'id'> = cleanUndefined({
+    type: MissionType.DELIVERY,
+    zone: Zone.NORD,                 // zone indicative ; la tournée peut être multi-zones
+    hubId: '',
+    hubName: 'Prise en charge terrain',
+    date,
+    vehicleId: vehicle?.id,
+    vehiclePlate: vehicle?.plate,
+    driverId: driver.id,
+    driverName: driver.name,
+    stops: [],
+    totalPackages: 0,
+    completedStops: 0,
+    failedStops: 0,
+    deliveredPackages: 0,
+    failedPackages: 0,
+    totalDistance: 0,
+    estimatedDuration: 0,
+    status: MissionStatus.IN_PROGRESS,
+    createdBy: driver.id,
+    createdByName: driver.name,
+    createdAt: now,
+    updatedAt: now
+  }) as Omit<Mission, 'id'>;
+  const id = await addMission(mission);
+  return { id, ...mission } as Mission;
+};
+
+/**
+ * PRISE EN CHARGE PAR SCAN : le chauffeur scanne des colis (importés non
+ * affectés, ou déjà à un autre chauffeur) → ils rejoignent SA tournée de
+ * livraison du jour (statut En livraison), avec un arrêt de livraison à
+ * l'adresse du destinataire. Si un colis appartenait à un autre chauffeur,
+ * il en est retiré (traçabilité transfert).
+ */
+export const claimPackagesForDelivery = async (params: {
+  packages: Package[];
+  driver: { id: string; name: string };
+  vehicle?: { id?: string; plate?: string };
+  date: string;
+  location?: { lat: number; lng: number };
+}): Promise<number> => {
+  const { packages: pkgs, driver, vehicle, date, location } = params;
+  if (pkgs.length === 0) throw new Error('Aucun colis à prendre en charge');
+  const mission = await getOrCreateDriverDeliveryMission(driver, date, vehicle);
+  return transferPackagesToDriver({
+    packages: pkgs,
+    toMission: mission,
+    toDriver: driver,
+    reason: TransferReason.OTHER,
+    location,
+    claimMode: true,
+    newStatus: PackageStatus.IN_DELIVERY
+  });
 };
 
 // ============================================================================
