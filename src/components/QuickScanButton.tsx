@@ -7,10 +7,14 @@
  * Lecture seule : aucun risque de modifier une donnée.
  */
 import React, { useState, lazy, Suspense } from 'react';
-import { ScanLine, X, Loader2, MapPin, Package as PackageIcon, Search } from 'lucide-react';
-import { Package, PackageStatus, PACKAGE_STATUS_COLORS } from '../types';
-import { findPackageByCode } from '../services/missionService';
+import { ScanLine, X, Loader2, MapPin, Package as PackageIcon, Search, PackageCheck, CheckCircle } from 'lucide-react';
+import { Package, PackageStatus, PACKAGE_STATUS_COLORS, User } from '../types';
+import { findPackageByCode, claimPackagesForDelivery } from '../services/missionService';
 import { packageDisplayCode } from '../utils/barcode';
+
+interface QuickScanButtonProps {
+  currentUser: User;
+}
 import PackageTimeline from './PackageTimeline';
 
 const BarcodeScanner = lazy(() => import('./BarcodeScanner'));
@@ -24,10 +28,44 @@ const statusEmoji = (s: PackageStatus): string => {
   return '🚚';
 };
 
-const QuickScanButton: React.FC = () => {
+const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser }) => {
   const [showScanner, setShowScanner] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [result, setResult] = useState<{ pkg: Package | null; scannedCode: string } | null>(null);
+  const [isClaiming, setIsClaiming] = useState(false);
+  const [claimed, setClaimed] = useState(false);
+
+  // Un colis est "prenable en charge" s'il n'est pas déjà livré/retourné,
+  // et pas déjà dans la tournée de la personne qui scanne.
+  const canClaim = (pkg: Package): boolean =>
+    pkg.status !== PackageStatus.DELIVERED &&
+    pkg.status !== PackageStatus.RETURNED &&
+    !(pkg.currentDriverId === currentUser.id && !!pkg.missionId);
+
+  const handleClaim = async () => {
+    if (!result?.pkg || isClaiming) return;
+    setIsClaiming(true);
+    try {
+      let location: { lat: number; lng: number } | undefined;
+      try {
+        location = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(
+            pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }), reject, { timeout: 5000 }
+          );
+        });
+      } catch { /* géoloc optionnelle */ }
+      await claimPackagesForDelivery({
+        packages: [result.pkg],
+        driver: { id: currentUser.id, name: `${currentUser.firstName} ${currentUser.lastName}` },
+        date: new Date().toISOString().split('T')[0],
+        location
+      });
+      setClaimed(true);
+    } catch (e) {
+      // en cas d'échec, on laisse la fiche ouverte
+    }
+    setIsClaiming(false);
+  };
 
   const handleScan = async (code: string) => {
     setShowScanner(false);
@@ -45,6 +83,8 @@ const QuickScanButton: React.FC = () => {
   const reset = () => {
     setResult(null);
     setIsSearching(false);
+    setClaimed(false);
+    setIsClaiming(false);
   };
 
   return (
@@ -152,6 +192,26 @@ const QuickScanButton: React.FC = () => {
             )}
 
             {/* Actions */}
+            {/* Prise en charge : bouton principal quand le colis est disponible */}
+            {result.pkg && !claimed && canClaim(result.pkg) && (
+              <div className="px-4 pt-1">
+                <button
+                  onClick={handleClaim}
+                  disabled={isClaiming}
+                  className="w-full flex items-center justify-center gap-2 py-3.5 bg-green-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-50"
+                >
+                  {isClaiming ? <><Loader2 size={18} className="animate-spin" /> Prise en charge…</> : <><PackageCheck size={18} /> Prendre en charge dans ma tournée</>}
+                </button>
+              </div>
+            )}
+            {claimed && (
+              <div className="px-4 pt-1">
+                <div className="w-full flex items-center justify-center gap-2 py-3 bg-green-50 border border-green-200 text-green-700 rounded-xl font-bold text-sm">
+                  <CheckCircle size={18} /> Pris en charge dans votre tournée
+                </div>
+              </div>
+            )}
+
             <div className="p-4 border-t border-slate-200 flex gap-2">
               <button
                 onClick={() => { reset(); setShowScanner(true); }}
