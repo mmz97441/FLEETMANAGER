@@ -34,6 +34,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser }) => {
   const [result, setResult] = useState<{ pkg: Package | null; scannedCode: string } | null>(null);
   const [isClaiming, setIsClaiming] = useState(false);
   const [claimed, setClaimed] = useState(false);
+  const [claimError, setClaimError] = useState<string | null>(null);
 
   // Un colis est "prenable en charge" s'il n'est pas déjà livré/retourné,
   // et pas déjà dans la tournée de la personne qui scanne.
@@ -62,7 +63,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser }) => {
       });
       setClaimed(true);
     } catch (e) {
-      // en cas d'échec, on laisse la fiche ouverte
+      setClaimError(e instanceof Error ? e.message : 'Échec de la prise en charge — réessayez');
     }
     setIsClaiming(false);
   };
@@ -85,7 +86,10 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser }) => {
     setIsSearching(false);
     setClaimed(false);
     setIsClaiming(false);
+    setClaimError(null);
   };
+
+  const handleClaimClick = () => { setClaimError(null); handleClaim(); };
 
   return (
     <>
@@ -193,10 +197,15 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser }) => {
 
             {/* Actions */}
             {/* Prise en charge : bouton principal quand le colis est disponible */}
+            {claimError && (
+              <div className="px-4 pt-1">
+                <p className="text-xs text-red-600 font-medium bg-red-50 border border-red-200 rounded-lg p-2">⚠️ {claimError}</p>
+              </div>
+            )}
             {result.pkg && !claimed && canClaim(result.pkg) && (
               <div className="px-4 pt-1">
                 <button
-                  onClick={handleClaim}
+                  onClick={handleClaimClick}
                   disabled={isClaiming}
                   className="w-full flex items-center justify-center gap-2 py-3.5 bg-green-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-50"
                 >

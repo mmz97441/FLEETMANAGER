@@ -317,7 +317,9 @@ service cloud.firestore {
     // Suppression : admin uniquement
     match /missions/{missionId} {
       allow read: if isAuthenticated();
-      allow create: if isAdminRole();
+      // Admin : création libre. Chauffeur : peut créer SA propre tournée
+      // (prise en charge par scan) — driverId doit être lui-même.
+      allow create: if isAdminRole() || (isDriver() && request.resource.data.driverId == request.auth.uid);
       allow update: if isAdminRole() || isDriver();
       allow delete: if isAdminRole();
     }

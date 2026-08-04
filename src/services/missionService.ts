@@ -842,15 +842,16 @@ export const getOrCreateDriverDeliveryMission = async (
   date: string,
   vehicle?: { id?: string; plate?: string }
 ): Promise<Mission> => {
+  // Requête sur driverId seul (pas de 2e where → évite un index composite) ;
+  // on filtre la date et le type côté client.
   const snap = await getDocs(query(
     collection(db, MISSIONS_COLLECTION),
     where('driverId', '==', driver.id),
-    where('date', '==', date),
-    limit(20)
+    limit(50)
   ));
   const existing = snap.docs
     .map(d => ({ id: d.id, ...d.data() } as Mission))
-    .find(m => m.type === MissionType.DELIVERY && m.status !== MissionStatus.COMPLETED);
+    .find(m => m.date === date && m.type === MissionType.DELIVERY && m.status !== MissionStatus.COMPLETED);
   if (existing) return existing;
 
   const now = new Date().toISOString();
