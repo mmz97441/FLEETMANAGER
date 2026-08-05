@@ -12,6 +12,7 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
+  runTransaction,
   getDoc,
   getDocs,
   query,
@@ -688,12 +689,21 @@ export interface RoadTransferInput {
  * - colis mis à jour (mission, stop, chauffeur, mouvement TRANSFERRED)
  * - un document package_transfers par tournée d'origine (traçabilité)
  */
+// Recompteurs cohérents d'une mission à partir de ses stops
+const recomputeMissionCounters = (stops: MissionStop[]) => ({
+  totalPackages: stops.reduce((a, s) => a + (s.packageCount || 0), 0),
+  completedStops: stops.filter(s => s.status === StopStatus.COMPLETED).length,
+  failedStops: stops.filter(s => s.status === StopStatus.FAILED || s.status === StopStatus.SKIPPED).length,
+});
+
 export const transferPackagesToDriver = async (input: RoadTransferInput): Promise<number> => {
-  const { packages: pkgs, toMission, toDriver, reason, location, notes, newStatus, claimMode } = input;
-  if (pkgs.length === 0) throw new Error('Aucun colis à traiter');
+  const { packages: raw, toMission, toDriver, reason, location, notes, newStatus, claimMode } = input;
+  // GARDE : ne jamais transférer / prendre en charge un colis DÉJÀ LIVRÉ ou RETOURNÉ
+  const pkgs = raw.filter(p => p.status !== PackageStatus.DELIVERED && p.status !== PackageStatus.RETURNED);
+  if (pkgs.length === 0) throw new Error('Aucun colis à traiter (colis déjà livrés/retournés exclus)');
   const now = new Date().toISOString();
 
-  // --- 1. Grouper par mission d'origine et les retirer de ces tournées ---
+  // --- 1. Retirer les colis de leur tournée d'origine (TRANSACTION par mission) ---
   const byOriginMission = new Map<string, Package[]>();
   for (const p of pkgs) {
     if (!p.missionId || p.missionId === toMission.id) continue;
@@ -703,101 +713,85 @@ export const transferPackagesToDriver = async (input: RoadTransferInput): Promis
 
   const originMissions = new Map<string, Mission>();
   for (const [missionId, missionPkgs] of byOriginMission) {
-    const mSnap = await getDoc(doc(db, MISSIONS_COLLECTION, missionId));
-    if (!mSnap.exists()) continue;
-    const mission = { id: mSnap.id, ...mSnap.data() } as Mission;
-    originMissions.set(missionId, mission);
-
-    const removedIds = new Set(missionPkgs.map(p => p.id));
-    const newStops = mission.stops.map(s => {
-      const remaining = s.packageIds.filter(id => !removedIds.has(id));
-      if (remaining.length === s.packageIds.length) return s;
-      if (remaining.length === 0) {
-        return {
-          ...s,
-          packageIds: [],
-          packageCount: 0,
-          status: StopStatus.SKIPPED,
-          notes: `${s.notes ? s.notes + ' — ' : ''}Colis transférés à ${toDriver.name}`
-        };
-      }
-      return { ...s, packageIds: remaining, packageCount: remaining.length };
+    const ref = doc(db, MISSIONS_COLLECTION, missionId);
+    const fromMission = await runTransaction(db, async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists()) return null;
+      const m = { id: snap.id, ...snap.data() } as Mission;
+      const removed = new Set(missionPkgs.map(p => p.id));
+      const newStops = m.stops
+        .map(s => {
+          const remaining = s.packageIds.filter(id => !removed.has(id));
+          return remaining.length === s.packageIds.length ? s : { ...s, packageIds: remaining, packageCount: remaining.length };
+        })
+        // Retirer les stops vidés (colis partis) SAUF s'ils étaient déjà terminés
+        .filter(s => s.packageIds.length > 0 || s.status === StopStatus.COMPLETED);
+      tx.update(ref, { stops: newStops, ...recomputeMissionCounters(newStops), updatedAt: now });
+      return m;
     });
+    if (fromMission) originMissions.set(missionId, fromMission);
+  }
 
-    await updateDoc(doc(db, MISSIONS_COLLECTION, missionId), {
+  // --- 2. Ajouter à la tournée du receveur (TRANSACTION, avec anti-doublon) ---
+  const toRef = doc(db, MISSIONS_COLLECTION, toMission.id);
+  const { addedStops, addedIds } = await runTransaction(db, async (tx) => {
+    const snap = await tx.get(toRef);
+    if (!snap.exists()) throw new Error('Votre tournée est introuvable');
+    const m = { id: snap.id, ...snap.data() } as Mission;
+    const already = new Set(m.stops.flatMap(s => s.packageIds));
+    const toAdd = pkgs.filter(p => !already.has(p.id)); // dédup : colis déjà dans la mission
+    let maxSeq = m.stops.reduce((mx, s) => Math.max(mx, s.sequence), 0);
+    const byAddress = new Map<string, Package[]>();
+    for (const p of toAdd) {
+      const key = `${p.address.toLowerCase().trim()}|${p.postalCode}|${p.city.toLowerCase().trim()}`;
+      if (!byAddress.has(key)) byAddress.set(key, []);
+      byAddress.get(key)!.push(p);
+    }
+    const stops: MissionStop[] = [];
+    for (const group of byAddress.values()) {
+      const first = group[0];
+      maxSeq += 1;
+      stops.push(cleanUndefined({
+        id: `transfer-${now.replace(/[:.]/g, '')}-${maxSeq}-${Math.floor(maxSeq)}`,
+        sequence: maxSeq, type: 'DELIVERY',
+        address: first.address, city: first.city, postalCode: first.postalCode,
+        coordinates: first.coordinates, floor: first.floor, hasElevator: first.hasElevator,
+        contactName: first.contactName, contactPhone: first.contactPhone,
+        packageIds: group.map(p => p.id), packageCount: group.length,
+        timeWindowStart: first.timeWindowStart, timeWindowEnd: first.timeWindowEnd,
+        serviceTime: first.serviceTime || 5,
+        notes: claimMode ? 'Pris en charge par scan' : 'Reçu par transfert en route',
+        status: StopStatus.PENDING
+      }) as MissionStop);
+    }
+    const newStops = [...m.stops, ...stops];
+    tx.update(toRef, {
       stops: newStops,
-      totalPackages: Math.max(0, (mission.totalPackages || 0) - missionPkgs.length),
+      totalPackages: recomputeMissionCounters(newStops).totalPackages,
+      status: m.status === MissionStatus.COMPLETED ? MissionStatus.IN_PROGRESS : (m.status || MissionStatus.IN_PROGRESS),
       updatedAt: now
     });
-  }
-
-  // --- 2. Ajouter les colis à la tournée du receveur (stops groupés par adresse) ---
-  const toSnap = await getDoc(doc(db, MISSIONS_COLLECTION, toMission.id));
-  if (!toSnap.exists()) throw new Error('Votre tournée est introuvable');
-  const freshTo = { id: toSnap.id, ...toSnap.data() } as Mission;
-
-  let maxSeq = freshTo.stops.reduce((m, s) => Math.max(m, s.sequence), 0);
-  const byAddress = new Map<string, Package[]>();
-  for (const p of pkgs) {
-    const key = `${p.address.toLowerCase().trim()}|${p.postalCode}|${p.city.toLowerCase().trim()}`;
-    if (!byAddress.has(key)) byAddress.set(key, []);
-    byAddress.get(key)!.push(p);
-  }
-
-  const addedStops: MissionStop[] = [];
-  for (const group of byAddress.values()) {
-    const first = group[0];
-    maxSeq += 1;
-    addedStops.push(cleanUndefined({
-      id: `transfer-${now.replace(/[:.]/g, '')}-${maxSeq}`,
-      sequence: maxSeq,
-      type: 'DELIVERY',
-      address: first.address,
-      city: first.city,
-      postalCode: first.postalCode,
-      coordinates: first.coordinates,
-      floor: first.floor,
-      hasElevator: first.hasElevator,
-      contactName: first.contactName,
-      contactPhone: first.contactPhone,
-      packageIds: group.map(p => p.id),
-      packageCount: group.length,
-      timeWindowStart: first.timeWindowStart,
-      timeWindowEnd: first.timeWindowEnd,
-      serviceTime: first.serviceTime || 5,
-      notes: claimMode ? 'Pris en charge par scan' : 'Reçu par transfert en route',
-      status: StopStatus.PENDING
-    }) as MissionStop);
-  }
-
-  await updateDoc(doc(db, MISSIONS_COLLECTION, toMission.id), {
-    stops: [...freshTo.stops, ...addedStops],
-    totalPackages: (freshTo.totalPackages || 0) + pkgs.length,
-    updatedAt: now
+    return { addedStops: stops, addedIds: new Set(toAdd.map(p => p.id)) };
   });
 
-  // --- 3. Mettre à jour chaque colis ---
+  // --- 3. Mettre à jour les colis réellement ajoutés (les doublons sont ignorés) ---
   for (const p of pkgs) {
+    if (!addedIds.has(p.id)) continue;
     const stop = addedStops.find(s => s.packageIds.includes(p.id))!;
     const fromMission = p.missionId ? originMissions.get(p.missionId) : undefined;
     const movement: PackageMovement = cleanUndefined({
       timestamp: now,
       action: claimMode ? 'OUT_FOR_DELIVERY' as const : 'TRANSFERRED' as const,
-      driverId: toDriver.id,
-      driverName: toDriver.name,
-      vehicleId: toMission.vehicleId,
-      vehiclePlate: toMission.vehiclePlate,
-      location,
+      driverId: toDriver.id, driverName: toDriver.name,
+      vehicleId: toMission.vehicleId, vehiclePlate: toMission.vehiclePlate, location,
       notes: claimMode
         ? `Pris en charge pour livraison par ${toDriver.name}${fromMission?.driverName ? ` (récupéré de ${fromMission.driverName})` : ''}`
         : `Transfert en route${fromMission?.driverName ? ` — de ${fromMission.driverName}` : ''} à ${toDriver.name}${notes ? ` (${notes})` : ''}`
     }) as PackageMovement;
 
     await updateDoc(doc(db, PACKAGES_COLLECTION, p.id), cleanUndefined({
-      missionId: toMission.id,
-      stopId: stop.id,
-      currentDriverId: toDriver.id,
-      currentVehicleId: toMission.vehicleId,
+      missionId: toMission.id, stopId: stop.id,
+      currentDriverId: toDriver.id, currentVehicleId: toMission.vehicleId,
       ...(newStatus ? { status: newStatus } : {}),
       movements: [...(p.movements || []), movement],
       updatedAt: now
@@ -808,29 +802,21 @@ export const transferPackagesToDriver = async (input: RoadTransferInput): Promis
   for (const [missionId, missionPkgs] of byOriginMission) {
     const fromMission = originMissions.get(missionId);
     if (!fromMission) continue;
+    const moved = missionPkgs.filter(p => addedIds.has(p.id));
+    if (moved.length === 0) continue;
     await addTransfer({
-      packageIds: missionPkgs.map(p => p.id),
-      packageCount: missionPkgs.length,
-      fromDriverId: fromMission.driverId || '',
-      fromDriverName: fromMission.driverName || 'Inconnu',
-      fromVehicleId: fromMission.vehicleId || '',
-      fromVehiclePlate: fromMission.vehiclePlate || '',
+      packageIds: moved.map(p => p.id), packageCount: moved.length,
+      fromDriverId: fromMission.driverId || '', fromDriverName: fromMission.driverName || 'Inconnu',
+      fromVehicleId: fromMission.vehicleId || '', fromVehiclePlate: fromMission.vehiclePlate || '',
       fromMissionId: missionId,
-      toDriverId: toDriver.id,
-      toDriverName: toDriver.name,
-      toVehicleId: toMission.vehicleId || '',
-      toVehiclePlate: toMission.vehiclePlate || '',
-      toMissionId: toMission.id,
-      location,
-      timestamp: now,
-      reason,
-      notes,
-      status: TransferStatus.CONFIRMED,
-      confirmedAt: now
+      toDriverId: toDriver.id, toDriverName: toDriver.name,
+      toVehicleId: toMission.vehicleId || '', toVehiclePlate: toMission.vehiclePlate || '',
+      toMissionId: toMission.id, location, timestamp: now, reason, notes,
+      status: TransferStatus.CONFIRMED, confirmedAt: now
     });
   }
 
-  return pkgs.length;
+  return addedIds.size;
 };
 
 /**
@@ -843,45 +829,42 @@ export const getOrCreateDriverDeliveryMission = async (
   date: string,
   vehicle?: { id?: string; plate?: string }
 ): Promise<Mission> => {
-  // Requête sur driverId seul (pas de 2e where → évite un index composite) ;
-  // on filtre la date et le type côté client.
-  const snap = await getDocs(query(
-    collection(db, MISSIONS_COLLECTION),
-    where('driverId', '==', driver.id),
-    limit(50)
-  ));
-  const existing = snap.docs
-    .map(d => ({ id: d.id, ...d.data() } as Mission))
-    .find(m => m.date === date && m.type === MissionType.DELIVERY && m.status !== MissionStatus.COMPLETED);
-  if (existing) return existing;
-
+  // ID DÉTERMINISTE (une seule tournée de prise en charge par chauffeur/jour) :
+  // deux scans simultanés convergent sur le même document → plus de doublon.
+  const id = `DLV-${driver.id}-${date}`;
+  const ref = doc(db, MISSIONS_COLLECTION, id);
   const now = new Date().toISOString();
-  const mission: Omit<Mission, 'id'> = cleanUndefined({
-    type: MissionType.DELIVERY,
-    zone: Zone.NORD,                 // zone indicative ; la tournée peut être multi-zones
-    hubId: '',
-    hubName: 'Prise en charge terrain',
-    date,
-    vehicleId: vehicle?.id,
-    vehiclePlate: vehicle?.plate,
-    driverId: driver.id,
-    driverName: driver.name,
-    stops: [],
-    totalPackages: 0,
-    completedStops: 0,
-    failedStops: 0,
-    deliveredPackages: 0,
-    failedPackages: 0,
-    totalDistance: 0,
-    estimatedDuration: 0,
-    status: MissionStatus.IN_PROGRESS,
-    createdBy: driver.id,
-    createdByName: driver.name,
-    createdAt: now,
-    updatedAt: now
-  }) as Omit<Mission, 'id'>;
-  const id = await addMission(mission);
-  return { id, ...mission } as Mission;
+
+  return await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    if (snap.exists()) return { id, ...snap.data() } as Mission;
+    const mission = cleanUndefined({
+      type: MissionType.DELIVERY,
+      zone: Zone.NORD,
+      hubId: '',
+      hubName: 'Prise en charge terrain',
+      date,
+      vehicleId: vehicle?.id,
+      vehiclePlate: vehicle?.plate,
+      driverId: driver.id,
+      driverName: driver.name,
+      stops: [],
+      totalPackages: 0,
+      completedStops: 0,
+      failedStops: 0,
+      deliveredPackages: 0,
+      failedPackages: 0,
+      totalDistance: 0,
+      estimatedDuration: 0,
+      status: MissionStatus.IN_PROGRESS,
+      createdBy: driver.id,
+      createdByName: driver.name,
+      createdAt: now,
+      updatedAt: now
+    });
+    tx.set(ref, mission);
+    return { id, ...mission } as Mission;
+  });
 };
 
 /**
@@ -1033,9 +1016,26 @@ export const optimizeDriverMission = async (
     if (next.coordinates) cursor = next.coordinates;
   }
 
-  // Recomposer : arrêts terminés en tête (ordre inchangé), puis optimisés
-  const finalStops = [...done, ...ordered].map((s, i) => ({ ...s, sequence: i + 1 }));
-  await updateDoc(doc(db, MISSIONS_COLLECTION, missionId), { stops: finalStops, updatedAt: new Date().toISOString() });
+  // Ordre calculé (map id → rang). Réappliqué dans une transaction sur les
+  // stops ACTUELS pour ne pas écraser un arrêt ajouté entre-temps.
+  const orderMap = new Map<string, number>();
+  [...done, ...ordered].forEach((s, i) => orderMap.set(s.id, i + 1));
+  const coordsMap = new Map(pending.filter(s => s.coordinates).map(s => [s.id, s.coordinates!]));
+
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(doc(db, MISSIONS_COLLECTION, missionId));
+    if (!snap.exists()) throw new Error('Tournée introuvable');
+    const m = { id: snap.id, ...snap.data() } as Mission;
+    let extra = orderMap.size;
+    const finalStops = m.stops
+      .map(s => ({
+        ...s,
+        coordinates: s.coordinates || coordsMap.get(s.id),
+        sequence: orderMap.has(s.id) ? orderMap.get(s.id)! : ++extra // stops ajoutés entre-temps → à la fin
+      }))
+      .sort((a, b) => a.sequence - b.sequence);
+    tx.update(doc(db, MISSIONS_COLLECTION, missionId), { stops: finalStops, updatedAt: new Date().toISOString() });
+  });
   return ordered.length;
 };
 
@@ -1047,30 +1047,24 @@ export const addManualStopToMission = async (
   missionId: string,
   stopData: { contactName: string; address: string; postalCode: string; city: string; contactPhone?: string; notes?: string }
 ): Promise<void> => {
-  const snap = await getDoc(doc(db, MISSIONS_COLLECTION, missionId));
-  if (!snap.exists()) throw new Error('Tournée introuvable');
-  const mission = { id: snap.id, ...snap.data() } as Mission;
-  const maxSeq = mission.stops.reduce((m, s) => Math.max(m, s.sequence), 0);
+  const ref = doc(db, MISSIONS_COLLECTION, missionId);
   const now = new Date().toISOString();
-  const stop = cleanUndefined({
-    id: `manual-${now.replace(/[:.]/g, '')}-${maxSeq + 1}`,
-    sequence: maxSeq + 1,
-    type: 'DELIVERY',
-    address: stopData.address,
-    city: stopData.city,
-    postalCode: stopData.postalCode,
-    contactName: stopData.contactName,
-    contactPhone: stopData.contactPhone,
-    packageIds: [],
-    packageCount: 0,
-    serviceTime: 5,
-    notes: `⚠️ Arrêt ajouté manuellement${stopData.notes ? ' — ' + stopData.notes : ''}`,
-    status: StopStatus.PENDING
-  }) as MissionStop;
-
-  await updateDoc(doc(db, MISSIONS_COLLECTION, missionId), {
-    stops: [...mission.stops, stop],
-    updatedAt: now
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists()) throw new Error('Tournée introuvable');
+    const mission = { id: snap.id, ...snap.data() } as Mission;
+    const maxSeq = mission.stops.reduce((m, s) => Math.max(m, s.sequence), 0);
+    const stop = cleanUndefined({
+      id: `manual-${now.replace(/[:.]/g, '')}-${maxSeq + 1}`,
+      sequence: maxSeq + 1,
+      type: 'DELIVERY',
+      address: stopData.address, city: stopData.city, postalCode: stopData.postalCode,
+      contactName: stopData.contactName, contactPhone: stopData.contactPhone,
+      packageIds: [], packageCount: 0, serviceTime: 5,
+      notes: `⚠️ Arrêt ajouté manuellement${stopData.notes ? ' — ' + stopData.notes : ''}`,
+      status: StopStatus.PENDING
+    }) as MissionStop;
+    tx.update(ref, { stops: [...mission.stops, stop], updatedAt: now });
   });
 };
 

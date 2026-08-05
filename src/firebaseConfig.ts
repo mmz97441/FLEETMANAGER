@@ -1,6 +1,11 @@
 // @ts-ignore
 import { initializeApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
+import {
+  getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager
+} from "firebase/firestore";
 // @ts-ignore
 import { getAuth } from "firebase/auth";
 import { getStorage } from "firebase/storage";
@@ -22,8 +27,21 @@ const firebaseConfig = {
 // Initialisation de Firebase
 const app = initializeApp(firebaseConfig);
 
-// Export des services pour utilisation dans l'app
-export const db = getFirestore(app);
+// Firestore avec CACHE LOCAL PERSISTANT (IndexedDB) : l'app fonctionne
+// hors-ligne (scan, prise en charge, validation de livraison) et synchronise
+// automatiquement au retour du réseau. Essentiel pour les chauffeurs en zone
+// blanche (les hauts, Cilaos, Salazie…). Repli sur getFirestore si IndexedDB
+// est indisponible (mode privé strict, très vieux navigateur).
+let _db;
+try {
+  _db = initializeFirestore(app, {
+    localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+  });
+} catch (e) {
+  console.warn("Persistance Firestore indisponible, mode en ligne uniquement:", e);
+  _db = getFirestore(app);
+}
+export const db = _db;
 export const auth = getAuth(app);
 export const storage = getStorage(app);
 

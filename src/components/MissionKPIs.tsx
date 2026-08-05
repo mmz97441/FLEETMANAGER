@@ -127,13 +127,17 @@ const MissionKPIs: React.FC<MissionKPIsProps> = ({ missions, packages, users, se
     // Temps moyen par livraison (en minutes)
     const avgTimePerDelivery = deliveredPkgs > 0 ? Math.round(totalDuration / deliveredPkgs) : 0;
 
-    // Comparaison veille (pour les flèches)
+    // Comparaison veille (pour les flèches) — MÊME source que le taux du jour :
+    // statuts réels des colis (pas les compteurs de missions).
     const yesterday = new Date(selectedDate);
     yesterday.setDate(yesterday.getDate() - 1);
     const yesterdayStr = yesterday.toISOString().split('T')[0];
-    const yesterdayMissions = missions.filter(m => m.date === yesterdayStr);
-    const yesterdayPkgs = yesterdayMissions.reduce((acc, m) => acc + (m.totalPackages || 0), 0);
-    const yesterdayDelivered = yesterdayMissions.reduce((acc, m) => acc + (m.deliveredPackages || 0), 0);
+    const yesterdayPackages = packages.filter(p =>
+      isInRange(p.createdAt.split('T')[0], yesterdayStr, yesterdayStr) ||
+      (p.updatedAt && isInRange(p.updatedAt.split('T')[0], yesterdayStr, yesterdayStr))
+    );
+    const yesterdayPkgs = yesterdayPackages.length;
+    const yesterdayDelivered = yesterdayPackages.filter(p => p.status === PackageStatus.DELIVERED).length;
     const yesterdayRate = yesterdayPkgs > 0 ? Math.round((yesterdayDelivered / yesterdayPkgs) * 100) : 0;
     
     const rateDelta = period === 'today' ? deliveryRate - yesterdayRate : 0;
@@ -145,7 +149,7 @@ const MissionKPIs: React.FC<MissionKPIsProps> = ({ missions, packages, users, se
       totalDistance: Math.round(totalDistance),
       avgTimePerDelivery
     };
-  }, [periodMissions, periodPackages, missions, selectedDate, period]);
+  }, [periodMissions, periodPackages, packages, selectedDate, period]);
 
   // ============================================================================
   // PERFORMANCE PAR CHAUFFEUR
@@ -161,20 +165,44 @@ const MissionKPIs: React.FC<MissionKPIsProps> = ({ missions, packages, users, se
       distance: number;
     }>();
 
+    // Résolution du nom : prop users → dernier mouvement du colis → 'Inconnu'
+    const usersById = new Map(users.map(u => [u.id, `${u.firstName} ${u.lastName}`.trim()]));
+    const resolveDriverName = (driverId: string, p: Package): string => {
+      const fromUsers = usersById.get(driverId);
+      if (fromUsers) return fromUsers;
+      const movName = (p.movements || [])
+        .filter(mv => mv.driverName)
+        .slice(-1)[0]?.driverName;
+      return movName || 'Inconnu';
+    };
+
+    const ensure = (driverId: string, name: string) => {
+      const existing = driverMap.get(driverId) || {
+        name, missions: 0, delivered: 0, failed: 0, total: 0, distance: 0
+      };
+      driverMap.set(driverId, existing);
+      return existing;
+    };
+
+    // Agrégation par CHAUFFEUR à partir des VRAIS colis de la période
+    // (source de vérité unique = statuts colis, via currentDriverId).
+    for (const p of periodPackages) {
+      if (!p.currentDriverId) continue;
+      const entry = ensure(p.currentDriverId, resolveDriverName(p.currentDriverId, p));
+      entry.total++;
+      if (p.status === PackageStatus.DELIVERED) entry.delivered++;
+      else if (p.status === PackageStatus.FAILED || p.status === PackageStatus.RETURNED) entry.failed++;
+    }
+
+    // Nombre de missions et km : basés sur periodMissions (compteur de tournées,
+    // pas de colis) — n'affecte pas les taux de livraison.
     for (const m of periodMissions) {
       if (!m.driverId) continue;
-      const existing = driverMap.get(m.driverId) || {
-        name: m.driverName || 'Inconnu',
-        missions: 0, delivered: 0, failed: 0, total: 0, distance: 0
-      };
-      
-      existing.missions++;
-      existing.delivered += m.deliveredPackages || 0;
-      existing.failed += m.failedPackages || 0;
-      existing.total += m.totalPackages || 0;
-      existing.distance += m.totalDistance || 0;
-      
-      driverMap.set(m.driverId, existing);
+      const entry = driverMap.has(m.driverId)
+        ? driverMap.get(m.driverId)!
+        : ensure(m.driverId, m.driverName || usersById.get(m.driverId) || 'Inconnu');
+      entry.missions++;
+      entry.distance += m.totalDistance || 0;
     }
 
     return Array.from(driverMap.values())
@@ -184,23 +212,25 @@ const MissionKPIs: React.FC<MissionKPIsProps> = ({ missions, packages, users, se
         distance: Math.round(d.distance)
       }))
       .sort((a, b) => b.delivered - a.delivered);
-  }, [periodMissions]);
+  }, [periodPackages, periodMissions, users]);
 
   // ============================================================================
   // PERFORMANCE PAR ZONE
   // ============================================================================
 
-  const zonePerformance = useMemo(() => 
+  const zonePerformance = useMemo(() =>
     [Zone.NORD, Zone.SUD, Zone.EST, Zone.OUEST].map(zone => {
-      const zoneMissions = periodMissions.filter(m => m.zone === zone);
-      const delivered = zoneMissions.reduce((acc, m) => acc + (m.deliveredPackages || 0), 0);
-      const failed = zoneMissions.reduce((acc, m) => acc + (m.failedPackages || 0), 0);
-      const total = zoneMissions.reduce((acc, m) => acc + (m.totalPackages || 0), 0);
+      // Source de vérité unique = statuts colis (p.zone / p.status)
+      const zonePkgs = periodPackages.filter(p => p.zone === zone);
+      const total = zonePkgs.length;
+      const delivered = zonePkgs.filter(p => p.status === PackageStatus.DELIVERED).length;
+      const failed = zonePkgs.filter(p => p.status === PackageStatus.FAILED || p.status === PackageStatus.RETURNED).length;
       const rate = total > 0 ? Math.round((delivered / total) * 100) : 0;
-      
-      return { zone, missions: zoneMissions.length, delivered, failed, total, rate };
+      const missions = periodMissions.filter(m => m.zone === zone).length;
+
+      return { zone, missions, delivered, failed, total, rate };
     }).filter(z => z.total > 0),
-    [periodMissions]
+    [periodPackages, periodMissions]
   );
 
   // ============================================================================
@@ -243,7 +273,9 @@ const MissionKPIs: React.FC<MissionKPIsProps> = ({ missions, packages, users, se
       const total = packages.filter(p => (p.createdAt || '').startsWith(dateStr)).length;
       const delivered = packages.filter(p => movedOn(p, dateStr, ['DELIVERED'])).length;
       const failed = packages.filter(p => movedOn(p, dateStr, ['FAILED', 'RETURNED'])).length;
-      const rate = total > 0 ? Math.round((delivered / total) * 100) : 0;
+      // delivered (mouvement DELIVERED ce jour) et total (colis créés ce jour)
+      // ne coïncident pas → on borne le taux affiché à 100 %.
+      const rate = total > 0 ? Math.min(100, Math.round((delivered / total) * 100)) : 0;
 
       days.push({ date: dateStr, label: dayLabel, delivered, failed, total, rate });
     }

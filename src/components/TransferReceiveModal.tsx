@@ -11,7 +11,7 @@ import React, { useState, useRef, lazy, Suspense } from 'react';
 import {
   X, Camera, Loader2, CheckCircle, AlertTriangle, Trash2, ArrowRightLeft
 } from 'lucide-react';
-import { Package, Mission, User, TransferReason } from '../types';
+import { Package, Mission, User, TransferReason, PackageStatus } from '../types';
 import { findDispatchedPackageByCode, transferPackagesToDriver } from '../services/missionService';
 import { packageDisplayCode } from '../utils/barcode';
 
@@ -63,6 +63,8 @@ const TransferReceiveModal: React.FC<TransferReceiveModalProps> = ({
           const pkg = await findDispatchedPackageByCode(cleaned);
           if (!pkg) {
             notify('warn', `${cleaned} — colis introuvable`);
+          } else if (pkg.status === PackageStatus.DELIVERED || pkg.status === PackageStatus.RETURNED) {
+            notify('warn', `${packageDisplayCode(pkg)} — déjà ${pkg.status.toLowerCase()}, transfert impossible`);
           } else if (addedIdsRef.current.has(pkg.id)) {
             notify('warn', `${packageDisplayCode(pkg)} — déjà scanné`);
           } else if (pkg.currentDriverId === currentUser.id || pkg.missionId === toMission.id) {
