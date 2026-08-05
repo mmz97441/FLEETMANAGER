@@ -112,10 +112,13 @@ const MissionKPIs: React.FC<MissionKPIsProps> = ({ missions, packages, users, se
     const completedMissions = periodMissions.filter(m => m.status === MissionStatus.COMPLETED).length;
     const inProgress = periodMissions.filter(m => m.status === MissionStatus.IN_PROGRESS).length;
     
-    const totalPkgs = periodMissions.reduce((acc, m) => acc + (m.totalPackages || 0), 0);
-    const deliveredPkgs = periodMissions.reduce((acc, m) => acc + (m.deliveredPackages || 0), 0);
-    const failedPkgs = periodMissions.reduce((acc, m) => acc + (m.failedPackages || 0), 0);
-    
+    // Colis comptés sur les VRAIS colis de la période (importés/livrés),
+    // pas seulement ceux rattachés à une mission → le tableau reflète l'activité
+    // même sans tournée créée (ex : colis importés du jour, en attente).
+    const totalPkgs = periodPackages.length;
+    const deliveredPkgs = periodPackages.filter(p => p.status === PackageStatus.DELIVERED).length;
+    const failedPkgs = periodPackages.filter(p => p.status === PackageStatus.FAILED || p.status === PackageStatus.RETURNED).length;
+
     const deliveryRate = totalPkgs > 0 ? Math.round((deliveredPkgs / totalPkgs) * 100) : 0;
     
     const totalDistance = periodMissions.reduce((acc, m) => acc + (m.totalDistance || 0), 0);
@@ -142,7 +145,7 @@ const MissionKPIs: React.FC<MissionKPIsProps> = ({ missions, packages, users, se
       totalDistance: Math.round(totalDistance),
       avgTimePerDelivery
     };
-  }, [periodMissions, missions, selectedDate, period]);
+  }, [periodMissions, periodPackages, missions, selectedDate, period]);
 
   // ============================================================================
   // PERFORMANCE PAR CHAUFFEUR
@@ -224,24 +227,29 @@ const MissionKPIs: React.FC<MissionKPIsProps> = ({ missions, packages, users, se
 
   const dailyTrend = useMemo(() => {
     const days: { date: string; label: string; delivered: number; failed: number; total: number; rate: number }[] = [];
-    
+
+    // Basé sur les COLIS (disponibles sur toutes les dates), pas sur les missions
+    // (qui ne sont chargées que pour le jour sélectionné). Par jour :
+    // total = colis importés ce jour ; delivered/failed = via leurs mouvements.
+    const movedOn = (p: Package, day: string, actions: string[]) =>
+      (p.movements || []).some(m => actions.includes(m.action) && (m.timestamp || '').startsWith(day));
+
     for (let i = 13; i >= 0; i--) {
       const d = new Date(selectedDate);
       d.setDate(d.getDate() - i);
       const dateStr = d.toISOString().split('T')[0];
       const dayLabel = d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
-      
-      const dayMissions = missions.filter(m => m.date === dateStr);
-      const delivered = dayMissions.reduce((acc, m) => acc + (m.deliveredPackages || 0), 0);
-      const failed = dayMissions.reduce((acc, m) => acc + (m.failedPackages || 0), 0);
-      const total = dayMissions.reduce((acc, m) => acc + (m.totalPackages || 0), 0);
+
+      const total = packages.filter(p => (p.createdAt || '').startsWith(dateStr)).length;
+      const delivered = packages.filter(p => movedOn(p, dateStr, ['DELIVERED'])).length;
+      const failed = packages.filter(p => movedOn(p, dateStr, ['FAILED', 'RETURNED'])).length;
       const rate = total > 0 ? Math.round((delivered / total) * 100) : 0;
-      
+
       days.push({ date: dateStr, label: dayLabel, delivered, failed, total, rate });
     }
-    
+
     return days;
-  }, [missions, selectedDate]);
+  }, [packages, selectedDate]);
 
   // ============================================================================
   // COULEURS GRAPHIQUES
