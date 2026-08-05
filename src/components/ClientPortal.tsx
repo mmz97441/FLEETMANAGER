@@ -295,9 +295,19 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   // Charger les colis du client (pour "Mes Expéditions")
   useEffect(() => {
     if (!currentUser?.id) return;
+    // Un colis appartient au client si son clientId = l'identifiant du compte
+    // (valeur stockée à l'import) OU si son clientName = la société du client
+    // (couvre les comptes d'équipe d'une même société). L'ancien filtre par
+    // companyName seul ne matchait jamais les colis (stockés par identifiant)
+    // → le client ne voyait plus rien.
+    const company = (currentUser.companyName || '').trim().toLowerCase();
     const unsub = subscribeToPackages((pkgs) => {
-      setClientPackages(pkgs);
-    }, { clientId: currentUser.companyName || currentUser.id });
+      const mine = pkgs.filter(p =>
+        p.clientId === currentUser.id ||
+        (!!company && (p.clientName || '').trim().toLowerCase() === company)
+      );
+      setClientPackages(mine);
+    });
     return unsub;
   }, [currentUser.id, currentUser.companyName]);
 
