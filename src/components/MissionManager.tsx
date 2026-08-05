@@ -218,12 +218,20 @@ const MissionManager: React.FC<MissionManagerProps> = ({
       PackageStatus.SORTED, PackageStatus.IN_TRANSIT, PackageStatus.LOADED,
       PackageStatus.IN_DELIVERY
     ];
-    return packages.filter(p => 
-      activeStatuses.includes(p.status) || 
+    return packages.filter(p =>
+      activeStatuses.includes(p.status) ||
       p.createdAt.startsWith(selectedDate) ||
       p.updatedAt?.startsWith(selectedDate)
     );
   }, [packages, selectedDate]);
+
+  // Vue de suivi des colis : par défaut TOUS les colis (suivi global), avec la
+  // date en filtre optionnel. Évite que l'admin ne voie rien à cause du filtre jour.
+  const [colisAllDates, setColisAllDates] = useState(true);
+  const colisView = useMemo(
+    () => colisAllDates ? packages : todayPackages,
+    [colisAllDates, packages, todayPackages]
+  );
 
   // Permissions via le hook
   const { hasPermission } = usePermissions();
@@ -1503,6 +1511,21 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   // Render Packages
   const renderPackages = () => (
     <div className="space-y-6">
+      {/* Bascule suivi global / jour sélectionné */}
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <p className="text-sm text-slate-500">
+          {colisAllDates
+            ? <>Suivi global — <b>{colisView.length}</b> colis (toutes dates)</>
+            : <>Colis du <b>{new Date(selectedDate).toLocaleDateString('fr-FR')}</b> — <b>{colisView.length}</b></>}
+        </p>
+        <button
+          onClick={() => setColisAllDates(v => !v)}
+          className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${colisAllDates ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-slate-600 border-slate-300'}`}
+        >
+          {colisAllDates ? '🌐 Toutes les dates' : '📅 Date sélectionnée'}
+        </button>
+      </div>
+
       {/* Stats colis */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         {[
@@ -1513,7 +1536,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           { status: PackageStatus.DELIVERED, label: 'Livrés' },
           { status: PackageStatus.FAILED, label: 'Échecs' }
         ].map(({ status, label }) => {
-          const count = todayPackages.filter(p => p.status === status).length;
+          const count = colisView.filter(p => p.status === status).length;
           const colors = PACKAGE_STATUS_COLORS[status];
           
           return (
@@ -1621,14 +1644,14 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                 <th className="px-2 py-3 text-center">
                   <input
                     type="checkbox"
-                    checked={selectedPackageIds.size > 0 && selectedPackageIds.size === todayPackages.filter(p => {
+                    checked={selectedPackageIds.size > 0 && selectedPackageIds.size === colisView.filter(p => {
                       if (!searchTerm) return true;
                       const term = searchTerm.toLowerCase();
                       return p.orderNumber.toLowerCase().includes(term) || p.contactName.toLowerCase().includes(term);
                     }).slice(0, 50).length}
                     onChange={(e) => {
                       if (e.target.checked) {
-                        const visibleIds = todayPackages
+                        const visibleIds = colisView
                           .filter(p => {
                             if (!searchTerm) return true;
                             const term = searchTerm.toLowerCase();
@@ -1672,14 +1695,14 @@ const MissionManager: React.FC<MissionManagerProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {todayPackages.length === 0 ? (
+              {colisView.length === 0 ? (
                 <tr>
                   <td colSpan={12} className="px-4 py-8 text-center text-slate-500">
                     Aucun colis pour cette date
                   </td>
                 </tr>
               ) : (
-                todayPackages
+                colisView
                   .filter(p => {
                     if (!searchTerm) return true;
                     const term = searchTerm.toLowerCase();
