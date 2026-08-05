@@ -84,15 +84,26 @@ const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages, clientName = 'Client'
     title: 'Voir ces colis'
   } : {};
   const drillClass = onDrillDown ? ' cursor-pointer hover:shadow-md hover:border-indigo-300 transition-all active:scale-95' : '';
-  const [period, setPeriod] = useState<Period>('today');
-  const dateRange = useMemo(() => getDateRange(period), [period]);
+  const today = new Date().toISOString().split('T')[0];
+  // Filtre de période : défaut = aujourd'hui. Raccourcis (jour/semaine/mois) +
+  // choix libre d'une date ou d'une plage "Du…Au…".
+  const [preset, setPreset] = useState<Period | 'custom'>('today');
+  const [startDate, setStartDate] = useState<string>(today);
+  const [endDate, setEndDate] = useState<string>(today);
+  const dateRange = useMemo(() => ({ start: startDate, end: endDate }), [startDate, endDate]);
+
+  const applyPreset = (p: Period) => {
+    const r = getDateRange(p);
+    setPreset(p);
+    setStartDate(r.start);
+    setEndDate(r.end);
+  };
+
   const periodLabel = useMemo(() => {
     const fr = (d: string) => new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
-    if (period === 'today') return `Aujourd'hui (${fr(dateRange.start)})`;
-    if (period === 'week') return `Semaine du ${fr(dateRange.start)} au ${fr(dateRange.end)}`;
-    return new Date(dateRange.start).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
-  }, [period, dateRange]);
-  const today = new Date().toISOString().split('T')[0];
+    if (startDate === endDate) return fr(startDate);
+    return `du ${fr(startDate)} au ${fr(endDate)}`;
+  }, [startDate, endDate]);
 
   // Packages de la période
   const periodPackages = useMemo(() => 
@@ -105,20 +116,21 @@ const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages, clientName = 'Client'
   // ============================================================================
 
   const pipeline = useMemo(() => {
-    const pending = packages.filter(p => p.status === PackageStatus.PENDING).length;
-    const inTransit = packages.filter(p => 
-      [PackageStatus.COLLECTED, PackageStatus.AT_HUB, PackageStatus.SORTED, 
+    // Tout est calculé sur la période sélectionnée (défaut : aujourd'hui)
+    const pending = periodPackages.filter(p => p.status === PackageStatus.PENDING).length;
+    const inTransit = periodPackages.filter(p =>
+      [PackageStatus.COLLECTED, PackageStatus.AT_HUB, PackageStatus.SORTED,
        PackageStatus.LOADED, PackageStatus.IN_TRANSIT, PackageStatus.IN_DELIVERY
       ].includes(p.status)
     ).length;
     const delivered = periodPackages.filter(p => p.status === PackageStatus.DELIVERED).length;
-    const failed = periodPackages.filter(p => 
+    const failed = periodPackages.filter(p =>
       p.status === PackageStatus.FAILED || p.status === PackageStatus.RETURNED
     ).length;
     const total = periodPackages.length;
-    
+
     return { pending, inTransit, delivered, failed, total };
-  }, [packages, periodPackages]);
+  }, [periodPackages]);
 
   // ============================================================================
   // TAUX DE LIVRAISON
@@ -131,7 +143,7 @@ const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages, clientName = 'Client'
 
   // Comparaison veille
   const yesterdayRate = useMemo(() => {
-    if (period !== 'today') return null;
+    if (preset !== 'today') return null;
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
     const yStr = yesterday.toISOString().split('T')[0];
@@ -140,7 +152,7 @@ const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages, clientName = 'Client'
     const yFailed = yPkgs.filter(p => p.status === PackageStatus.FAILED || p.status === PackageStatus.RETURNED).length;
     const yResolved = yDelivered + yFailed;
     return yResolved > 0 ? Math.round((yDelivered / yResolved) * 100) : null;
-  }, [packages, period]);
+  }, [packages, preset]);
 
   const rateDelta = yesterdayRate !== null ? deliveryRate - yesterdayRate : 0;
 
@@ -263,9 +275,9 @@ const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages, clientName = 'Client'
         {(['today', 'week', 'month'] as Period[]).map(p => (
           <button
             key={p}
-            onClick={() => setPeriod(p)}
+            onClick={() => applyPreset(p)}
             className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${
-              period === p
+              preset === p
                 ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200'
                 : 'bg-white text-slate-600 border border-slate-200 hover:border-indigo-300'
             }`}
@@ -273,6 +285,22 @@ const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages, clientName = 'Client'
             {p === 'today' ? "Aujourd'hui" : p === 'week' ? 'Semaine' : 'Mois'}
           </button>
         ))}
+
+        {/* Choix libre d'une date / plage de dates */}
+        <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border ${preset === 'custom' ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 bg-white'}`}>
+          <span className="text-xs text-slate-500 font-medium">Du</span>
+          <input
+            type="date" value={startDate} max={endDate}
+            onChange={e => { setPreset('custom'); setStartDate(e.target.value); }}
+            className="text-sm bg-transparent outline-none text-slate-700"
+          />
+          <span className="text-xs text-slate-500 font-medium">au</span>
+          <input
+            type="date" value={endDate} min={startDate} max={today}
+            onChange={e => { setPreset('custom'); setEndDate(e.target.value); }}
+            className="text-sm bg-transparent outline-none text-slate-700"
+          />
+        </div>
 
         {/* Boutons d'export — rapport de la période sélectionnée */}
         <div className="ml-auto flex items-center gap-2">
@@ -364,7 +392,7 @@ const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages, clientName = 'Client'
           </p>
         </div>
         <div className="text-right">
-          {period === 'today' && yesterdayRate !== null && (
+          {preset === 'today' && yesterdayRate !== null && (
             <div>
               <DeltaIndicator value={rateDelta} />
               <p className="text-[10px] text-slate-400 mt-0.5">vs hier</p>
@@ -558,9 +586,10 @@ const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages, clientName = 'Client'
       <div className="grid grid-cols-3 gap-4">
         <div className="bg-slate-50 rounded-xl p-4 text-center">
           <p className="text-2xl font-black text-slate-700">
-            {periodPackages.length > 0 
-              ? Math.round(periodPackages.length / (period === 'today' ? 1 : period === 'week' ? 7 : 30))
-              : 0}
+            {(() => {
+              const days = Math.max(1, Math.round((new Date(endDate).getTime() - new Date(startDate).getTime()) / 86400000) + 1);
+              return periodPackages.length > 0 ? Math.round(periodPackages.length / days) : 0;
+            })()}
           </p>
           <p className="text-xs text-slate-500">colis/jour (moy.)</p>
         </div>
