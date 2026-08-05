@@ -305,7 +305,9 @@ service cloud.firestore {
     // Suppression : admin uniquement
     match /packages/{packageId} {
       allow read: if isAuthenticated();
-      allow create: if isAdminRole();
+      // Admin : création libre. Chauffeur : peut créer un colis "à la volée"
+      // (carton en main, hors import) — il doit se l'affecter (currentDriverId = lui).
+      allow create: if isAdminRole() || (isDriver() && request.resource.data.currentDriverId == request.auth.uid);
       allow update: if isAdminRole() || isDriver();
       allow delete: if isAdminRole();
     }

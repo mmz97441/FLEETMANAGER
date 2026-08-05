@@ -1171,7 +1171,7 @@ const App: React.FC = () => {
         )}
 
         {/* Raccourci scan rapide — disponible sur tous les écrans (usage interne) */}
-        {currentUser.role !== UserRole.CLIENT && <QuickScanButton currentUser={currentUser} />}
+        {currentUser.role !== UserRole.CLIENT && <QuickScanButton currentUser={currentUser} clients={users.filter(u => u.role === UserRole.CLIENT || String(u.role).toLowerCase().includes('client'))} />}
 
         {/* MODAL ALERTE DOCUMENTS NON SIGNÉS */}
         <Suspense fallback={null}>

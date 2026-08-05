@@ -7,15 +7,16 @@
  * Lecture seule : aucun risque de modifier une donnée.
  */
 import React, { useState, lazy, Suspense } from 'react';
-import { ScanLine, X, Loader2, MapPin, Package as PackageIcon, Search, PackageCheck, CheckCircle } from 'lucide-react';
-import { Package, PackageStatus, PACKAGE_STATUS_COLORS, User } from '../types';
-import { findPackageByCode, claimPackagesForDelivery } from '../services/missionService';
+import { ScanLine, X, Loader2, MapPin, Package as PackageIcon, Search, PackageCheck, CheckCircle, Plus } from 'lucide-react';
+import { Package, PackageStatus, PACKAGE_STATUS_COLORS, User, UserRole } from '../types';
+import { findPackageByCode, claimPackagesForDelivery, createAndClaimPackage } from '../services/missionService';
 import { packageDisplayCode } from '../utils/barcode';
+import PackageTimeline from './PackageTimeline';
 
 interface QuickScanButtonProps {
   currentUser: User;
+  clients?: User[];
 }
-import PackageTimeline from './PackageTimeline';
 
 const BarcodeScanner = lazy(() => import('./BarcodeScanner'));
 
@@ -28,13 +29,51 @@ const statusEmoji = (s: PackageStatus): string => {
   return '🚚';
 };
 
-const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser }) => {
+const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients = [] }) => {
   const [showScanner, setShowScanner] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [result, setResult] = useState<{ pkg: Package | null; scannedCode: string } | null>(null);
   const [isClaiming, setIsClaiming] = useState(false);
   const [claimed, setClaimed] = useState(false);
   const [claimError, setClaimError] = useState<string | null>(null);
+  // Création à la volée (carton hors import)
+  const [showCreate, setShowCreate] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [createForm, setCreateForm] = useState({ clientId: '', contactName: '', address: '', postalCode: '', city: '', contactPhone: '' });
+
+  const handleCreate = async () => {
+    if (!result) return;
+    if (!createForm.clientId) { setClaimError('Choisissez le client expéditeur'); return; }
+    if (!createForm.address.trim() || !createForm.city.trim()) { setClaimError('Adresse et ville obligatoires'); return; }
+    setCreating(true); setClaimError(null);
+    try {
+      let location: { lat: number; lng: number } | undefined;
+      try {
+        location = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }), reject, { timeout: 5000 });
+        });
+      } catch { /* optionnel */ }
+      const client = clients.find(c => c.id === createForm.clientId);
+      await createAndClaimPackage({
+        code: result.scannedCode,
+        clientId: createForm.clientId,
+        clientName: client?.companyName || (client ? `${client.firstName} ${client.lastName}` : 'Client'),
+        contactName: createForm.contactName,
+        address: createForm.address,
+        postalCode: createForm.postalCode,
+        city: createForm.city,
+        contactPhone: createForm.contactPhone,
+        driver: { id: currentUser.id, name: `${currentUser.firstName} ${currentUser.lastName}` },
+        date: new Date().toISOString().split('T')[0],
+        location
+      });
+      setShowCreate(false);
+      setClaimed(true);
+    } catch (e) {
+      setClaimError(e instanceof Error ? e.message : 'Échec de la création');
+    }
+    setCreating(false);
+  };
 
   // Un colis est "prenable en charge" s'il n'est pas déjà livré/retourné,
   // et pas déjà dans la tournée de la personne qui scanne.
@@ -87,6 +126,9 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser }) => {
     setClaimed(false);
     setIsClaiming(false);
     setClaimError(null);
+    setShowCreate(false);
+    setCreating(false);
+    setCreateForm({ clientId: '', contactName: '', address: '', postalCode: '', city: '', contactPhone: '' });
   };
 
   const handleClaimClick = () => { setClaimError(null); handleClaim(); };
@@ -180,6 +222,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser }) => {
               </>
             ) : (
               /* Colis introuvable */
+              !showCreate ? (
               <div className="p-6 text-center">
                 <div className="w-14 h-14 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-3">
                   <Search size={24} className="text-amber-600" />
@@ -190,9 +233,50 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser }) => {
                 </p>
                 <p className="font-mono text-sm font-bold text-slate-700 mt-1 break-all">{result.scannedCode}</p>
                 <p className="text-xs text-slate-400 mt-2">
-                  Vérifiez qu'il a bien été importé, ou notez ce code pour le service.
+                  Ce carton n'a pas été importé. Vous pouvez le créer et le prendre en charge maintenant.
                 </p>
+                <button
+                  onClick={() => setShowCreate(true)}
+                  className="mt-4 w-full flex items-center justify-center gap-2 py-3 bg-green-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform"
+                >
+                  <Plus size={18} /> Créer et prendre en charge
+                </button>
               </div>
+              ) : (
+              /* Formulaire de création à la volée */
+              <div className="p-4 space-y-3">
+                <div className="flex items-start gap-2 p-2.5 bg-amber-50 border border-amber-200 rounded-xl">
+                  <span>⚠️</span>
+                  <p className="text-[11px] text-amber-800">Colis <b>hors import</b>. Il sera pris en charge dans votre tournée et signalé au bureau pour réconciliation avec le fichier client.</p>
+                </div>
+                <p className="text-xs text-slate-500">N° colis : <b className="font-mono">{result.scannedCode}</b></p>
+                <div>
+                  <label className="text-xs font-bold text-slate-500 block mb-1">Client expéditeur *</label>
+                  <select value={createForm.clientId} onChange={e => setCreateForm(f => ({ ...f, clientId: e.target.value }))}
+                    className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-green-500 outline-none">
+                    <option value="">— Choisir —</option>
+                    {clients.map(c => <option key={c.id} value={c.id}>{c.companyName || `${c.firstName} ${c.lastName}`}</option>)}
+                  </select>
+                </div>
+                <input type="text" placeholder="Destinataire" value={createForm.contactName}
+                  onChange={e => setCreateForm(f => ({ ...f, contactName: e.target.value }))}
+                  className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-green-500 outline-none" />
+                <input type="text" placeholder="Adresse *" value={createForm.address}
+                  onChange={e => setCreateForm(f => ({ ...f, address: e.target.value }))}
+                  className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-green-500 outline-none" />
+                <div className="flex gap-2">
+                  <input type="text" inputMode="numeric" placeholder="Code postal" value={createForm.postalCode}
+                    onChange={e => setCreateForm(f => ({ ...f, postalCode: e.target.value }))}
+                    className="w-1/3 px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-green-500 outline-none" />
+                  <input type="text" placeholder="Ville *" value={createForm.city}
+                    onChange={e => setCreateForm(f => ({ ...f, city: e.target.value }))}
+                    className="flex-1 px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-green-500 outline-none" />
+                </div>
+                <input type="tel" placeholder="Téléphone (optionnel)" value={createForm.contactPhone}
+                  onChange={e => setCreateForm(f => ({ ...f, contactPhone: e.target.value }))}
+                  className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-green-500 outline-none" />
+              </div>
+              )
             )}
 
             {/* Actions */}
@@ -218,6 +302,17 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser }) => {
                 <div className="w-full flex items-center justify-center gap-2 py-3 bg-green-50 border border-green-200 text-green-700 rounded-xl font-bold text-sm">
                   <CheckCircle size={18} /> Pris en charge dans votre tournée
                 </div>
+              </div>
+            )}
+            {showCreate && !claimed && (
+              <div className="px-4 pt-1">
+                <button
+                  onClick={handleCreate}
+                  disabled={creating}
+                  className="w-full flex items-center justify-center gap-2 py-3.5 bg-green-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-50"
+                >
+                  {creating ? <><Loader2 size={18} className="animate-spin" /> Création…</> : <><Plus size={18} /> Créer et prendre en charge</>}
+                </button>
               </div>
             )}
 

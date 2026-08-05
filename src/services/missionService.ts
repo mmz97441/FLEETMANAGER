@@ -912,6 +912,68 @@ export const claimPackagesForDelivery = async (params: {
   });
 };
 
+/**
+ * CRÉATION À LA VOLÉE : le chauffeur a un carton en main qui n'a pas été importé.
+ * Il le crée depuis l'étiquette et le prend directement en charge dans sa tournée
+ * de livraison. Marqué comme "hors import" pour réconciliation par le bureau.
+ */
+export const createAndClaimPackage = async (params: {
+  code: string;
+  clientId: string;
+  clientName: string;
+  contactName: string;
+  address: string;
+  postalCode: string;
+  city: string;
+  contactPhone?: string;
+  driver: { id: string; name: string };
+  date: string;
+  location?: { lat: number; lng: number };
+}): Promise<Package> => {
+  const now = new Date().toISOString();
+  const code = params.code.trim();
+  const zone = (await getZoneFromPostalCode(params.postalCode.trim())) || Zone.NORD;
+
+  const pkgData = cleanUndefined({
+    clientId: params.clientId,
+    clientName: params.clientName,
+    importBatchId: `MANUEL-${params.date}`,
+    externalId: code,
+    orderNumber: code,
+    address: params.address.trim(),
+    city: params.city.trim(),
+    postalCode: params.postalCode.trim(),
+    zone,
+    contactName: params.contactName.trim() || 'Destinataire',
+    contactPhone: params.contactPhone?.trim() || undefined,
+    serviceTime: 5,
+    status: PackageStatus.PENDING,
+    currentDriverId: params.driver.id, // requis par les règles pour la création chauffeur
+    comment: '⚠️ Créé à la volée (hors import) — à réconcilier',
+    movements: [{
+      timestamp: now,
+      action: 'IMPORTED' as const,
+      driverId: params.driver.id,
+      driverName: params.driver.name,
+      notes: `Colis créé à la volée par ${params.driver.name} (carton hors import)`
+    }],
+    createdAt: now,
+    updatedAt: now
+  });
+
+  const ref = await addDoc(collection(db, PACKAGES_COLLECTION), pkgData);
+  const created = { id: ref.id, ...pkgData } as Package;
+
+  // Prise en charge immédiate dans la tournée de livraison du jour
+  await claimPackagesForDelivery({
+    packages: [created],
+    driver: params.driver,
+    date: params.date,
+    location: params.location
+  });
+  return created;
+};
+
 // ---- Optimisation & édition de tournée côté chauffeur ----
 
 const haversineKm = (a: { lat: number; lng: number }, b: { lat: number; lng: number }): number => {
