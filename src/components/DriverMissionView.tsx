@@ -17,8 +17,9 @@ import React, { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'rea
 import {
   Mission, MissionStatus, MissionType, MissionStop, StopStatus,
   PackageStatus, FailureReason, Package, DeliveryLocation,
-  User, MISSION_STATUS_COLORS
+  User, MISSION_STATUS_COLORS, Issue, IssueStatus
 } from '../types';
+import { addIssueToFirestore } from '../services/firestore';
 import {
   subscribeToMissions,
   subscribeToPackages,
@@ -272,6 +273,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   const [showReorder, setShowReorder] = useState(false);
   const [showManualStop, setShowManualStop] = useState(false);
   const [manualStop, setManualStop] = useState({ contactName: '', address: '', postalCode: '', city: '', contactPhone: '' });
+  const [showIssue, setShowIssue] = useState(false);
+  const [issueForm, setIssueForm] = useState<{ category: string; description: string; priority: 'Low' | 'Medium' | 'High' }>({ category: 'Véhicule / panne', description: '', priority: 'Medium' });
+  const [issueSubmitting, setIssueSubmitting] = useState(false);
   const [stopPackages, setStopPackages] = useState<Package[]>([]);
   
   // Return to hub workflow
@@ -915,6 +919,39 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
     } catch {
       showNotif('❌ Erreur lors de l\'ajout de l\'arrêt');
     }
+  };
+
+  // Signaler un problème depuis la tournée (crée un incident vu par le bureau)
+  const handleSubmitIssue = async () => {
+    if (!issueForm.description.trim()) { showNotif('⚠️ Décrivez le problème'); return; }
+    setIssueSubmitting(true);
+    try {
+      const now = new Date().toISOString();
+      const issue: Issue = {
+        id: '',
+        vehicleId: activeMission?.vehicleId || '',
+        reportedByUserId: currentUser.id,
+        reportedBy: `${currentUser.firstName} ${currentUser.lastName}`,
+        description: `[${issueForm.category}] ${issueForm.description.trim()}`,
+        date: now,
+        priority: issueForm.priority,
+        status: IssueStatus.NEW,
+        logs: [{
+          id: `log-${now}`,
+          date: now,
+          message: `Signalé depuis la tournée par ${currentUser.firstName} ${currentUser.lastName}`,
+          authorName: `${currentUser.firstName} ${currentUser.lastName}`,
+          type: 'NOTE'
+        }]
+      };
+      await addIssueToFirestore(issue);
+      setShowIssue(false);
+      setIssueForm({ category: 'Véhicule / panne', description: '', priority: 'Medium' });
+      showNotif('🛠️ Problème signalé au bureau');
+    } catch {
+      showNotif('❌ Erreur lors du signalement');
+    }
+    setIssueSubmitting(false);
   };
 
   const handlePickupComplete = async (scannedIds: string[], missingIds: string[], signatureBase64?: string) => {
@@ -1594,6 +1631,14 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
           ➕ Ajouter un arrêt manuel
         </button>
 
+        {/* Signaler un problème au bureau (incident) */}
+        <button
+          onClick={() => setShowIssue(true)}
+          className="w-full flex items-center justify-center gap-2 py-3 bg-white border border-red-200 rounded-xl text-sm font-medium text-red-600 active:scale-95 transition-transform"
+        >
+          🛠️ Signaler un problème
+        </button>
+
         {/* Bouton retour liste */}
         <button
           onClick={() => setActiveMissionId(null)}
@@ -1691,6 +1736,57 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                   Ajouter l'arrêt
                 </button>
                 <button onClick={() => setShowManualStop(false)} className="px-5 py-3 bg-slate-100 text-slate-700 rounded-xl font-medium text-sm">
+                  Annuler
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* === MODAL SIGNALER UN PROBLÈME === */}
+        {showIssue && (
+          <div className="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center sm:p-4" onClick={() => setShowIssue(false)}>
+            <div className="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-md animate-slide-up" onClick={e => e.stopPropagation()}>
+              <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+                <h3 className="font-bold text-slate-800">🛠️ Signaler un problème</h3>
+                <button onClick={() => setShowIssue(false)} className="p-2 rounded-full hover:bg-slate-100"><XCircle size={20} className="text-slate-400" /></button>
+              </div>
+              <div className="p-4 space-y-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-500 block mb-1">Type de problème</label>
+                  <select value={issueForm.category} onChange={e => setIssueForm(f => ({ ...f, category: e.target.value }))}
+                    className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 outline-none">
+                    <option>Véhicule / panne</option>
+                    <option>Accident</option>
+                    <option>Colis abîmé / manquant</option>
+                    <option>Adresse introuvable / erronée</option>
+                    <option>Client / destinataire</option>
+                    <option>Autre</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-500 block mb-1">Description *</label>
+                  <textarea value={issueForm.description} onChange={e => setIssueForm(f => ({ ...f, description: e.target.value }))}
+                    rows={3} placeholder="Décrivez le problème…"
+                    className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 outline-none" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-500 block mb-1">Urgence</label>
+                  <div className="flex gap-2">
+                    {([['Low', 'Basse'], ['Medium', 'Moyenne'], ['High', 'Haute']] as const).map(([val, label]) => (
+                      <button key={val} onClick={() => setIssueForm(f => ({ ...f, priority: val }))}
+                        className={`flex-1 py-2 rounded-lg text-sm font-bold border ${issueForm.priority === val ? (val === 'High' ? 'bg-red-600 text-white border-red-600' : val === 'Medium' ? 'bg-amber-500 text-white border-amber-500' : 'bg-slate-600 text-white border-slate-600') : 'bg-white text-slate-600 border-slate-300'}`}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div className="p-4 border-t border-slate-200 flex gap-2">
+                <button onClick={handleSubmitIssue} disabled={issueSubmitting} className="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-50">
+                  {issueSubmitting ? 'Envoi…' : 'Envoyer au bureau'}
+                </button>
+                <button onClick={() => setShowIssue(false)} className="px-5 py-3 bg-slate-100 text-slate-700 rounded-xl font-medium text-sm">
                   Annuler
                 </button>
               </div>
