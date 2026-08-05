@@ -28,7 +28,8 @@ import {
   updatePackageStatus,
   subscribeToPackages,
   subscribeToHubs,
-  subscribeToMissions
+  subscribeToMissions,
+  findPackageByCode
 } from '../services/missionService';
 
 const BarcodeScanner = lazy(() => import('./BarcodeScanner'));
@@ -188,7 +189,9 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
 
   // --- RÉCEPTION : Scan un colis → AT_HUB ---
   const handleReceptionScan = async (barcode: string) => {
-    const pkg = packages.find(p => packageMatchesCode(p, barcode));
+    // Recherche en mémoire (rapide) puis, si absent (au-delà des 500 colis
+    // récents chargés en temps réel), recherche directe en base.
+    const pkg = packages.find(p => packageMatchesCode(p, barcode)) || await findPackageByCode(barcode) || undefined;
 
     if (!pkg) {
       showNotif('warning', `Code ${barcode} — colis non trouvé`);
@@ -257,7 +260,7 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
 
   // --- CHARGEMENT : Scan un colis → vérification chauffeur ---
   const handleLoadingScan = async (barcode: string) => {
-    const pkg = packages.find(p => packageMatchesCode(p, barcode));
+    const pkg = packages.find(p => packageMatchesCode(p, barcode)) || await findPackageByCode(barcode) || undefined;
 
     if (!pkg) {
       showNotif('warning', `Code ${barcode} — colis non trouvé dans le système`);

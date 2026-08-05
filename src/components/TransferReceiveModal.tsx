@@ -7,7 +7,7 @@
  * - à la confirmation, les colis basculent dans SA tournée et sortent
  *   de celle de l'ancien chauffeur (traçabilité complète)
  */
-import React, { useState, lazy, Suspense } from 'react';
+import React, { useState, useRef, lazy, Suspense } from 'react';
 import {
   X, Camera, Loader2, CheckCircle, AlertTriangle, Trash2, ArrowRightLeft
 } from 'lucide-react';
@@ -35,34 +35,53 @@ const TransferReceiveModal: React.FC<TransferReceiveModalProps> = ({
   const [reason, setReason] = useState<TransferReason>(TransferReason.PROXIMITY);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'warn'; message: string } | null>(null);
 
+  // File d'attente : scan rafale traité en série, sans perte de code.
+  const queueRef = useRef<string[]>([]);
+  const processingRef = useRef(false);
+  const addedIdsRef = useRef<Set<string>>(new Set());
+
   const notify = (type: 'ok' | 'warn', message: string) => {
     setFeedback({ type, message });
     setTimeout(() => setFeedback(null), 4000);
   };
 
-  const lookupCode = async (code: string) => {
+  const lookupCode = (code: string) => {
     const cleaned = code.trim();
-    if (!cleaned || isSearching) return;
+    if (!cleaned) return;
+    queueRef.current.push(cleaned);
+    void drainQueue();
+  };
+
+  const drainQueue = async () => {
+    if (processingRef.current) return;
+    processingRef.current = true;
     setIsSearching(true);
     try {
-      const pkg = await findDispatchedPackageByCode(cleaned);
-
-      if (!pkg) {
-        notify('warn', `${cleaned} — colis introuvable`);
-      } else if (scannedPkgs.some(p => p.id === pkg.id)) {
-        notify('warn', `${packageDisplayCode(pkg)} — déjà scanné`);
-      } else if (pkg.currentDriverId === currentUser.id || pkg.missionId === toMission.id) {
-        notify('warn', `${packageDisplayCode(pkg)} — déjà dans votre tournée`);
-      } else if (!pkg.missionId) {
-        notify('warn', `${packageDisplayCode(pkg)} — colis non dispatché (à traiter au hub)`);
-      } else {
-        setScannedPkgs(prev => [...prev, pkg]);
-        notify('ok', `${packageDisplayCode(pkg)} — ${pkg.contactName} ✓`);
+      while (queueRef.current.length > 0) {
+        const cleaned = queueRef.current.shift()!;
+        try {
+          const pkg = await findDispatchedPackageByCode(cleaned);
+          if (!pkg) {
+            notify('warn', `${cleaned} — colis introuvable`);
+          } else if (addedIdsRef.current.has(pkg.id)) {
+            notify('warn', `${packageDisplayCode(pkg)} — déjà scanné`);
+          } else if (pkg.currentDriverId === currentUser.id || pkg.missionId === toMission.id) {
+            notify('warn', `${packageDisplayCode(pkg)} — déjà dans votre tournée`);
+          } else if (!pkg.missionId) {
+            notify('warn', `${packageDisplayCode(pkg)} — colis non dispatché (à traiter au hub)`);
+          } else {
+            addedIdsRef.current.add(pkg.id);
+            setScannedPkgs(prev => [...prev, pkg]);
+            notify('ok', `${packageDisplayCode(pkg)} — ${pkg.contactName} ✓`);
+          }
+        } catch {
+          notify('warn', `${cleaned} — erreur lors de la recherche`);
+        }
       }
-    } catch (e) {
-      notify('warn', 'Erreur lors de la recherche du colis');
+    } finally {
+      processingRef.current = false;
+      setIsSearching(false);
     }
-    setIsSearching(false);
   };
 
   const handleConfirm = async () => {
@@ -176,7 +195,7 @@ const TransferReceiveModal: React.FC<TransferReceiveModalProps> = ({
                     </p>
                   </div>
                   <button
-                    onClick={() => setScannedPkgs(prev => prev.filter(p => p.id !== pkg.id))}
+                    onClick={() => { addedIdsRef.current.delete(pkg.id); setScannedPkgs(prev => prev.filter(p => p.id !== pkg.id)); }}
                     disabled={isTransferring}
                     className="p-2 text-slate-400 hover:text-red-500"
                   >

@@ -5,7 +5,7 @@
  * chauffeur) → ils rejoignent SA tournée de livraison du jour. Modèle métier :
  * "scan = prise en charge en livraison".
  */
-import React, { useState, lazy, Suspense } from 'react';
+import React, { useState, useRef, lazy, Suspense } from 'react';
 import { X, Camera, Loader2, CheckCircle, AlertTriangle, Trash2, PackageCheck } from 'lucide-react';
 import { Package, User, PackageStatus } from '../types';
 import { findPackageByCode, claimPackagesForDelivery } from '../services/missionService';
@@ -27,33 +27,54 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
   const [isClaiming, setIsClaiming] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'warn'; message: string } | null>(null);
 
+  // File d'attente : en scan rafale, les codes sont traités en série SANS être
+  // perdus (contrairement à un simple "ignore si occupé" qui droppait des colis).
+  const queueRef = useRef<string[]>([]);
+  const processingRef = useRef(false);
+  const addedIdsRef = useRef<Set<string>>(new Set());
+
   const notify = (type: 'ok' | 'warn', message: string) => {
     setFeedback({ type, message });
     setTimeout(() => setFeedback(null), 4000);
   };
 
-  const lookupCode = async (code: string) => {
+  const lookupCode = (code: string) => {
     const cleaned = code.trim();
-    if (!cleaned || isSearching) return;
+    if (!cleaned) return;
+    queueRef.current.push(cleaned);
+    void drainQueue();
+  };
+
+  const drainQueue = async () => {
+    if (processingRef.current) return;
+    processingRef.current = true;
     setIsSearching(true);
     try {
-      const pkg = await findPackageByCode(cleaned);
-      if (!pkg) {
-        notify('warn', `${cleaned} — colis introuvable (importé ?)`);
-      } else if (scannedPkgs.some(p => p.id === pkg.id)) {
-        notify('warn', `${packageDisplayCode(pkg)} — déjà scanné`);
-      } else if (pkg.status === PackageStatus.DELIVERED) {
-        notify('warn', `${packageDisplayCode(pkg)} — déjà livré`);
-      } else if (pkg.currentDriverId === currentUser.id && pkg.missionId) {
-        notify('warn', `${packageDisplayCode(pkg)} — déjà dans votre tournée`);
-      } else {
-        setScannedPkgs(prev => [...prev, pkg]);
-        notify('ok', `${packageDisplayCode(pkg)} — ${pkg.contactName} ✓`);
+      while (queueRef.current.length > 0) {
+        const cleaned = queueRef.current.shift()!;
+        try {
+          const pkg = await findPackageByCode(cleaned);
+          if (!pkg) {
+            notify('warn', `${cleaned} — colis introuvable (importé ?)`);
+          } else if (addedIdsRef.current.has(pkg.id)) {
+            notify('warn', `${packageDisplayCode(pkg)} — déjà scanné`);
+          } else if (pkg.status === PackageStatus.DELIVERED) {
+            notify('warn', `${packageDisplayCode(pkg)} — déjà livré`);
+          } else if (pkg.currentDriverId === currentUser.id && pkg.missionId) {
+            notify('warn', `${packageDisplayCode(pkg)} — déjà dans votre tournée`);
+          } else {
+            addedIdsRef.current.add(pkg.id);
+            setScannedPkgs(prev => [...prev, pkg]);
+            notify('ok', `${packageDisplayCode(pkg)} — ${pkg.contactName} ✓`);
+          }
+        } catch {
+          notify('warn', `${cleaned} — erreur lors de la recherche`);
+        }
       }
-    } catch {
-      notify('warn', 'Erreur lors de la recherche du colis');
+    } finally {
+      processingRef.current = false;
+      setIsSearching(false);
     }
-    setIsSearching(false);
   };
 
   const handleConfirm = async () => {
@@ -149,7 +170,7 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
                     <p className="font-mono text-xs font-bold text-green-800">{packageDisplayCode(pkg)}</p>
                     <p className="text-[11px] text-slate-600 truncate">{pkg.contactName} • {pkg.postalCode} {pkg.city}</p>
                   </div>
-                  <button onClick={() => setScannedPkgs(prev => prev.filter(p => p.id !== pkg.id))} disabled={isClaiming} className="p-2 text-slate-400 hover:text-red-500">
+                  <button onClick={() => { addedIdsRef.current.delete(pkg.id); setScannedPkgs(prev => prev.filter(p => p.id !== pkg.id)); }} disabled={isClaiming} className="p-2 text-slate-400 hover:text-red-500">
                     <Trash2 size={16} />
                   </button>
                 </div>
