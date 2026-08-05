@@ -30,6 +30,7 @@ import {
   PostalCodeMapping, User, UserRole
 } from '../types';
 import { extractScanTokens } from '../utils/barcode';
+import { geocodeAddress, getGoogleMapsApiKey } from './gmproService';
 
 // Collections Firestore
 const HUBS_COLLECTION = 'hubs';
@@ -908,6 +909,106 @@ export const claimPackagesForDelivery = async (params: {
     location,
     claimMode: true,
     newStatus: PackageStatus.IN_DELIVERY
+  });
+};
+
+// ---- Optimisation & édition de tournée côté chauffeur ----
+
+const haversineKm = (a: { lat: number; lng: number }, b: { lat: number; lng: number }): number => {
+  const R = 6371;
+  const dLat = (b.lat - a.lat) * Math.PI / 180;
+  const dLng = (b.lng - a.lng) * Math.PI / 180;
+  const s = Math.sin(dLat / 2) ** 2 +
+    Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+};
+
+/**
+ * Optimise l'ordre des arrêts d'une tournée par plus-proche-voisin depuis le
+ * point de départ (position GPS du chauffeur). Géocode les arrêts sans
+ * coordonnées via Google Geocoding. Les arrêts déjà terminés/échoués gardent
+ * leur place en tête ; seuls les arrêts restants (PENDING/ARRIVED) sont
+ * réordonnés. Met à jour les `sequence` et sauvegarde.
+ * Retourne le nb d'arrêts réordonnés, ou -1 si impossible (pas de coords).
+ */
+export const optimizeDriverMission = async (
+  missionId: string,
+  startCoords: { lat: number; lng: number }
+): Promise<number> => {
+  const snap = await getDoc(doc(db, MISSIONS_COLLECTION, missionId));
+  if (!snap.exists()) throw new Error('Tournée introuvable');
+  const mission = { id: snap.id, ...snap.data() } as Mission;
+  const apiKey = getGoogleMapsApiKey();
+
+  const done = mission.stops.filter(s => s.status === StopStatus.COMPLETED || s.status === StopStatus.FAILED || s.status === StopStatus.SKIPPED);
+  const pending = mission.stops.filter(s => !done.includes(s));
+  if (pending.length <= 1) return 0;
+
+  // Géocoder les arrêts sans coordonnées
+  for (const s of pending) {
+    if (!s.coordinates && apiKey) {
+      const c = await geocodeAddress(s.address, s.city, s.postalCode, apiKey);
+      if (c) s.coordinates = c;
+    }
+  }
+  const withCoords = pending.filter(s => s.coordinates);
+  if (withCoords.length < 2) return -1; // géocodage indisponible → optimisation impossible
+
+  // Plus-proche-voisin depuis le point de départ
+  const remaining = [...pending];
+  const ordered: MissionStop[] = [];
+  let cursor = startCoords;
+  while (remaining.length > 0) {
+    let bestIdx = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < remaining.length; i++) {
+      const c = remaining[i].coordinates;
+      const d = c ? haversineKm(cursor, c) : Infinity; // sans coords → repoussé en fin
+      if (d < bestDist) { bestDist = d; bestIdx = i; }
+    }
+    const next = remaining.splice(bestIdx, 1)[0];
+    ordered.push(next);
+    if (next.coordinates) cursor = next.coordinates;
+  }
+
+  // Recomposer : arrêts terminés en tête (ordre inchangé), puis optimisés
+  const finalStops = [...done, ...ordered].map((s, i) => ({ ...s, sequence: i + 1 }));
+  await updateDoc(doc(db, MISSIONS_COLLECTION, missionId), { stops: finalStops, updatedAt: new Date().toISOString() });
+  return ordered.length;
+};
+
+/**
+ * Ajoute un arrêt de livraison saisi manuellement par le chauffeur (adresse
+ * hors import). Aucun colis rattaché — c'est un passage supplémentaire.
+ */
+export const addManualStopToMission = async (
+  missionId: string,
+  stopData: { contactName: string; address: string; postalCode: string; city: string; contactPhone?: string; notes?: string }
+): Promise<void> => {
+  const snap = await getDoc(doc(db, MISSIONS_COLLECTION, missionId));
+  if (!snap.exists()) throw new Error('Tournée introuvable');
+  const mission = { id: snap.id, ...snap.data() } as Mission;
+  const maxSeq = mission.stops.reduce((m, s) => Math.max(m, s.sequence), 0);
+  const now = new Date().toISOString();
+  const stop = cleanUndefined({
+    id: `manual-${now.replace(/[:.]/g, '')}-${maxSeq + 1}`,
+    sequence: maxSeq + 1,
+    type: 'DELIVERY',
+    address: stopData.address,
+    city: stopData.city,
+    postalCode: stopData.postalCode,
+    contactName: stopData.contactName,
+    contactPhone: stopData.contactPhone,
+    packageIds: [],
+    packageCount: 0,
+    serviceTime: 5,
+    notes: `⚠️ Arrêt ajouté manuellement${stopData.notes ? ' — ' + stopData.notes : ''}`,
+    status: StopStatus.PENDING
+  }) as MissionStop;
+
+  await updateDoc(doc(db, MISSIONS_COLLECTION, missionId), {
+    stops: [...mission.stops, stop],
+    updatedAt: now
   });
 };
 

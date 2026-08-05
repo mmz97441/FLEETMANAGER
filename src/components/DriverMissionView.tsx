@@ -24,6 +24,8 @@ import {
   subscribeToPackages,
   updateMission,
   updateMissionFields,
+  optimizeDriverMission,
+  addManualStopToMission,
   updateMissionStatus,
   updatePackageStatus
 } from '../services/missionService';
@@ -33,6 +35,7 @@ import PickupScanView from './PickupScanView';
 import TransferReceiveModal from './TransferReceiveModal';
 import ClaimScanModal from './ClaimScanModal';
 import ScanGateDialog from './ScanGateDialog';
+import StopReorderModal from './StopReorderModal';
 import { packageMatchesCode, packageScanCodes, packageDisplayCode } from '../utils/barcode';
 const BarcodeScanner = lazy(() => import('./BarcodeScanner'));
 import {
@@ -265,6 +268,10 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   const [showScanGate, setShowScanGate] = useState(false); // garde-fou "colis manquants"
   const [showTransferModal, setShowTransferModal] = useState(false); // réception de colis en route
   const [showClaimModal, setShowClaimModal] = useState(false); // prise en charge par scan
+  const [isOptimizing, setIsOptimizing] = useState(false);
+  const [showReorder, setShowReorder] = useState(false);
+  const [showManualStop, setShowManualStop] = useState(false);
+  const [manualStop, setManualStop] = useState({ contactName: '', address: '', postalCode: '', city: '', contactPhone: '' });
   const [stopPackages, setStopPackages] = useState<Package[]>([]);
   
   // Return to hub workflow
@@ -862,6 +869,52 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
       if (prev.some(b => b.toUpperCase() === barcode.toUpperCase())) return prev;
       return [...prev, barcode];
     });
+  };
+
+  // Optimiser l'ordre des arrêts depuis la position GPS du chauffeur
+  const handleOptimizeTour = async () => {
+    if (!activeMission || isOptimizing) return;
+    setIsOptimizing(true);
+    try {
+      let coords: { lat: number; lng: number };
+      try {
+        coords = await getCurrentPosition();
+      } catch {
+        showNotif('📍 Position GPS indisponible — activez la localisation');
+        setIsOptimizing(false);
+        return;
+      }
+      const n = await optimizeDriverMission(activeMission.id, coords);
+      if (n === -1) showNotif('❌ Optimisation impossible (adresses non géolocalisées)');
+      else if (n === 0) showNotif('Rien à optimiser');
+      else showNotif(`🧭 Tournée optimisée — ${n} arrêts réordonnés`);
+    } catch (e) {
+      showNotif('❌ Erreur lors de l\'optimisation');
+    }
+    setIsOptimizing(false);
+  };
+
+  // Ajouter un arrêt manuel (adresse hors import)
+  const handleAddManualStop = async () => {
+    if (!activeMission) return;
+    if (!manualStop.address.trim() || !manualStop.city.trim()) {
+      showNotif('⚠️ Adresse et ville obligatoires');
+      return;
+    }
+    try {
+      await addManualStopToMission(activeMission.id, {
+        contactName: manualStop.contactName.trim() || 'Arrêt manuel',
+        address: manualStop.address.trim(),
+        postalCode: manualStop.postalCode.trim(),
+        city: manualStop.city.trim(),
+        contactPhone: manualStop.contactPhone.trim() || undefined
+      });
+      setShowManualStop(false);
+      setManualStop({ contactName: '', address: '', postalCode: '', city: '', contactPhone: '' });
+      showNotif('➕ Arrêt manuel ajouté à votre tournée');
+    } catch {
+      showNotif('❌ Erreur lors de l\'ajout de l\'arrêt');
+    }
   };
 
   const handlePickupComplete = async (scannedIds: string[], missingIds: string[], signatureBase64?: string) => {
@@ -1518,6 +1571,29 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
           📦 Prendre en charge des colis (scan)
         </button>
 
+        {/* Organisation de la tournée : optimiser / réorganiser / ajouter un arrêt */}
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={handleOptimizeTour}
+            disabled={isOptimizing}
+            className="flex items-center justify-center gap-2 py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold active:scale-95 transition-transform disabled:opacity-50"
+          >
+            {isOptimizing ? <Loader2 size={16} className="animate-spin" /> : '🧭'} Optimiser
+          </button>
+          <button
+            onClick={() => setShowReorder(true)}
+            className="flex items-center justify-center gap-2 py-3 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-700 active:scale-95 transition-transform"
+          >
+            ↕️ Réorganiser
+          </button>
+        </div>
+        <button
+          onClick={() => setShowManualStop(true)}
+          className="w-full flex items-center justify-center gap-2 py-3 bg-white border border-amber-300 rounded-xl text-sm font-medium text-amber-700 active:scale-95 transition-transform"
+        >
+          ➕ Ajouter un arrêt manuel
+        </button>
+
         {/* Bouton retour liste */}
         <button
           onClick={() => setActiveMissionId(null)}
@@ -1561,6 +1637,65 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
               showNotif(`📦 ${count} colis pris en charge dans votre tournée`);
             }}
           />
+        )}
+
+        {/* === MODAL RÉORGANISER (drag & drop) === */}
+        {showReorder && activeMission && (
+          <StopReorderModal
+            isOpen={showReorder}
+            mission={activeMission}
+            onClose={() => setShowReorder(false)}
+            onSave={async (m, newStops) => {
+              await updateMissionFields(m.id, { stops: newStops });
+              setShowReorder(false);
+              showNotif('↕️ Ordre de tournée mis à jour');
+            }}
+          />
+        )}
+
+        {/* === MODAL AJOUT ARRÊT MANUEL === */}
+        {showManualStop && (
+          <div className="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center sm:p-4" onClick={() => setShowManualStop(false)}>
+            <div className="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-md animate-slide-up" onClick={e => e.stopPropagation()}>
+              <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+                <h3 className="font-bold text-slate-800">➕ Ajouter un arrêt manuel</h3>
+                <button onClick={() => setShowManualStop(false)} className="p-2 rounded-full hover:bg-slate-100"><XCircle size={20} className="text-slate-400" /></button>
+              </div>
+              <div className="p-4 space-y-3">
+                <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                  <span className="text-lg">⚠️</span>
+                  <p className="text-xs text-amber-800">
+                    Cet arrêt n'a <b>pas de colis rattaché</b> et ne provient pas d'un import client. Il ne sera pas suivi dans le portail client. À utiliser uniquement pour un passage exceptionnel.
+                  </p>
+                </div>
+                <input type="text" placeholder="Nom du destinataire (optionnel)" value={manualStop.contactName}
+                  onChange={e => setManualStop(s => ({ ...s, contactName: e.target.value }))}
+                  className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 outline-none" />
+                <input type="text" placeholder="Adresse *" value={manualStop.address}
+                  onChange={e => setManualStop(s => ({ ...s, address: e.target.value }))}
+                  className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 outline-none" />
+                <div className="flex gap-2">
+                  <input type="text" inputMode="numeric" placeholder="Code postal" value={manualStop.postalCode}
+                    onChange={e => setManualStop(s => ({ ...s, postalCode: e.target.value }))}
+                    className="w-1/3 px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 outline-none" />
+                  <input type="text" placeholder="Ville *" value={manualStop.city}
+                    onChange={e => setManualStop(s => ({ ...s, city: e.target.value }))}
+                    className="flex-1 px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 outline-none" />
+                </div>
+                <input type="tel" placeholder="Téléphone (optionnel)" value={manualStop.contactPhone}
+                  onChange={e => setManualStop(s => ({ ...s, contactPhone: e.target.value }))}
+                  className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 outline-none" />
+              </div>
+              <div className="p-4 border-t border-slate-200 flex gap-2">
+                <button onClick={handleAddManualStop} className="flex-1 py-3 bg-amber-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform">
+                  Ajouter l'arrêt
+                </button>
+                <button onClick={() => setShowManualStop(false)} className="px-5 py-3 bg-slate-100 text-slate-700 rounded-xl font-medium text-sm">
+                  Annuler
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* === MODAL ÉCHEC === */}
