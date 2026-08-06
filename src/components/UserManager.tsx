@@ -8,6 +8,8 @@ import ConfirmModal from './ConfirmModal';
 import { sendUserInvitationEmail } from '../services/emailService';
 import { createInvitation, getActivationUrl, resendInvitation } from '../services/invitationService';
 import { toggleUserStatus, forcePasswordReset } from '../services/cloudFunctions';
+import { cleanupDuplicateUserProfiles } from '../services/firestore';
+import { notifySuccess, notifyError, notifyInfo } from '../services/logService';
 import { usePermissions, Permission } from '../usePermissions';
 import { validateName, validateEmail, validatePhone, ValidationResult } from '../utils/validation';
 
@@ -43,6 +45,30 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
       type: 'ADD' | 'UPDATE' | 'DELETE';
       data?: any;
   } | null>(null);
+
+  // Nettoyage des profils en double (issus de la migration d'ID)
+  const [isCleaning, setIsCleaning] = useState(false);
+  const handleCleanupDuplicates = async () => {
+    if (!currentUser || isCleaning) return;
+    setIsCleaning(true);
+    notifyInfo('Analyse des profils en double…');
+    try {
+      const res = await cleanupDuplicateUserProfiles(currentUser);
+      if (res.removed.length === 0 && res.skipped.length === 0) {
+        notifySuccess('Aucun profil en double trouvé. Tout est propre 👍');
+      } else {
+        if (res.removed.length > 0) {
+          notifySuccess(`${res.removed.length} profil(s) en double supprimé(s) : ${res.removed.map(r => r.name || r.email).join(', ')}`);
+        }
+        if (res.skipped.length > 0) {
+          notifyError(`${res.skipped.length} cas ambigu(s) non touché(s) — à vérifier : ${res.skipped.map(s => s.email).join(', ')}`, 12000);
+        }
+      }
+    } catch (e) {
+      notifyError(e instanceof Error ? e.message : 'Échec du nettoyage des doublons');
+    }
+    setIsCleaning(false);
+  };
 
   // MENU & LOADING STATES
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -562,17 +588,28 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
                 </div>
             </div>
 
-            {/* Bouton d'Action Unique */}
-            {canCreateUser && (
-                <div className="w-full xl:w-auto flex justify-end">
-                    <button 
+            {/* Boutons d'Action */}
+            <div className="w-full xl:w-auto flex justify-end gap-2">
+                {canDeleteUser && (
+                    <button
+                        onClick={handleCleanupDuplicates}
+                        disabled={isCleaning}
+                        title="Détecte et supprime les profils en double laissés par la migration de compte"
+                        className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all text-sm whitespace-nowrap disabled:opacity-50"
+                    >
+                        <RefreshCw size={16} className={isCleaning ? 'animate-spin' : ''} />
+                        {isCleaning ? 'Nettoyage…' : 'Nettoyer les doublons'}
+                    </button>
+                )}
+                {canCreateUser && (
+                    <button
                         onClick={handleOpenAdd}
                         className="bg-slate-900 hover:bg-black text-white px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 shadow-lg hover:shadow-xl transition-all text-sm whitespace-nowrap"
                     >
                         <UserPlus size={18} /> Ajouter un Utilisateur
                     </button>
-                </div>
-            )}
+                )}
+            </div>
         </div>
 
         {/* --- GRID VIEW (CARDS INTERACTIVES) --- */}

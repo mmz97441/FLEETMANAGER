@@ -223,6 +223,88 @@ export const updateUserProfile = async (user: User) => {
     }
 };
 
+/**
+ * Résultat d'un nettoyage des profils utilisateurs en double.
+ */
+export interface DuplicateCleanupResult {
+  groupsChecked: number;
+  removed: { id: string; email: string; name: string }[];
+  skipped: { email: string; reason: string; ids: string[] }[];
+}
+
+/**
+ * Supprime les profils utilisateurs en double laissés par la migration d'ID
+ * (un profil créé avant la 1re connexion → nouveau doc à l'UID Auth, ancien doc
+ * non supprimable par le chauffeur lui-même).
+ *
+ * Discriminateur sûr : le VRAI profil est celui qui possède `lastLoginAt`
+ * (écrit uniquement sur users/{authUid} à chaque connexion). Le doublon de
+ * migration n'en a jamais. En cas d'ambiguïté (aucun ou plusieurs profils avec
+ * connexion pour un même email), on NE supprime RIEN et on signale.
+ *
+ * Réservé aux admins (les règles Firestore l'imposent aussi côté serveur).
+ */
+export const cleanupDuplicateUserProfiles = async (
+  currentUser: User
+): Promise<DuplicateCleanupResult> => {
+  const result: DuplicateCleanupResult = { groupsChecked: 0, removed: [], skipped: [] };
+
+  const role = String(currentUser.role || '').toLowerCase();
+  const isAdmin = /^(admin|pr[eé]sident[e]?|directeur|directrice|direction|secr[eé]taire|secr[eé]tariat)$/.test(role);
+  if (!isAdmin) throw new Error("Seul un administrateur peut nettoyer les profils en double.");
+
+  const snap = await getDocs(collection(db, "users"));
+  const all = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+
+  // Grouper par email normalisé
+  const byEmail = new Map<string, typeof all>();
+  for (const u of all) {
+    const email = String(u.email || '').toLowerCase().trim();
+    if (!email) continue;
+    const arr = byEmail.get(email) || [];
+    arr.push(u);
+    byEmail.set(email, arr);
+  }
+
+  for (const [email, group] of byEmail) {
+    if (group.length < 2) continue;
+    result.groupsChecked++;
+
+    // Profils ayant déjà servi à se connecter (donc = users/{authUid})
+    const withLogin = group
+      .filter(u => !!u.lastLoginAt)
+      .sort((a, b) => String(b.lastLoginAt).localeCompare(String(a.lastLoginAt)));
+
+    if (withLogin.length === 0) {
+      result.skipped.push({ email, reason: "aucun profil avec connexion (ambigu)", ids: group.map(u => u.id) });
+      continue;
+    }
+    if (withLogin.length > 1) {
+      result.skipped.push({ email, reason: "plusieurs profils actifs (vérif. manuelle)", ids: group.map(u => u.id) });
+      continue;
+    }
+
+    const keeper = withLogin[0];
+    const toRemove = group.filter(u => u.id !== keeper.id); // aucun n'a de lastLoginAt
+
+    for (const dup of toRemove) {
+      try {
+        await deleteDoc(doc(db, "users", dup.id));
+        result.removed.push({
+          id: dup.id,
+          email,
+          name: `${dup.firstName || ''} ${dup.lastName || ''}`.trim() || '(sans nom)'
+        });
+      } catch (e) {
+        reportError('users.cleanupDuplicate', e, { silent: true, extra: { dupId: dup.id, email } });
+        result.skipped.push({ email, reason: "suppression refusée", ids: [dup.id] });
+      }
+    }
+  }
+
+  return result;
+};
+
 /** Enregistre la date de dernière connexion (appelé à chaque ouverture de l'app). */
 export const recordUserLogin = async (uid: string) => {
     try {
