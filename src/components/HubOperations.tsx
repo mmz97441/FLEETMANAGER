@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import {
   Hub, Package, PackageStatus, PACKAGE_STATUS_COLORS,
-  Zone, ZONE_COLORS, User, UserRole, Vehicle, Mission
+  Zone, ZONE_COLORS, User, UserRole, Vehicle, Mission, MissionStatus
 } from '../types';
 import {
   updatePackageStatus,
@@ -152,7 +152,7 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
   // Mission du chauffeur pour afficher le contexte
   const driverMission = useMemo(() => {
     if (!selectedDriverId) return null;
-    return missions.find(m => m.driverId === selectedDriverId && m.status !== 'Terminée') || null;
+    return missions.find(m => m.driverId === selectedDriverId && m.status !== MissionStatus.COMPLETED) || null;
   }, [missions, selectedDriverId]);
 
   // Véhicule du chauffeur
@@ -285,7 +285,7 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
         assignedDriverName: assignedDriver 
           ? `${assignedDriver.firstName} ${assignedDriver.lastName}` 
           : 'Chauffeur inconnu',
-        assignedVehiclePlate: assignedVehicle?.licensePlate || 'Véhicule non assigné',
+        assignedVehiclePlate: assignedVehicle?.plate || 'Véhicule non assigné',
         assignedZone: pkg.zone || 'Non définie'
       });
       
@@ -310,10 +310,10 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
         driverId: selectedDriverId,
         driverName: driver ? `${driver.firstName} ${driver.lastName}` : '',
         vehicleId: vehicle?.id || '',
-        vehiclePlate: vehicle?.licensePlate || '',
+        vehiclePlate: vehicle?.plate || '',
         hubId: selectedHubId,
         hubName: selectedHub?.name || '',
-        notes: `Chargé dans ${vehicle?.licensePlate || 'véhicule'}`
+        notes: `Chargé dans ${vehicle?.plate || 'véhicule'}`
       }, {
         currentDriverId: selectedDriverId,
         currentVehicleId: vehicle?.id
@@ -576,7 +576,7 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
                 <Truck size={18} className="text-indigo-600" />
                 <div>
                   <p className="text-sm font-bold text-indigo-800">
-                    Mission {driverMission.zone} — {driverVehicle?.licensePlate || 'Véhicule'}
+                    Mission {driverMission.zone} — {driverVehicle?.plate || 'Véhicule'}
                   </p>
                   <p className="text-xs text-indigo-600">
                     {driverMission.totalPackages} colis • {driverMission.stops?.length || 0} stops

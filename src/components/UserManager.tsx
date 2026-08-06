@@ -92,9 +92,6 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
       case 'email':
         if (value.length > 0) validation = validateEmail(value);
         break;
-      case 'phone':
-        if (value.length > 0) validation = validatePhone(value);
-        break;
     }
     
     setFormErrors(prev => ({

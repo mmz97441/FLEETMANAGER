@@ -481,7 +481,7 @@ const App: React.FC = () => {
       logActivity(currentUser, ActivityAction.ISSUE_CREATED, {
         targetType: 'issue',
         targetId: issue.id,
-        targetName: vehicle ? `${vehicle.plate} - ${issue.title}` : issue.title
+        targetName: vehicle ? `${vehicle.plate} - ${issue.description}` : issue.description
       });
     }
   };
@@ -497,7 +497,7 @@ const App: React.FC = () => {
           logActivity(currentUser, ActivityAction.ISSUE_RESOLVED, {
             targetType: 'issue',
             targetId: id,
-            targetName: vehicle ? `${vehicle.plate} - ${issueToUpdate.title}` : issueToUpdate.title
+            targetName: vehicle ? `${vehicle.plate} - ${issueToUpdate.description}` : issueToUpdate.description
           });
         }
     }

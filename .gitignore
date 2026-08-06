@@ -111,3 +111,12 @@ dist
 
 # Stores VSCode settings outside the repo
 .vscode
+
+# Fichiers de sauvegarde ad-hoc (Dashboard.tsx.backup etc.)
+*.backup
+*.bak
+*.orig
+
+# macOS
+.DS_Store
+.gstack/

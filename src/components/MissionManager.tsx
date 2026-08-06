@@ -246,15 +246,11 @@ const MissionManager: React.FC<MissionManagerProps> = ({
       await updateMissionFields(mission.id, { stops: newStops });
       
       // Log de l'activité
-      await logActivity({
-        userId: currentUser.id,
-        userEmail: currentUser.email,
-        userName: `${currentUser.firstName} ${currentUser.lastName}`,
-        action: ActivityAction.MISSION_UPDATED,
+      await logActivity(currentUser, ActivityAction.MISSION_UPDATED, {
         targetType: 'mission',
         targetId: mission.id,
         targetName: `Tournée ${mission.driverName || 'Non assigné'}`,
-        details: `Ordre des stops modifié manuellement (${newStops.length} stops)`
+        details: { changes: [`Ordre des stops modifié manuellement (${newStops.length} stops)`] }
       });
 
       console.log('✅ Ordre des stops sauvegardé');
@@ -1318,11 +1314,9 @@ const MissionManager: React.FC<MissionManagerProps> = ({
       });
 
       await updateMissionFields(mission.id, { stops: updatedStops });
-      await logActivity({
-        type: 'MISSION_UPDATED',
-        userId: currentUser.id,
-        userName: `${currentUser.firstName} ${currentUser.lastName}`,
-        target: `Mission ${mission.zone}`,
+      await logActivity(currentUser, ActivityAction.MISSION_UPDATED, {
+        targetType: 'mission',
+        targetName: `Mission ${mission.zone}`,
         details: { changes: [`Stop ${stop.contactName} déplacé vers le haut`] }
       });
     } catch (err) {
@@ -1347,11 +1341,9 @@ const MissionManager: React.FC<MissionManagerProps> = ({
       });
 
       await updateMissionFields(mission.id, { stops: updatedStops });
-      await logActivity({
-        type: 'MISSION_UPDATED',
-        userId: currentUser.id,
-        userName: `${currentUser.firstName} ${currentUser.lastName}`,
-        target: `Mission ${mission.zone}`,
+      await logActivity(currentUser, ActivityAction.MISSION_UPDATED, {
+        targetType: 'mission',
+        targetName: `Mission ${mission.zone}`,
         details: { changes: [`Stop ${stop.contactName} déplacé vers le bas`] }
       });
     } catch (err) {
@@ -1400,11 +1392,9 @@ const MissionManager: React.FC<MissionManagerProps> = ({
         } catch (e) { console.warn('Erreur marquage retour colis:', pkgId, e); }
       }
 
-      await logActivity({
-        type: 'MISSION_UPDATED',
-        userId: currentUser.id,
-        userName: `${currentUser.firstName} ${currentUser.lastName}`,
-        target: `Mission ${mission.zone}`,
+      await logActivity(currentUser, ActivityAction.MISSION_UPDATED, {
+        targetType: 'mission',
+        targetName: `Mission ${mission.zone}`,
         details: { changes: [`Stop ${stop.contactName} supprimé (${stop.packageCount} colis à retourner)`] }
       });
 
@@ -1440,11 +1430,9 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
       await updateMissionFields(mission.id, { stops: updatedStops });
 
-      await logActivity({
-        type: 'MISSION_UPDATED',
-        userId: currentUser.id,
-        userName: `${currentUser.firstName} ${currentUser.lastName}`,
-        target: `Mission ${mission.zone}`,
+      await logActivity(currentUser, ActivityAction.MISSION_UPDATED, {
+        targetType: 'mission',
+        targetName: `Mission ${mission.zone}`,
         details: { changes: [`Stop ${stop.contactName} modifié`] }
       });
 
@@ -1492,11 +1480,9 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
       await updateMissionFields(mission.id, { stops: updatedStops });
 
-      await logActivity({
-        type: 'MISSION_UPDATED',
-        userId: currentUser.id,
-        userName: `${currentUser.firstName} ${currentUser.lastName}`,
-        target: `Mission ${mission.zone}`,
+      await logActivity(currentUser, ActivityAction.MISSION_UPDATED, {
+        targetType: 'mission',
+        targetName: `Mission ${mission.zone}`,
         details: { changes: [`Nouveau stop ajouté: ${newStopForm.contactName}`] }
       });
 
@@ -2060,11 +2046,10 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                     
                     if (Object.keys(fields).length > 0) {
                       await updatePackageFields(editingPkg.id, fields);
-                      await logActivity({
-                        type: 'PACKAGE_UPDATED',
-                        userId: currentUser.id,
-                        userName: `${currentUser.firstName} ${currentUser.lastName}`,
-                        target: editingPkg.orderNumber,
+                      await logActivity(currentUser, ActivityAction.ITEM_UPDATED, {
+                        targetType: 'package',
+                        targetId: editingPkg.id,
+                        targetName: editingPkg.orderNumber,
                         details: { changes: Object.keys(fields), before: {}, after: fields }
                       });
                     }
@@ -2109,11 +2094,10 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                   setIsSavingPkg(true);
                   try {
                     await deletePackage(deletingPkg.id);
-                    await logActivity({
-                      type: 'PACKAGE_DELETED',
-                      userId: currentUser.id,
-                      userName: `${currentUser.firstName} ${currentUser.lastName}`,
-                      target: deletingPkg.orderNumber,
+                    await logActivity(currentUser, ActivityAction.ITEM_DELETED, {
+                      targetType: 'package',
+                      targetId: deletingPkg.id,
+                      targetName: deletingPkg.orderNumber,
                       details: { metadata: { contactName: deletingPkg.contactName, address: deletingPkg.address } }
                     });
                     setDeletingPkg(null);
@@ -3210,7 +3194,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                   className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none"
                 >
                   <option value="">Sélectionner un chauffeur...</option>
-                  {users.filter(u => u.role === UserRole.DRIVER && u.isActive !== false).map(driver => {
+                  {users.filter(u => u.role === UserRole.DRIVER && !u.isDisabled).map(driver => {
                     const vehicle = vehicles.find(v => v.assignedDriverId === driver.id);
                     return (
                       <option key={driver.id} value={driver.id}>

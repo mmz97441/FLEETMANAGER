@@ -549,8 +549,8 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
           
           // Récupérer les IDs des admins/direction/président pour notification in-app
           const adminIds = users
-            .filter(u => u.role === UserRole.ADMIN || u.role === UserRole.DIRECTOR || 
-                        u.role === UserRole.MANAGER || u.role === UserRole.PRESIDENT)
+            .filter(u => u.role === UserRole.ADMIN || u.role === UserRole.DIRECTOR ||
+                        u.role === UserRole.PRESIDENT)
             .map(u => u.id);
           
           // Labels pour les types d'absence
@@ -563,6 +563,8 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
             [AbsenceType.MATERNITE]: 'congé maternité',
             [AbsenceType.PATERNITE]: 'congé paternité',
             [AbsenceType.FORMATION]: 'formation',
+            [AbsenceType.INJUSTIFIEE]: 'absence injustifiée',
+            [AbsenceType.RECUP]: 'récupération',
             [AbsenceType.AUTRE]: 'autre absence'
           };
           

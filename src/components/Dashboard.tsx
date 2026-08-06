@@ -443,7 +443,7 @@ const Dashboard: React.FC<DashboardProps> = ({
 
     // --- INCIDENTS ---
     const openIssues = issues.filter(i => i.status !== IssueStatus.RESOLVED);
-    const criticalIssues = openIssues.filter(i => i.priority === 'high');
+    const criticalIssues = openIssues.filter(i => i.priority === 'High');
 
     // ============================================================================
     // KPIs FINANCIERS PRÉSIDENT
@@ -1109,8 +1109,8 @@ const Dashboard: React.FC<DashboardProps> = ({
                     <p className="text-xs text-slate-500 truncate max-w-[200px]">{issue.description}</p>
                   </div>
                   <span className={`text-xs font-bold px-2 py-1 rounded-full ${
-                    issue.priority === 'high' ? 'bg-red-100 text-red-700' :
-                    issue.priority === 'medium' ? 'bg-orange-100 text-orange-700' :
+                    issue.priority === 'High' ? 'bg-red-100 text-red-700' :
+                    issue.priority === 'Medium' ? 'bg-orange-100 text-orange-700' :
                     'bg-slate-100 text-slate-600'
                   }`}>
                     {issue.status}

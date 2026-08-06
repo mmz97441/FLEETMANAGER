@@ -11,24 +11,29 @@ service firebase.storage {
       return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role;
     }
 
-    // Rôles d'administration
+    // Rôles d'administration (regex ancrées pour éviter les faux positifs type "sous-président")
     function isAdminRole() {
-      return request.auth != null && getUserRole().matches('(?i)(admin|pr.*sid.*|direct.*|secr.*tariat)');
+      return request.auth != null && getUserRole().matches('(?i)^(admin|pr[eé]sident[e]?|directeur|directrice|direction|secr[eé]taire|secr[eé]tariat)$');
     }
 
     // Est un chauffeur
     function isDriver() {
-      return request.auth != null && getUserRole().matches('(?i)chauffeur');
+      return request.auth != null && getUserRole().matches('(?i)^(chauffeur|chauffeuse)$');
     }
 
     // Est un mécanicien
     function isMechanic() {
-      return request.auth != null && getUserRole().matches('(?i)m.*canicien');
+      return request.auth != null && getUserRole().matches('(?i)^(m[eé]canicien|m[eé]canicienne)$');
+    }
+
+    // Est un client
+    function isClient() {
+      return request.auth != null && getUserRole().matches('(?i)^client$');
     }
 
     // Utilisateur interne (tous sauf Client)
     function isInternalUser() {
-      return request.auth != null && getUserRole().matches('(?i)(admin|pr.*sid.*|direct.*|secr.*tariat|chauffeur|m.*canicien|stagiaire)');
+      return request.auth != null && getUserRole().matches('(?i)^(admin|pr[eé]sident[e]?|directeur|directrice|direction|secr[eé]taire|secr[eé]tariat|chauffeur|chauffeuse|m[eé]canicien|m[eé]canicienne|stagiaire)$');
     }
 
     // ============================================================
@@ -59,54 +64,55 @@ service firebase.storage {
     }
 
     // ============================================================
-    // PHOTOS INCIDENTS
+    // PHOTOS INCIDENTS (données internes, jamais pour les clients)
     // ============================================================
     // Chemin: issues/{vehicleId}/{timestamp}_{filename}
-    // Lecture : tous les connectés
-    // Écriture : admin + chauffeurs + mécaniciens (signalent des incidents)
+    // Lecture : utilisateurs internes uniquement (les clients n'ont rien à y voir)
+    // Écriture : admin + chauffeurs + mécaniciens
     match /issues/{allPaths=**} {
-      allow read: if request.auth != null;
+      allow read: if isInternalUser();
       allow write: if (isAdminRole() || isDriver() || isMechanic())
         && request.resource.size < 10 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
     }
 
     // ============================================================
-    // FACTURES INCIDENTS (devis/factures mécanicien)
+    // FACTURES INCIDENTS (données internes financières)
     // ============================================================
     // Chemin: invoices/{vehicleId}/{timestamp}_{filename}
-    // Lecture : tous les connectés
+    // Lecture : utilisateurs internes uniquement
     // Écriture : admin + mécaniciens
     match /invoices/{allPaths=**} {
-      allow read: if request.auth != null;
+      allow read: if isInternalUser();
       allow write: if (isAdminRole() || isMechanic())
         && request.resource.size < 10 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
     }
 
     // ============================================================
-    // PHOTOS CARBURANT (tickets de caisse)
+    // PHOTOS CARBURANT (tickets de caisse, données internes)
     // ============================================================
     // Chemin: fuel-receipts/{vehicleId}/{timestamp}_{filename}
-    // Lecture : tous les connectés internes
+    // Lecture : utilisateurs internes uniquement
     // Écriture : admin + chauffeurs (saisissent les pleins)
     match /fuel-receipts/{allPaths=**} {
-      allow read: if request.auth != null;
+      allow read: if isInternalUser();
       allow write: if (isAdminRole() || isDriver())
         && request.resource.size < 10 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
     }
 
     // ============================================================
-    // DOCUMENTS ABSENCES
+    // DOCUMENTS ABSENCES (justificatifs employés)
     // ============================================================
     // Chemin: absences/{absenceId}/{timestamp}_{filename}
-    // Lecture : tous les connectés
-    // Écriture : tous les internes (chaque employé peut joindre un justificatif)
+    // Lecture : utilisateurs internes uniquement (RH / sa propre absence)
+    // Écriture : utilisateurs internes (image ou PDF uniquement, pas d'.exe ni .html)
     match /absences/{allPaths=**} {
-      allow read: if request.auth != null;
+      allow read: if isInternalUser();
       allow write: if isInternalUser()
-        && request.resource.size < 10 * 1024 * 1024;
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*|application/pdf');
     }
   }
 }

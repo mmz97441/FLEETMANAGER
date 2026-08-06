@@ -1039,7 +1039,7 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
           message={confirmState.message}
           type="danger"
           onConfirm={handleDelete}
-          onCancel={() => setConfirmState({ ...confirmState, isOpen: false })}
+          onClose={() => setConfirmState({ ...confirmState, isOpen: false })}
         />
       )}
     </div>

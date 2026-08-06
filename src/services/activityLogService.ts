@@ -111,11 +111,15 @@ const getActionLabel = (action: ActivityAction): string => {
     
     // Missions
     [ActivityAction.MISSION_CREATED]: 'a créé une mission',
+    [ActivityAction.MISSION_UPDATED]: 'a modifié une tournée',
     [ActivityAction.MISSION_DISPATCHED]: 'a dispatché une mission',
     [ActivityAction.MISSION_STARTED]: 'a démarré une mission',
     [ActivityAction.MISSION_COMPLETED]: 'a terminé une mission',
     [ActivityAction.MISSION_CANCELLED]: 'a annulé une mission',
     [ActivityAction.ITEM_CREATED]: 'a créé un élément',
+    [ActivityAction.ITEM_UPDATED]: 'a modifié un élément',
+    [ActivityAction.ITEM_DELETED]: 'a supprimé un élément',
+    [ActivityAction.STATUS_CHANGED]: 'a changé le statut',
     
     // Système
     [ActivityAction.SYSTEM_SETTINGS_UPDATED]: 'a modifié les paramètres',

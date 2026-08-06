@@ -322,7 +322,7 @@ const LeaveManager: React.FC<LeaveManagerProps> = ({ currentUser, users, leaves,
           
           // Notifier les admins/direction de la nouvelle demande
           const adminIds = users
-            .filter(u => u.role === UserRole.ADMIN || u.role === UserRole.DIRECTOR || u.role === UserRole.MANAGER || u.role === UserRole.PRESIDENT)
+            .filter(u => u.role === UserRole.ADMIN || u.role === UserRole.DIRECTOR || u.role === UserRole.PRESIDENT)
             .map(u => u.id);
           
           const leaveTypeLabels: Record<LeaveType, string> = {

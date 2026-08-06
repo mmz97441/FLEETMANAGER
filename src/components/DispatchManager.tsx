@@ -358,7 +358,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
           tour.driverId,
           selectedZone!,
           tour.stops.length,
-          tour.vehiclePlate
+          tour.vehiclePlate ?? ''
         ).catch(() => {});
       }
       

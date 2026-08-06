@@ -256,7 +256,7 @@ const DriverTourView: React.FC<DriverTourViewProps> = ({ currentUser, vehicles }
         {/* Zone */}
         <div className="text-center">
           <span className={`inline-block px-4 py-2 rounded-xl text-sm font-bold ${ZONE_COLORS[mission.zone]?.bg || 'bg-slate-100'} ${ZONE_COLORS[mission.zone]?.text || 'text-slate-600'}`}>
-            Mission {mission.zone} • {vehicle?.licensePlate || 'Véhicule'}
+            Mission {mission.zone} • {vehicle?.plate || 'Véhicule'}
           </span>
         </div>
       </div>
@@ -274,7 +274,7 @@ const DriverTourView: React.FC<DriverTourViewProps> = ({ currentUser, vehicles }
               Ma tournée — {mission.zone}
             </h2>
             <p className="text-sm text-slate-600 mt-0.5">
-              {vehicle?.licensePlate || 'Véhicule'} • {orderedStops.length} stops • {formatDistance(mission.totalDistance)}
+              {vehicle?.plate || 'Véhicule'} • {orderedStops.length} stops • {formatDistance(mission.totalDistance)}
             </p>
           </div>
           <div className="text-right">

@@ -126,7 +126,11 @@ export const NOTIFICATION_CONFIG: Record<NotificationType, {
   [NotificationType.DAILY_SUMMARY]: { icon: '📊', color: 'text-purple-700', bgColor: 'bg-purple-50' },
   [NotificationType.RATE_ALERT]: { icon: '📉', color: 'text-red-700', bgColor: 'bg-red-50' },
   [NotificationType.NEW_CLIENT]: { icon: '🤝', color: 'text-emerald-700', bgColor: 'bg-emerald-50' },
-  
+
+  [NotificationType.LEAVE_REQUEST]: { icon: '📝', color: 'text-indigo-700', bgColor: 'bg-indigo-50' },
+  [NotificationType.LEAVE_APPROVED]: { icon: '✅', color: 'text-green-700', bgColor: 'bg-green-50' },
+  [NotificationType.LEAVE_REJECTED]: { icon: '❌', color: 'text-red-700', bgColor: 'bg-red-50' },
+
   [NotificationType.SYSTEM]: { icon: 'ℹ️', color: 'text-slate-700', bgColor: 'bg-slate-50' },
 };
 

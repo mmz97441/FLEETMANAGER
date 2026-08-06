@@ -2,8 +2,15 @@
 import { GoogleGenAI } from "@google/genai";
 import { Vehicle, User, FuelLog, MaintenanceLog } from '../types';
 
-// NOTE: process.env.API_KEY is populated via vite.config.ts define for Vercel deployment compatibility
-// In Vercel Project Settings, add env var: VITE_GEMINI_API_KEY
+// ⚠️ SÉCURITÉ — RISQUE CONNU À CORRIGER
+// La variable VITE_GEMINI_API_KEY est bundlée dans le JS livré au navigateur
+// (le préfixe VITE_ rend la valeur publique). N'importe quel visiteur peut
+// extraire la clé du bundle et faire facturer ton compte Google.
+//
+// Solution recommandée : déplacer cet appel dans une Cloud Function callable
+// (functions/src/index.ts), conserver la clé dans la config Firebase Functions
+// (firebase functions:config:set gemini.key="..."), et appeler depuis le frontend
+// via httpsCallable. Voir TODO sécurité dans CHANGELOG.
 const apiKey = process.env.API_KEY;
 
 let ai: GoogleGenAI | null = null;

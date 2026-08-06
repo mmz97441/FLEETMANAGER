@@ -121,7 +121,7 @@ export const FuelManager: React.FC<FuelManagerProps> = ({ logs, vehicles, users,
     if (vehicleLogs.length === 0) {
       // Pas de logs, vérifier le km initial du véhicule
       const vehicle = vehicles.find(v => v.id === vehicleId);
-      return vehicle?.mileage || null;
+      return vehicle?.currentMileage || null;
     }
     
     return vehicleLogs[0].mileage;
@@ -640,7 +640,7 @@ export const FuelManager: React.FC<FuelManagerProps> = ({ logs, vehicles, users,
             canViewCosts && { label: 'Prix Moyen/L', value: `${stats.avgPrice.toFixed(3)} €`, icon: TrendingUp, color: 'text-indigo-600', bg: 'bg-indigo-50' },
             { label: 'Distance', value: `${stats.periodDistance.toLocaleString()} km`, icon: Route, color: 'text-orange-600', bg: 'bg-orange-50' },
             { label: 'Conso. Moyenne', value: `${stats.avgConsumption > 0 ? stats.avgConsumption.toFixed(1) : '-'} L/100`, icon: Gauge, color: 'text-emerald-600', bg: 'bg-emerald-50' }
-        ].filter(Boolean).map((stat, idx) => (
+        ].filter((s): s is { label: string; value: string; icon: typeof DollarSign; color: string; bg: string } => Boolean(s)).map((stat, idx) => (
             <div key={idx} className="bg-white p-6 rounded-2xl shadow-[0_2px_10px_-3px_rgba(6,81,237,0.1)] border border-slate-100 flex flex-col justify-between hover:-translate-y-1 transition-transform duration-300">
                 <div className="flex justify-between items-start mb-3">
                     <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">{stat.label}</p>
@@ -1256,7 +1256,7 @@ export const FuelManager: React.FC<FuelManagerProps> = ({ logs, vehicles, users,
                 <p className="font-bold text-slate-800">
                   {(() => {
                     const v = vehicles.find(v => v.id === editingLog.vehicleId);
-                    return v ? `${v.plate} - ${v.brand} ${v.model}` : editingLog.vehicleId;
+                    return v ? `${v.plate} - ${v.make || ''} ${v.model}`.trim() : editingLog.vehicleId;
                   })()}
                 </p>
               </div>

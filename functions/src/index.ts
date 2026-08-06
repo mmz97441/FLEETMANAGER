@@ -19,6 +19,50 @@ const auth = admin.auth();
 const APP_URL = process.env.APP_URL || "https://delivrex.vercel.app";
 
 // ============================================================================
+// HELPERS DE VÉRIFICATION DE RÔLE
+// ============================================================================
+// Avant ce helper, le code faisait `callerRole.includes("admin")` ce qui matchait
+// faussement "non-admin-readonly", "client-admin", "directeur-stagiaire", etc.
+// On normalise (lowercase + sans accents + trim) puis on compare exactement.
+
+const ADMIN_LIKE_ROLES = new Set([
+  "admin",
+  "administrateur",
+  "administratrice",
+  "president",
+  "presidente",
+  "directeur",
+  "directrice",
+  "direction",
+  "directeur exploitation",
+  "directrice exploitation",
+  "secretaire",
+  "secretariat",
+]);
+
+const SECRETARY_ALSO_ALLOWED = new Set([
+  ...ADMIN_LIKE_ROLES,
+  "secretaire",
+  "secretariat",
+]);
+
+function normalizeRole(role: unknown): string {
+  return String(role || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "") // retire les accents combinants
+    .trim();
+}
+
+function isAdminCaller(role: unknown): boolean {
+  return ADMIN_LIKE_ROLES.has(normalizeRole(role));
+}
+
+function isSecretaryOrAdminCaller(role: unknown): boolean {
+  return SECRETARY_ALSO_ALLOWED.has(normalizeRole(role));
+}
+
+// ============================================================================
 // OPTIMISATION DE TOURNÉES MULTI-VÉHICULES (GMPRO)
 // ============================================================================
 
@@ -227,11 +271,7 @@ export const deleteUserCompletely = functions
       );
     }
 
-    const callerRole = String(callerDoc.data()?.role || "").toLowerCase();
-    const allowedRoles = ["admin", "président", "president", "directeur", "director", "directeur exploitation"];
-    
-    const hasPermission = allowedRoles.some(role => callerRole.includes(role));
-    if (!hasPermission) {
+    if (!isAdminCaller(callerDoc.data()?.role)) {
       throw new functions.https.HttpsError(
         "permission-denied",
         "Vous n'avez pas les droits pour supprimer un utilisateur."
@@ -422,11 +462,7 @@ export const toggleUserStatus = functions
       );
     }
 
-    const callerRole = String(callerDoc.data()?.role || "").toLowerCase();
-    const allowedRoles = ["admin", "président", "president", "directeur", "director", "directeur exploitation"];
-    
-    const hasPermission = allowedRoles.some(role => callerRole.includes(role));
-    if (!hasPermission) {
+    if (!isAdminCaller(callerDoc.data()?.role)) {
       throw new functions.https.HttpsError(
         "permission-denied",
         "Vous n'avez pas les droits pour cette action."
@@ -549,11 +585,7 @@ export const forcePasswordReset = functions
       );
     }
 
-    const callerRole = String(callerDoc.data()?.role || "").toLowerCase();
-    const allowedRoles = ["admin", "président", "president", "directeur", "director", "directeur exploitation", "secret"];
-    
-    const hasPermission = allowedRoles.some(role => callerRole.includes(role));
-    if (!hasPermission) {
+    if (!isSecretaryOrAdminCaller(callerDoc.data()?.role)) {
       throw new functions.https.HttpsError(
         "permission-denied",
         "Vous n'avez pas les droits pour cette action."
@@ -873,94 +905,131 @@ export const activateAccount = functions
       }
 
       // ========================================
-      // ÉTAPE 3: CRÉER/MIGRER LE PROFIL FIRESTORE
+      // ÉTAPE 3: CRÉER/MIGRER LE PROFIL FIRESTORE + MARQUER L'INVITATION
       // ========================================
-      console.log(`📝 Migration/Création du profil Firestore...`);
-      
-      // Vérifier si le profil existe déjà avec le bon UID (double activation)
-      const existingNewProfile = await db.collection("users").doc(authUser.uid).get();
-      if (existingNewProfile.exists) {
-        console.log(`✅ Profil existe déjà avec le bon UID: ${authUser.uid}`);
-      } else {
-        // Chercher le profil original
-        const oldUserDoc = await db.collection("users").doc(invitation.userId).get();
-        
-        if (oldUserDoc.exists) {
-          // MIGRATION: Copier le profil existant vers le nouvel UID
-          const userData = oldUserDoc.data();
-          
-          await db.collection("users").doc(authUser.uid).set({
-            ...userData,
-            id: authUser.uid,
-            email: invitation.email.toLowerCase().trim(),
-            activatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            status: "active",
-          });
+      // Toutes les écritures Firestore sont enveloppées dans une transaction :
+      // si l'une plante, aucune n'est appliquée → pas d'invitation marquée "used"
+      // alors que le profil n'a pas été créé, et inversement.
+      // En cas d'échec Firestore après création Auth, on supprime le compte Auth
+      // pour ne pas laisser de compte orphelin (sinon le user retombe sur
+      // "Ce compte existe déjà" sans pouvoir se connecter).
+      console.log(`📝 Migration/Création du profil Firestore (transactionnel)...`);
 
-          // Supprimer l'ancien document
-          await db.collection("users").doc(invitation.userId).delete();
-          
-          console.log(`✅ Profil migré de ${invitation.userId} vers ${authUser.uid}`);
-        } else {
-          // RECONSTRUCTION: Créer le profil depuis les données de l'invitation
-          console.warn(`⚠️ Profil original ${invitation.userId} non trouvé - Reconstruction...`);
-          
-          // Construire le profil complet depuis l'invitation
-          const reconstructedProfile = {
-            id: authUser.uid,
-            email: invitation.email.toLowerCase().trim(),
-            firstName: invitation.firstName || "",
-            lastName: invitation.lastName || "",
-            role: invitation.role || "Chauffeur",
-            activatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            createdAt: invitation.createdAt || new Date().toISOString(),
-            status: "active",
-            // Champs par défaut pour un nouvel utilisateur
-            phone: "",
-            assignedVehicleId: null,
-            companyName: "",
-          };
-          
-          // Valider que les champs essentiels sont présents
-          if (!reconstructedProfile.firstName || !reconstructedProfile.lastName) {
-            console.error(`❌ Données insuffisantes pour reconstruire le profil`);
-            throw new functions.https.HttpsError(
-              "failed-precondition",
-              "Les informations de profil sont manquantes. Contactez votre administrateur."
-            );
-          }
-          
-          await db.collection("users").doc(authUser.uid).set(reconstructedProfile);
-          
-          console.log(`✅ Profil reconstruit pour ${authUser.uid}: ${reconstructedProfile.firstName} ${reconstructedProfile.lastName}`);
-        }
+      // Pré-validation : si on doit reconstruire, on a besoin de firstName/lastName.
+      // On vérifie AVANT la transaction pour ne pas créer Auth pour rien.
+      if (!invitation.firstName || !invitation.lastName) {
+        // On vérifiera dans la transaction si on tombe dans le cas "reconstruction"
+        // (sinon les noms viennent du profil existant)
       }
 
-      // ========================================
-      // ÉTAPE 4: MARQUER L'INVITATION COMME UTILISÉE
-      // ========================================
-      await invitationDoc.ref.update({
-        used: true,
-        usedAt: new Date().toISOString(),
-        authUid: authUser.uid,
-        activationSuccess: true,
-      });
+      const authUid = authUser.uid;
+      const normalizedEmail = invitation.email.toLowerCase().trim();
+      let wasReconstructed = false;
+
+      try {
+        await db.runTransaction(async (tx) => {
+          // --- Lectures (obligatoires AVANT toute écriture en transaction) ---
+          const newProfileRef = db.collection("users").doc(authUid);
+          const newProfileSnap = await tx.get(newProfileRef);
+
+          // L'ID original (pré-activation) peut être différent de l'UID Auth.
+          // Si invitation.userId est absent, on est forcément en cas "reconstruction".
+          const oldProfileRef = invitation.userId
+            ? db.collection("users").doc(invitation.userId)
+            : null;
+          const oldProfileSnap = oldProfileRef ? await tx.get(oldProfileRef) : null;
+
+          // --- Écritures ---
+          if (newProfileSnap.exists) {
+            // Double activation : le profil cible existe déjà, on ne touche pas
+            console.log(`✅ Profil existe déjà avec le bon UID: ${authUid}`);
+          } else if (oldProfileSnap && oldProfileSnap.exists) {
+            // MIGRATION : copier l'ancien profil vers le nouvel UID puis supprimer
+            const userData = oldProfileSnap.data() || {};
+            tx.set(newProfileRef, {
+              ...userData,
+              id: authUid,
+              email: normalizedEmail,
+              activatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              status: "active",
+            });
+            tx.delete(oldProfileRef!);
+            console.log(`✅ Profil migré de ${invitation.userId} vers ${authUid}`);
+          } else {
+            // RECONSTRUCTION depuis l'invitation
+            if (!invitation.firstName || !invitation.lastName) {
+              throw new functions.https.HttpsError(
+                "failed-precondition",
+                "Les informations de profil sont manquantes. Contactez votre administrateur."
+              );
+            }
+            wasReconstructed = true;
+            tx.set(newProfileRef, {
+              id: authUid,
+              email: normalizedEmail,
+              firstName: invitation.firstName,
+              lastName: invitation.lastName,
+              role: invitation.role || "Chauffeur",
+              activatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              createdAt: invitation.createdAt || new Date().toISOString(),
+              status: "active",
+              phone: "",
+              assignedVehicleId: null,
+              companyName: "",
+            });
+            console.log(`✅ Profil reconstruit pour ${authUid}: ${invitation.firstName} ${invitation.lastName}`);
+          }
+
+          // Marquer l'invitation comme utilisée (atomique avec le profil)
+          tx.update(invitationDoc.ref, {
+            used: true,
+            usedAt: new Date().toISOString(),
+            authUid: authUid,
+            activationSuccess: true,
+          });
+        });
+      } catch (firestoreError: any) {
+        // Rollback : supprimer le compte Auth qu'on vient de créer
+        // (sauf si on l'avait récupéré dans le branch email-already-exists,
+        // mais on peut quand même tenter le delete sans bloquer)
+        console.error("❌ Échec écriture Firestore après création Auth, rollback de l'utilisateur Auth", firestoreError);
+        try {
+          await auth.deleteUser(authUid);
+          console.log(`🧹 Compte Auth ${authUid} supprimé (rollback)`);
+        } catch (deleteErr) {
+          console.error(`⚠️ Impossible de supprimer le compte Auth orphelin ${authUid}`, deleteErr);
+        }
+        if (firestoreError instanceof functions.https.HttpsError) {
+          throw firestoreError;
+        }
+        throw new functions.https.HttpsError(
+          "internal",
+          `Échec activation côté base de données : ${firestoreError?.message || firestoreError}`
+        );
+      }
 
       console.log(`✅ Compte activé avec succès pour: ${invitation.email}`);
 
       // ========================================
-      // ÉTAPE 5: LOG D'AUDIT
+      // ÉTAPE 5: LOG D'AUDIT (best-effort, ne bloque pas le retour)
       // ========================================
-      await db.collection("audit_logs").add({
-        action: "ACCOUNT_ACTIVATED",
-        userId: authUser.uid,
-        email: invitation.email,
-        invitedBy: invitation.invitedBy,
-        invitedByName: invitation.invitedByName,
-        originalUserId: invitation.userId,
-        reconstructed: !await db.collection("users").doc(invitation.userId).get().then(d => d.exists),
-        activatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
+      // Avant : `reconstructed: !await db...` lisait un doc qui venait d'être
+      // supprimé dans la migration → la valeur était quasi-toujours fausse.
+      // On utilise désormais la variable `wasReconstructed` réellement calculée.
+      try {
+        await db.collection("audit_logs").add({
+          action: "ACCOUNT_ACTIVATED",
+          userId: authUid,
+          email: invitation.email,
+          invitedBy: invitation.invitedBy,
+          invitedByName: invitation.invitedByName,
+          originalUserId: invitation.userId,
+          reconstructed: wasReconstructed,
+          activatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      } catch (auditErr) {
+        console.warn("⚠️ Échec écriture audit_log (non bloquant)", auditErr);
+      }
 
       return {
         success: true,

@@ -608,7 +608,7 @@ const IssueManager: React.FC<IssueManagerProps> = ({
   };
 
   const addInvoiceLine = () => {
-    setInvoiceLines([...invoiceLines, { description: '', quantity: 1, unitPrice: 0, total: 0 }]);
+    setInvoiceLines([...invoiceLines, { id: crypto.randomUUID(), description: '', quantity: 1, unitPrice: 0, total: 0 }]);
   };
 
   const updateInvoiceLine = (index: number, field: keyof InvoiceLine, value: any) => {

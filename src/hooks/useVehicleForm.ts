@@ -175,8 +175,6 @@ export const useVehicleForm = ({
       plate: formData.plate.toUpperCase(),
       model: formData.model,
       make: formData.make,
-      brand: formData.make, // Alias pour compatibilité
-      plateNumber: formData.plate.toUpperCase(), // Alias pour compatibilité
       type: formData.type,
       status: formData.status,
       currentMileage: formData.currentMileage,

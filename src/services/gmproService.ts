@@ -192,7 +192,7 @@ export const optimizeMultiVehicle = async (
     // 3. Coordonnées du hub
     let hubCoords = hub.coordinates;
     if (!hubCoords) {
-      hubCoords = await geocodeAddress(hub.address, hub.city, hub.postalCode, apiKey);
+      hubCoords = (await geocodeAddress(hub.address, hub.city, hub.postalCode, apiKey)) ?? undefined;
       if (!hubCoords) {
           return createFallbackOptimization(stopGroups, driversVehicles, null);
       }

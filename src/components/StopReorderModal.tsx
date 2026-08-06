@@ -126,7 +126,7 @@ const StopReorderModal: React.FC<StopReorderModalProps> = ({
   };
 
   // Vérification si réordonnancement possible
-  const canReorder = mission.status === MissionStatus.DISPATCHED || mission.status === MissionStatus.PENDING;
+  const canReorder = mission.status === MissionStatus.DISPATCHED || mission.status === MissionStatus.IN_PROGRESS;
 
   return (
     <Modal

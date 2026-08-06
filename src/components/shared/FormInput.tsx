@@ -128,7 +128,7 @@ export const FormTextarea = forwardRef<HTMLTextAreaElement, FormTextareaProps>((
 FormTextarea.displayName = 'FormTextarea';
 
 // === SELECT ===
-export interface FormSelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
+export interface FormSelectProps extends Omit<React.SelectHTMLAttributes<HTMLSelectElement>, 'size'> {
   label?: string;
   icon?: LucideIcon;
   error?: string;

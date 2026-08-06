@@ -174,6 +174,10 @@ export interface FuelLog {
   isRentalEntry?: boolean;
   // === NOUVEAU: Imputation des coûts ===
   imputedToVehicleId?: string;  // Si remplacement, ID du véhicule remplacé pour imputation comptable
+  // Audit de modification
+  lastModifiedAt?: string;
+  lastModifiedBy?: string;
+  lastModifiedByName?: string;
 }
 
 export interface InvoiceLine {
@@ -397,6 +401,7 @@ export enum LeaveType {
   UNPAID = 'Sans Solde',
   SICK = 'Maladie',
   RTT = 'RTT',
+  FAMILY = 'Congé Familial',
   OTHER = 'Autre'
 }
 
@@ -673,8 +678,12 @@ export enum ActivityAction {
   MISSION_STARTED = 'MISSION_STARTED',
   MISSION_COMPLETED = 'MISSION_COMPLETED',
   MISSION_CANCELLED = 'MISSION_CANCELLED',
+  MISSION_UPDATED = 'MISSION_UPDATED',
   ITEM_CREATED = 'ITEM_CREATED',
-  
+  ITEM_UPDATED = 'ITEM_UPDATED',
+  ITEM_DELETED = 'ITEM_DELETED',
+  STATUS_CHANGED = 'STATUS_CHANGED',
+
   // Système
   SYSTEM_SETTINGS_UPDATED = 'SYSTEM_SETTINGS_UPDATED',
   PERMISSIONS_UPDATED = 'PERMISSIONS_UPDATED',
