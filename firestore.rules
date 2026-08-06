@@ -391,6 +391,16 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // --- Journal d'erreurs technique ---
+    // Création : tout utilisateur connecté (les erreurs surviennent partout,
+    // pour tous les rôles). Lecture réservée à la direction (contient stack
+    // technique + contexte). Jamais modifiable ni supprimable.
+    match /error_logs/{logId} {
+      allow read: if isAdminRole();
+      allow create: if isAuthenticated();
+      allow update, delete: if false;
+    }
+
     // --- Notifications ---
     // Lecture : le destinataire uniquement
     // Création : tout connecté (le système envoie des notifications)

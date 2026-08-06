@@ -14,6 +14,7 @@ import { doc, updateDoc, setDoc, getDoc, collection, query, where, getDocs } fro
 import { ref, uploadString, getDownloadURL } from 'firebase/storage';
 import { Package, PackageStatus } from '../types';
 import { compressImage } from './podService';
+import { reportError } from './logService';
 
 const PICKUPS_COLLECTION = 'pickups';
 const PACKAGES_COLLECTION = 'packages';
@@ -107,11 +108,19 @@ export const finalizePickup = async (params: {
     }
 
     // 2. MAJ chaque colis scanné → COLLECTED
+    // On n'avale PLUS les erreurs : chaque colis en échec est collecté et remonté.
+    const failedPackageIds: string[] = [];
     for (const pkgId of scannedPackageIds) {
       try {
         const pkgRef = doc(db, PACKAGES_COLLECTION, pkgId);
         const pkgSnap = await getDoc(pkgRef);
-        if (!pkgSnap.exists()) continue;
+        if (!pkgSnap.exists()) {
+          failedPackageIds.push(pkgId);
+          reportError('pickup.finalize.package', new Error(`Colis ${pkgId} introuvable en base`), {
+            silent: true, extra: { pkgId, missionId, stopId }
+          });
+          continue;
+        }
 
         const pkg = pkgSnap.data() as Package;
         const movements = [...(pkg.movements || []), {
@@ -133,8 +142,27 @@ export const finalizePickup = async (params: {
           updatedAt: timestamp
         });
       } catch (e) {
-        /* silenced */
+        // Un colis n'a pas pu être mis à jour (droits, réseau…) → on le trace
+        // et on continue les autres, mais l'échec ne sera PAS silencieux.
+        failedPackageIds.push(pkgId);
+        reportError('pickup.finalize.package', e, {
+          silent: true, extra: { pkgId, missionId, stopId, clientName }
+        });
       }
+    }
+
+    // Si des colis scannés n'ont pas pu être enregistrés, on prévient l'utilisateur
+    // (message visible) tout en laissant le manifeste se créer pour ce qui a marché.
+    if (failedPackageIds.length > 0) {
+      reportError(
+        'pickup.finalize',
+        new Error(`${failedPackageIds.length} colis scanné(s) n'ont pas pu être enregistrés`),
+        {
+          level: 'warning',
+          userMessage: `⚠️ ${failedPackageIds.length} colis scanné(s) sur ${scannedPackageIds.length} n'ont pas pu être enregistrés. Vérifiez votre connexion et rescannez-les.`,
+          extra: { failedPackageIds, missionId, stopId, clientName }
+        }
+      );
     }
 
     // 3. Créer le manifeste
@@ -167,7 +195,10 @@ export const finalizePickup = async (params: {
     return manifest;
 
   } catch (err) {
-    console.error('[finalizePickup] Erreur:', err);
+    reportError('pickup.finalize', err, {
+      userMessage: "L'enlèvement n'a pas pu être finalisé. Vos scans ne sont pas perdus, réessayez.",
+      extra: { missionId, stopId, clientName, scannedCount: scannedPackageIds.length }
+    });
     return null;
   }
 };

@@ -10,6 +10,7 @@ import React, { useState, lazy, Suspense } from 'react';
 import { ScanLine, X, Loader2, MapPin, Package as PackageIcon, Search, PackageCheck, CheckCircle, Plus } from 'lucide-react';
 import { Package, PackageStatus, PACKAGE_STATUS_COLORS, User, UserRole } from '../types';
 import { findPackageByCode, claimPackagesForDelivery, createAndClaimPackage } from '../services/missionService';
+import { reportError } from '../services/logService';
 import { packageDisplayCode } from '../utils/barcode';
 import PackageTimeline from './PackageTimeline';
 
@@ -111,11 +112,20 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
     setShowScanner(false);
     setIsSearching(true);
     setResult(null);
+    setClaimError(null);
     try {
       const pkg = await findPackageByCode(code);
+      // pkg === null => vraiment introuvable ; sinon on affiche la fiche.
       setResult({ pkg, scannedCode: code });
-    } catch {
-      setResult({ pkg: null, scannedCode: code });
+    } catch (e) {
+      // NE PAS faire croire à un "introuvable" alors que c'est une erreur réseau
+      // ou de droits : on trace, on affiche l'erreur, et on n'invite pas à
+      // créer un doublon.
+      reportError('quickscan.search', e, {
+        userMessage: 'Recherche impossible (réseau ou droits). Vérifiez votre connexion et rescannez.',
+        extra: { code }
+      });
+      setClaimError('Recherche impossible — vérifiez votre connexion et rescannez.');
     }
     setIsSearching(false);
   };

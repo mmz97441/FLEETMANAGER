@@ -1,5 +1,6 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { RefreshCw, ShieldAlert } from 'lucide-react';
+import { reportError } from '../services/logService';
 
 interface ErrorBoundaryProps {
   children?: ReactNode;
@@ -21,7 +22,12 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error("Uncaught error:", error, errorInfo);
+    // Persiste l'erreur de rendu (Firestore + console). Pas de toast : l'écran
+    // plein ci-dessous fait déjà office de message visible.
+    reportError('react.render', error, {
+      silent: true,
+      extra: { componentStack: errorInfo.componentStack }
+    });
   }
 
   handleReload = () => {

@@ -22,6 +22,7 @@ import {
   Ban, Shield, Settings, Loader2
 } from 'lucide-react';
 import Modal from './shared/Modal';
+import ErrorLogsPanel from './ErrorLogsPanel';
 
 interface ActivityLogsProps {
   users: User[];
@@ -29,6 +30,8 @@ interface ActivityLogsProps {
 }
 
 const ActivityLogs: React.FC<ActivityLogsProps> = ({ users, currentUser }) => {
+  // Onglet : activité (audit) ou erreurs techniques
+  const [tab, setTab] = useState<'activity' | 'errors'>('activity');
   // États
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -195,7 +198,7 @@ const ActivityLogs: React.FC<ActivityLogsProps> = ({ users, currentUser }) => {
     };
   }, [logs]);
 
-  if (isLoading) {
+  if (isLoading && tab === 'activity') {
     return (
       <div className="flex items-center justify-center h-96">
         <Loader2 size={48} className="animate-spin text-brand-500" />
@@ -218,16 +221,40 @@ const ActivityLogs: React.FC<ActivityLogsProps> = ({ users, currentUser }) => {
         </div>
         
         <div className="flex items-center gap-2">
-          <button
-            onClick={handleExport}
-            className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 rounded-xl text-slate-700 font-medium hover:bg-slate-50 transition-colors"
-          >
-            <Download size={18} />
-            <span className="hidden sm:inline">Exporter</span>
-          </button>
+          {tab === 'activity' && (
+            <button
+              onClick={handleExport}
+              className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 rounded-xl text-slate-700 font-medium hover:bg-slate-50 transition-colors"
+            >
+              <Download size={18} />
+              <span className="hidden sm:inline">Exporter</span>
+            </button>
+          )}
         </div>
       </div>
 
+      {/* Onglets : Activité / Erreurs */}
+      <div className="flex items-center gap-2 border-b border-slate-200">
+        <button
+          onClick={() => setTab('activity')}
+          className={`px-4 py-2 text-sm font-bold border-b-2 -mb-px transition-colors ${
+            tab === 'activity' ? 'border-brand-500 text-brand-600' : 'border-transparent text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          <span className="flex items-center gap-2"><Activity size={16} /> Activité</span>
+        </button>
+        <button
+          onClick={() => setTab('errors')}
+          className={`px-4 py-2 text-sm font-bold border-b-2 -mb-px transition-colors ${
+            tab === 'errors' ? 'border-red-500 text-red-600' : 'border-transparent text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          <span className="flex items-center gap-2"><AlertTriangle size={16} /> Journal d'erreurs</span>
+        </button>
+      </div>
+
+      {tab === 'errors' ? <ErrorLogsPanel /> : (
+      <>
       {/* Stats rapides */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-white rounded-xl border border-slate-200 p-4">
@@ -544,6 +571,8 @@ const ActivityLogs: React.FC<ActivityLogsProps> = ({ users, currentUser }) => {
           </div>
         )}
       </Modal>
+      </>
+      )}
     </div>
   );
 };

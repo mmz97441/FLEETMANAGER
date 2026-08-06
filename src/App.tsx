@@ -6,6 +6,7 @@ import { auth } from "./firebaseConfig";
 // Composants légers chargés immédiatement (shell UI)
 import Sidebar from './components/Sidebar';
 import ErrorBoundary from './components/ErrorBoundary';
+import { setLogUser } from './services/logService';
 import MobileNavBar from './components/MobileNavBar';
 import QuickScanButton from './components/QuickScanButton';
 import NotificationCenter from './components/NotificationCenter';
@@ -145,6 +146,13 @@ const App: React.FC = () => {
           window.removeEventListener('offline', handleOffline);
       };
   }, []);
+
+  // --- CONTEXTE DES LOGS D'ERREUR ---
+  // Attache l'utilisateur courant à toute erreur loguée (error_logs) et vide
+  // le tampon local vers Firestore dès qu'on est connecté.
+  useEffect(() => {
+    setLogUser(currentUser);
+  }, [currentUser]);
 
   // --- 1. AUTHENTICATION & PROFILE LISTENER ---
   useEffect(() => {

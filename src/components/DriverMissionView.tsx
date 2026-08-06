@@ -32,6 +32,7 @@ import {
 } from '../services/missionService';
 import { uploadAndCreatePOD, uploadFailurePOD, UploadProgress } from '../services/podService';
 import { finalizePickup } from '../services/pickupService';
+import { reportError } from '../services/logService';
 import PickupScanView from './PickupScanView';
 import TransferReceiveModal from './TransferReceiveModal';
 import ClaimScanModal from './ClaimScanModal';
@@ -427,7 +428,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
             driverName: `${currentUser.firstName} ${currentUser.lastName}`,
             notes: `Chargement terminé — départ ${now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`
           });
-        } catch (e) { /* silenced */ }
+        } catch (e) { reportError('driver.loadComplete.item', e, { silent: true, extra: { pkgId } }); }
       }
 
       // 2. Recalculer les ETAs basées sur l'heure réelle de départ
@@ -460,8 +461,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
       setActiveStopIndex(0);
       showNotif('🚀 Chargement terminé — Bonne tournée !');
     } catch (err) {
-      console.error('Erreur chargement terminé:', err);
-      showNotif('❌ Erreur — Réessayez');
+      reportError('driver.loadCompleted', err, { silent: true });
+      showNotif(`❌ Erreur — Réessayez${err instanceof Error ? ` (${err.message})` : ''}`);
     }
     setIsProcessing(false);
   };
@@ -518,7 +519,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
           const { uploadProofPhoto } = await import('../services/podService');
           const url = await uploadProofPhoto(photoBase64, returningPackage.id, 'return');
           photoUrls.push(url);
-        } catch (e) { /* silenced */ }
+        } catch (e) { reportError('driver.return.photo', e, { level: 'warning', silent: true, extra: { packageId: returningPackage.id } }); }
       }
 
       // Uploader la signature si présente
@@ -527,7 +528,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
         try {
           const { uploadProofPhoto } = await import('../services/podService');
           signatureUrl = await uploadProofPhoto(returnSignature, returningPackage.id, 'return-signature');
-        } catch (e) { /* silenced */ }
+        } catch (e) { reportError('driver.return.signature', e, { level: 'warning', silent: true, extra: { packageId: returningPackage.id } }); }
       }
 
       // Créer la preuve de retour
@@ -574,8 +575,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
       setReturnPhotos([]);
       setReturnSignature(null);
     } catch (err) {
-      console.error('Erreur confirmation retour:', err);
-      showNotif('❌ Erreur — Réessayez');
+      reportError('driver.confirmReturn', err, { silent: true });
+      showNotif(`❌ Erreur — Réessayez${err instanceof Error ? ` (${err.message})` : ''}`);
     }
     setIsProcessing(false);
   };
@@ -600,8 +601,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
       await updateMission({ ...activeMission, stops: updatedStops });
       showNotif('📍 Arrivée enregistrée');
     } catch (err) {
-      console.error('Erreur arrivée:', err);
-      showNotif('❌ Erreur');
+      reportError('driver.arrival', err, { silent: true });
+      showNotif(`❌ Erreur${err instanceof Error ? ` — ${err.message}` : ''}`);
     }
     setIsProcessing(false);
   };
@@ -703,7 +704,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
               currentVehicleId: activeMission.vehicleId
             }
           );
-        } catch (e) { /* silenced */ }
+        } catch (e) { reportError('driver.multiColis.item', e, { silent: true }); }
       }
 
       // 6. FIX BUG 2: Trouver le prochain stop en attente dans l'ORDRE TRIÉ (par sequence)
@@ -725,8 +726,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
 
       showNotif(allDone ? '🎉 Tournée terminée !' : `✅ Stop ${currentStop.sequence} livré !`);
     } catch (err) {
-      console.error('Erreur livraison:', err);
-      showNotif('❌ Erreur livraison');
+      reportError('driver.delivery', err, { silent: true });
+      showNotif(`❌ Erreur livraison${err instanceof Error ? ` — ${err.message}` : ''}`);
     }
     setIsProcessing(false);
   };
@@ -790,7 +791,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
               currentVehicleId: activeMission.vehicleId
             }
           );
-        } catch (e) { /* silenced */ }
+        } catch (e) { reportError('driver.multiColis.item', e, { silent: true }); }
       }
 
       // Upload photos d'échec si présentes (preuve de tentative)
@@ -827,8 +828,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
 
       showNotif(allDone ? '🏁 Tournée terminée' : `⚠️ Stop ${currentStop.sequence} — échec enregistré`);
     } catch (err) {
-      console.error('Erreur échec:', err);
-      showNotif('❌ Erreur');
+      reportError('driver.markFailed', err, { silent: true });
+      showNotif(`❌ Erreur${err instanceof Error ? ` — ${err.message}` : ''}`);
     }
     setIsProcessing(false);
   };
@@ -893,7 +894,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
       else if (n === 0) showNotif('Rien à optimiser');
       else showNotif(`🧭 Tournée optimisée — ${n} arrêts réordonnés`);
     } catch (e) {
-      showNotif('❌ Erreur lors de l\'optimisation');
+      reportError('driver.optimize', e, { silent: true });
+      showNotif(`❌ Erreur lors de l'optimisation${e instanceof Error ? ` — ${e.message}` : ''}`);
     }
     setIsOptimizing(false);
   };
@@ -916,8 +918,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
       setShowManualStop(false);
       setManualStop({ contactName: '', address: '', postalCode: '', city: '', contactPhone: '' });
       showNotif('➕ Arrêt manuel ajouté à votre tournée');
-    } catch {
-      showNotif('❌ Erreur lors de l\'ajout de l\'arrêt');
+    } catch (e) {
+      reportError('driver.addManualStop', e, { silent: true });
+      showNotif(`❌ Erreur lors de l'ajout de l'arrêt${e instanceof Error ? ` — ${e.message}` : ''}`);
     }
   };
 
@@ -948,8 +951,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
       setShowIssue(false);
       setIssueForm({ category: 'Véhicule / panne', description: '', priority: 'Medium' });
       showNotif('🛠️ Problème signalé au bureau');
-    } catch {
-      showNotif('❌ Erreur lors du signalement');
+    } catch (e) {
+      reportError('driver.reportIssue', e, { silent: true });
+      showNotif(`❌ Erreur lors du signalement${e instanceof Error ? ` — ${e.message}` : ''}`);
     }
     setIssueSubmitting(false);
   };
@@ -1027,8 +1031,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
           : `✅ Enlèvement terminé — ${scannedIds.length}/${currentStop.packageIds.length} colis collectés`
       );
     } catch (err) {
-      console.error('Erreur enlèvement:', err);
-      showNotif('❌ Erreur enlèvement');
+      reportError('driver.pickup', err, { silent: true });
+      showNotif(`❌ Erreur enlèvement${err instanceof Error ? ` — ${err.message}` : ''}`);
     }
     setIsProcessing(false);
   };
