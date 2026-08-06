@@ -4,7 +4,7 @@
  * Composant principal pour la gestion des missions et tournées
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Mission, MissionStatus, MissionType, MissionStop, StopStatus, Package, PackageStatus,
   ImportBatch, ImportBatchStatus, Hub, Zone, User, UserRole, Vehicle,
@@ -232,6 +232,29 @@ const MissionManager: React.FC<MissionManagerProps> = ({
     () => colisAllDates ? packages : todayPackages,
     [colisAllDates, packages, todayPackages]
   );
+
+  // Filtre statut de l'onglet Colis (piloté par les cartes cliquables du
+  // tableau de bord et les cartes stats de l'onglet Colis).
+  const [pkgStatusFilter, setPkgStatusFilter] = useState<PackageStatus | 'all' | 'failed'>('all');
+
+  const matchesPkgStatusFilter = useCallback((p: Package) => {
+    if (pkgStatusFilter === 'all') return true;
+    if (pkgStatusFilter === 'failed') return p.status === PackageStatus.FAILED || p.status === PackageStatus.RETURNED;
+    return p.status === pkgStatusFilter;
+  }, [pkgStatusFilter]);
+
+  // Drill-down depuis le tableau de bord : ouvre l'onglet Colis pré-filtré
+  // sur le statut cliqué. scope='today' respecte la date sélectionnée,
+  // 'all' bascule en suivi global (semaine / mois n'ont pas d'équivalent jour).
+  const handleDrillToPackages = useCallback((
+    status: PackageStatus | 'all' | 'failed',
+    scope: 'today' | 'all'
+  ) => {
+    setPkgStatusFilter(status);
+    setColisAllDates(scope === 'all');
+    setSearchTerm('');
+    setActiveTab('packages');
+  }, []);
 
   // Permissions via le hook
   const { hasPermission } = usePermissions();
@@ -630,6 +653,8 @@ const MissionManager: React.FC<MissionManagerProps> = ({
       packages={packages}
       users={users}
       selectedDate={selectedDate}
+      onDrillDown={handleDrillToPackages}
+      onOpenMissions={() => setActiveTab('missions')}
     />
   );
 
@@ -1512,27 +1537,54 @@ const MissionManager: React.FC<MissionManagerProps> = ({
         </button>
       </div>
 
-      {/* Stats colis */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        {[
+      {/* Stats colis — cartes cliquables pour filtrer la liste par statut */}
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+        {([
+          { status: 'all' as const, label: 'Tous', bg: 'bg-slate-100', text: 'text-slate-700' },
           { status: PackageStatus.PENDING, label: 'En attente' },
           { status: PackageStatus.AT_HUB, label: 'Au hub' },
           { status: PackageStatus.SORTED, label: 'Triés' },
           { status: PackageStatus.IN_DELIVERY, label: 'En livraison' },
           { status: PackageStatus.DELIVERED, label: 'Livrés' },
           { status: PackageStatus.FAILED, label: 'Échecs' }
-        ].map(({ status, label }) => {
-          const count = colisView.filter(p => p.status === status).length;
-          const colors = PACKAGE_STATUS_COLORS[status];
-          
+        ] as { status: PackageStatus | 'all'; label: string; bg?: string; text?: string }[]).map(({ status, label, bg, text }) => {
+          const count = status === 'all'
+            ? colisView.length
+            : colisView.filter(p => p.status === status).length;
+          const colors = status === 'all'
+            ? { bg: bg!, text: text! }
+            : PACKAGE_STATUS_COLORS[status];
+          const isActive = pkgStatusFilter === status;
+
           return (
-            <div key={status} className={`${colors.bg} rounded-xl p-4`}>
+            <button
+              key={status}
+              onClick={() => setPkgStatusFilter(prev => prev === status ? 'all' : status)}
+              className={`${colors.bg} rounded-xl p-4 text-left transition-all hover:shadow-md ${
+                isActive ? 'ring-2 ring-brand-500 ring-offset-1' : 'ring-0'
+              }`}
+            >
               <p className={`text-2xl font-bold ${colors.text}`}>{count}</p>
               <p className={`text-sm ${colors.text} opacity-80`}>{label}</p>
-            </div>
+            </button>
           );
         })}
       </div>
+
+      {/* Bandeau filtre actif */}
+      {pkgStatusFilter !== 'all' && (
+        <div className="flex items-center gap-2 text-sm bg-brand-50 border border-brand-200 rounded-xl px-4 py-2">
+          <span className="text-brand-700 font-semibold">
+            Filtre : {pkgStatusFilter === 'failed' ? 'Échecs + retours' : pkgStatusFilter}
+          </span>
+          <button
+            onClick={() => setPkgStatusFilter('all')}
+            className="ml-auto text-xs font-bold text-brand-600 hover:underline"
+          >
+            Effacer le filtre
+          </button>
+        </div>
+      )}
 
       {/* Recherche */}
       <div className="relative">
@@ -1631,6 +1683,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                   <input
                     type="checkbox"
                     checked={selectedPackageIds.size > 0 && selectedPackageIds.size === colisView.filter(p => {
+                      if (!matchesPkgStatusFilter(p)) return false;
                       if (!searchTerm) return true;
                       const term = searchTerm.toLowerCase();
                       return p.orderNumber.toLowerCase().includes(term) || p.contactName.toLowerCase().includes(term);
@@ -1639,6 +1692,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                       if (e.target.checked) {
                         const visibleIds = colisView
                           .filter(p => {
+                            if (!matchesPkgStatusFilter(p)) return false;
                             if (!searchTerm) return true;
                             const term = searchTerm.toLowerCase();
                             return p.orderNumber.toLowerCase().includes(term) || (p.externalId || '').toLowerCase().includes(term) || p.contactName.toLowerCase().includes(term);
@@ -1681,15 +1735,18 @@ const MissionManager: React.FC<MissionManagerProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {colisView.length === 0 ? (
+              {colisView.filter(matchesPkgStatusFilter).length === 0 ? (
                 <tr>
                   <td colSpan={12} className="px-4 py-8 text-center text-slate-500">
-                    Aucun colis pour cette date
+                    {pkgStatusFilter === 'all'
+                      ? 'Aucun colis pour cette date'
+                      : 'Aucun colis pour ce filtre'}
                   </td>
                 </tr>
               ) : (
                 colisView
                   .filter(p => {
+                    if (!matchesPkgStatusFilter(p)) return false;
                     if (!searchTerm) return true;
                     const term = searchTerm.toLowerCase();
                     return (
