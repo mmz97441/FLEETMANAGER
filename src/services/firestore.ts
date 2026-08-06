@@ -19,6 +19,7 @@ import {
 } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { Vehicle, FuelLog, MaintenanceLog, Issue, VehicleStatus, User, UserRole, LeaveRequest, QuoteRequest, CompanyDocument, DocumentAcknowledgment, SavedAddress } from "../types";
+import { reportError } from "./logService";
 
 // --- HELPER UTILS ---
 const mapDbStatusToApp = (dbStatus: any): VehicleStatus => {
@@ -104,33 +105,43 @@ export const checkUserEmailAuthorized = async (email: string): Promise<boolean> 
 
 // Lie le compte Auth (nouvellement créé) au profil existant (créé par l'admin)
 export const linkAuthToProfile = async (email: string, authUid: string) => {
+    // Normaliser l'email
+    const normalizedEmail = email.toLowerCase().trim();
+    const q = query(collection(db, "users"), where("email", "==", normalizedEmail));
+    const querySnapshot = await getDocs(q);
+
+    if (querySnapshot.empty) return;
+
+    const oldDoc = querySnapshot.docs[0];
+    const userData = oldDoc.data();
+
+    // Si le profil a déjà le bon ID (cas rare ou déjà migré), on arrête
+    if (oldDoc.id === authUid) return;
+
+    // 1. Créer le nouveau document avec le bon UID (Auth ID).
+    //    Autorisé par les règles (users create: request.auth.uid == userId).
+    //    Si CETTE étape échoue, on propage : sans profil à son UID, les règles
+    //    Firestore ne pourront jamais reconnaître le rôle → connexion inutile.
+    await setDoc(doc(db, "users", authUid), {
+        ...userData as any, // Spread here. userData is DocumentData.
+        id: authUid, // On s'assure que l'ID interne matche
+        email: normalizedEmail // S'assurer que l'email est normalisé
+    });
+
+    // 2. Supprimer l'ancien document (ID temporaire). ATTENTION : la suppression
+    //    d'un profil est réservée aux admins (règles). Pour un chauffeur/client
+    //    qui migre le sien, ce delete est REFUSÉ. Ce n'est PAS bloquant : le
+    //    nouveau doc est déjà en place, la connexion DOIT aboutir. On loggue le
+    //    doublon pour nettoyage admin ultérieur — mais on ne fait plus planter
+    //    la connexion (ancien bug : le chauffeur était éjecté à sa 1re connexion).
     try {
-        // Normaliser l'email
-        const normalizedEmail = email.toLowerCase().trim();
-        const q = query(collection(db, "users"), where("email", "==", normalizedEmail));
-        const querySnapshot = await getDocs(q);
-
-        if (!querySnapshot.empty) {
-            const oldDoc = querySnapshot.docs[0];
-            const userData = oldDoc.data();
-            
-            // Si le profil a déjà le bon ID (cas rare ou déjà migré), on arrête
-            if (oldDoc.id === authUid) return;
-
-            // 1. Créer le nouveau document avec le bon UID (Auth ID)
-            await setDoc(doc(db, "users", authUid), {
-                ...userData as any, // Spread here. userData is DocumentData.
-                id: authUid, // On s'assure que l'ID interne matche
-                email: normalizedEmail // S'assurer que l'email est normalisé
-            });
-
-            // 2. Supprimer l'ancien document (celui avec l'ID temporaire)
-            await deleteDoc(doc(db, "users", oldDoc.id));
-            console.log(`Profil migré de ${oldDoc.id} vers ${authUid}`);
-        }
-    } catch (e) {
-        console.error("Erreur lors de la liaison du profil:", e);
-        throw e;
+        await deleteDoc(doc(db, "users", oldDoc.id));
+        console.log(`Profil migré de ${oldDoc.id} vers ${authUid}`);
+    } catch (delErr) {
+        reportError('auth.linkProfile.deleteOld', delErr, {
+            silent: true,
+            extra: { oldId: oldDoc.id, authUid, email: normalizedEmail }
+        });
     }
 };
 
