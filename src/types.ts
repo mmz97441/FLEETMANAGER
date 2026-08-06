@@ -76,6 +76,8 @@ export interface User {
 
   // Dernière connexion (mise à jour à chaque ouverture de l'app)
   lastLoginAt?: string;
+  // Date d'activation du compte (posée par la Cloud Function activateAccount)
+  activatedAt?: string;
   // Permissions personnalisées (exceptions au template de rôle)
   customPermissions?: {
     granted: string[];  // Permissions ajoutées
@@ -943,7 +945,10 @@ export interface MissionStop {
 
 export interface Mission {
   id: string;
-  
+
+  // Client expéditeur (enlèvements) — optionnel selon le type de tournée
+  clientId?: string;
+
   // Type et zone
   type: MissionType;
   zone: Zone;

@@ -388,9 +388,11 @@ const getAdminUserIds = async (): Promise<string[]> => {
   try {
     const q = query(
       collection(db, 'users'),
+      // ⚠️ 'in' Firestore : max 10 valeurs, AUCUNE ne doit être undefined
+      // (UserRole.SUPER_ADMIN n'existe pas → cassait la requête → admins sans notif).
       where('role', 'in', [
-        UserRole.ADMIN, UserRole.SUPER_ADMIN, 
-        'admin', 'super_admin', 'Admin', 'Super Admin',
+        UserRole.ADMIN, UserRole.PRESIDENT, UserRole.DIRECTOR,
+        'admin', 'Admin', 'Super Admin',
         'Directeur', 'directeur', 'Exploitant', 'exploitant'
       ])
     );
@@ -1183,14 +1185,10 @@ export const deletePackage = async (packageId: string): Promise<void> => {
  */
 export const updatePackageFields = async (
   packageId: string,
-  fields: Partial<Pick<Package,
-    'contactName' | 'contactPhone' | 'address' | 'city' | 'postalCode' |
-    'timeWindowStart' | 'timeWindowEnd' | 'comment' | 'weight' | 'volume' |
-    'zone' | 'floor' | 'hasElevator'
-  >>
+  fields: Partial<Package>
 ): Promise<void> => {
-  await updateDoc(doc(db, PACKAGES_COLLECTION, packageId), {
+  await updateDoc(doc(db, PACKAGES_COLLECTION, packageId), cleanUndefined({
     ...fields,
     updatedAt: new Date().toISOString()
-  });
+  }));
 };

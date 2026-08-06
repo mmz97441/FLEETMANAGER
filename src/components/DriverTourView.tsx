@@ -24,7 +24,6 @@ import {
 import {
   subscribeToMissions,
   subscribeToPackages,
-  updateMissionStopStatus,
   updatePackageStatus
 } from '../services/missionService';
 

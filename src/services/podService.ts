@@ -139,6 +139,25 @@ const uploadBase64 = async (path: string, base64Data: string, contentType = 'ima
   }
 };
 
+/**
+ * Upload d'une photo/signature isolée (ex. preuve de RETOUR HUB), avec
+ * compression, vers Storage. Retourne l'URL téléchargeable.
+ * (Réparé : cette fonction était appelée par le flux retour hub mais
+ * n'existait pas → photos de retour silencieusement perdues.)
+ */
+export const uploadProofPhoto = async (
+  base64: string,
+  packageId: string,
+  kind: string = 'photo'
+): Promise<string> => {
+  const isSignature = kind.includes('signature');
+  const data = isSignature ? base64 : await compressImage(base64);
+  const ext = isSignature ? 'png' : 'jpg';
+  const mime = isSignature ? 'image/png' : 'image/jpeg';
+  const ts = new Date().toISOString().replace(/[:.]/g, '');
+  return uploadBase64(`pod/returns/${packageId}/${kind}-${ts}.${ext}`, data, mime);
+};
+
 // ============================================================================
 // TYPES
 // ============================================================================

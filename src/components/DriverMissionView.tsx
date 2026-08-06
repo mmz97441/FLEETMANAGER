@@ -2060,7 +2060,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                   setReturnSignature(data);
                   setShowReturnSignature(false);
                 }}
-                onClear={() => {}}
+                onCancel={() => setShowReturnSignature(false)}
                 driverName={`${currentUser.firstName} ${currentUser.lastName}`}
               />
             </div>
