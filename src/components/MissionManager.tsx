@@ -27,8 +27,10 @@ import {
   updatePackageFields,
   updateMissionFields,
   DEFAULT_POSTAL_CODE_MAPPINGS,
-  MissionStats
+  MissionStats,
+  resyncPackageStatusesFromStops
 } from '../services/missionService';
+import { notifySuccess, notifyError, notifyInfo } from '../services/logService';
 import { importExcelFile, validateExcelFormat, parseExcelForReview, ReviewResult } from '../services/importService';
 import { geocodeAddress, getGoogleMapsApiKey, optimizeMultiVehicle, DriverVehicle } from '../services/gmproService';
 import { logActivity } from '../services/activityLogService';
@@ -242,6 +244,29 @@ const MissionManager: React.FC<MissionManagerProps> = ({
     if (pkgStatusFilter === 'failed') return p.status === PackageStatus.FAILED || p.status === PackageStatus.RETURNED;
     return p.status === pkgStatusFilter;
   }, [pkgStatusFilter]);
+
+  // Resynchronisation des statuts colis ↔ arrêts (répare les "En livraison"
+  // bloqués alors que l'arrêt est terminé).
+  const [isResyncing, setIsResyncing] = useState(false);
+  const handleResyncStatuses = useCallback(async () => {
+    if (isResyncing) return;
+    setIsResyncing(true);
+    notifyInfo('Analyse des statuts colis…');
+    try {
+      const res = await resyncPackageStatusesFromStops();
+      if (res.fixedDelivered > 0) {
+        notifySuccess(`${res.fixedDelivered} colis repassé(s) en "Livré" (arrêt déjà terminé par le chauffeur).`);
+      } else if (res.completedStopPackages === 0) {
+        notifyInfo("Aucun arrêt terminé à resynchroniser : les livraisons concernées n'ont pas encore été validées par les chauffeurs.");
+      } else {
+        notifySuccess('Statuts déjà à jour, rien à corriger.');
+      }
+      if (res.failed > 0) notifyError(`${res.failed} colis n'ont pas pu être mis à jour (voir Journal d'erreurs).`);
+    } catch (e) {
+      notifyError(e instanceof Error ? e.message : 'Échec de la resynchronisation');
+    }
+    setIsResyncing(false);
+  }, [isResyncing]);
 
   // Drill-down depuis le tableau de bord : ouvre l'onglet Colis pré-filtré
   // sur le statut cliqué. scope='today' respecte la date sélectionnée,
@@ -1529,12 +1554,23 @@ const MissionManager: React.FC<MissionManagerProps> = ({
             ? <>Suivi global — <b>{colisView.length}</b> colis (toutes dates)</>
             : <>Colis du <b>{new Date(selectedDate).toLocaleDateString('fr-FR')}</b> — <b>{colisView.length}</b></>}
         </p>
-        <button
-          onClick={() => setColisAllDates(v => !v)}
-          className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${colisAllDates ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-slate-600 border-slate-300'}`}
-        >
-          {colisAllDates ? '🌐 Toutes les dates' : '📅 Date sélectionnée'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleResyncStatuses}
+            disabled={isResyncing}
+            title="Répare les colis restés 'En livraison' alors que le chauffeur a terminé l'arrêt"
+            className="px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition-colors flex items-center gap-1.5 disabled:opacity-50"
+          >
+            <RefreshCw size={13} className={isResyncing ? 'animate-spin' : ''} />
+            {isResyncing ? 'Resync…' : 'Resynchroniser les statuts'}
+          </button>
+          <button
+            onClick={() => setColisAllDates(v => !v)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${colisAllDates ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-slate-600 border-slate-300'}`}
+          >
+            {colisAllDates ? '🌐 Toutes les dates' : '📅 Date sélectionnée'}
+          </button>
+        </div>
       </div>
 
       {/* Stats colis — cartes cliquables pour filtrer la liste par statut */}

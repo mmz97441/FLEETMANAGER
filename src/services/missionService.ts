@@ -32,6 +32,7 @@ import {
 } from '../types';
 import { extractScanTokens } from '../utils/barcode';
 import { geocodeAddress, getGoogleMapsApiKey } from './gmproService';
+import { reportError } from './logService';
 
 // Collections Firestore
 const HUBS_COLLECTION = 'hubs';
@@ -333,6 +334,75 @@ export const updatePackageStatus = async (
 
   // === AUTO-NOTIFICATIONS (fire-and-forget) ===
   triggerPackageNotifications(pkg, status, movement).catch(() => {});
+};
+
+/**
+ * RESYNCHRONISATION DES STATUTS COLIS ↔ ARRÊTS.
+ *
+ * Répare les colis restés "En livraison" alors que leur arrêt a été marqué
+ * TERMINÉ par le chauffeur (cause : échec d'upload des preuves qui interrompait
+ * la mise à jour du colis). On ne passe un colis en "Livré" QUE si son arrêt de
+ * livraison est COMPLETED → c'est la preuve que le chauffeur a bien validé.
+ *
+ * S'il n'y a rien à corriger, c'est que les livraisons n'ont pas été validées
+ * (chauffeur encore en tournée), pas un bug.
+ */
+export interface StatusResyncResult {
+  completedStopPackages: number; // colis rattachés à un arrêt terminé
+  fixedDelivered: number;        // colis repassés en "Livré"
+  failed: number;                // échecs de mise à jour
+  details: { packageId: string; orderNumber: string; from: string }[];
+}
+
+export const resyncPackageStatusesFromStops = async (): Promise<StatusResyncResult> => {
+  const result: StatusResyncResult = { completedStopPackages: 0, fixedDelivered: 0, failed: 0, details: [] };
+
+  // 1. Parcourir toutes les missions → colis dont l'arrêt DELIVERY est TERMINÉ
+  const missionsSnap = await getDocs(collection(db, MISSIONS_COLLECTION));
+  const deliveredStopMeta = new Map<string, { driverId?: string; driverName?: string; vehicleId?: string; vehiclePlate?: string }>();
+  for (const mDoc of missionsSnap.docs) {
+    const m = mDoc.data() as Mission;
+    for (const s of (m.stops || [])) {
+      if (s.type !== 'PICKUP' && s.status === StopStatus.COMPLETED) {
+        for (const id of (s.packageIds || [])) {
+          deliveredStopMeta.set(id, {
+            driverId: m.driverId, driverName: m.driverName,
+            vehicleId: m.vehicleId, vehiclePlate: m.vehiclePlate
+          });
+        }
+      }
+    }
+  }
+
+  if (deliveredStopMeta.size === 0) return result;
+
+  // 2. Colis correspondants qui ne sont PAS encore "Livré" → réparer
+  const pkgsSnap = await getDocs(query(collection(db, PACKAGES_COLLECTION), orderBy('createdAt', 'desc'), limit(500)));
+  for (const pDoc of pkgsSnap.docs) {
+    const pkg = { id: pDoc.id, ...(pDoc.data() as any) } as Package;
+    const meta = deliveredStopMeta.get(pkg.id);
+    if (!meta) continue;
+    result.completedStopPackages++;
+    if (pkg.status === PackageStatus.DELIVERED) continue;
+
+    try {
+      await updatePackageStatus(pkg.id, PackageStatus.DELIVERED, {
+        action: 'DELIVERED',
+        driverId: meta.driverId || pkg.currentDriverId || '',
+        driverName: meta.driverName || '',
+        vehicleId: meta.vehicleId,
+        vehiclePlate: meta.vehiclePlate,
+        notes: 'Statut resynchronisé (arrêt marqué terminé par le chauffeur)'
+      });
+      result.fixedDelivered++;
+      result.details.push({ packageId: pkg.id, orderNumber: pkg.orderNumber || pkg.externalId || pkg.id, from: String(pkg.status) });
+    } catch (e) {
+      result.failed++;
+      reportError('resync.package', e, { silent: true, extra: { packageId: pkg.id } });
+    }
+  }
+
+  return result;
 };
 
 /**

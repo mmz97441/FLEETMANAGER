@@ -702,33 +702,11 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
         ...(allDone ? { completedAt: now } : {})
       });
 
-      // 4. Upload POD vers Firebase Storage + persistence Firestore
-      //    (signature + photos compressées, uploadées avec barre de progression)
-      setUploadProgress({ step: 'compressing', current: 0, total: 1, message: 'Préparation...' });
-      const podResult = await uploadAndCreatePOD({
-        missionId: activeMission.id,
-        stopId: currentStop.id,
-        packageIds: currentStop.packageIds,
-        driverId: currentUser.id,
-        driverName: `${currentUser.firstName} ${currentUser.lastName}`,
-        vehicleId: activeMission.vehicleId || '',
-        vehiclePlate: activeMission.vehiclePlate || '',
-        recipientName: recipientName || undefined,
-        deliveryLocation,
-        signatureBase64: signatureData || undefined,
-        photosBase64: capturedPhotos,
-        coordinates: coords || { lat: 0, lng: 0 },
-        notes: [
-          recipientName ? `${deliveryLocation} — Réceptionné par: ${recipientName}` : null,
-          scanTrace || null
-        ].filter(Boolean).join(' • ') || undefined
-      }, setUploadProgress);
-
-      if (podResult) {
-        showNotif('📸 Preuves uploadées ✓');
-      }
-
-      // 5. Mettre à jour statut des colis avec le BON format PackageMovement
+      // 4. Statut des colis EN PREMIER = source de vérité de la livraison.
+      //    L'upload des preuves (lourd, sensible au réseau mobile) se fait APRÈS.
+      //    Ainsi, si l'upload échoue, le colis reste bien "Livré" (seule la preuve
+      //    est à renvoyer) au lieu de rester bloqué "En livraison".
+      let deliveredCount = 0;
       for (const pkgId of currentStop.packageIds) {
         try {
           await updatePackageStatus(
@@ -753,7 +731,51 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
               currentVehicleId: activeMission.vehicleId
             }
           );
-        } catch (e) { reportError('driver.multiColis.item', e, { silent: true }); }
+          deliveredCount++;
+        } catch (e) {
+          reportError('driver.delivery.item', e, {
+            silent: true,
+            extra: { pkgId, missionId: activeMission.id, stopId: currentStop.id }
+          });
+        }
+      }
+      if (deliveredCount < currentStop.packageIds.length) {
+        const stuck = currentStop.packageIds.length - deliveredCount;
+        reportError('driver.delivery.partial', new Error(`${stuck} colis non passés en Livré`), {
+          level: 'warning',
+          userMessage: `⚠️ ${stuck} colis sur ${currentStop.packageIds.length} n'ont pas pu passer en "Livré" (réseau ?). Ils restent "En livraison" — resynchronisez une fois en ligne.`,
+          extra: { missionId: activeMission.id, stopId: currentStop.id }
+        });
+      }
+
+      // 5. Upload des preuves (POD) — best-effort : NE DOIT JAMAIS annuler la livraison.
+      try {
+        setUploadProgress({ step: 'compressing', current: 0, total: 1, message: 'Préparation...' });
+        const podResult = await uploadAndCreatePOD({
+          missionId: activeMission.id,
+          stopId: currentStop.id,
+          packageIds: currentStop.packageIds,
+          driverId: currentUser.id,
+          driverName: `${currentUser.firstName} ${currentUser.lastName}`,
+          vehicleId: activeMission.vehicleId || '',
+          vehiclePlate: activeMission.vehiclePlate || '',
+          recipientName: recipientName || undefined,
+          deliveryLocation,
+          signatureBase64: signatureData || undefined,
+          photosBase64: capturedPhotos,
+          coordinates: coords || { lat: 0, lng: 0 },
+          notes: [
+            recipientName ? `${deliveryLocation} — Réceptionné par: ${recipientName}` : null,
+            scanTrace || null
+          ].filter(Boolean).join(' • ') || undefined
+        }, setUploadProgress);
+        if (podResult) showNotif('📸 Preuves uploadées ✓');
+      } catch (e) {
+        reportError('driver.delivery.pod', e, {
+          level: 'warning',
+          userMessage: "⚠️ Colis livré, mais l'envoi des preuves (photo/signature) a échoué. Elles pourront être renvoyées.",
+          extra: { missionId: activeMission.id, stopId: currentStop.id }
+        });
       }
 
       // 6. FIX BUG 2: Trouver le prochain stop en attente dans l'ORDRE TRIÉ (par sequence)
