@@ -49,6 +49,32 @@ import {
 } from 'lucide-react';
 
 // ============================================================================
+// REGROUPEMENT PAR POINT DE LIVRAISON (même logique que l'import)
+// Sert au filet de sécurité : détecter un colis à la même adresse non inclus
+// dans l'arrêt courant, pour éviter que le chauffeur reparte en oubliant un colis.
+// ============================================================================
+
+const normAddr = (s?: string): string =>
+  (s || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+
+const normPhone = (s?: string): string => (s || '').replace(/\D/g, '');
+
+/** Un colis et un arrêt sont-ils au MÊME point de livraison ? (adresse OU tél+CP) */
+const samePlace = (
+  a: { address?: string; postalCode?: string; city?: string; contactPhone?: string },
+  b: { address?: string; postalCode?: string; city?: string; contactPhone?: string }
+): boolean => {
+  const key = (x: typeof a) => `${normAddr(x.address)}|${(x.postalCode || '').trim()}|${normAddr(x.city)}`;
+  if (key(a) === key(b)) return true;
+  const pa = normPhone(a.contactPhone), pb = normPhone(b.contactPhone);
+  return pa.length >= 6 && pa === pb && (a.postalCode || '').trim() === (b.postalCode || '').trim();
+};
+
+// ============================================================================
 // TYPES
 // ============================================================================
 
@@ -278,7 +304,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   const [issueForm, setIssueForm] = useState<{ category: string; description: string; priority: 'Low' | 'Medium' | 'High' }>({ category: 'Véhicule / panne', description: '', priority: 'Medium' });
   const [issueSubmitting, setIssueSubmitting] = useState(false);
   const [stopPackages, setStopPackages] = useState<Package[]>([]);
-  
+  // Filet de sécurité : colis à la même adresse NON inclus dans l'arrêt courant
+  const [otherAtAddress, setOtherAtAddress] = useState<Package[]>([]);
+
   // Return to hub workflow
   const [returnPackages, setReturnPackages] = useState<Package[]>([]);
   const [showReturnModal, setShowReturnModal] = useState(false);
@@ -330,16 +358,37 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   // Charger les colis du stop courant (PICKUP : pour le scan ; DELIVERY : pour
   // afficher au chauffeur les N° de colis à remettre)
   useEffect(() => {
-    if (!currentStop?.packageIds?.length) {
+    if (!currentStop) {
       setStopPackages([]);
+      setOtherAtAddress([]);
       return;
     }
+    const ids = currentStop.packageIds || [];
     const unsub = subscribeToPackages((pkgs) => {
-      const filtered = pkgs.filter(p => currentStop.packageIds.includes(p.id));
-      setStopPackages(filtered);
+      setStopPackages(pkgs.filter(p => ids.includes(p.id)));
+
+      // Filet de sécurité (livraison uniquement) : y a-t-il des colis destinés à
+      // CE point de livraison qui ne sont PAS dans l'arrêt ? (colis oublié, parti
+      // chez un autre chauffeur, mal regroupé). On restreint aux colis encore à
+      // livrer et pertinents (à moi, à cette mission, ou du jour) pour éviter le bruit.
+      if (currentStop.type === 'DELIVERY') {
+        const others = pkgs.filter(p =>
+          !ids.includes(p.id) &&
+          samePlace(p, currentStop) &&
+          p.status !== PackageStatus.DELIVERED &&
+          p.status !== PackageStatus.RETURNED &&
+          p.status !== PackageStatus.FAILED &&
+          (p.currentDriverId === currentUser.id ||
+            (!!activeMission && p.missionId === activeMission.id) ||
+            (p.createdAt || '').startsWith(today))
+        );
+        setOtherAtAddress(others);
+      } else {
+        setOtherAtAddress([]);
+      }
     });
     return unsub;
-  }, [currentStop?.id]);
+  }, [currentStop?.id, currentStop?.type, activeMission?.id, currentUser.id, today]);
 
   // Reset scan quand on change de stop
   useEffect(() => {
@@ -1272,6 +1321,26 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                         {stopPackages.length > 1 && (
                           <span className="ml-1 font-sans font-medium text-blue-500">{i + 1}/{stopPackages.length}</span>
                         )}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Filet de sécurité : colis à la même adresse hors de cet arrêt */}
+              {!isPickupStop && otherAtAddress.length > 0 && (
+                <div className="mt-2 p-3 bg-red-50 border-2 border-red-300 rounded-lg">
+                  <p className="text-xs font-black text-red-700 flex items-center gap-1.5">
+                    <XCircle size={14} />
+                    ATTENTION — {otherAtAddress.length} autre{otherAtAddress.length > 1 ? 's' : ''} colis à cette adresse !
+                  </p>
+                  <p className="text-[11px] text-red-600 mt-1">
+                    {stopPackages.length + otherAtAddress.length} colis semblent destinés à ce client, tu n'en as que <b>{stopPackages.length}</b> dans cet arrêt. Vérifie avec le client avant de repartir.
+                  </p>
+                  <div className="flex flex-wrap gap-1.5 mt-1.5">
+                    {otherAtAddress.map(p => (
+                      <span key={p.id} className="px-2 py-1 bg-white border border-red-200 rounded-lg text-[11px] font-mono font-bold text-red-700">
+                        {p.externalId || p.barcode}
                       </span>
                     ))}
                   </div>

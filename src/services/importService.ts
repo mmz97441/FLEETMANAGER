@@ -589,37 +589,85 @@ export const parseExcelForReview = async (file: File): Promise<ReviewResult> => 
   };
 };
 
-/**
- * Plusieurs lignes avec la même commande + même adresse = UN point de livraison
- * multi-colis (cas normal : une pharmacie reçoit 3 cartons) → numérotées 1/N.
- * Un VRAI doublon = le même N° colis présent sur plusieurs lignes → avertissement.
- */
-const deliveryGroupKey = (r: ReviewRow): string =>
-  `${r.orderNumber}|${r.address.toLowerCase().trim()}|${r.postalCode}`;
+// ── Regroupement par POINT DE LIVRAISON (secure le nombre de colis à déposer) ──
+// Objectif : tous les colis destinés au MÊME point physique comptent ensemble
+// (ex. pharmacie qui reçoit 6 cartons sur 2 commandes) → le chauffeur voit le
+// bon total. On NE se base PAS sur le n° de commande (2 commandes = 1 point) ni
+// sur le nom (trop variable entre imports : "SARL PHCIE" vs "PHARMACIE" → ça
+// scinderait le groupe et sous-compterait). Clé fiable = adresse + CP + ville.
+// Renfort : même téléphone + même CP = même client (rattrape les fautes de
+// frappe dans l'adresse).
+
+const normalizeAddr = (s?: string): string =>
+  (s || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // accents
+    .replace(/[^a-z0-9]+/g, ' ')                      // ponctuation → espace
+    .trim();
+
+const normalizePhone = (s?: string): string => (s || '').replace(/\D/g, '');
+
+const addrKey = (r: ReviewRow): string =>
+  `${normalizeAddr(r.address)}|${(r.postalCode || '').trim()}|${normalizeAddr(r.city)}`;
+
+/** Téléphone exploitable comme signal (≥ 6 chiffres), sinon vide. */
+const phoneSignal = (r: ReviewRow): string => {
+  const p = normalizePhone(r.contactPhone);
+  return p.length >= 6 ? p : '';
+};
+
+/** Deux lignes = même point de livraison ? (adresse identique OU même tél+CP) */
+const sameDeliveryPoint = (a: ReviewRow, b: ReviewRow): boolean => {
+  if (addrKey(a) === addrKey(b)) return true;
+  const pa = phoneSignal(a), pb = phoneSignal(b);
+  return !!pa && pa === pb && (a.postalCode || '').trim() === (b.postalCode || '').trim();
+};
 
 const annotateMultiColisAndDuplicates = (reviewRows: ReviewRow[]): void => {
-  const byDelivery = new Map<string, ReviewRow[]>();
-  const byColis = new Map<string, ReviewRow[]>();
+  const active = reviewRows.filter(r => r._status !== 'deleted');
 
-  for (const r of reviewRows) {
-    if (r._status === 'deleted') continue;
-    const gKey = deliveryGroupKey(r);
-    if (!byDelivery.has(gKey)) byDelivery.set(gKey, []);
-    byDelivery.get(gKey)!.push(r);
+  // Union-Find : on relie les lignes qui partagent l'adresse OU le téléphone,
+  // pour former les composantes = points de livraison réels.
+  const parent = active.map((_, i) => i);
+  const find = (i: number): number => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+  const union = (i: number, j: number) => { const ri = find(i), rj = find(j); if (ri !== rj) parent[ri] = rj; };
 
-    const cKey = r.externalId.trim().toUpperCase();
-    if (cKey) {
-      if (!byColis.has(cKey)) byColis.set(cKey, []);
-      byColis.get(cKey)!.push(r);
+  const byAddr = new Map<string, number>();
+  const byPhone = new Map<string, number>();
+  active.forEach((r, i) => {
+    const ak = addrKey(r);
+    if (byAddr.has(ak)) union(i, byAddr.get(ak)!); else byAddr.set(ak, i);
+    const pk = phoneSignal(r);
+    if (pk) {
+      const pcKey = `${pk}|${(r.postalCode || '').trim()}`;
+      if (byPhone.has(pcKey)) union(i, byPhone.get(pcKey)!); else byPhone.set(pcKey, i);
     }
-  }
+  });
 
-  for (const group of byDelivery.values()) {
+  // Regrouper par composante
+  const groups = new Map<number, ReviewRow[]>();
+  active.forEach((r, i) => {
+    const root = find(i);
+    if (!groups.has(root)) groups.set(root, []);
+    groups.get(root)!.push(r);
+  });
+
+  for (const group of groups.values()) {
     if (group.length > 1) {
       group.forEach((r, i) => { r._multiColis = { index: i + 1, total: group.length }; });
+    } else {
+      group[0]._multiColis = undefined;
     }
   }
 
+  // Vrai doublon = le même N° colis présent sur plusieurs lignes
+  const byColis = new Map<string, ReviewRow[]>();
+  for (const r of active) {
+    const cKey = r.externalId.trim().toUpperCase();
+    if (!cKey) continue;
+    if (!byColis.has(cKey)) byColis.set(cKey, []);
+    byColis.get(cKey)!.push(r);
+  }
   for (const [colis, dups] of byColis) {
     if (dups.length > 1) {
       for (const r of dups) {
@@ -667,11 +715,11 @@ export const revalidateRow = async (row: ReviewRow, allRows: ReviewRow[]): Promi
     if (dup) warnings.push(`Doublon : N° colis ${row.externalId} aussi présent ligne ${dup._rowIndex}`);
   }
 
-  // Multi-colis : même commande + même adresse = un point de livraison groupé
+  // Multi-colis : même POINT DE LIVRAISON (adresse+CP+ville, ou tél+CP) — quel
+  // que soit le n° de commande. Aligné sur annotateMultiColisAndDuplicates.
   const updated = { ...row, zone };
-  const gKey = deliveryGroupKey(updated);
   const groupRowIndexes = allRows
-    .filter(r => r._rowIndex !== row._rowIndex && r._status !== 'deleted' && deliveryGroupKey(r) === gKey)
+    .filter(r => r._rowIndex !== row._rowIndex && r._status !== 'deleted' && sameDeliveryPoint(r, updated))
     .map(r => r._rowIndex)
     .concat(row._rowIndex)
     .sort((a, b) => a - b);

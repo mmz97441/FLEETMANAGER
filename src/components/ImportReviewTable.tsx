@@ -485,7 +485,7 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
                         {row._multiColis && (
                           <span
                             className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 whitespace-nowrap"
-                            title={`Point de livraison avec ${row._multiColis.total} colis (même commande, même adresse)`}
+                            title={`Point de livraison avec ${row._multiColis.total} colis (même adresse — toutes commandes confondues)`}
                           >
                             {row._multiColis.index}/{row._multiColis.total}
                           </span>
