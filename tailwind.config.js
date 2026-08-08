@@ -4,7 +4,7 @@ export default {
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
-  darkMode: 'media', // Adapte au thème système automatiquement
+  darkMode: 'class', // Thème clair verrouillé : le sombre ne s'active jamais tout seul
   theme: {
     extend: {
       fontFamily: {
