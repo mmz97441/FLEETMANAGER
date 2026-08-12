@@ -25,15 +25,25 @@ const timeAgo = (iso: string): string => {
 const ErrorLogsPanel: React.FC = () => {
   const [logs, setLogs] = useState<ErrorLogRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [readError, setReadError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [levelFilter, setLevelFilter] = useState<'all' | 'error' | 'warning'>('all');
   const [expanded, setExpanded] = useState<string | null>(null);
 
   useEffect(() => {
-    const unsub = subscribeToErrorLogs(next => {
-      setLogs(next);
-      setIsLoading(false);
-    });
+    const unsub = subscribeToErrorLogs(
+      next => { setLogs(next); setReadError(null); setIsLoading(false); },
+      200,
+      err => {
+        const msg = err instanceof Error ? err.message : String(err);
+        setReadError(
+          /permission|insufficient/i.test(msg)
+            ? "Accès refusé : ton rôle n'a pas le droit de lire le journal d'erreurs (réservé à la direction)."
+            : `Lecture du journal impossible : ${msg}`
+        );
+        setIsLoading(false);
+      }
+    );
     return unsub;
   }, []);
 
@@ -65,6 +75,16 @@ const ErrorLogsPanel: React.FC = () => {
     return (
       <div className="flex items-center justify-center h-64 text-slate-400">
         <RefreshCw className="animate-spin mr-2" size={18} /> Chargement du journal d'erreurs…
+      </div>
+    );
+  }
+
+  if (readError) {
+    return (
+      <div className="bg-red-50 border-2 border-red-200 rounded-xl p-6 text-center">
+        <XCircle className="mx-auto text-red-500 mb-2" size={28} />
+        <p className="text-sm font-bold text-red-700">Journal d'erreurs indisponible</p>
+        <p className="text-xs text-red-600 mt-1">{readError}</p>
       </div>
     );
   }

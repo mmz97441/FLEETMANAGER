@@ -20,13 +20,16 @@ service cloud.firestore {
     // Utilise regex (.matches) pour gérer les variantes Unicode (é vs e+accent combinant)
     // et les différences de casse. Les patterns sont ancrés (^...$) pour éviter qu'un
     // rôle "sous-président-stagiaire" matche /président/ et obtienne un faux positif.
+    // Motifs par PRÉFIXE (.*) pour tolérer les variantes réelles :
+    // "Directeur Exploitation", "Présidence"/"Présidente", "Secrétariat", etc.
+    // Sans le .*, un rôle ancré ^directeur$ rejetait "Directeur Exploitation".
     function isAdminRole() {
-      return request.auth != null && getUserRole().matches('(?i)^(admin|pr[eé]sident[e]?|directeur|directrice|direction|secr[eé]taire|secr[eé]tariat)$');
+      return request.auth != null && getUserRole().matches('(?i)^(admin|pr[eé]siden.*|directeur.*|directrice.*|direction|secr[eé]ta.*)$');
     }
 
     // Rôles internes (tous sauf Client)
     function isInternalUser() {
-      return request.auth != null && getUserRole().matches('(?i)^(admin|pr[eé]sident[e]?|directeur|directrice|direction|secr[eé]taire|secr[eé]tariat|chauffeur|chauffeuse|m[eé]canicien|m[eé]canicienne|stagiaire)$');
+      return request.auth != null && getUserRole().matches('(?i)^(admin|pr[eé]siden.*|directeur.*|directrice.*|direction|secr[eé]ta.*|chauffeu.*|m[eé]canicien.*|stagiaire)$');
     }
 
     // Rôles opérationnels (chauffeurs, mécaniciens)

@@ -220,13 +220,19 @@ export const reportError = (context: string, error: unknown, opts: ReportOptions
 /** Souscrit au journal d'erreurs en temps réel (derniers N, plus récents d'abord). */
 export const subscribeToErrorLogs = (
   callback: (logs: ErrorLogRecord[]) => void,
-  limitCount = 200
+  limitCount = 200,
+  onError?: (err: unknown) => void
 ): (() => void) => {
   const q = query(collection(db, 'error_logs'), orderBy('createdAt', 'desc'), limit(limitCount));
   return onSnapshot(
     q,
     snap => callback(snap.docs.map(d => ({ id: d.id, ...(d.data() as object) } as ErrorLogRecord))),
-    err => { console.error('[logService] lecture error_logs impossible', err); callback([]); }
+    err => {
+      // NE PAS renvoyer un tableau vide silencieux : un refus de droits ressemblerait
+      // alors à "aucune erreur". On remonte l'échec pour l'afficher clairement.
+      console.error('[logService] lecture error_logs impossible', err);
+      if (onError) onError(err);
+    }
   );
 };
 
