@@ -915,17 +915,42 @@ export const getOrCreateDriverDeliveryMission = async (
   const ref = doc(db, MISSIONS_COLLECTION, id);
   const now = new Date().toISOString();
 
+  // VÉHICULE : priorité au véhicule passé, sinon on reprend AUTOMATIQUEMENT le
+  // véhicule assigné au profil du chauffeur (les tournées créées par scan n'en
+  // passaient aucun → livraisons sans véhicule). Résolu hors transaction.
+  let vehicleId = vehicle?.id;
+  let vehiclePlate = vehicle?.plate;
+  if (!vehicleId) {
+    try {
+      const uSnap = await getDoc(doc(db, 'users', driver.id));
+      const assigned = uSnap.exists() ? (uSnap.data() as any).assignedVehicleId : undefined;
+      if (assigned) {
+        vehicleId = assigned;
+        const vSnap = await getDoc(doc(db, 'vehicles', assigned));
+        if (vSnap.exists()) vehiclePlate = (vSnap.data() as any).plate;
+      }
+    } catch { /* best-effort : à défaut, tournée sans véhicule (nettoyé plus bas) */ }
+  }
+
   return await runTransaction(db, async (tx) => {
     const snap = await tx.get(ref);
-    if (snap.exists()) return { id, ...snap.data() } as Mission;
+    if (snap.exists()) {
+      const existing = { id, ...snap.data() } as Mission;
+      // Tournée du jour déjà créée sans véhicule → on la complète.
+      if (!existing.vehicleId && vehicleId) {
+        tx.update(ref, cleanUndefined({ vehicleId, vehiclePlate, updatedAt: now }));
+        return { ...existing, vehicleId, vehiclePlate } as Mission;
+      }
+      return existing;
+    }
     const mission = cleanUndefined({
       type: MissionType.DELIVERY,
       zone: Zone.NORD,
       hubId: '',
       hubName: 'Prise en charge terrain',
       date,
-      vehicleId: vehicle?.id,
-      vehiclePlate: vehicle?.plate,
+      vehicleId,
+      vehiclePlate,
       driverId: driver.id,
       driverName: driver.name,
       stops: [],

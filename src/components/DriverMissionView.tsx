@@ -666,10 +666,17 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
         : `⚠️ Validé sans scan complet (${deliveryScannedCount}/${stopPackages.length} scannés)`;
     if (!activeMission || !currentStop) return;
     setIsProcessing(true);
+    // GPS OBLIGATOIRE : on doit connaître le point précis de la livraison.
+    // Sans position, on refuse la validation (mode strict choisi par la direction).
+    let coords: { lat: number; lng: number };
     try {
-      let coords: { lat: number; lng: number } | undefined;
-      try { coords = await getCurrentPosition(); } catch {}
-
+      coords = await getCurrentPosition();
+    } catch {
+      showNotif('📍 Active ta localisation pour valider la livraison (position GPS obligatoire).');
+      setIsProcessing(false);
+      return;
+    }
+    try {
       const now = new Date().toISOString();
 
       // 1. Mettre à jour le stop
