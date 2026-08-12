@@ -916,18 +916,22 @@ export const getOrCreateDriverDeliveryMission = async (
   const now = new Date().toISOString();
 
   // VÉHICULE : priorité au véhicule passé, sinon on reprend AUTOMATIQUEMENT le
-  // véhicule assigné au profil du chauffeur (les tournées créées par scan n'en
-  // passaient aucun → livraisons sans véhicule). Résolu hors transaction.
+  // véhicule du chauffeur (les tournées créées par scan n'en passaient aucun →
+  // livraisons sans véhicule). Le lien est stocké CÔTÉ VÉHICULE (vehicle.driverId
+  // ou assignedDriverId == chauffeur), et la plaque brute est `licensePlate`
+  // (le champ `plate` du type n'existe qu'après mapping applicatif). Hors transaction.
   let vehicleId = vehicle?.id;
   let vehiclePlate = vehicle?.plate;
   if (!vehicleId) {
     try {
-      const uSnap = await getDoc(doc(db, 'users', driver.id));
-      const assigned = uSnap.exists() ? (uSnap.data() as any).assignedVehicleId : undefined;
-      if (assigned) {
-        vehicleId = assigned;
-        const vSnap = await getDoc(doc(db, 'vehicles', assigned));
-        if (vSnap.exists()) vehiclePlate = (vSnap.data() as any).plate;
+      let vdoc = (await getDocs(query(collection(db, 'vehicles'), where('driverId', '==', driver.id)))).docs[0];
+      if (!vdoc) {
+        vdoc = (await getDocs(query(collection(db, 'vehicles'), where('assignedDriverId', '==', driver.id)))).docs[0];
+      }
+      if (vdoc) {
+        const vd = vdoc.data() as any;
+        vehicleId = vdoc.id;
+        vehiclePlate = vd.licensePlate || vd.plate;
       }
     } catch { /* best-effort : à défaut, tournée sans véhicule (nettoyé plus bas) */ }
   }
