@@ -324,11 +324,19 @@ export const updatePackageStatus = async (
   
   const pkg = pkgDoc.data() as Package;
   const now = new Date().toISOString();
-  
+
+  // CRUCIAL : nettoyer les undefined avant écriture. Firestore rejette toute
+  // valeur `undefined` ("Unsupported field value: undefined") — c'est ce qui
+  // faisait échouer la mise à jour du statut à la livraison (vehicleId/plate/
+  // location absents sur une tournée créée par scan ou sans GPS) et laissait
+  // les colis bloqués "En livraison".
+  const cleanedMovement = cleanUndefined({ ...movement, timestamp: now });
+  const cleanedExtra = cleanUndefined(extraFields || {});
+
   await updateDoc(doc(db, PACKAGES_COLLECTION, packageId), {
     status,
-    movements: [...(pkg.movements || []), { ...movement, timestamp: now }],
-    ...(extraFields || {}),
+    movements: [...(pkg.movements || []), cleanedMovement],
+    ...cleanedExtra,
     updatedAt: now
   });
 

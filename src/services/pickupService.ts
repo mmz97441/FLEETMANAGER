@@ -19,6 +19,17 @@ import { reportError } from './logService';
 const PICKUPS_COLLECTION = 'pickups';
 const PACKAGES_COLLECTION = 'packages';
 
+// Firestore rejette toute valeur `undefined`. On nettoie en profondeur avant
+// écriture (location/vehicleId absents = fréquent → sinon updateDoc plante).
+const stripUndefined = (obj: any): any => {
+  if (obj === undefined || obj === null) return null;
+  if (typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(stripUndefined);
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(obj)) if (v !== undefined) out[k] = stripUndefined(v);
+  return out;
+};
+
 // ============================================================================
 // TYPES
 // ============================================================================
@@ -123,7 +134,7 @@ export const finalizePickup = async (params: {
         }
 
         const pkg = pkgSnap.data() as Package;
-        const movements = [...(pkg.movements || []), {
+        const movements = [...(pkg.movements || []), stripUndefined({
           timestamp,
           action: 'COLLECTED' as const,
           driverId,
@@ -132,15 +143,15 @@ export const finalizePickup = async (params: {
           vehiclePlate,
           location: coordinates,
           notes: `Enlevé chez ${clientName}`
-        }];
+        })];
 
-        await updateDoc(pkgRef, {
+        await updateDoc(pkgRef, stripUndefined({
           status: PackageStatus.COLLECTED,
           currentDriverId: driverId,
           currentVehicleId: vehicleId,
           movements,
           updatedAt: timestamp
-        });
+        }));
       } catch (e) {
         // Un colis n'a pas pu être mis à jour (droits, réseau…) → on le trace
         // et on continue les autres, mais l'échec ne sera PAS silencieux.
