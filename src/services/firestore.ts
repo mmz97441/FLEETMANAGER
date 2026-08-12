@@ -392,19 +392,32 @@ export const addVehicleToFirestore = async (vehicle: Vehicle) => {
     technicalControlDate: vehicle.technicalControlDate || null,
     customDeadlines: vehicle.customDeadlines || []
   };
-  await addDoc(collection(db, "vehicles"), cleanFirestoreData(dataToSave));
+  const created = await addDoc(collection(db, "vehicles"), cleanFirestoreData(dataToSave));
+  // Lien bidirectionnel : renseigne aussi le côté utilisateur.
+  if (vehicle.assignedDriverId) {
+    updateDoc(doc(db, "users", vehicle.assignedDriverId), { assignedVehicleId: created.id }).catch(() => {});
+  }
 };
 
 export const updateVehicleInFirestore = async (vehicle: Vehicle) => {
   const ref = doc(db, "vehicles", vehicle.id);
+
+  // Lien bidirectionnel : on lit l'ancien chauffeur pour le nettoyer si besoin.
+  let prevDriverId: string | null = null;
+  try {
+    const prev = await getDoc(ref);
+    prevDriverId = prev.exists() ? ((prev.data() as any).driverId || null) : null;
+  } catch { /* best-effort */ }
+  const newDriverId = vehicle.assignedDriverId || null;
+
   const updateData: any = {
     currentMileage: Number(vehicle.currentMileage),
     licensePlate: vehicle.plate,
-    driverId: vehicle.assignedDriverId || null,
+    driverId: newDriverId,
     status: vehicle.status,
     customDeadlines: vehicle.customDeadlines || []
   };
-  
+
   // Update conditional fields
   if (vehicle.technicalControlDate) updateData.technicalControlDate = vehicle.technicalControlDate;
   if (vehicle.maintenanceInterval) updateData.maintenanceInterval = vehicle.maintenanceInterval;
@@ -412,8 +425,16 @@ export const updateVehicleInFirestore = async (vehicle: Vehicle) => {
   if (vehicle.tailgateDate) updateData.tailgateDate = vehicle.tailgateDate;
   if (vehicle.chronotachygraphDate) updateData.chronotachygraphDate = vehicle.chronotachygraphDate;
   if (vehicle.speedLimiterDate) updateData.speedLimiterDate = vehicle.speedLimiterDate;
-  
+
   await updateDoc(ref, cleanFirestoreData(updateData));
+
+  // Synchronise le côté utilisateur (assignedVehicleId) — best-effort, non bloquant.
+  if (newDriverId && newDriverId !== prevDriverId) {
+    updateDoc(doc(db, "users", newDriverId), { assignedVehicleId: vehicle.id }).catch(() => {});
+  }
+  if (prevDriverId && prevDriverId !== newDriverId) {
+    updateDoc(doc(db, "users", prevDriverId), { assignedVehicleId: "" }).catch(() => {});
+  }
 };
 
 export const deleteVehicleFromFirestore = async (id: string) => {

@@ -932,6 +932,10 @@ export const getOrCreateDriverDeliveryMission = async (
         const vd = vdoc.data() as any;
         vehicleId = vdoc.id;
         vehiclePlate = vd.licensePlate || vd.plate;
+        // Lien bidirectionnel : renseigne le côté user si manquant (self-heal).
+        if (vd.driverId === driver.id || vd.assignedDriverId === driver.id) {
+          updateDoc(doc(db, 'users', driver.id), { assignedVehicleId: vdoc.id }).catch(() => {});
+        }
       }
     } catch { /* best-effort : à défaut, tournée sans véhicule (nettoyé plus bas) */ }
   }
