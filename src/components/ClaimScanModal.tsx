@@ -63,9 +63,17 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
           } else if (pkg.currentDriverId === currentUser.id && pkg.missionId) {
             notify('warn', `${packageDisplayCode(pkg)} — déjà dans votre tournée`);
           } else {
+            // Anti-confusion embarquement : un colis NON affecté = prise en charge
+            // directe normale (ex. récupéré sans passer par le hub). Un colis
+            // affecté à un AUTRE chauffeur = alerte (c'est une passation).
+            const foreign = !!pkg.currentDriverId && pkg.currentDriverId !== currentUser.id && !!pkg.missionId;
             addedIdsRef.current.add(pkg.id);
             setScannedPkgs(prev => [...prev, pkg]);
-            notify('ok', `${packageDisplayCode(pkg)} — ${pkg.contactName} ✓`);
+            if (foreign) {
+              notify('warn', `⚠️ ${packageDisplayCode(pkg)} — ce colis est sur une autre tournée. Le prendre = passation.`);
+            } else {
+              notify('ok', `${packageDisplayCode(pkg)} — ${pkg.contactName} ✓`);
+            }
           }
         } catch {
           notify('warn', `${cleaned} — erreur lors de la recherche`);

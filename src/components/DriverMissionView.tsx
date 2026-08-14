@@ -2496,6 +2496,17 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                       {mission.totalPackages} colis • {mission.stops.length} stops à charger
                     </p>
                   </div>
+                  {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+                  <button
+                    onClick={() => setShowClaimModal(true)}
+                    disabled={isProcessing}
+                    className="w-full flex items-center justify-center gap-2 py-3 bg-blue-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-50"
+                  >
+                    <Camera size={18} />
+                    📷 Scanner les colis à l'embarquement
+                  </button>
                   <button
                     onClick={() => handleLoadingComplete(mission)}
                     disabled={isProcessing}
