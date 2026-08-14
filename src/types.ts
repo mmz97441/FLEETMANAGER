@@ -589,6 +589,7 @@ export type ViewState =
   | 'company_settings'
   | 'activity_logs'
   | 'error_logs'
+  | 'president_overview'
   | 'missions'
   | 'notifications_settings'
   | 'api_diagnostic'

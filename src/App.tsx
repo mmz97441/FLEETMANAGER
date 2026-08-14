@@ -42,6 +42,7 @@ const DeliveryScheduleSettings = lazy(() => import('./components/DeliverySchedul
 const ZoneManager = lazy(() => import('./components/ZoneManager'));
 const HubOperations = lazy(() => import('./components/HubOperations'));
 const DriverTourView = lazy(() => import('./components/DriverTourView'));
+const PresidentOverview = lazy(() => import('./components/PresidentOverview'));
 
 // FIREBASE SERVICES
 import { 
@@ -948,6 +949,9 @@ const App: React.FC = () => {
             initialTab="errors"
           />
         );
+
+      case 'president_overview':
+        return <PresidentOverview />;
 
       case 'missions': {
         // Chauffeurs → vue mobile dédiée

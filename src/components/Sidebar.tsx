@@ -6,7 +6,7 @@ import {
   FileCheck, CalendarDays, ChevronDown, ChevronRight,
   ShoppingBag, Euro, List, Settings as SettingsIcon, FileSignature,
   UserCog, Bell, Download, ClipboardList, Palmtree, Shield,
-  Route, Package, MapPin, Activity, Clock, Navigation, AlertTriangle
+  Route, Package, MapPin, Activity, Clock, Navigation, AlertTriangle, Eye
 } from 'lucide-react';
 import { ViewState, User, UserRole } from '../types';
 import { usePermissions, Permission, PermissionKey } from '../usePermissions';
@@ -69,10 +69,17 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
     // ─────────────────────────────────────────────────────
     // TABLEAU DE BORD
     // ─────────────────────────────────────────────────────
-    { 
-      id: 'dashboard', 
-      label: 'Tableau de Bord', 
-      icon: LayoutDashboard, 
+    {
+      id: 'president_overview',
+      label: 'Vue de dieu',
+      icon: Eye,
+      permission: Permission.DASHBOARD_KPI_FLEET
+    },
+
+    {
+      id: 'dashboard',
+      label: 'Tableau de Bord',
+      icon: LayoutDashboard,
       permission: Permission.DASHBOARD_VIEW
     },
 
