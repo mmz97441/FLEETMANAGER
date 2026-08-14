@@ -275,6 +275,48 @@ export const subscribeToPackages = (
   });
 };
 
+/**
+ * Abonnement DÉDIÉ aux colis d'un client (portail expéditeur).
+ *
+ * Corrige un défaut de `subscribeToPackages` qui ne charge que les 500 colis les
+ * plus récents de TOUT le système avant de filtrer côté client : un client à fort
+ * volume ne voyait plus ses colis anciens. Ici on interroge Firestore CÔTÉ SERVEUR
+ * par `clientId` ET par `clientName` (requêtes d'égalité → index simples, pas de
+ * limite globale), puis on fusionne. Le client voit ainsi TOUS ses colis.
+ */
+export const subscribeToClientPackages = (
+  client: { id: string; companyName?: string },
+  callback: (packages: Package[]) => void
+) => {
+  let byId: Package[] = [];
+  let byName: Package[] = [];
+  const emit = () => {
+    const map = new Map<string, Package>();
+    [...byId, ...byName].forEach(p => map.set(p.id, p));
+    const merged = Array.from(map.values())
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    callback(merged);
+  };
+
+  const qId = query(collection(db, PACKAGES_COLLECTION), where('clientId', '==', client.id), limit(3000));
+  const unsub1 = onSnapshot(qId, snap => {
+    byId = snap.docs.map(d => ({ id: d.id, ...d.data() } as Package));
+    emit();
+  });
+
+  let unsub2: () => void = () => {};
+  const company = (client.companyName || '').trim();
+  if (company) {
+    const qName = query(collection(db, PACKAGES_COLLECTION), where('clientName', '==', company), limit(3000));
+    unsub2 = onSnapshot(qName, snap => {
+      byName = snap.docs.map(d => ({ id: d.id, ...d.data() } as Package));
+      emit();
+    });
+  }
+
+  return () => { unsub1(); unsub2(); };
+};
+
 export const getPackagesByMission = async (missionId: string): Promise<Package[]> => {
   const q = query(collection(db, PACKAGES_COLLECTION), where('missionId', '==', missionId));
   const snapshot = await getDocs(q);

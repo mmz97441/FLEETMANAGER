@@ -11,7 +11,7 @@ import { createInvitation, getActivationUrl, resendInvitation } from '../service
 import { subscribeToSavedAddresses, addSavedAddress, incrementAddressUsage, updateUserProfile } from '../services/firestore';
 import { getDeliveryScheduleConfig, getAvailableSlotsForZone, estimateZoneFromAddress } from '../services/deliveryService';
 import { getPODByPackage } from '../services/podService';
-import { subscribeToPackages } from '../services/missionService';
+import { subscribeToClientPackages } from '../services/missionService';
 import { generateBatchLabelsHTML } from '../services/pickupService';
 import ShippingLabel, { quoteToLabelData, ShippingLabelData } from './ShippingLabel';
 import PODViewer from './PODViewer';
@@ -302,6 +302,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
 
   // === MES EXPÉDITIONS (colis du client) ===
   const [clientPackages, setClientPackages] = useState<PackageType[]>([]);
+  const [isLoadingPackages, setIsLoadingPackages] = useState(true);
   const [shipmentSearch, setShipmentSearch] = useState('');
   const [shipmentFilter, setShipmentFilter] = useState<'all' | 'pending' | 'transit' | 'delivered' | 'failed'>('all');
   const [expandedShipmentId, setExpandedShipmentId] = useState<string | null>(null); // timeline dépliée
@@ -322,21 +323,18 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   }, []);
 
   // Charger les colis du client (pour "Mes Expéditions")
+  // Abonnement dédié : requête server-side par clientId + clientName (tous les
+  // colis du client, sans la limite globale de 500 qui en masquait d'anciens).
   useEffect(() => {
     if (!currentUser?.id) return;
-    // Un colis appartient au client si son clientId = l'identifiant du compte
-    // (valeur stockée à l'import) OU si son clientName = la société du client
-    // (couvre les comptes d'équipe d'une même société). L'ancien filtre par
-    // companyName seul ne matchait jamais les colis (stockés par identifiant)
-    // → le client ne voyait plus rien.
-    const company = (currentUser.companyName || '').trim().toLowerCase();
-    const unsub = subscribeToPackages((pkgs) => {
-      const mine = pkgs.filter(p =>
-        p.clientId === currentUser.id ||
-        (!!company && (p.clientName || '').trim().toLowerCase() === company)
-      );
-      setClientPackages(mine);
-    });
+    setIsLoadingPackages(true);
+    const unsub = subscribeToClientPackages(
+      { id: currentUser.id, companyName: currentUser.companyName },
+      (pkgs) => {
+        setClientPackages(pkgs);
+        setIsLoadingPackages(false);
+      }
+    );
     return unsub;
   }, [currentUser.id, currentUser.companyName]);
 
@@ -1521,7 +1519,14 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                     );
                                 })}
 
-                                {filtered.length === 0 && (
+                                {isLoadingPackages && filtered.length === 0 && (
+                                    <div className="text-center py-16">
+                                        <div className="inline-block w-8 h-8 border-2 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-3" />
+                                        <p className="text-slate-500 font-medium">Chargement de vos expéditions…</p>
+                                    </div>
+                                )}
+
+                                {!isLoadingPackages && filtered.length === 0 && (
                                     <div className="text-center py-16">
                                         <Package className="mx-auto text-slate-300 mb-3" size={40} />
                                         <p className="text-slate-500 font-medium">Aucune expédition trouvée</p>

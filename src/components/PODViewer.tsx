@@ -12,7 +12,8 @@ import React, { useState } from 'react';
 import { ProofOfDelivery, DeliveryLocation } from '../types';
 import {
   X, MapPin, Clock, User, Truck, Camera, PenTool,
-  ZoomIn, ChevronLeft, ChevronRight, ExternalLink, Printer
+  ZoomIn, ChevronLeft, ChevronRight, ExternalLink, Printer,
+  CheckCircle, AlertTriangle
 } from 'lucide-react';
 
 interface PODViewerProps {
@@ -191,6 +192,21 @@ const PODViewer: React.FC<PODViewerProps> = ({
                 </span>
               )}
             </div>
+
+            {/* État de la marchandise à la réception */}
+            {typeof pod.merchandiseGoodCondition === 'boolean' && (
+              pod.merchandiseGoodCondition ? (
+                <div className="flex items-center gap-2 bg-green-50 rounded-xl p-3 border border-green-200">
+                  <CheckCircle size={16} className="text-green-600" />
+                  <span className="text-sm font-semibold text-green-800">Marchandises reçues en bon état</span>
+                </div>
+              ) : (
+                <div className="bg-amber-50 rounded-xl p-3 border border-amber-200">
+                  <p className="text-xs font-bold text-amber-700 flex items-center gap-1"><AlertTriangle size={14} /> Réserves émises à la réception</p>
+                  {pod.reservesNote && <p className="text-sm text-amber-800 mt-1">{pod.reservesNote}</p>}
+                </div>
+              )
+            )}
 
             {/* Infos chauffeur (back-office uniquement) */}
             {showDriverInfo && (
