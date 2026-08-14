@@ -798,6 +798,24 @@ export const addSavedAddress = async (address: Omit<SavedAddress, 'id'>): Promis
   return docRef.id;
 };
 
+// Import en lot du carnet de destinataires (retourne le nombre créé)
+export const addSavedAddressesBatch = async (addresses: Omit<SavedAddress, 'id'>[]): Promise<number> => {
+  const now = new Date().toISOString();
+  let created = 0;
+  await Promise.all(addresses.map(async (address) => {
+    try {
+      await addDoc(collection(db, "savedAddresses"), cleanFirestoreData({
+        ...address,
+        usageCount: 0,
+        createdAt: now,
+        updatedAt: now
+      }));
+      created++;
+    } catch { /* ignore une ligne en échec, on continue */ }
+  }));
+  return created;
+};
+
 // Mettre à jour une adresse
 export const updateSavedAddress = async (address: SavedAddress): Promise<void> => {
   const { id, ...data } = address;

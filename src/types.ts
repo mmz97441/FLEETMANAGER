@@ -614,6 +614,7 @@ export interface SavedAddress {
   city: string;             // Code postal et ville
   contactName: string;      // Nom du contact
   contactPhone: string;     // Téléphone
+  contactEmail?: string;    // Email du destinataire (optionnel — pour copie du BL)
   notes?: string;           // Notes optionnelles
   isFavorite?: boolean;     // Adresse favorite (affichée en premier)
   usageCount?: number;      // Nombre d'utilisations (pour tri par pertinence)
@@ -833,7 +834,16 @@ export interface Package {
   hasElevator?: boolean;
   contactName: string;
   contactPhone?: string;
-  
+  contactEmail?: string;           // Email destinataire (pour copie du BL)
+
+  // Multi-colis (X/N) sur un même point de livraison
+  packageIndex?: number;
+  packageTotal?: number;
+
+  // Origine self-service client
+  createdByClient?: boolean;       // Colis créé par l'expéditeur depuis son espace
+  clientReference?: string;        // Référence propre du client (affichée en second)
+
   // Contraintes
   timeWindowStart?: string;        // "08:00"
   timeWindowEnd?: string;          // "10:00"

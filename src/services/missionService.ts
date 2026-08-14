@@ -542,6 +542,72 @@ export const addPackagesBatch = async (packages: Omit<Package, 'id' | 'createdAt
   return ids;
 };
 
+// Code de suivi généré système pour un colis créé par le client (préfixe CL).
+export const generateTrackingCode = (): string => {
+  const d = new Date();
+  const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+  const rand = Math.random().toString(36).slice(2, 7).toUpperCase();
+  return `CL-${ymd}-${rand}`;
+};
+
+/**
+ * Création d'une expédition self-service par le client (portail expéditeur).
+ * Crée N colis (multi-colis 1/N…N/N) sur un même point de livraison, statut
+ * PENDING (« à collecter »), zone fournie, codes de suivi système uniques.
+ * Retourne les colis créés (avec id) pour impression immédiate des étiquettes.
+ */
+export const createClientShipment = async (params: {
+  client: { id: string; companyName: string };
+  recipient: { contactName: string; address: string; city: string; postalCode: string; contactPhone?: string; contactEmail?: string };
+  zone: Zone;
+  packageCount: number;
+  weight?: number;
+  volume?: number;
+  comment?: string;
+  clientReference?: string;
+}): Promise<Package[]> => {
+  const { client, recipient, zone } = params;
+  const total = Math.max(1, Math.min(Number(params.packageCount) || 1, 50));
+  const now = new Date().toISOString();
+
+  const toCreate: Omit<Package, 'id' | 'createdAt' | 'updatedAt'>[] = [];
+  for (let i = 1; i <= total; i++) {
+    const code = generateTrackingCode();
+    toCreate.push({
+      clientId: client.id,
+      clientName: client.companyName,
+      importBatchId: 'client-self-service',
+      externalId: code,
+      orderNumber: code,
+      barcode: code,
+      address: recipient.address,
+      city: recipient.city,
+      postalCode: recipient.postalCode,
+      zone,
+      contactName: recipient.contactName,
+      contactPhone: recipient.contactPhone,
+      contactEmail: recipient.contactEmail,
+      serviceTime: 5,
+      comment: params.comment,
+      weight: params.weight,
+      volume: params.volume,
+      clientReference: params.clientReference,
+      createdByClient: true,
+      packageIndex: i,
+      packageTotal: total,
+      status: PackageStatus.PENDING,
+      movements: [{
+        timestamp: now,
+        action: 'IMPORTED' as const,
+        notes: `Créé par l'expéditeur ${client.companyName}${params.clientReference ? ` — réf ${params.clientReference}` : ''}`
+      }]
+    } as Omit<Package, 'id' | 'createdAt' | 'updatedAt'>);
+  }
+
+  const ids = await addPackagesBatch(toCreate);
+  return toCreate.map((p, idx) => ({ ...(p as Package), id: ids[idx], createdAt: now, updatedAt: now }));
+};
+
 // ============================================================================
 // MISSIONS
 // ============================================================================

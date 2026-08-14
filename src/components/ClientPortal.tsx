@@ -16,6 +16,8 @@ import { generateBatchLabelsHTML } from '../services/pickupService';
 import ShippingLabel, { quoteToLabelData, ShippingLabelData } from './ShippingLabel';
 import PODViewer from './PODViewer';
 import { openDeliveryNote } from '../utils/deliveryNote';
+import CreateShipmentModal from './CreateShipmentModal';
+import ImportRecipientsModal from './ImportRecipientsModal';
 import ClientKPIs from './ClientKPIs';
 
 // ============================================================================
@@ -307,6 +309,8 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   const [shipmentFilter, setShipmentFilter] = useState<'all' | 'pending' | 'transit' | 'delivered' | 'failed'>('all');
   const [expandedShipmentId, setExpandedShipmentId] = useState<string | null>(null); // timeline dépliée
   const [selectedLabels, setSelectedLabels] = useState<Set<string>>(new Set());
+  const [showCreateShipment, setShowCreateShipment] = useState(false);
+  const [showImportRecipients, setShowImportRecipients] = useState(false);
 
   // Charger la config créneaux au montage
   useEffect(() => {
@@ -1252,13 +1256,31 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
             <div className="space-y-6 animate-fade-in">
                 {/* Header */}
                 <div className="bg-gradient-to-r from-blue-700 to-indigo-600 rounded-3xl p-6 text-white shadow-xl">
-                    <h2 className="text-2xl font-bold flex items-center gap-3">
-                        <QrCode size={28} />
-                        Mes Expéditions
-                    </h2>
-                    <p className="text-blue-100 mt-1">
-                        {clientPackages.length} colis au total — Suivez vos envois et téléchargez vos étiquettes
-                    </p>
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                        <div>
+                            <h2 className="text-2xl font-bold flex items-center gap-3">
+                                <QrCode size={28} />
+                                Mes Expéditions
+                            </h2>
+                            <p className="text-blue-100 mt-1">
+                                {clientPackages.length} colis au total — Suivez vos envois et téléchargez vos étiquettes
+                            </p>
+                        </div>
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => setShowImportRecipients(true)}
+                                className="flex items-center gap-2 px-4 py-2.5 bg-white/15 hover:bg-white/25 text-white rounded-xl font-bold text-sm transition-colors"
+                            >
+                                <UserPlus size={16} /> Importer mes destinataires
+                            </button>
+                            <button
+                                onClick={() => setShowCreateShipment(true)}
+                                className="flex items-center gap-2 px-4 py-2.5 bg-white text-indigo-700 rounded-xl font-bold text-sm shadow-lg active:scale-95 transition-transform"
+                            >
+                                <Plus size={16} /> Créer une expédition
+                            </button>
+                        </div>
+                    </div>
                 </div>
 
                 {/* Stats rapides */}
@@ -2102,6 +2124,30 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
             data={labelData}
             onClose={() => setLabelData(null)}
             companyName={currentUser.companyName || 'FleetGenius Transport'}
+          />
+        )}
+
+        {/* CRÉER UNE EXPÉDITION (self-service) */}
+        {showCreateShipment && (
+          <CreateShipmentModal
+            currentUser={currentUser}
+            savedAddresses={savedAddresses}
+            onClose={() => setShowCreateShipment(false)}
+            onCreated={() => { /* la liste se met à jour via l'abonnement temps réel */ }}
+          />
+        )}
+
+        {/* IMPORTER LE CARNET DE DESTINATAIRES */}
+        {showImportRecipients && (
+          <ImportRecipientsModal
+            currentUser={currentUser}
+            existingAddresses={savedAddresses}
+            onClose={() => setShowImportRecipients(false)}
+            onDone={(count) => {
+              setShowImportRecipients(false);
+              setAddressSaveMessage(`✅ ${count} destinataire(s) importé(s) dans votre carnet.`);
+              setTimeout(() => setAddressSaveMessage(''), 5000);
+            }}
           />
         )}
 

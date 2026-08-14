@@ -255,11 +255,25 @@ export const getPickupsByMission = async (missionId: string): Promise<PickupMani
  * Format : 4 étiquettes par page A4 (2 colonnes × 2 lignes).
  * Chaque étiquette = 10×15cm avec code-barres Code128.
  */
-export const generateBatchLabelsHTML = (packages: Package[], companyName = 'FleetGenius Transport'): string => {
+export type LabelFormat = 'A4' | 'A5' | 'A6';
+
+export const generateBatchLabelsHTML = (
+  packages: Package[],
+  companyName = 'FleetGenius Transport',
+  format: LabelFormat = 'A4'
+): string => {
+  // Config par format : taille de page, colonnes, nb d'étiquettes/page, dimensions
+  const FMT: Record<LabelFormat, { page: string; cols: string; perPage: number; lw: string; lh: string }> = {
+    A4: { page: 'A4', cols: '1fr 1fr', perPage: 4, lw: '95mm', lh: '140mm' },
+    A5: { page: 'A5', cols: '1fr', perPage: 1, lw: '138mm', lh: '198mm' },
+    A6: { page: 'A6', cols: '1fr', perPage: 1, lw: '98mm', lh: '138mm' },
+  };
+  const cfg = FMT[format] || FMT.A4;
   const labels = packages.map(pkg => `
     <div class="label">
       <div class="label-header">
         <span class="company">${companyName}</span>
+        ${pkg.packageTotal && pkg.packageTotal > 1 ? `<span class="xn">Colis ${pkg.packageIndex}/${pkg.packageTotal}</span>` : ''}
         <span class="zone">${pkg.zone || ''}</span>
       </div>
       <div class="barcode-zone">
@@ -278,7 +292,7 @@ export const generateBatchLabelsHTML = (packages: Package[], companyName = 'Flee
       </div>
       ${pkg.comment ? `<div class="comment">📝 ${pkg.comment}</div>` : ''}
       <div class="ref-zone">
-        <span>Réf: ${pkg.orderNumber}</span>
+        <span>Suivi: ${pkg.orderNumber}${pkg.clientReference ? ` · Réf: ${pkg.clientReference}` : ''}</span>
         ${pkg.weight ? `<span>${pkg.weight} kg</span>` : ''}
       </div>
     </div>
@@ -294,17 +308,18 @@ export const generateBatchLabelsHTML = (packages: Package[], companyName = 'Flee
 <title>Étiquettes - ${packages.length} colis</title>
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"><\/script>
 <style>
-  @page { size: A4; margin: 5mm; }
+  @page { size: ${cfg.page}; margin: 5mm; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: Arial, sans-serif; }
-  .page { display: grid; grid-template-columns: 1fr 1fr; gap: 4mm; page-break-after: always; }
+  .page { display: grid; grid-template-columns: ${cfg.cols}; gap: 4mm; page-break-after: always; }
   .page:last-child { page-break-after: avoid; }
   .label {
-    width: 95mm; height: 140mm;
+    width: ${cfg.lw}; height: ${cfg.lh};
     border: 2px solid #000; padding: 3mm;
     display: flex; flex-direction: column;
     page-break-inside: avoid;
   }
+  .xn { font-size: 11pt; font-weight: bold; color: #fff; background: #4f46e5; padding: 1mm 3mm; border-radius: 3px; }
   .label-header {
     display: flex; justify-content: space-between; align-items: center;
     padding: 2mm; border-bottom: 2px solid #000; background: #f5f5f5;
@@ -343,17 +358,18 @@ ${labels}
       } catch(e) { /* silenced */ }
     }
   });
-  // Regrouper en pages de 4
+  // Regrouper en pages selon le format
+  const PER_PAGE = ${cfg.perPage};
   const labels = document.querySelectorAll('.label');
   const pages = document.querySelectorAll('.page');
-  if (pages.length === 1 && labels.length > 4) {
+  if (pages.length === 1 && labels.length > PER_PAGE) {
     const container = pages[0];
     const allLabels = Array.from(labels);
     container.innerHTML = '';
-    for (let i = 0; i < allLabels.length; i += 4) {
+    for (let i = 0; i < allLabels.length; i += PER_PAGE) {
       const page = document.createElement('div');
       page.className = 'page';
-      allLabels.slice(i, i + 4).forEach(l => page.appendChild(l));
+      allLabels.slice(i, i + PER_PAGE).forEach(l => page.appendChild(l));
       container.parentNode.insertBefore(page, container);
     }
     container.remove();
