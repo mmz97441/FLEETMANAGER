@@ -280,6 +280,15 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   const [deliveryLocation, setDeliveryLocation] = useState<DeliveryLocation>(DeliveryLocation.HAND_DELIVERY);
   const [capturedPhotos, setCapturedPhotos] = useState<string[]>([]);
   const MAX_PHOTOS = 5;
+  // Assistant de livraison pas-à-pas (petits écrans) + état marchandise à la réception
+  const [deliveryStep, setDeliveryStep] = useState(0);
+  const [merchandiseGood, setMerchandiseGood] = useState(true);
+  const [reservesNote, setReservesNote] = useState('');
+  const [gpsBlocked, setGpsBlocked] = useState(false); // action bloquée : GPS obligatoire non activé
+  const [gpsErrorMsg, setGpsErrorMsg] = useState(''); // message personnalisé selon la cause
+  const [gpsIsPermission, setGpsIsPermission] = useState(false); // true = permission navigateur refusée (vs GPS OS coupé)
+  const [gpsRetry, setGpsRetry] = useState<null | (() => void)>(null); // action à rejouer après activation
+  const DELIVERY_STEPS = ['Colis', 'État', 'Réception', 'Preuve', 'Validation'];
   const [signatureData, setSignatureData] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
@@ -395,6 +404,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
     setScannedBarcodes([]);
     setShowScanner(false);
     setScanBypass(false);
+    setDeliveryStep(0);
+    setMerchandiseGood(true);
+    setReservesNote('');
   }, [currentStop?.id]);
 
   // Scan de contrôle à la livraison : chaque colis du stop doit être scanné
@@ -451,6 +463,40 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
     });
   };
 
+  // Message GPS personnalisé (prénom) + ciblé selon la cause de l'échec.
+  const buildGpsMessage = (err: any): { msg: string; isPermission: boolean } => {
+    const hi = currentUser.firstName ? `${currentUser.firstName}, ` : '';
+    const code = err && typeof err.code === 'number' ? err.code : null;
+    if (code === 1) // PERMISSION_DENIED
+      return { msg: `${hi}autorise la localisation pour ce site dans les réglages du navigateur stp 🙏`, isPermission: true };
+    if (code === 2) // POSITION_UNAVAILABLE (GPS OS coupé)
+      return { msg: `${hi}active le GPS de ton téléphone pour continuer stp 🙏`, isPermission: false };
+    if (code === 3) // TIMEOUT
+      return { msg: `${hi}impossible de te localiser — vérifie que le GPS est bien activé, puis réessaie stp 🙏`, isPermission: false };
+    return { msg: `${hi}active ta localisation pour continuer stp 🙏`, isPermission: false };
+  };
+
+  // Garde GPS réutilisable : renvoie la position, ou déclenche la modale bloquante
+  // (message personnalisé + action à rejouer) et renvoie null. Utilisée pour la
+  // LIVRAISON et le DÉPART de tournée. NE PAS utiliser pour la passation entre chauffeurs.
+  const ensureGps = async (retry: () => void): Promise<{ lat: number; lng: number } | null> => {
+    try {
+      return await getCurrentPosition();
+    } catch (e) {
+      const { msg, isPermission } = buildGpsMessage(e);
+      reportError('driver.gpsRequired', e, {
+        level: 'warning',
+        silent: true,
+        extra: { driverId: currentUser.id, driverName: `${currentUser.firstName} ${currentUser.lastName}` }
+      });
+      setGpsErrorMsg(msg);
+      setGpsIsPermission(isPermission);
+      setGpsRetry(() => retry);
+      setGpsBlocked(true);
+      return null;
+    }
+  };
+
   // === ACTIONS ===
 
   // Phase 1 : Commencer le chargement (DISPATCHED → LOADING en mémoire)
@@ -462,6 +508,10 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
 
   // Phase 2 : Chargement terminé → packages IN_DELIVERY + mission IN_PROGRESS + recalcul ETA
   const handleLoadingComplete = async (mission: Mission) => {
+    // GPS obligatoire DÈS LE DÉPART : on bloque ici (au hub) plutôt qu'au 1er client,
+    // pour que le chauffeur active sa localisation en début de tournée.
+    const startPos = await ensureGps(() => handleLoadingComplete(mission));
+    if (!startPos) return;
     setIsProcessing(true);
     try {
       const now = new Date();
@@ -666,16 +716,15 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
         : `⚠️ Validé sans scan complet (${deliveryScannedCount}/${stopPackages.length} scannés)`;
     if (!activeMission || !currentStop) return;
     setIsProcessing(true);
-    // GPS OBLIGATOIRE : on doit connaître le point précis de la livraison.
-    // Sans position, on refuse la validation (mode strict choisi par la direction).
+    // GPS OBLIGATOIRE : toute LIVRAISON doit avoir un point GPS précis (mode strict).
+    // (La passation entre chauffeurs — prise en charge / transfert — n'est PAS
+    // concernée : elle a son propre flux sans GPS obligatoire.)
+    // Sans position, on NE valide PAS : on logue l'incident (plus d'échec silencieux)
+    // et on affiche une modale bloquante qui force l'activation du GPS du téléphone.
     let coords: { lat: number; lng: number };
-    try {
-      coords = await getCurrentPosition();
-    } catch {
-      showNotif('📍 Active ta localisation pour valider la livraison (position GPS obligatoire).');
-      setIsProcessing(false);
-      return;
-    }
+    const pos = await ensureGps(handleDeliverySuccess);
+    if (!pos) { setIsProcessing(false); return; }
+    coords = pos;
     try {
       const now = new Date().toISOString();
 
@@ -768,11 +817,14 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
           vehiclePlate: activeMission.vehiclePlate || '',
           recipientName: recipientName || undefined,
           deliveryLocation,
+          merchandiseGoodCondition: merchandiseGood,
+          reservesNote: merchandiseGood ? undefined : (reservesNote.trim() || undefined),
           signatureBase64: signatureData || undefined,
           photosBase64: capturedPhotos,
           coordinates: coords || { lat: 0, lng: 0 },
           notes: [
             recipientName ? `${deliveryLocation} — Réceptionné par: ${recipientName}` : null,
+            merchandiseGood ? null : `⚠️ Réserves: ${reservesNote.trim() || 'oui'}`,
             scanTrace || null
           ].filter(Boolean).join(' • ') || undefined
         }, setUploadProgress);
@@ -801,6 +853,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
       setDeliveryLocation(DeliveryLocation.HAND_DELIVERY);
       setShowSignature(false);
       setUploadProgress(null);
+      setDeliveryStep(0);
+      setMerchandiseGood(true);
+      setReservesNote('');
 
       showNotif(allDone ? '🎉 Tournée terminée !' : `✅ Stop ${currentStop.sequence} livré !`);
     } catch (err) {
@@ -1447,206 +1502,301 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                 {/* ===== MODE LIVRAISON (DELIVERY) ===== */}
                 {currentStop.status === StopStatus.ARRIVED && !isPickupStop && (
                   <>
-                    {/* Scan de contrôle des colis avant remise */}
-                    {stopPackages.length > 0 && (
-                      <div className="bg-white border border-slate-200 rounded-xl p-3 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <p className="text-xs font-bold text-slate-700">
-                            📷 Colis scannés : {deliveryScannedCount}/{stopPackages.length}
-                          </p>
-                          <button
-                            onClick={() => setShowScanner(true)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold active:scale-95 transition-transform"
-                          >
-                            <Camera size={14} />
-                            Scanner
-                          </button>
+                    {/* Progression de l'assistant de livraison */}
+                    <div className="flex items-center gap-1 px-1 pb-1">
+                      {DELIVERY_STEPS.map((label, i) => (
+                        <div key={label} className="flex-1 flex flex-col items-center gap-1">
+                          <div className={`w-full h-1.5 rounded-full ${i <= deliveryStep ? 'bg-green-500' : 'bg-slate-200'}`} />
+                          <span className={`text-[9px] font-bold ${i === deliveryStep ? 'text-green-700' : 'text-slate-400'}`}>{label}</span>
                         </div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {stopPackages.map(p => {
-                            const ok = scannedBarcodes.some(b => packageMatchesCode(p, b));
-                            return (
-                              <span
-                                key={p.id}
-                                className={`px-2 py-1 rounded-lg text-[11px] font-mono font-bold border ${
-                                  ok
-                                    ? 'bg-green-50 border-green-300 text-green-700'
-                                    : 'bg-slate-50 border-slate-200 text-slate-500'
+                      ))}
+                    </div>
+
+                    {/* ===== ÉTAPE 1 · COLIS ===== */}
+                    {deliveryStep === 0 && (
+                      <div className="space-y-2">
+                        <p className="text-sm font-bold text-slate-800 px-1">Étape 1 · Vérifier les colis ({stopPackages.length})</p>
+                        {stopPackages.length > 0 ? (
+                          <div className="bg-white border border-slate-200 rounded-xl p-3 space-y-2">
+                            <div className="flex items-center justify-between">
+                              <p className="text-xs font-bold text-slate-700">
+                                📷 Colis scannés : {deliveryScannedCount}/{stopPackages.length}
+                              </p>
+                              <button
+                                onClick={() => setShowScanner(true)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold active:scale-95 transition-transform"
+                              >
+                                <Camera size={14} />
+                                Scanner
+                              </button>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {stopPackages.map(p => {
+                                const ok = scannedBarcodes.some(b => packageMatchesCode(p, b));
+                                return (
+                                  <span
+                                    key={p.id}
+                                    className={`px-2 py-1 rounded-lg text-[11px] font-mono font-bold border ${
+                                      ok
+                                        ? 'bg-green-50 border-green-300 text-green-700'
+                                        : 'bg-slate-50 border-slate-200 text-slate-500'
+                                    }`}
+                                  >
+                                    {ok ? '✓ ' : ''}{packageDisplayCode(p)}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                            {!allStopScanned && (
+                              <p className="text-[11px] text-amber-600 font-medium">
+                                ⚠️ {missingStopCodes.length} colis non scanné{missingStopCodes.length > 1 ? 's' : ''} — le compte sera demandé à la validation
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-slate-500 px-1">Aucun colis listé pour ce point.</p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* ===== ÉTAPE 2 · ÉTAT MARCHANDISE ===== */}
+                    {deliveryStep === 1 && (
+                      <div className="space-y-2">
+                        <p className="text-sm font-bold text-slate-800 px-1">Étape 2 · État de la marchandise</p>
+                        <button
+                          onClick={() => setMerchandiseGood(g => !g)}
+                          className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-colors ${merchandiseGood ? 'bg-green-50 border-green-400' : 'bg-white border-slate-200'}`}
+                        >
+                          <div className={`w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 ${merchandiseGood ? 'bg-green-500 text-white' : 'border-2 border-slate-300'}`}>
+                            {merchandiseGood && <CheckCircle size={18} />}
+                          </div>
+                          <span className="text-sm font-medium text-slate-800">Marchandises reçues en <b>bon état</b>, sans réserve</span>
+                        </button>
+                        {!merchandiseGood && (
+                          <div className="px-1">
+                            <label className="text-xs font-bold text-amber-700 mb-1 block">⚠️ Réserves — précisez :</label>
+                            <textarea
+                              value={reservesNote}
+                              onChange={(e) => setReservesNote(e.target.value)}
+                              placeholder="Colis manquant, emballage endommagé, contenu non conforme…"
+                              rows={3}
+                              className="w-full px-3 py-2.5 border border-amber-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-200 outline-none"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* ===== ÉTAPE 3 · RÉCEPTION ===== */}
+                    {deliveryStep === 2 && (
+                      <div className="space-y-3">
+                        <p className="text-sm font-bold text-slate-800 px-1">Étape 3 · Réception</p>
+                        {/* Nom réceptionnaire */}
+                        <div className="px-1">
+                          <label className="text-xs font-medium text-slate-500 mb-1 block">
+                            Nom du réceptionnaire
+                            <span className="text-red-400 ml-1">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            value={recipientName}
+                            onChange={(e) => setRecipientName(e.target.value)}
+                            placeholder="Nom de la personne qui réceptionne"
+                            className="w-full px-3 py-3 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-green-200 focus:border-green-400 outline-none"
+                          />
+                        </div>
+                        {/* Lieu de remise */}
+                        <div className="px-1">
+                          <label className="text-xs font-medium text-slate-500 mb-1 block">
+                            📍 Lieu de remise
+                          </label>
+                          <div className="grid grid-cols-2 gap-1.5">
+                            {Object.values(DeliveryLocation).map(loc => (
+                              <button
+                                key={loc}
+                                onClick={() => setDeliveryLocation(loc as DeliveryLocation)}
+                                className={`px-2 py-2.5 rounded-lg text-xs font-medium transition-colors text-left ${
+                                  deliveryLocation === loc
+                                    ? 'bg-green-100 border-2 border-green-400 text-green-800'
+                                    : 'bg-slate-50 border border-slate-200 text-slate-600 hover:bg-slate-100'
                                 }`}
                               >
-                                {ok ? '✓ ' : ''}{packageDisplayCode(p)}
-                              </span>
-                            );
-                          })}
+                                {loc === DeliveryLocation.HAND_DELIVERY && '🤝 '}
+                                {loc === DeliveryLocation.NEIGHBOR && '🏠 '}
+                                {loc === DeliveryLocation.CONCIERGE && '🔑 '}
+                                {loc === DeliveryLocation.MAILBOX && '📬 '}
+                                {loc === DeliveryLocation.RECEPTION && '🏢 '}
+                                {loc === DeliveryLocation.SAFE_PLACE && '🔒 '}
+                                {loc === DeliveryLocation.OTHER && '📋 '}
+                                {loc}
+                              </button>
+                            ))}
+                          </div>
                         </div>
-                        {!allStopScanned && (
-                          <p className="text-[11px] text-amber-600 font-medium">
-                            ⚠️ {missingStopCodes.length} colis non scanné{missingStopCodes.length > 1 ? 's' : ''} — à scanner avant de valider
+                      </div>
+                    )}
+
+                    {/* ===== ÉTAPE 4 · PREUVE ===== */}
+                    {deliveryStep === 3 && (
+                      <div className="space-y-3">
+                        <p className="text-sm font-bold text-slate-800 px-1">Étape 4 · Preuve (signature + photos)</p>
+                        {/* Signature */}
+                        {!showSignature && !signatureData && (
+                          <button
+                            onClick={() => setShowSignature(true)}
+                            className="w-full flex items-center justify-center gap-2 py-3.5 bg-amber-50 border-2 border-dashed border-amber-300 text-amber-700 rounded-xl font-bold text-sm"
+                          >
+                            <PenTool size={16} />
+                            ✍️ Capturer la signature *
+                          </button>
+                        )}
+
+                        {showSignature && (
+                          <SignaturePad
+                            onSave={(data) => { setSignatureData(data); setShowSignature(false); }}
+                            onCancel={() => setShowSignature(false)}
+                            driverName={`${currentUser.firstName} ${currentUser.lastName}`}
+                          />
+                        )}
+
+                        {signatureData && (
+                          <div className="flex items-center gap-2 px-3 py-2.5 bg-green-50 border border-green-200 rounded-xl">
+                            <CheckCircle size={16} className="text-green-600" />
+                            <span className="text-xs text-green-700 font-bold flex-1">Signature enregistrée ✓</span>
+                            <button onClick={() => { setSignatureData(null); setShowSignature(true); }} className="text-xs text-green-600 underline font-medium">
+                              Refaire
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Photos — max 5 */}
+                        <div className="px-1">
+                          <label className="text-xs font-medium text-slate-500 mb-1.5 block">
+                            📸 Photos du colis / lieu de livraison
+                          </label>
+                          <button
+                            onClick={() => photoInputRef.current?.click()}
+                            disabled={capturedPhotos.length >= MAX_PHOTOS}
+                            className="w-full flex items-center justify-center gap-2 py-3 bg-slate-50 border border-slate-200 text-slate-700 rounded-xl font-medium text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            <Camera size={16} />
+                            {capturedPhotos.length >= MAX_PHOTOS
+                              ? `Maximum atteint (${MAX_PHOTOS}/${MAX_PHOTOS})`
+                              : `Prendre une photo (${capturedPhotos.length}/${MAX_PHOTOS})`
+                            }
+                          </button>
+                          <input
+                            ref={photoInputRef}
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            className="hidden"
+                            onChange={handlePhotoCapture}
+                          />
+                        </div>
+
+                        {capturedPhotos.length > 0 && (
+                          <div className="flex gap-2 px-1 overflow-x-auto pb-1">
+                            {capturedPhotos.map((photo, i) => (
+                              <div key={i} className="relative flex-shrink-0">
+                                <img src={photo} alt={`Photo ${i+1}`} className="w-20 h-20 rounded-lg object-cover border-2 border-slate-200" />
+                                <button
+                                  onClick={() => setCapturedPhotos(prev => prev.filter((_, idx) => idx !== i))}
+                                  className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-[10px] shadow-md"
+                                >
+                                  ✕
+                                </button>
+                                <span className="absolute bottom-0.5 left-0.5 bg-black/50 text-white text-[9px] px-1 rounded">
+                                  {i + 1}/{capturedPhotos.length}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {!signatureData && (
+                          <p className="text-[11px] text-amber-600 font-medium text-center px-2">
+                            ⚠️ Signature obligatoire pour valider la livraison
                           </p>
                         )}
                       </div>
                     )}
 
-                    {/* Barre de progression upload */}
-                    {uploadProgress && uploadProgress.step !== 'done' && uploadProgress.step !== 'error' && (
-                      <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
-                        <div className="flex items-center gap-2">
-                          <Loader2 size={14} className="animate-spin text-blue-600" />
-                          <span className="text-xs font-bold text-blue-700">{uploadProgress.message}</span>
+                    {/* ===== ÉTAPE 5 · VALIDATION ===== */}
+                    {deliveryStep === 4 && (
+                      <div className="space-y-3">
+                        <p className="text-sm font-bold text-slate-800 px-1">Étape 5 · Validation</p>
+                        {/* Récapitulatif */}
+                        <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm space-y-1.5">
+                          <div className="flex justify-between"><span className="text-slate-500">Colis</span><span className="font-bold">{stopPackages.length}</span></div>
+                          <div className="flex justify-between"><span className="text-slate-500">État marchandise</span><span className={`font-bold ${merchandiseGood ? 'text-green-700' : 'text-amber-700'}`}>{merchandiseGood ? 'Bon état' : 'Réserves'}</span></div>
+                          {!merchandiseGood && reservesNote.trim() && (
+                            <div className="text-[11px] text-amber-700 bg-amber-50 rounded-lg px-2 py-1.5">{reservesNote.trim()}</div>
+                          )}
+                          <div className="flex justify-between"><span className="text-slate-500">Réceptionné par</span><span className="font-bold">{recipientName || '—'}</span></div>
+                          <div className="flex justify-between"><span className="text-slate-500">Lieu de remise</span><span className="font-bold">{deliveryLocation}</span></div>
+                          <div className="flex justify-between"><span className="text-slate-500">Signature</span><span className="font-bold">{signatureData ? '✓' : '—'}</span></div>
+                          <div className="flex justify-between"><span className="text-slate-500">Photos</span><span className="font-bold">{capturedPhotos.length}</span></div>
                         </div>
-                        <div className="w-full bg-blue-100 rounded-full h-2">
-                          <div
-                            className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                            style={{ width: `${Math.round((uploadProgress.current / uploadProgress.total) * 100)}%` }}
-                          />
-                        </div>
-                      </div>
-                    )}
 
-                    {/* Nom réceptionnaire */}
-                    <div className="px-1">
-                      <label className="text-xs font-medium text-slate-500 mb-1 block">
-                        Nom du réceptionnaire
-                        <span className="text-red-400 ml-1">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={recipientName}
-                        onChange={(e) => setRecipientName(e.target.value)}
-                        placeholder="Nom de la personne qui réceptionne"
-                        className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-green-200 focus:border-green-400 outline-none"
-                      />
-                    </div>
+                        {/* Barre de progression upload */}
+                        {uploadProgress && uploadProgress.step !== 'done' && uploadProgress.step !== 'error' && (
+                          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
+                            <div className="flex items-center gap-2">
+                              <Loader2 size={14} className="animate-spin text-blue-600" />
+                              <span className="text-xs font-bold text-blue-700">{uploadProgress.message}</span>
+                            </div>
+                            <div className="w-full bg-blue-100 rounded-full h-2">
+                              <div
+                                className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                                style={{ width: `${Math.round((uploadProgress.current / uploadProgress.total) * 100)}%` }}
+                              />
+                            </div>
+                          </div>
+                        )}
 
-                    {/* Lieu de remise */}
-                    <div className="px-1">
-                      <label className="text-xs font-medium text-slate-500 mb-1 block">
-                        📍 Lieu de remise
-                      </label>
-                      <div className="grid grid-cols-2 gap-1.5">
-                        {Object.values(DeliveryLocation).map(loc => (
-                          <button
-                            key={loc}
-                            onClick={() => setDeliveryLocation(loc as DeliveryLocation)}
-                            className={`px-2 py-2 rounded-lg text-xs font-medium transition-colors text-left ${
-                              deliveryLocation === loc
-                                ? 'bg-green-100 border-2 border-green-400 text-green-800'
-                                : 'bg-slate-50 border border-slate-200 text-slate-600 hover:bg-slate-100'
-                            }`}
-                          >
-                            {loc === DeliveryLocation.HAND_DELIVERY && '🤝 '}
-                            {loc === DeliveryLocation.NEIGHBOR && '🏠 '}
-                            {loc === DeliveryLocation.CONCIERGE && '🔑 '}
-                            {loc === DeliveryLocation.MAILBOX && '📬 '}
-                            {loc === DeliveryLocation.RECEPTION && '🏢 '}
-                            {loc === DeliveryLocation.SAFE_PLACE && '🔒 '}
-                            {loc === DeliveryLocation.OTHER && '📋 '}
-                            {loc}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Signature */}
-                    {!showSignature && !signatureData && (
-                      <button
-                        onClick={() => setShowSignature(true)}
-                        className="w-full flex items-center justify-center gap-2 py-3.5 bg-amber-50 border-2 border-dashed border-amber-300 text-amber-700 rounded-xl font-bold text-sm"
-                      >
-                        <PenTool size={16} />
-                        ✍️ Capturer la signature *
-                      </button>
-                    )}
-
-                    {showSignature && (
-                      <SignaturePad
-                        onSave={(data) => { setSignatureData(data); setShowSignature(false); }}
-                        onCancel={() => setShowSignature(false)}
-                        driverName={`${currentUser.firstName} ${currentUser.lastName}`}
-                      />
-                    )}
-
-                    {signatureData && (
-                      <div className="flex items-center gap-2 px-3 py-2.5 bg-green-50 border border-green-200 rounded-xl">
-                        <CheckCircle size={16} className="text-green-600" />
-                        <span className="text-xs text-green-700 font-bold flex-1">Signature enregistrée ✓</span>
-                        <button onClick={() => { setSignatureData(null); setShowSignature(true); }} className="text-xs text-green-600 underline font-medium">
-                          Refaire
+                        <button
+                          onClick={() => { if (allStopScanned) { handleDeliverySuccess(); } else { setShowScanGate(true); } }}
+                          disabled={isProcessing || !signatureData || !recipientName.trim()}
+                          className="w-full flex items-center justify-center gap-2 py-4 bg-green-600 text-white rounded-xl font-bold text-base active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          {isProcessing ? <Loader2 size={18} className="animate-spin" /> : <CheckCircle size={18} />}
+                          Livré ✓
                         </button>
                       </div>
                     )}
 
-                    {/* Photos — max 5, previews plus grandes */}
-                    <div className="px-1">
-                      <label className="text-xs font-medium text-slate-500 mb-1.5 block">
-                        📸 Photos du colis / lieu de livraison
-                      </label>
-                      <button
-                        onClick={() => photoInputRef.current?.click()}
-                        disabled={capturedPhotos.length >= MAX_PHOTOS}
-                        className="w-full flex items-center justify-center gap-2 py-3 bg-slate-50 border border-slate-200 text-slate-700 rounded-xl font-medium text-sm disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        <Camera size={16} />
-                        {capturedPhotos.length >= MAX_PHOTOS 
-                          ? `Maximum atteint (${MAX_PHOTOS}/${MAX_PHOTOS})`
-                          : `Prendre une photo (${capturedPhotos.length}/${MAX_PHOTOS})`
-                        }
-                      </button>
-                      <input
-                        ref={photoInputRef}
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
-                        className="hidden"
-                        onChange={handlePhotoCapture}
-                      />
-                    </div>
-
-                    {capturedPhotos.length > 0 && (
-                      <div className="flex gap-2 px-1 overflow-x-auto pb-1">
-                        {capturedPhotos.map((photo, i) => (
-                          <div key={i} className="relative flex-shrink-0">
-                            <img src={photo} alt={`Photo ${i+1}`} className="w-20 h-20 rounded-lg object-cover border-2 border-slate-200" />
-                            <button
-                              onClick={() => setCapturedPhotos(prev => prev.filter((_, idx) => idx !== i))}
-                              className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-[10px] shadow-md"
-                            >
-                              ✕
-                            </button>
-                            <span className="absolute bottom-0.5 left-0.5 bg-black/50 text-white text-[9px] px-1 rounded">
-                              {i + 1}/{capturedPhotos.length}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Alerte si signature manquante */}
-                    {!signatureData && (
-                      <p className="text-[11px] text-amber-600 font-medium text-center px-2">
-                        ⚠️ Signature obligatoire pour valider la livraison
-                      </p>
-                    )}
-
-                    {/* Boutons Livré / Échec */}
+                    {/* Navigation entre étapes */}
                     <div className="flex gap-2 pt-1">
-                      <button
-                        onClick={() => { if (allStopScanned) { handleDeliverySuccess(); } else { setShowScanGate(true); } }}
-                        disabled={isProcessing || !signatureData || !recipientName.trim()}
-                        className="flex-1 flex items-center justify-center gap-2 py-3.5 bg-green-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        {isProcessing ? <Loader2 size={18} className="animate-spin" /> : <CheckCircle size={18} />}
-                        Livré ✓
-                      </button>
-                      <button
-                        onClick={() => setShowFailureModal(true)}
-                        disabled={isProcessing}
-                        className="flex-1 flex items-center justify-center gap-2 py-3.5 bg-red-50 border-2 border-red-200 text-red-700 rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-50"
-                      >
-                        <XCircle size={18} />
-                        Échec
-                      </button>
+                      {deliveryStep > 0 && (
+                        <button
+                          onClick={() => setDeliveryStep(s => Math.max(0, s - 1))}
+                          disabled={isProcessing}
+                          className="px-4 py-3 bg-slate-100 text-slate-700 rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-40"
+                        >
+                          ← Retour
+                        </button>
+                      )}
+                      {deliveryStep < 4 && (
+                        <button
+                          onClick={() => setDeliveryStep(s => Math.min(4, s + 1))}
+                          disabled={(deliveryStep === 2 && !recipientName.trim()) || (deliveryStep === 3 && !signatureData)}
+                          className="flex-1 flex items-center justify-center gap-2 py-3 bg-green-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          Suivant →
+                        </button>
+                      )}
                     </div>
+
+                    {/* Échec possible à tout moment */}
+                    <button
+                      onClick={() => setShowFailureModal(true)}
+                      disabled={isProcessing}
+                      className="w-full flex items-center justify-center gap-1.5 py-2.5 text-red-600 text-xs font-bold disabled:opacity-50"
+                    >
+                      <XCircle size={14} />
+                      Signaler un échec de livraison
+                    </button>
                   </>
                 )}
               </div>
@@ -1772,6 +1922,48 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
               showNotif(`🔁 ${count} colis récupéré${count > 1 ? 's' : ''} dans votre tournée`);
             }}
           />
+        )}
+
+        {/* === MODAL GPS OBLIGATOIRE (action bloquée sans localisation) === */}
+        {gpsBlocked && (
+          <div className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl max-w-sm w-full p-5 text-center space-y-3">
+              <div className="text-5xl">📍</div>
+              <h3 className="font-bold text-lg text-slate-900">Localisation obligatoire</h3>
+              <p className="text-sm font-semibold text-slate-800">
+                {gpsErrorMsg || `${currentUser.firstName ? currentUser.firstName + ', ' : ''}active ta localisation pour continuer stp 🙏`}
+              </p>
+              <div className="text-left text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1.5">
+                {gpsIsPermission ? (
+                  <>
+                    <p>1️⃣ Ouvre le <b>menu du navigateur</b> (cadenas 🔒 dans la barre d'adresse)</p>
+                    <p>2️⃣ <b>Autorise la localisation</b> pour ce site</p>
+                    <p>3️⃣ Reviens ici et appuie sur <b>Réessayer</b></p>
+                  </>
+                ) : (
+                  <>
+                    <p>1️⃣ Ouvre les <b>réglages</b> de ton téléphone</p>
+                    <p>2️⃣ Active la <b>localisation / GPS</b></p>
+                    <p>3️⃣ Reviens ici et appuie sur <b>Réessayer</b></p>
+                  </>
+                )}
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={() => setGpsBlocked(false)}
+                  className="flex-1 py-3 bg-slate-100 text-slate-700 rounded-xl font-bold text-sm active:scale-95 transition-transform"
+                >
+                  Annuler
+                </button>
+                <button
+                  onClick={() => { setGpsBlocked(false); (gpsRetry || handleDeliverySuccess)(); }}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-3 bg-green-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform"
+                >
+                  <MapPin size={16} /> Réessayer
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* === MODAL PRISE EN CHARGE PAR SCAN === */}

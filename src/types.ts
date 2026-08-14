@@ -63,6 +63,10 @@ export interface User {
   avatarUrl?: string;
   hasSeenTutorial?: boolean;
   companyName?: string;
+  // Identité expéditeur (client) — reprise automatiquement sur les bons de livraison
+  companyAddress?: string;   // Adresse complète (rue, CP, ville)
+  companySiret?: string;     // N° SIRET
+  companyPhone?: string;     // Téléphone société
   leaveBalance: number;
   driverLicenseScanDate?: string;
   isHeavyGoodsDriver?: boolean;
@@ -584,6 +588,7 @@ export type ViewState =
   // Nouvelles vues Administration & Paramètres
   | 'company_settings'
   | 'activity_logs'
+  | 'error_logs'
   | 'missions'
   | 'notifications_settings'
   | 'api_diagnostic'
@@ -1034,9 +1039,13 @@ export interface ProofOfDelivery {
   
   // Horodatage
   timestamp: string;
-  
+
   // Commentaire
   notes?: string;
+
+  // État de la marchandise constaté à la réception
+  merchandiseGoodCondition?: boolean;  // true = reçu en bon état (défaut) ; false = réserves
+  reservesNote?: string;               // détail des réserves si décoché
 }
 
 // Preuve de retour au hub (quand un colis est annulé/retourné)

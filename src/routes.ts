@@ -25,6 +25,7 @@ export const VIEW_TO_PATH: Record<ViewState, string> = {
   settings: '/settings',
   company_settings: '/company-settings',
   activity_logs: '/activity-logs',
+  error_logs: '/error-logs',
   missions: '/missions',
   notifications_settings: '/notifications-settings',
   api_diagnostic: '/api-diagnostic',

@@ -6,7 +6,7 @@ import {
   FileCheck, CalendarDays, ChevronDown, ChevronRight,
   ShoppingBag, Euro, List, Settings as SettingsIcon, FileSignature,
   UserCog, Bell, Download, ClipboardList, Palmtree, Shield,
-  Route, Package, MapPin, Activity, Clock, Navigation
+  Route, Package, MapPin, Activity, Clock, Navigation, AlertTriangle
 } from 'lucide-react';
 import { ViewState, User, UserRole } from '../types';
 import { usePermissions, Permission, PermissionKey } from '../usePermissions';
@@ -163,12 +163,13 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
       id: 'administration',
       label: 'Administration',
       icon: UserCog,
-      permission: Permission.USERS_VIEW,
+      permissions: [Permission.USERS_VIEW, Permission.LOGS_VIEW],
       items: [
         { id: 'users', label: 'Utilisateurs', icon: Users, permission: Permission.USERS_VIEW },
         { id: 'permissions', label: 'Permissions', icon: Shield, permission: Permission.USERS_PERMISSIONS },
         { id: 'company_settings', label: 'Entreprise', icon: Building2, permission: Permission.SETTINGS_COMPANY },
         { id: 'activity_logs', label: 'Logs d\'activité', icon: ClipboardList, permission: Permission.LOGS_VIEW },
+        { id: 'error_logs', label: 'Journal d\'erreurs', icon: AlertTriangle, permission: Permission.LOGS_VIEW },
       ]
     },
 

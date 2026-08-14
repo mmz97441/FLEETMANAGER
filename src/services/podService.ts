@@ -184,6 +184,8 @@ export const uploadAndCreatePOD = async (
     vehiclePlate: string;
     recipientName?: string;
     deliveryLocation?: DeliveryLocation;
+    merchandiseGoodCondition?: boolean;
+    reservesNote?: string;
     signatureBase64?: string;
     photosBase64: string[];
     coordinates: { lat: number; lng: number };
@@ -194,8 +196,12 @@ export const uploadAndCreatePOD = async (
   const {
     missionId, stopId, packageIds, driverId, driverName,
     vehicleId, vehiclePlate, recipientName, deliveryLocation,
+    merchandiseGoodCondition, reservesNote,
     signatureBase64, photosBase64, coordinates, notes
   } = params;
+  // Normalisé pour Firestore (pas d'undefined : le projet n'active pas ignoreUndefinedProperties)
+  const goodCondition = merchandiseGoodCondition ?? true;
+  const reservesExtra = (!goodCondition && reservesNote) ? { reservesNote } : {};
 
   const totalSteps = 1 + (signatureBase64 ? 1 : 0) + Math.max(photosBase64.length, 1) + 1;
   let step = 0;
@@ -248,6 +254,7 @@ export const uploadAndCreatePOD = async (
     await setDoc(doc(db, POD_COLLECTION, podDocId), {
       packageIds, missionId, stopId, driverId, driverName,
       vehicleId, vehiclePlate, recipientName, deliveryLocation: deliveryLocation || null,
+      merchandiseGoodCondition: goodCondition, reservesNote: reservesExtra.reservesNote ?? null,
       signatureUrl, photoUrls,
       coordinates, timestamp, notes, type: 'SUCCESS', createdAt: timestamp
     });
@@ -258,6 +265,7 @@ export const uploadAndCreatePOD = async (
         const pkgPod: ProofOfDelivery = {
           packageId: pkgId, missionId, stopId, driverId, driverName,
           vehicleId, vehiclePlate, recipientName, deliveryLocation,
+          merchandiseGoodCondition: goodCondition, ...reservesExtra,
           signatureUrl, photoUrls,
           coordinates, timestamp, notes
         };
@@ -269,6 +277,7 @@ export const uploadAndCreatePOD = async (
     return {
       packageId: packageIds[0] || '', missionId, stopId, driverId, driverName,
       vehicleId, vehiclePlate, recipientName, deliveryLocation,
+      merchandiseGoodCondition: goodCondition, ...reservesExtra,
       signatureUrl, photoUrls,
       coordinates, timestamp, notes
     };

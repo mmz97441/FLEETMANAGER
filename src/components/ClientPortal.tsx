@@ -8,13 +8,14 @@ import ConfirmModal from './ConfirmModal';
 import PackageTimeline from './PackageTimeline';
 import { sendUserInvitationEmail } from '../services/emailService';
 import { createInvitation, getActivationUrl, resendInvitation } from '../services/invitationService';
-import { subscribeToSavedAddresses, addSavedAddress, incrementAddressUsage } from '../services/firestore';
+import { subscribeToSavedAddresses, addSavedAddress, incrementAddressUsage, updateUserProfile } from '../services/firestore';
 import { getDeliveryScheduleConfig, getAvailableSlotsForZone, estimateZoneFromAddress } from '../services/deliveryService';
 import { getPODByPackage } from '../services/podService';
 import { subscribeToPackages } from '../services/missionService';
 import { generateBatchLabelsHTML } from '../services/pickupService';
 import ShippingLabel, { quoteToLabelData, ShippingLabelData } from './ShippingLabel';
 import PODViewer from './PODViewer';
+import { openDeliveryNote } from '../utils/deliveryNote';
 import ClientKPIs from './ClientKPIs';
 
 // ============================================================================
@@ -270,6 +271,34 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   const [labelData, setLabelData] = useState<ShippingLabelData | null>(null);
   const [viewingPOD, setViewingPOD] = useState<{ pod: ProofOfDelivery; quote: QuoteRequest } | null>(null);
   const [loadingPOD, setLoadingPOD] = useState<string | null>(null);
+
+  // === MON ENTREPRISE (identité expéditeur pour les BL) ===
+  const [companyForm, setCompanyForm] = useState({
+    companyName: currentUser.companyName || '',
+    companyAddress: currentUser.companyAddress || '',
+    companySiret: currentUser.companySiret || '',
+    companyPhone: currentUser.companyPhone || '',
+  });
+  const [companySaveMsg, setCompanySaveMsg] = useState('');
+  const [savingCompany, setSavingCompany] = useState(false);
+  const companyInfoComplete = !!(companyForm.companyName.trim() && companyForm.companyAddress.trim());
+  const handleSaveCompany = async () => {
+    setSavingCompany(true);
+    try {
+      await updateUserProfile({
+        ...currentUser,
+        companyName: companyForm.companyName.trim(),
+        companyAddress: companyForm.companyAddress.trim(),
+        companySiret: companyForm.companySiret.trim(),
+        companyPhone: companyForm.companyPhone.trim(),
+      });
+      setCompanySaveMsg('✅ Infos entreprise enregistrées — elles apparaîtront sur vos BL.');
+    } catch (e) {
+      setCompanySaveMsg('❌ Échec de l\'enregistrement, réessayez.');
+    }
+    setSavingCompany(false);
+    setTimeout(() => setCompanySaveMsg(''), 4000);
+  };
 
   // === MES EXPÉDITIONS (colis du client) ===
   const [clientPackages, setClientPackages] = useState<PackageType[]>([]);
@@ -769,6 +798,73 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
 
         {/* --- VIEW: DASHBOARD --- */}
         {activeView === 'client_dashboard' && (
+          <div className="space-y-6">
+            {/* Mon entreprise (identité expéditeur pour les BL) */}
+            <div className={`bg-white rounded-2xl border p-4 sm:p-5 shadow-sm ${companyInfoComplete ? 'border-slate-200' : 'border-amber-300'}`}>
+              <div className="flex items-center gap-2 mb-3">
+                <Building2 size={18} className="text-indigo-600" />
+                <h3 className="font-bold text-slate-800">Mon entreprise (expéditeur)</h3>
+              </div>
+              {!companyInfoComplete && (
+                <div className="mb-3 flex items-start gap-2 text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-3 py-2">
+                  <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
+                  <span>Raison sociale et adresse sont <b>obligatoires</b> : elles figurent sur chaque bon de livraison. Complétez-les.</span>
+                </div>
+              )}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-slate-500 mb-1 block">Raison sociale *</label>
+                  <input
+                    type="text"
+                    value={companyForm.companyName}
+                    onChange={(e) => setCompanyForm(f => ({ ...f, companyName: e.target.value }))}
+                    placeholder="Ex : PREM BPA"
+                    className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-500 mb-1 block">Téléphone</label>
+                  <input
+                    type="tel"
+                    value={companyForm.companyPhone}
+                    onChange={(e) => setCompanyForm(f => ({ ...f, companyPhone: e.target.value }))}
+                    placeholder="0262 00 00 00"
+                    className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="text-xs font-medium text-slate-500 mb-1 block">Adresse complète *</label>
+                  <input
+                    type="text"
+                    value={companyForm.companyAddress}
+                    onChange={(e) => setCompanyForm(f => ({ ...f, companyAddress: e.target.value }))}
+                    placeholder="12 rue des Lilas, 97400 Saint-Denis"
+                    className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-500 mb-1 block">SIRET</label>
+                  <input
+                    type="text"
+                    value={companyForm.companySiret}
+                    onChange={(e) => setCompanyForm(f => ({ ...f, companySiret: e.target.value }))}
+                    placeholder="123 456 789 00012"
+                    className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                  />
+                </div>
+                <div className="flex items-end">
+                  <button
+                    onClick={handleSaveCompany}
+                    disabled={savingCompany || !companyForm.companyName.trim() || !companyForm.companyAddress.trim()}
+                    className="w-full sm:w-auto px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {savingCompany ? 'Enregistrement…' : 'Enregistrer'}
+                  </button>
+                </div>
+              </div>
+              {companySaveMsg && <p className="text-xs font-medium text-slate-600 mt-2">{companySaveMsg}</p>}
+            </div>
+
             <ClientKPIs
               packages={clientPackages}
               clientName={currentUser.companyName || `${currentUser.firstName} ${currentUser.lastName}`}
@@ -777,6 +873,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                 onNavigate?.('client_shipments');
               }}
             />
+          </div>
         )}
 
         {/* --- VIEW: TEAM MANAGEMENT --- */}
@@ -1370,6 +1467,25 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                                     <QrCode size={14} />
                                                 </button>
 
+                                                {/* Bon de livraison (BL) — regroupe les colis du même point */}
+                                                <button
+                                                    onClick={() => openDeliveryNote(
+                                                        pkg as PackageType,
+                                                        clientPackages,
+                                                        {
+                                                            companyName: companyForm.companyName || currentUser?.companyName || pkg.clientName,
+                                                            address: companyForm.companyAddress || undefined,
+                                                            siret: companyForm.companySiret || undefined,
+                                                            phone: companyForm.companyPhone || undefined,
+                                                            email: currentUser?.email,
+                                                        }
+                                                    )}
+                                                    title="Bon de livraison (PDF)"
+                                                    className="p-2 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded-lg transition-colors"
+                                                >
+                                                    <FileText size={14} />
+                                                </button>
+
                                                 {/* Voir POD si livré */}
                                                 {pkg.status === PackageStatus.DELIVERED && pkg.pod && (
                                                     <button
@@ -1396,9 +1512,9 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                         {isExpanded && (
                                             <div className="px-6 pb-4 pt-1 bg-slate-50/70 border-t border-slate-100">
                                                 <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">
-                                                    Suivi du colis {pkg.externalId || pkg.barcode || pkg.orderNumber}
+                                                    Traçabilité complète — colis {pkg.externalId || pkg.barcode || pkg.orderNumber}
                                                 </p>
-                                                <PackageTimeline movements={pkg.movements || []} />
+                                                <PackageTimeline movements={pkg.movements || []} showActors pod={pkg.pod} />
                                             </div>
                                         )}
                                         </React.Fragment>

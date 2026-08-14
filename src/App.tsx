@@ -933,9 +933,18 @@ const App: React.FC = () => {
 
       case 'activity_logs':
         return (
-          <ActivityLogs 
+          <ActivityLogs
             users={users}
             currentUser={currentUser}
+          />
+        );
+
+      case 'error_logs':
+        return (
+          <ActivityLogs
+            users={users}
+            currentUser={currentUser}
+            initialTab="errors"
           />
         );
 

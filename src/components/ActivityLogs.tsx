@@ -27,11 +27,12 @@ import ErrorLogsPanel from './ErrorLogsPanel';
 interface ActivityLogsProps {
   users: User[];
   currentUser: User;
+  initialTab?: 'activity' | 'errors';
 }
 
-const ActivityLogs: React.FC<ActivityLogsProps> = ({ users, currentUser }) => {
+const ActivityLogs: React.FC<ActivityLogsProps> = ({ users, currentUser, initialTab = 'activity' }) => {
   // Onglet : activité (audit) ou erreurs techniques
-  const [tab, setTab] = useState<'activity' | 'errors'>('activity');
+  const [tab, setTab] = useState<'activity' | 'errors'>(initialTab);
   // États
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [isLoading, setIsLoading] = useState(true);

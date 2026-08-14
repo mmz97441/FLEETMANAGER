@@ -443,6 +443,7 @@ export const DEFAULT_ROLE_TEMPLATES: Record<UserRole, PermissionKey[]> = {
     Permission.PACKAGES_TRANSFER,
     Permission.HUBS_VIEW,
     Permission.HUBS_MANAGE,
+    Permission.LOGS_VIEW,
   ],
 
   [UserRole.SECRETARY]: [
