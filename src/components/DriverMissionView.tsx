@@ -517,36 +517,32 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
       const now = new Date();
       const nowISO = now.toISOString();
 
-      // 1. Passer tous les colis SORTED → LOADED → IN_DELIVERY
-      const packageIds = mission.stops.flatMap(s => s.packageIds);
-      for (const pkgId of packageIds) {
-        try {
-          await updatePackageStatus(pkgId, PackageStatus.IN_DELIVERY, {
-            action: 'LOADING_COMPLETE',
-            driverId: currentUser.id,
-            driverName: `${currentUser.firstName} ${currentUser.lastName}`,
-            notes: `Chargement terminé — départ ${now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`
-          });
-        } catch (e) { reportError('driver.loadComplete.item', e, { silent: true, extra: { pkgId } }); }
-      }
-
-      // 2. Recalculer les ETAs basées sur l'heure réelle de départ
+      // 1. Recalculer les ETAs basées sur l'heure réelle de départ
       const updatedStops = mission.stops.map((stop, idx) => {
-        const baseMinutes = (stop.durationFromPrevious || 0);
         const cumulativeMinutes = mission.stops
           .slice(0, idx + 1)
           .reduce((sum, s) => sum + (s.durationFromPrevious || 0) + (s.serviceTime || 5), 0);
-        
+
         const etaDate = new Date(now.getTime() + cumulativeMinutes * 60000);
         const estimatedArrival = etaDate.toISOString();
         const estimatedDeparture = new Date(etaDate.getTime() + (stop.serviceTime || 5) * 60000).toISOString();
-        
-        return {
-          ...stop,
-          estimatedArrival,
-          estimatedDeparture
-        };
+
+        return { ...stop, estimatedArrival, estimatedDeparture };
       });
+
+      // 2. Colis → IN_DELIVERY + heure de livraison prévue (dénormalisée pour le client)
+      for (const stop of updatedStops) {
+        for (const pkgId of (stop.packageIds || [])) {
+          try {
+            await updatePackageStatus(pkgId, PackageStatus.IN_DELIVERY, {
+              action: 'LOADING_COMPLETE',
+              driverId: currentUser.id,
+              driverName: `${currentUser.firstName} ${currentUser.lastName}`,
+              notes: `Chargement terminé — départ ${now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`
+            }, { estimatedDeliveryAt: stop.estimatedArrival });
+          } catch (e) { reportError('driver.loadComplete.item', e, { silent: true, extra: { pkgId } }); }
+        }
+      }
 
       // 3. Mission → IN_PROGRESS avec loadedAt + stops recalculés
       await updateMissionFields(mission.id, {

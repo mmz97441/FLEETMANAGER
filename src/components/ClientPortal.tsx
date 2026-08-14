@@ -1448,6 +1448,17 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                                         {new Date(lastMove.timestamp).toLocaleDateString('fr-FR')} {new Date(lastMove.timestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
                                                     </p>
                                                 )}
+                                                {pkg.status === PackageStatus.IN_DELIVERY && pkg.estimatedDeliveryAt && (() => {
+                                                    const eta = new Date(pkg.estimatedDeliveryAt);
+                                                    if (isNaN(eta.getTime())) return null;
+                                                    const today = eta.toDateString() === new Date().toDateString();
+                                                    const hhmm = eta.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+                                                    return (
+                                                        <p className="text-[10px] font-bold text-orange-600 mt-0.5">
+                                                            🕒 Livraison prévue {today ? `vers ${hhmm}` : `le ${eta.toLocaleDateString('fr-FR')} vers ${hhmm}`}
+                                                        </p>
+                                                    );
+                                                })()}
                                             </div>
 
                                             {/* Actions */}

@@ -854,6 +854,7 @@ export interface Package {
   
   // Tracking
   movements: PackageMovement[];    // Historique complet
+  estimatedDeliveryAt?: string;    // Heure de passage prévue (dénormalisée depuis l'arrêt) — affichée au client
   
   // POD
   pod?: ProofOfDelivery;
