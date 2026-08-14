@@ -10,6 +10,7 @@ import { setLogUser } from './services/logService';
 import MobileNavBar from './components/MobileNavBar';
 import QuickScanButton from './components/QuickScanButton';
 import NotificationCenter from './components/NotificationCenter';
+import ViewAsSwitcher from './components/ViewAsSwitcher';
 import Login from './components/Login';
 import { Menu, Loader2, WifiOff } from 'lucide-react';
 
@@ -1096,6 +1097,10 @@ const App: React.FC = () => {
     }
   };
 
+  const canViewAs = ['presiden', 'admin', 'direct'].some(k =>
+    String(currentUser?.role || '').toLowerCase().includes(k)
+  );
+
   return (
     <ErrorBoundary>
       <PermissionsProvider currentUser={currentUser}>
@@ -1139,11 +1144,12 @@ const App: React.FC = () => {
                   <span className="text-[10px] font-bold text-brand-600 uppercase tracking-wide">{currentUser.role}</span>
               </div>
               <div className="flex items-center gap-2">
+                {canViewAs && <ViewAsSwitcher currentUser={currentUser} users={users} quotes={quotes} />}
                 <NotificationCenter currentUser={currentUser} onNavigate={setCurrentView} />
                 <div className="w-6">
                   {currentUser.avatarUrl && <img src={currentUser.avatarUrl} className="w-6 h-6 rounded-full border border-slate-200" />}
                 </div>
-              </div> 
+              </div>
           </div>
 
           <div className="hidden lg:flex items-center p-4 absolute top-0 left-0 right-0 z-10 justify-between">
@@ -1153,7 +1159,8 @@ const App: React.FC = () => {
               >
                   <Menu size={20} />
               </button>
-              <div className="pr-2">
+              <div className="flex items-center gap-2 pr-2">
+                {canViewAs && <ViewAsSwitcher currentUser={currentUser} users={users} quotes={quotes} />}
                 <NotificationCenter currentUser={currentUser} onNavigate={setCurrentView} />
               </div>
           </div>
