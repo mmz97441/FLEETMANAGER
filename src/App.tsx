@@ -757,7 +757,7 @@ const App: React.FC = () => {
     // une vue interne (dashboard flotte, missions, vue de dieu, logs…). Même si
     // currentView était forcé à une valeur interne, on le ramène au portail.
     const isClientRole = currentUser.role === UserRole.CLIENT || String(currentUser.role || '').toLowerCase().includes('client');
-    const CLIENT_ALLOWED = ['client_dashboard', 'client_list', 'client_shipments', 'client_team', 'help', 'settings'];
+    const CLIENT_ALLOWED = ['client_dashboard', 'client_list', 'client_shipments', 'client_team', 'client_analytics', 'help', 'settings'];
     const view: ViewState = (isClientRole && !CLIENT_ALLOWED.includes(currentView)) ? 'client_dashboard' : currentView;
     switch (view) {
       case 'dashboard':
@@ -1052,6 +1052,7 @@ const App: React.FC = () => {
       case 'client_list':
       case 'client_shipments':
       case 'client_team':
+      case 'client_analytics':
         // Sécurité : On filtre strictement les utilisateurs visibles par le client
         const companyTeam = users.filter(u =>
             u.companyName === currentUser.companyName &&

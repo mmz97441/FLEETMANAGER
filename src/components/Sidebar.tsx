@@ -6,7 +6,7 @@ import {
   FileCheck, CalendarDays, ChevronDown, ChevronRight,
   ShoppingBag, Euro, List, Settings as SettingsIcon, FileSignature,
   UserCog, Bell, Download, ClipboardList, Palmtree, Shield,
-  Route, Package, MapPin, Activity, Clock, Navigation, AlertTriangle, Eye
+  Route, Package, MapPin, Activity, Clock, Navigation, AlertTriangle, Eye, BarChart3
 } from 'lucide-react';
 import { ViewState, User, UserRole } from '../types';
 import { usePermissions, Permission, PermissionKey } from '../usePermissions';
@@ -209,6 +209,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
       items: [
         { id: 'client_dashboard', label: 'Accueil', icon: LayoutDashboard, permission: Permission.CLIENT_DASHBOARD },
         { id: 'client_shipments', label: 'Mes Colis', icon: Package, permission: Permission.CLIENT_REQUESTS_VIEW_OWN },
+        { id: 'client_analytics', label: 'Statistiques', icon: BarChart3, permission: Permission.CLIENT_DASHBOARD },
         { id: 'client_list', label: 'Mes Devis', icon: List, permission: Permission.CLIENT_REQUESTS_VIEW_OWN },
         { id: 'client_team', label: 'Mon Équipe', icon: Users, permission: Permission.CLIENT_TEAM_VIEW },
       ]

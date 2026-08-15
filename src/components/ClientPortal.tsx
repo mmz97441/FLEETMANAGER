@@ -19,6 +19,7 @@ import { openDeliveryNote } from '../utils/deliveryNote';
 import CreateShipmentModal from './CreateShipmentModal';
 import ImportRecipientsModal from './ImportRecipientsModal';
 import AccountHub from './AccountHub';
+import ClientAnalytics from './ClientAnalytics';
 import { changePassword } from '../services/accountService';
 import ClientKPIs from './ClientKPIs';
 
@@ -854,10 +855,11 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
             <div>
               <h2 className="text-2xl font-extrabold text-slate-900">Bonjour {currentUser.firstName} 👋</h2>
               <p className="text-slate-500 mb-4">Que voulez-vous faire ?</p>
-              <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+              <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
                 {[
                   { icon: Plus, label: 'Créer une expédition', hint: 'Nouvel envoi + étiquette', color: 'bg-indigo-600', onClick: () => setShowCreateShipment(true) },
                   { icon: Search, label: 'Suivre mes colis', hint: 'Où sont mes envois ?', color: 'bg-blue-600', onClick: () => onNavigate?.('client_shipments') },
+                  { icon: BarChart3, label: 'Mes statistiques', hint: 'KPI & graphiques', color: 'bg-fuchsia-600', onClick: () => onNavigate?.('client_analytics') },
                   { icon: UserPlus, label: 'Importer mes destinataires', hint: 'Excel / CSV', color: 'bg-emerald-600', onClick: () => setShowImportRecipients(true) },
                   { icon: FileText, label: 'Mes devis', hint: 'Demandes de prix', color: 'bg-amber-500', onClick: () => onNavigate?.('client_list') },
                   { icon: UserIcon, label: 'Mon compte', hint: 'Profil, mot de passe, entreprise', color: 'bg-slate-700', onClick: () => setShowAccountHub(true) },
@@ -1361,6 +1363,11 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                     )}
                 </div>
             </div>
+        )}
+
+        {/* --- VIEW: STATISTIQUES (Studio Analytique) --- */}
+        {activeView === 'client_analytics' && (
+            <ClientAnalytics packages={clientPackages} />
         )}
 
         {/* --- VIEW: MES EXPÉDITIONS (Tracking + Étiquettes) --- */}
