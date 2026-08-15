@@ -801,6 +801,32 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
         {/* --- VIEW: DASHBOARD --- */}
         {activeView === 'client_dashboard' && (
           <div className="space-y-6">
+            {/* Accueil guidé — "Que voulez-vous faire ?" (simple pour tous) */}
+            <div>
+              <h2 className="text-2xl font-extrabold text-slate-900">Bonjour {currentUser.firstName} 👋</h2>
+              <p className="text-slate-500 mb-4">Que voulez-vous faire ?</p>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                {[
+                  { icon: Plus, label: 'Créer une expédition', hint: 'Nouvel envoi + étiquette', color: 'bg-indigo-600', onClick: () => setShowCreateShipment(true) },
+                  { icon: Search, label: 'Suivre mes colis', hint: 'Où sont mes envois ?', color: 'bg-blue-600', onClick: () => onNavigate?.('client_shipments') },
+                  { icon: UserPlus, label: 'Importer mes destinataires', hint: 'Excel / CSV', color: 'bg-emerald-600', onClick: () => setShowImportRecipients(true) },
+                  { icon: FileText, label: 'Mes devis', hint: 'Demandes de prix', color: 'bg-amber-500', onClick: () => onNavigate?.('client_list') },
+                ].map((a, i) => (
+                  <button
+                    key={i}
+                    onClick={a.onClick}
+                    className="bg-white rounded-2xl border border-slate-200 p-4 text-left hover:shadow-md hover:border-indigo-200 active:scale-95 transition-all flex flex-col gap-2"
+                  >
+                    <span className={`w-11 h-11 rounded-xl ${a.color} text-white flex items-center justify-center`}>
+                      <a.icon size={22} />
+                    </span>
+                    <span className="font-bold text-slate-800 leading-tight">{a.label}</span>
+                    <span className="text-xs text-slate-400">{a.hint}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Mon entreprise (identité expéditeur pour les BL) */}
             <div className={`bg-white rounded-2xl border p-4 sm:p-5 shadow-sm ${companyInfoComplete ? 'border-slate-200' : 'border-amber-300'}`}>
               <div className="flex items-center gap-2 mb-3">

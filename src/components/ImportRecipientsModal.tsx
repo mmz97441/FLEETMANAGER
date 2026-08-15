@@ -10,7 +10,7 @@ import React, { useState, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { User, SavedAddress } from '../types';
 import { addSavedAddressesBatch } from '../services/firestore';
-import { X, Upload, CheckCircle, AlertTriangle, FileSpreadsheet } from 'lucide-react';
+import { X, Upload, CheckCircle, AlertTriangle, FileSpreadsheet, Download } from 'lucide-react';
 
 interface ImportRecipientsModalProps {
   currentUser: User;
@@ -100,6 +100,18 @@ const ImportRecipientsModal: React.FC<ImportRecipientsModalProps> = ({ currentUs
     }
   };
 
+  const downloadTemplate = () => {
+    const example = [
+      { Nom: 'Pharmacie du Centre', Adresse: '12 rue des Lilas', 'Code postal': '97400', Ville: 'Saint-Denis', 'Téléphone': '0692 12 34 56', Email: 'contact@pharmacie-centre.re' },
+      { Nom: 'Pharmacie du Port', Adresse: '5 avenue de la Mer', 'Code postal': '97420', Ville: 'Le Port', 'Téléphone': '0262 00 00 00', Email: '' },
+    ];
+    const ws = XLSX.utils.json_to_sheet(example);
+    ws['!cols'] = [{ wch: 24 }, { wch: 26 }, { wch: 12 }, { wch: 18 }, { wch: 16 }, { wch: 28 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Destinataires');
+    XLSX.writeFile(wb, 'modele-destinataires.xlsx');
+  };
+
   const okRows = (rows || []).filter(r => r._status === 'ok');
   const dupRows = (rows || []).filter(r => r._status === 'duplicate');
   const badRows = (rows || []).filter(r => r._status === 'invalid');
@@ -151,6 +163,13 @@ const ImportRecipientsModal: React.FC<ImportRecipientsModalProps> = ({ currentUs
             </button>
             <input ref={inputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
               onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+            <button
+              onClick={downloadTemplate}
+              className="mt-3 w-full flex items-center justify-center gap-2 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-sm font-bold"
+            >
+              <Download size={16} /> Télécharger un fichier d'exemple
+            </button>
+            <p className="text-[11px] text-slate-400 text-center mt-1">Remplis le modèle avec tes destinataires, puis importe-le.</p>
           </>
         )}
 
