@@ -8,7 +8,7 @@ import ConfirmModal from './ConfirmModal';
 import PackageTimeline from './PackageTimeline';
 import { sendUserInvitationEmail } from '../services/emailService';
 import { createInvitation, getActivationUrl, resendInvitation } from '../services/invitationService';
-import { subscribeToSavedAddresses, addSavedAddress, incrementAddressUsage, updateUserProfile } from '../services/firestore';
+import { subscribeToSavedAddresses, addSavedAddress, incrementAddressUsage, updateUserProfile, updateSavedAddress, deleteSavedAddress } from '../services/firestore';
 import { getDeliveryScheduleConfig, getAvailableSlotsForZone, estimateZoneFromAddress } from '../services/deliveryService';
 import { getPODByPackage } from '../services/podService';
 import { subscribeToClientPackages } from '../services/missionService';
@@ -21,6 +21,7 @@ import ImportRecipientsModal from './ImportRecipientsModal';
 import AccountHub from './AccountHub';
 import ClientAnalytics from './ClientAnalytics';
 import InsightsPanel from './analytics/InsightsPanel';
+import RecipientsManager from './RecipientsManager';
 import { getClientInsights } from '../services/clientInsights';
 import { changePassword } from '../services/accountService';
 import ClientKPIs from './ClientKPIs';
@@ -356,6 +357,31 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   // === MES EXPÉDITIONS (colis du client) ===
   const [clientPackages, setClientPackages] = useState<PackageType[]>([]);
   const [isLoadingPackages, setIsLoadingPackages] = useState(true);
+
+  // Gestion du carnet de destinataires (CRUD)
+  const recipientPackageCounts = useMemo(() => {
+    const m: Record<string, number> = {};
+    clientPackages.forEach(p => { const n = (p.contactName || '').trim(); if (n) m[n] = (m[n] || 0) + 1; });
+    return m;
+  }, [clientPackages]);
+  const handleCreateRecipient = async (fields: { contactName: string; address: string; city: string; contactPhone: string; contactEmail?: string; notes?: string }) => {
+    await addSavedAddress({
+      companyName: currentUser.companyName || `${currentUser.firstName} ${currentUser.lastName}`,
+      createdBy: currentUser.id,
+      label: fields.contactName,
+      type: 'delivery',
+      address: fields.address,
+      city: fields.city,
+      contactName: fields.contactName,
+      contactPhone: fields.contactPhone,
+      contactEmail: fields.contactEmail,
+      notes: fields.notes,
+      createdAt: '', updatedAt: '',
+    } as any);
+  };
+  const handleUpdateRecipient = async (addr: SavedAddress) => { await updateSavedAddress(addr); };
+  const handleDeleteRecipient = async (id: string) => { await deleteSavedAddress(id); };
+
   const [shipmentSearch, setShipmentSearch] = useState('');
   const [shipmentFilter, setShipmentFilter] = useState<'all' | 'pending' | 'transit' | 'delivered' | 'failed'>('all');
   const [expandedShipmentId, setExpandedShipmentId] = useState<string | null>(null); // timeline colis dépliée
@@ -880,7 +906,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                   { icon: Plus, label: 'Créer une expédition', hint: 'Nouvel envoi + étiquette', color: 'bg-indigo-600', onClick: () => setShowCreateShipment(true) },
                   { icon: Search, label: 'Suivre mes colis', hint: 'Où sont mes envois ?', color: 'bg-blue-600', onClick: () => onNavigate?.('client_shipments') },
                   { icon: BarChart3, label: 'Mes statistiques', hint: 'KPI & graphiques', color: 'bg-fuchsia-600', onClick: () => onNavigate?.('client_analytics') },
-                  { icon: UserPlus, label: 'Importer mes destinataires', hint: 'Excel / CSV', color: 'bg-emerald-600', onClick: () => setShowImportRecipients(true) },
+                  { icon: UserPlus, label: 'Mes destinataires', hint: 'Ajouter, modifier, importer', color: 'bg-emerald-600', onClick: () => onNavigate?.('client_recipients') },
                   { icon: FileText, label: 'Mes devis', hint: 'Demandes de prix', color: 'bg-amber-500', onClick: () => onNavigate?.('client_list') },
                   { icon: UserIcon, label: 'Mon compte', hint: 'Profil, mot de passe, entreprise', color: 'bg-slate-700', onClick: () => setShowAccountHub(true) },
                 ].map((a, i) => (
@@ -1393,6 +1419,18 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
         {/* --- VIEW: STATISTIQUES (Studio Analytique) --- */}
         {activeView === 'client_analytics' && (
             <ClientAnalytics packages={clientPackages} />
+        )}
+
+        {/* --- VIEW: MES DESTINATAIRES (carnet, CRUD) --- */}
+        {activeView === 'client_recipients' && (
+            <RecipientsManager
+                addresses={savedAddresses}
+                packageCounts={recipientPackageCounts}
+                onCreate={handleCreateRecipient}
+                onUpdate={handleUpdateRecipient}
+                onDelete={handleDeleteRecipient}
+                onImport={() => setShowImportRecipients(true)}
+            />
         )}
 
         {/* --- VIEW: MES EXPÉDITIONS (Tracking + Étiquettes) --- */}

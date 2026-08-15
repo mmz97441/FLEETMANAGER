@@ -130,6 +130,7 @@ const ViewAsSwitcher: React.FC<ViewAsSwitcherProps> = ({ currentUser, users, quo
               { v: 'client_dashboard', label: '🏠 Accueil' },
               { v: 'client_shipments', label: '📦 Mes Colis' },
               { v: 'client_analytics', label: '📊 Statistiques' },
+              { v: 'client_recipients', label: '📇 Destinataires' },
               { v: 'client_list', label: '📄 Mes Devis' },
               { v: 'client_team', label: '👥 Mon Équipe' },
             ] as { v: ViewState; label: string }[]).map(t => (
