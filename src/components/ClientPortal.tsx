@@ -22,6 +22,7 @@ import AccountHub from './AccountHub';
 import ClientAnalytics from './ClientAnalytics';
 import InsightsPanel from './analytics/InsightsPanel';
 import RecipientsManager from './RecipientsManager';
+import ClientHelp from './ClientHelp';
 import { getClientInsights } from '../services/clientInsights';
 import { changePassword } from '../services/accountService';
 import ClientKPIs from './ClientKPIs';
@@ -390,6 +391,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   const [showCreateShipment, setShowCreateShipment] = useState(false);
   const [showImportRecipients, setShowImportRecipients] = useState(false);
   const [showAccountHub, setShowAccountHub] = useState(false);
+  const [showClientHelp, setShowClientHelp] = useState(false);
 
   // Sauvegarde des infos entreprise depuis "Mon compte" (persiste + rafraîchit le formulaire local)
   const handleSaveCompanyFromHub = async (fields: { companyName: string; companyAddress: string; companyPhone: string; companySiret: string }) => {
@@ -913,6 +915,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                   <button
                     key={i}
                     onClick={a.onClick}
+                    title={`${a.label} — ${a.hint}`}
                     className="bg-white rounded-2xl border border-slate-200 p-4 text-left hover:shadow-md hover:border-indigo-200 active:scale-95 transition-all flex flex-col gap-2"
                   >
                     <span className={`w-11 h-11 rounded-xl ${a.color} text-white flex items-center justify-center`}>
@@ -2265,6 +2268,19 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
             }}
           />
         )}
+
+        {/* BOUTON D'AIDE FLOTTANT (toujours visible dans l'espace client) */}
+        <button
+          onClick={() => setShowClientHelp(true)}
+          title="Aide & guide — comment utiliser mon espace"
+          aria-label="Aide"
+          className="fixed bottom-5 right-5 z-[90] w-14 h-14 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white shadow-xl flex items-center justify-center active:scale-95 transition-transform"
+        >
+          <HelpCircle size={26} />
+        </button>
+
+        {/* CENTRE D'AIDE CLIENT (guide + FAQ) */}
+        {showClientHelp && <ClientHelp onClose={() => setShowClientHelp(false)} />}
 
         {/* MON COMPTE (espace d'administration client) */}
         {showAccountHub && (
