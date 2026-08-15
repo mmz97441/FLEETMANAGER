@@ -753,9 +753,15 @@ const App: React.FC = () => {
   }
 
   const renderContent = () => {
-    switch (currentView) {
+    // GARDE-FOU CLIENT (défense en profondeur) : un client ne peut JAMAIS rendre
+    // une vue interne (dashboard flotte, missions, vue de dieu, logs…). Même si
+    // currentView était forcé à une valeur interne, on le ramène au portail.
+    const isClientRole = currentUser.role === UserRole.CLIENT || String(currentUser.role || '').toLowerCase().includes('client');
+    const CLIENT_ALLOWED = ['client_dashboard', 'client_list', 'client_shipments', 'client_team', 'help', 'settings'];
+    const view: ViewState = (isClientRole && !CLIENT_ALLOWED.includes(currentView)) ? 'client_dashboard' : currentView;
+    switch (view) {
       case 'dashboard':
-        return <Dashboard 
+        return <Dashboard
             vehicles={vehicles} 
             logs={fuelLogs} 
             maintenanceLogs={maintenanceLogs}
@@ -1053,7 +1059,7 @@ const App: React.FC = () => {
         );
 
         return <ClientPortal
-            activeView={currentView}
+            activeView={view}
             currentUser={currentUser}
             quotes={quotes}
             companyUsers={companyTeam}
