@@ -302,15 +302,23 @@ service cloud.firestore {
     }
 
     // --- Packages (colis) ---
-    // Lecture : tous les connectés (clients voient leurs colis)
-    // Création : admin uniquement (import de fichiers)
+    // Lecture : internes = tout ; CLIENT = uniquement SES colis (clientId ou
+    //   clientName = sa société). Empêche un client de lister tous les colis.
+    // Création : admin (import) ; chauffeur (colis à la volée, affecté à lui) ;
+    //   CLIENT (expédition self-service, à son nom + flag createdByClient).
     // Modification : admin + chauffeurs (scan, livraison, retour, transfert)
     // Suppression : admin uniquement
     match /packages/{packageId} {
-      allow read: if isAuthenticated();
-      // Admin : création libre. Chauffeur : peut créer un colis "à la volée"
-      // (carton en main, hors import) — il doit se l'affecter (currentDriverId = lui).
-      allow create: if isAdminRole() || (isDriver() && request.resource.data.currentDriverId == request.auth.uid);
+      allow read: if isAuthenticated() && (
+        !isClient()
+        || resource.data.clientId == request.auth.uid
+        || resource.data.clientName == getUserData().companyName
+      );
+      allow create: if isAdminRole()
+        || (isDriver() && request.resource.data.currentDriverId == request.auth.uid)
+        || (isClient()
+            && request.resource.data.clientId == request.auth.uid
+            && request.resource.data.createdByClient == true);
       allow update: if isAdminRole() || isDriver();
       allow delete: if isAdminRole();
     }
@@ -321,7 +329,10 @@ service cloud.firestore {
     // Modification : admin + chauffeurs (démarrage, complétion, mise à jour stops)
     // Suppression : admin uniquement
     match /missions/{missionId} {
-      allow read: if isAuthenticated();
+      // Lecture : internes uniquement. Un client n'a pas besoin des tournées
+      // (son ETA est dénormalisée sur le colis) et ne doit pas voir les livraisons
+      // d'autres clients.
+      allow read: if isAuthenticated() && !isClient();
       // Admin : création libre. Chauffeur : peut créer SA propre tournée
       // (prise en charge par scan) — driverId doit être lui-même.
       allow create: if isAdminRole() || (isDriver() && request.resource.data.driverId == request.auth.uid);

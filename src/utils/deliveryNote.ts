@@ -31,15 +31,22 @@ const normAddr = (p: Package): string =>
 const normPhone = (p: Package): string =>
   (p.contactPhone || '').replace(/\D+/g, '').replace(/^0+/, '');
 
-/** Renvoie tous les colis du même point de livraison que `pkg` (inclus). */
+/**
+ * Renvoie les colis du MÊME POINT DE LIVRAISON (pharmacie) que `pkg`, et du
+ * MÊME JOUR d'envoi. Le BL est donc « un BL par pharmacie » (pour cet envoi),
+ * pas un BL fourre-tout de toutes les livraisons de la journée ni de l'historique
+ * complet de la pharmacie.
+ */
 export const packagesAtSamePoint = (pkg: Package, all: Package[]): Package[] => {
   const a = normAddr(pkg);
   const ph = normPhone(pkg);
+  const day = (pkg.createdAt || '').slice(0, 10);
   return all.filter(p => {
     if (p.id === pkg.id) return true;
     const sameAddr = a && normAddr(p) === a;
     const samePhone = ph && normPhone(p) === ph;
-    return sameAddr || samePhone;
+    const sameDay = !day || (p.createdAt || '').slice(0, 10) === day;
+    return (sameAddr || samePhone) && sameDay;
   });
 };
 

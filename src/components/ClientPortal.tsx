@@ -221,6 +221,34 @@ interface ClientPortalProps {
 
 const COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444'];
 
+// Code couleur (bordure gauche) + explication (tooltip) par stade de livraison
+const STATUS_BORDER: Record<string, string> = {
+  [PackageStatus.PENDING]: 'border-l-slate-400',
+  [PackageStatus.COLLECTED]: 'border-l-blue-400',
+  [PackageStatus.AT_HUB]: 'border-l-indigo-400',
+  [PackageStatus.SORTED]: 'border-l-purple-400',
+  [PackageStatus.IN_TRANSIT]: 'border-l-cyan-400',
+  [PackageStatus.LOADED]: 'border-l-amber-400',
+  [PackageStatus.IN_DELIVERY]: 'border-l-orange-400',
+  [PackageStatus.DELIVERED]: 'border-l-green-500',
+  [PackageStatus.FAILED]: 'border-l-red-500',
+  [PackageStatus.RETURN_REQUESTED]: 'border-l-yellow-400',
+  [PackageStatus.RETURNED]: 'border-l-rose-400',
+};
+const STATUS_TOOLTIP: Record<string, string> = {
+  [PackageStatus.PENDING]: 'Colis enregistré — en attente de collecte par le transporteur',
+  [PackageStatus.COLLECTED]: 'Colis collecté chez vous',
+  [PackageStatus.AT_HUB]: 'Arrivé au centre de tri',
+  [PackageStatus.SORTED]: 'Trié et affecté à une tournée',
+  [PackageStatus.IN_TRANSIT]: 'En transit vers la zone de livraison',
+  [PackageStatus.LOADED]: 'Chargé dans le véhicule de livraison',
+  [PackageStatus.IN_DELIVERY]: 'En cours de livraison — le chauffeur est en route',
+  [PackageStatus.DELIVERED]: 'Livré au destinataire (preuve disponible)',
+  [PackageStatus.FAILED]: 'Livraison en échec — voir le détail',
+  [PackageStatus.RETURN_REQUESTED]: 'Retour programmé au centre',
+  [PackageStatus.RETURNED]: 'Retourné au centre',
+};
+
 const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, quotes, companyUsers = [], onNavigate, onAddQuote, onUpdateQuoteStatus, onAddTeamMember, onUpdateTeamMember, onDeleteTeamMember }) => {
   // Navigation Local State REMOVED in favor of activeView prop
   const [listFilter, setListFilter] = useState<'active' | 'history'>('active');
@@ -1448,7 +1476,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                                 if ((e.target as HTMLElement).closest('button, input')) return;
                                                 setExpandedShipmentId(isExpanded ? null : pkg.id);
                                             }}
-                                            className="grid grid-cols-1 md:grid-cols-12 gap-2 px-4 py-3 items-center hover:bg-slate-50 transition-colors cursor-pointer">
+                                            className={`grid grid-cols-1 md:grid-cols-12 gap-2 px-4 py-3 items-center hover:bg-slate-50 transition-colors cursor-pointer border-l-4 ${STATUS_BORDER[pkg.status] || 'border-l-slate-300'}`}>
                                             {/* Checkbox */}
                                             <div className="hidden md:flex col-span-1 items-center">
                                                 <input
@@ -1483,7 +1511,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
 
                                             {/* Statut */}
                                             <div className="md:col-span-2">
-                                                <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-bold ${statusColors.bg} ${statusColors.text}`}>
+                                                <span title={STATUS_TOOLTIP[pkg.status] || pkg.status} className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-bold cursor-help ${statusColors.bg} ${statusColors.text}`}>
                                                     {pkg.status === PackageStatus.DELIVERED && '✅'}
                                                     {pkg.status === PackageStatus.PENDING && '⏳'}
                                                     {pkg.status === PackageStatus.COLLECTED && '📦'}
