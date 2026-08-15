@@ -9,6 +9,8 @@ import React, { useMemo, useState } from 'react';
 import { Package, PackageStatus } from '../types';
 import { computeClientMetrics, MetricPeriod } from '../services/clientMetrics';
 import { KpiTile, TrendChart, BarByDimension, DonutStatuses, TopList } from './analytics/AnalyticsWidgets';
+import InsightsPanel from './analytics/InsightsPanel';
+import { getClientInsights } from '../services/clientInsights';
 import { BarChart3 } from 'lucide-react';
 
 interface ClientAnalyticsProps {
@@ -65,6 +67,8 @@ const ClientAnalytics: React.FC<ClientAnalyticsProps> = ({ packages }) => {
     [packages, period, pharmacy, zone]
   );
 
+  const insights = useMemo(() => getClientInsights(packages), [packages]);
+
   const donutData = m.statusBreakdown.map(s => ({ name: s.status, value: s.count, color: STATUS_HEX[s.status] }));
   const trendData = m.byDay.map(d => ({ date: d.date.slice(5), value: d.total }));
   const pharmaBar = m.byPharmacy.map(p => ({ name: p.name, value: p.count }));
@@ -80,6 +84,9 @@ const ClientAnalytics: React.FC<ClientAnalyticsProps> = ({ packages }) => {
         <h1 className="text-2xl font-extrabold text-slate-900 flex items-center gap-2"><BarChart3 size={24} className="text-indigo-600" /> Statistiques</h1>
         <p className="text-sm text-slate-500">Vos indicateurs, calculés en direct — rien à configurer.</p>
       </div>
+
+      {/* Ce qui compte (insights automatiques) */}
+      <InsightsPanel insights={insights} />
 
       {/* Filtres */}
       <div className="flex flex-wrap items-center gap-2">

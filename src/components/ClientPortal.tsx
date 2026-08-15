@@ -20,6 +20,8 @@ import CreateShipmentModal from './CreateShipmentModal';
 import ImportRecipientsModal from './ImportRecipientsModal';
 import AccountHub from './AccountHub';
 import ClientAnalytics from './ClientAnalytics';
+import InsightsPanel from './analytics/InsightsPanel';
+import { getClientInsights } from '../services/clientInsights';
 import { changePassword } from '../services/accountService';
 import ClientKPIs from './ClientKPIs';
 
@@ -878,6 +880,11 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                 ))}
               </div>
             </div>
+
+            {/* Ce qui compte (insights auto, version compacte) */}
+            {clientPackages.length > 0 && (
+              <InsightsPanel insights={getClientInsights(clientPackages)} compact />
+            )}
 
             {/* Check-list de démarrage (masquée une fois tout fait) */}
             {(() => {
