@@ -124,6 +124,24 @@ const ViewAsSwitcher: React.FC<ViewAsSwitcherProps> = ({ currentUser, users, quo
               <X size={14} /> Revenir président
             </button>
           </div>
+          {/* Barre de navigation de l'aperçu (le portail n'a pas la sidebar) */}
+          <div className="bg-white border-b border-slate-200 px-3 py-2 flex items-center gap-1 overflow-x-auto shrink-0">
+            {([
+              { v: 'client_dashboard', label: '🏠 Accueil' },
+              { v: 'client_shipments', label: '📦 Mes Colis' },
+              { v: 'client_analytics', label: '📊 Statistiques' },
+              { v: 'client_list', label: '📄 Mes Devis' },
+              { v: 'client_team', label: '👥 Mon Équipe' },
+            ] as { v: ViewState; label: string }[]).map(t => (
+              <button
+                key={t.v}
+                onClick={() => setPreviewView(t.v)}
+                className={`px-3 py-1.5 rounded-lg text-sm font-bold whitespace-nowrap transition-colors ${previewView === t.v ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
           <div className="flex-1 overflow-y-auto p-4 lg:p-8">
             <div className="max-w-7xl mx-auto">
               <Suspense fallback={<div className="p-10 text-center text-slate-400">Chargement de l'aperçu…</div>}>

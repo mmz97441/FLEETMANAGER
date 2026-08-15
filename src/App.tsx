@@ -97,6 +97,7 @@ import {
 } from './types';
 
 import { PermissionsProvider } from './usePermissions';
+import { pathToView, viewToPath } from './routes';
 
 // === Composant de chargement pour Suspense ===
 const PageLoader: React.FC = () => (
@@ -113,8 +114,8 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
 
-  // Navigation
-  const [currentView, setCurrentView] = useState<ViewState>('dashboard');
+  // Navigation — vue initiale dérivée de l'URL (deep-link / rafraîchissement)
+  const [currentView, setCurrentView] = useState<ViewState>(() => pathToView(window.location.pathname));
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -136,6 +137,19 @@ const App: React.FC = () => {
   // Selection for Detail Views
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
   const [targetIssueVehicleId, setTargetIssueVehicleId] = useState<string | null>(null);
+
+  // --- ROUTAGE URL : chaque vue a une URL (deep-link, refresh, retour navigateur) ---
+  useEffect(() => {
+    const path = viewToPath(currentView);
+    if (window.location.pathname !== path) {
+      window.history.pushState({}, '', path);
+    }
+  }, [currentView]);
+  useEffect(() => {
+    const onPop = () => setCurrentView(pathToView(window.location.pathname));
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
 
   // --- ONLINE / OFFLINE DETECTION ---
   useEffect(() => {
@@ -191,7 +205,9 @@ const App: React.FC = () => {
                 // Si l'utilisateur est un client, on le force vers le tableau de bord client
                 const role = String(existingProfile.role || '').toLowerCase();
                 if (role.includes('client')) {
-                    setCurrentView('client_dashboard');
+                    // Honorer l'URL si c'est une vue client autorisée (deep-link/refresh), sinon accueil
+                    const allowed = ['client_dashboard', 'client_list', 'client_shipments', 'client_team', 'client_analytics', 'help', 'settings'];
+                    setCurrentView(prev => allowed.includes(prev) ? prev : 'client_dashboard');
                 }
                 // Si l'utilisateur est un stagiaire, pas de tableau de bord - redirect vers véhicules
                 if (role.includes('stag')) {
@@ -209,7 +225,7 @@ const App: React.FC = () => {
                         });
                         // Vérification continue du rôle en temps réel
                         const updatedRole = String(updatedProfile.role || '').toLowerCase();
-                        if (updatedRole.includes('client') && !['client_dashboard', 'client_list', 'client_shipments', 'client_team', 'help', 'settings'].includes(currentView)) {
+                        if (updatedRole.includes('client') && !['client_dashboard', 'client_list', 'client_shipments', 'client_team', 'client_analytics', 'help', 'settings'].includes(currentView)) {
                              setCurrentView('client_dashboard');
                         }
                         // Stagiaire ne peut pas accéder au dashboard
