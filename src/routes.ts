@@ -41,6 +41,8 @@ export const VIEW_TO_PATH: Record<ViewState, string> = {
   client_shipments: '/client/shipments',
   client_analytics: '/client/statistiques',
   client_recipients: '/client/destinataires',
+  client_company: '/client/entreprise',
+  client_help: '/client/aide',
 };
 
 // Chemin URL → ViewState (inverse)

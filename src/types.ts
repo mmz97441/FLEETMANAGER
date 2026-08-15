@@ -592,6 +592,8 @@ export type ViewState =
   | 'president_overview'
   | 'client_analytics'
   | 'client_recipients'
+  | 'client_company'
+  | 'client_help'
   | 'missions'
   | 'notifications_settings'
   | 'api_diagnostic'

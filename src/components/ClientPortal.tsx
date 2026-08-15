@@ -22,10 +22,9 @@ import AccountHub from './AccountHub';
 import ClientAnalytics from './ClientAnalytics';
 import InsightsPanel from './analytics/InsightsPanel';
 import RecipientsManager from './RecipientsManager';
-import ClientHelp from './ClientHelp';
+import ClientHelp, { HelpNavTarget } from './ClientHelp';
 import { getClientInsights } from '../services/clientInsights';
 import { changePassword } from '../services/accountService';
-import ClientKPIs from './ClientKPIs';
 
 // ============================================================================
 // COMPOSANT InputField DÉFINI EN DEHORS pour éviter le bug de focus
@@ -383,6 +382,18 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   const handleUpdateRecipient = async (addr: SavedAddress) => { await updateSavedAddress(addr); };
   const handleDeleteRecipient = async (id: string) => { await deleteSavedAddress(id); };
 
+  // Liens réels depuis le centre d'aide vers les vraies pages/actions
+  const handleHelpNavigate = (target: HelpNavTarget) => {
+    switch (target) {
+      case 'home': onNavigate?.('client_dashboard'); break;
+      case 'shipments': onNavigate?.('client_shipments'); break;
+      case 'recipients': onNavigate?.('client_recipients'); break;
+      case 'analytics': onNavigate?.('client_analytics'); break;
+      case 'create': setShowCreateShipment(true); break;
+      case 'account': setShowAccountHub(true); break;
+    }
+  };
+
   const [shipmentSearch, setShipmentSearch] = useState('');
   const [shipmentFilter, setShipmentFilter] = useState<'all' | 'pending' | 'transit' | 'delivered' | 'failed'>('all');
   const [expandedShipmentId, setExpandedShipmentId] = useState<string | null>(null); // timeline colis dépliée
@@ -391,7 +402,6 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   const [showCreateShipment, setShowCreateShipment] = useState(false);
   const [showImportRecipients, setShowImportRecipients] = useState(false);
   const [showAccountHub, setShowAccountHub] = useState(false);
-  const [showClientHelp, setShowClientHelp] = useState(false);
 
   // Sauvegarde des infos entreprise depuis "Mon compte" (persiste + rafraîchit le formulaire local)
   const handleSaveCompanyFromHub = async (fields: { companyName: string; companyAddress: string; companyPhone: string; companySiret: string }) => {
@@ -909,8 +919,8 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                   { icon: Search, label: 'Suivre mes colis', hint: 'Où sont mes envois ?', color: 'bg-blue-600', onClick: () => onNavigate?.('client_shipments') },
                   { icon: BarChart3, label: 'Mes statistiques', hint: 'KPI & graphiques', color: 'bg-fuchsia-600', onClick: () => onNavigate?.('client_analytics') },
                   { icon: UserPlus, label: 'Mes destinataires', hint: 'Ajouter, modifier, importer', color: 'bg-emerald-600', onClick: () => onNavigate?.('client_recipients') },
-                  { icon: FileText, label: 'Mes devis', hint: 'Demandes de prix', color: 'bg-amber-500', onClick: () => onNavigate?.('client_list') },
-                  { icon: UserIcon, label: 'Mon compte', hint: 'Profil, mot de passe, entreprise', color: 'bg-slate-700', onClick: () => setShowAccountHub(true) },
+                  { icon: Building2, label: 'Mon Entreprise', hint: 'Infos société + équipe', color: 'bg-amber-500', onClick: () => onNavigate?.('client_company') },
+                  { icon: UserIcon, label: 'Mon compte', hint: 'Profil & mot de passe', color: 'bg-slate-700', onClick: () => setShowAccountHub(true) },
                 ].map((a, i) => (
                   <button
                     key={i}
@@ -928,11 +938,6 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
               </div>
             </div>
 
-            {/* Ce qui compte (insights auto, version compacte) */}
-            {clientPackages.length > 0 && (
-              <InsightsPanel insights={getClientInsights(clientPackages)} compact />
-            )}
-
             {/* Check-list de démarrage (masquée une fois tout fait) */}
             {(() => {
               const step1 = companyInfoComplete;
@@ -940,7 +945,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
               const step3 = clientPackages.length > 0;
               if (step1 && step2 && step3) return null;
               const steps = [
-                { done: step1, label: 'Complétez votre entreprise', hint: 'Raison sociale + adresse (pour vos BL)', action: () => document.getElementById('mon-entreprise')?.scrollIntoView({ behavior: 'smooth' }), cta: 'Compléter' },
+                { done: step1, label: 'Complétez votre entreprise', hint: 'Raison sociale + adresse (pour vos BL)', action: () => onNavigate?.('client_company'), cta: 'Compléter' },
                 { done: step2, label: 'Importez vos destinataires', hint: 'Une fois, puis choix en un clic', action: () => setShowImportRecipients(true), cta: 'Importer' },
                 { done: step3, label: 'Créez votre 1ʳᵉ expédition', hint: 'Formulaire + étiquette', action: () => setShowCreateShipment(true), cta: 'Créer' },
               ];
@@ -968,7 +973,12 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                 </div>
               );
             })()}
+          </div>
+        )}
 
+        {/* --- VIEW: MON ENTREPRISE (identité expéditeur + équipe) --- */}
+        {activeView === 'client_company' && (
+          <div className="space-y-6">
             {/* Mon entreprise (identité expéditeur pour les BL) */}
             <div id="mon-entreprise" className={`bg-white rounded-2xl border p-4 sm:p-5 shadow-sm ${companyInfoComplete ? 'border-slate-200' : 'border-amber-300'}`}>
               <div className="flex items-center gap-2 mb-3">
@@ -1034,20 +1044,11 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
               </div>
               {companySaveMsg && <p className="text-xs font-medium text-slate-600 mt-2">{companySaveMsg}</p>}
             </div>
-
-            <ClientKPIs
-              packages={clientPackages}
-              clientName={currentUser.companyName || `${currentUser.firstName} ${currentUser.lastName}`}
-              onDrillDown={(filter) => {
-                setShipmentFilter(filter);
-                onNavigate?.('client_shipments');
-              }}
-            />
           </div>
         )}
 
-        {/* --- VIEW: TEAM MANAGEMENT --- */}
-        {activeView === 'client_team' && (
+        {/* --- VIEW: TEAM MANAGEMENT (dans Mon Entreprise) --- */}
+        {(activeView === 'client_team' || activeView === 'client_company') && (
             <div className="space-y-6">
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-indigo-50 p-6 rounded-2xl border border-indigo-100 gap-4">
                     <div>
@@ -1422,6 +1423,11 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
         {/* --- VIEW: STATISTIQUES (Studio Analytique) --- */}
         {activeView === 'client_analytics' && (
             <ClientAnalytics packages={clientPackages} />
+        )}
+
+        {/* --- VIEW: AIDE (guide + FAQ, onglet) --- */}
+        {activeView === 'client_help' && (
+            <ClientHelp embedded onNavigate={handleHelpNavigate} onClose={() => onNavigate?.('client_dashboard')} />
         )}
 
         {/* --- VIEW: MES DESTINATAIRES (carnet, CRUD) --- */}
@@ -2268,19 +2274,6 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
             }}
           />
         )}
-
-        {/* BOUTON D'AIDE FLOTTANT (toujours visible dans l'espace client) */}
-        <button
-          onClick={() => setShowClientHelp(true)}
-          title="Aide & guide — comment utiliser mon espace"
-          aria-label="Aide"
-          className="fixed bottom-5 right-5 z-[90] w-14 h-14 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white shadow-xl flex items-center justify-center active:scale-95 transition-transform"
-        >
-          <HelpCircle size={26} />
-        </button>
-
-        {/* CENTRE D'AIDE CLIENT (guide + FAQ) */}
-        {showClientHelp && <ClientHelp onClose={() => setShowClientHelp(false)} />}
 
         {/* MON COMPTE (espace d'administration client) */}
         {showAccountHub && (

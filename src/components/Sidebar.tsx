@@ -212,7 +212,8 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
         { id: 'client_analytics', label: 'Statistiques', icon: BarChart3, permission: Permission.CLIENT_DASHBOARD },
         { id: 'client_recipients', label: 'Mes Destinataires', icon: MapPin, permission: Permission.CLIENT_ADDRESSES_VIEW },
         { id: 'client_list', label: 'Mes Devis', icon: List, permission: Permission.CLIENT_REQUESTS_VIEW_OWN },
-        { id: 'client_team', label: 'Mon Équipe', icon: Users, permission: Permission.CLIENT_TEAM_VIEW },
+        { id: 'client_company', label: 'Mon Entreprise', icon: Building2, permission: Permission.CLIENT_DASHBOARD },
+        { id: 'client_help', label: 'Aide', icon: HelpCircle, permission: Permission.CLIENT_DASHBOARD },
       ]
     },
 

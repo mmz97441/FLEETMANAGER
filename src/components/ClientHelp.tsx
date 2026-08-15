@@ -19,9 +19,24 @@ import {
 // 100% présentationnel : aucune donnée, aucun service. Uniquement onClose.
 // ============================================================================
 
+export type HelpNavTarget = 'home' | 'create' | 'shipments' | 'recipients' | 'analytics' | 'account';
+
 interface ClientHelpProps {
-  onClose: () => void;
+  onClose?: () => void;
+  onNavigate?: (target: HelpNavTarget) => void; // liens réels vers les pages
+  embedded?: boolean; // true = rendu en page/onglet (pas en modale)
 }
+
+// Chaque section du guide pointe vers la vraie page/action correspondante
+const SECTION_TARGET: Record<string, { target: HelpNavTarget; label: string }> = {
+  accueil: { target: 'home', label: "Aller à l'accueil" },
+  creer: { target: 'create', label: 'Créer une expédition' },
+  colis: { target: 'shipments', label: 'Voir mes colis' },
+  destinataires: { target: 'recipients', label: 'Gérer mes destinataires' },
+  stats: { target: 'analytics', label: 'Ouvrir mes statistiques' },
+  compte: { target: 'account', label: 'Ouvrir mon compte' },
+  bl: { target: 'shipments', label: 'Voir mes colis (BL)' },
+};
 
 type TabId = 'guide' | 'faq';
 
@@ -205,7 +220,7 @@ const FAQ_ITEMS: FaqItem[] = [
   },
 ];
 
-const ClientHelp: React.FC<ClientHelpProps> = ({ onClose }) => {
+const ClientHelp: React.FC<ClientHelpProps> = ({ onClose, onNavigate, embedded = false }) => {
   const [activeTab, setActiveTab] = useState<TabId>('guide');
   const [query, setQuery] = useState('');
   const [openFaqId, setOpenFaqId] = useState<string | null>(null);
@@ -241,16 +256,11 @@ const ClientHelp: React.FC<ClientHelpProps> = ({ onClose }) => {
     { id: 'faq', label: 'FAQ', count: filteredFaq.length },
   ];
 
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[130] bg-black/50 flex items-center justify-center p-4"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Aide et guide"
-    >
+  const panel = (
       <div
-        className="max-w-3xl w-full max-h-[90vh] rounded-2xl bg-white flex flex-col overflow-hidden shadow-2xl"
+        className={embedded
+          ? "max-w-3xl mx-auto w-full rounded-2xl bg-white flex flex-col overflow-hidden border border-slate-200"
+          : "max-w-3xl w-full max-h-[90vh] rounded-2xl bg-white flex flex-col overflow-hidden shadow-2xl"}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -368,6 +378,14 @@ const ClientHelp: React.FC<ClientHelpProps> = ({ onClose }) => {
                           </li>
                         ))}
                       </ul>
+                      {onNavigate && SECTION_TARGET[section.id] && (
+                        <button
+                          onClick={() => onNavigate(SECTION_TARGET[section.id].target)}
+                          className="mt-3 inline-flex items-center gap-1.5 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-bold active:scale-95 transition-transform"
+                        >
+                          {SECTION_TARGET[section.id].label} →
+                        </button>
+                      )}
                     </div>
                   );
                 })}
@@ -411,6 +429,18 @@ const ClientHelp: React.FC<ClientHelpProps> = ({ onClose }) => {
           )}
         </div>
       </div>
+  );
+
+  if (embedded) return panel;
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[130] bg-black/50 flex items-center justify-center p-4"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Aide et guide"
+    >
+      {panel}
     </div>,
     document.body,
   );

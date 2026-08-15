@@ -206,7 +206,7 @@ const App: React.FC = () => {
                 const role = String(existingProfile.role || '').toLowerCase();
                 if (role.includes('client')) {
                     // Honorer l'URL si c'est une vue client autorisée (deep-link/refresh), sinon accueil
-                    const allowed = ['client_dashboard', 'client_list', 'client_shipments', 'client_team', 'client_analytics', 'client_recipients', 'help', 'settings'];
+                    const allowed = ['client_dashboard', 'client_list', 'client_shipments', 'client_team', 'client_analytics', 'client_recipients', 'client_company', 'client_help', 'help', 'settings'];
                     setCurrentView(prev => allowed.includes(prev) ? prev : 'client_dashboard');
                 }
                 // Si l'utilisateur est un stagiaire, pas de tableau de bord - redirect vers véhicules
@@ -225,7 +225,7 @@ const App: React.FC = () => {
                         });
                         // Vérification continue du rôle en temps réel
                         const updatedRole = String(updatedProfile.role || '').toLowerCase();
-                        if (updatedRole.includes('client') && !['client_dashboard', 'client_list', 'client_shipments', 'client_team', 'client_analytics', 'client_recipients', 'help', 'settings'].includes(currentView)) {
+                        if (updatedRole.includes('client') && !['client_dashboard', 'client_list', 'client_shipments', 'client_team', 'client_analytics', 'client_recipients', 'client_company', 'client_help', 'help', 'settings'].includes(currentView)) {
                              setCurrentView('client_dashboard');
                         }
                         // Stagiaire ne peut pas accéder au dashboard
@@ -773,7 +773,7 @@ const App: React.FC = () => {
     // une vue interne (dashboard flotte, missions, vue de dieu, logs…). Même si
     // currentView était forcé à une valeur interne, on le ramène au portail.
     const isClientRole = currentUser.role === UserRole.CLIENT || String(currentUser.role || '').toLowerCase().includes('client');
-    const CLIENT_ALLOWED = ['client_dashboard', 'client_list', 'client_shipments', 'client_team', 'client_analytics', 'client_recipients', 'help', 'settings'];
+    const CLIENT_ALLOWED = ['client_dashboard', 'client_list', 'client_shipments', 'client_team', 'client_analytics', 'client_recipients', 'client_company', 'client_help', 'help', 'settings'];
     const view: ViewState = (isClientRole && !CLIENT_ALLOWED.includes(currentView)) ? 'client_dashboard' : currentView;
     switch (view) {
       case 'dashboard':
@@ -1068,8 +1068,10 @@ const App: React.FC = () => {
       case 'client_list':
       case 'client_shipments':
       case 'client_team':
+      case 'client_company':
       case 'client_analytics':
       case 'client_recipients':
+      case 'client_help':
         // Sécurité : On filtre strictement les utilisateurs visibles par le client
         const companyTeam = users.filter(u =>
             u.companyName === currentUser.companyName &&
