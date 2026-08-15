@@ -7,6 +7,7 @@
  * dans le carnet d'adresses (SavedAddress, type 'delivery').
  */
 import React, { useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import * as XLSX from 'xlsx';
 import { User, SavedAddress } from '../types';
 import { addSavedAddressesBatch } from '../services/firestore';
@@ -141,8 +142,8 @@ const ImportRecipientsModal: React.FC<ImportRecipientsModalProps> = ({ currentUs
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+  return createPortal(
+    <div className="fixed inset-0 z-[120] bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl max-w-lg w-full max-h-[85vh] flex flex-col p-5" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-bold text-slate-800 flex items-center gap-2"><FileSpreadsheet size={18} className="text-indigo-600" /> Importer mes destinataires</h3>
@@ -210,7 +211,8 @@ const ImportRecipientsModal: React.FC<ImportRecipientsModalProps> = ({ currentUs
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 

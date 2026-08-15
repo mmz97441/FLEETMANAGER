@@ -7,6 +7,7 @@
  * → étiquettes 1/N…N/N.
  */
 import React, { useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { User, SavedAddress, Package, Zone } from '../types';
 import { createClientShipment } from '../services/missionService';
 import { estimateZoneFromAddress } from '../services/deliveryService';
@@ -119,8 +120,8 @@ const CreateShipmentModal: React.FC<CreateShipmentModalProps> = ({ currentUser, 
 
   const inputCls = 'w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500';
 
-  return (
-    <div className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+  return createPortal(
+    <div className="fixed inset-0 z-[120] bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-5" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-bold text-slate-800 flex items-center gap-2"><PackageIcon size={18} className="text-indigo-600" /> Créer une expédition</h3>
@@ -206,7 +207,8 @@ const CreateShipmentModal: React.FC<CreateShipmentModalProps> = ({ currentUser, 
           <Printer size={16} /> {busy ? 'Création…' : `Créer ${packageCount > 1 ? packageCount + ' colis' : "l'expédition"} + imprimer`}
         </button>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 

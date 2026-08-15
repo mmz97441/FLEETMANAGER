@@ -227,6 +227,15 @@ interface ClientPortalProps {
 
 const COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444'];
 
+// Découpe "10 rue X, 97400 Ville" en { street, city:"97400 Ville" } (best-effort)
+const splitCompanyAddress = (full?: string): { street: string; city: string } => {
+  const s = (full || '').trim();
+  const m = s.match(/(97\d{3}|\d{5})/);
+  if (!m) return { street: s, city: '' };
+  const idx = s.indexOf(m[1]);
+  return { street: s.slice(0, idx).replace(/[,\s]+$/, '').trim(), city: s.slice(idx).trim() };
+};
+
 // Code couleur (bordure gauche) + explication (tooltip) par stade de livraison
 const STATUS_BORDER: Record<string, string> = {
   [PackageStatus.PENDING]: 'border-l-slate-400',
@@ -282,8 +291,11 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   } | null>(null);
 
   // Form State - Quote
+  // L'expéditeur (enlèvement) = le client lui-même → pré-rempli depuis "Mon entreprise"
+  const _origin = splitCompanyAddress(currentUser.companyAddress);
   const [newRequest, setNewRequest] = useState({
-      originAddress: '', originCity: '', originContactName: '', originContactPhone: '',
+      originAddress: _origin.street, originCity: _origin.city,
+      originContactName: currentUser.companyName || '', originContactPhone: currentUser.companyPhone || '',
       destinationAddress: '', destinationCity: '', destContactName: '', destContactPhone: '',
       goodsDescription: '', weight: '' as any,
       length: '' as any, width: '' as any, height: '' as any, volume: 0,

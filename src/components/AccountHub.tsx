@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { User, Package as PackageType } from '../types';
 import {
   X,
@@ -143,9 +144,9 @@ const AccountHub: React.FC<AccountHubProps> = ({
     return list.slice(0, 20);
   }, [packages]);
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-[80] bg-black/50 flex items-center justify-center p-4"
+      className="fixed inset-0 z-[120] bg-black/50 flex items-center justify-center p-4"
       onClick={onClose}
     >
       <div
@@ -523,7 +524,8 @@ const AccountHub: React.FC<AccountHubProps> = ({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 
