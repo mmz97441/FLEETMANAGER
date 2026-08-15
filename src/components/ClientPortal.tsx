@@ -18,6 +18,8 @@ import PODViewer from './PODViewer';
 import { openDeliveryNote } from '../utils/deliveryNote';
 import CreateShipmentModal from './CreateShipmentModal';
 import ImportRecipientsModal from './ImportRecipientsModal';
+import AccountHub from './AccountHub';
+import { changePassword } from '../services/accountService';
 import ClientKPIs from './ClientKPIs';
 
 // ============================================================================
@@ -340,6 +342,24 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   const [selectedLabels, setSelectedLabels] = useState<Set<string>>(new Set());
   const [showCreateShipment, setShowCreateShipment] = useState(false);
   const [showImportRecipients, setShowImportRecipients] = useState(false);
+  const [showAccountHub, setShowAccountHub] = useState(false);
+
+  // Sauvegarde des infos entreprise depuis "Mon compte" (persiste + rafraîchit le formulaire local)
+  const handleSaveCompanyFromHub = async (fields: { companyName: string; companyAddress: string; companyPhone: string; companySiret: string }) => {
+    await updateUserProfile({
+      ...currentUser,
+      companyName: fields.companyName.trim(),
+      companyAddress: fields.companyAddress.trim(),
+      companyPhone: fields.companyPhone.trim(),
+      companySiret: fields.companySiret.trim(),
+    });
+    setCompanyForm({
+      companyName: fields.companyName.trim(),
+      companyAddress: fields.companyAddress.trim(),
+      companySiret: fields.companySiret.trim(),
+      companyPhone: fields.companyPhone.trim(),
+    });
+  };
 
   // Charger la config créneaux au montage
   useEffect(() => {
@@ -834,12 +854,13 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
             <div>
               <h2 className="text-2xl font-extrabold text-slate-900">Bonjour {currentUser.firstName} 👋</h2>
               <p className="text-slate-500 mb-4">Que voulez-vous faire ?</p>
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
                 {[
                   { icon: Plus, label: 'Créer une expédition', hint: 'Nouvel envoi + étiquette', color: 'bg-indigo-600', onClick: () => setShowCreateShipment(true) },
                   { icon: Search, label: 'Suivre mes colis', hint: 'Où sont mes envois ?', color: 'bg-blue-600', onClick: () => onNavigate?.('client_shipments') },
                   { icon: UserPlus, label: 'Importer mes destinataires', hint: 'Excel / CSV', color: 'bg-emerald-600', onClick: () => setShowImportRecipients(true) },
                   { icon: FileText, label: 'Mes devis', hint: 'Demandes de prix', color: 'bg-amber-500', onClick: () => onNavigate?.('client_list') },
+                  { icon: UserIcon, label: 'Mon compte', hint: 'Profil, mot de passe, entreprise', color: 'bg-slate-700', onClick: () => setShowAccountHub(true) },
                 ].map((a, i) => (
                   <button
                     key={i}
@@ -2172,6 +2193,18 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
               setAddressSaveMessage(`✅ ${count} destinataire(s) importé(s) dans votre carnet.`);
               setTimeout(() => setAddressSaveMessage(''), 5000);
             }}
+          />
+        )}
+
+        {/* MON COMPTE (espace d'administration client) */}
+        {showAccountHub && (
+          <AccountHub
+            currentUser={currentUser}
+            companyUsers={companyUsers}
+            packages={clientPackages}
+            onClose={() => setShowAccountHub(false)}
+            onChangePassword={changePassword}
+            onSaveCompany={handleSaveCompanyFromHub}
           />
         )}
 
