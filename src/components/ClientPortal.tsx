@@ -222,6 +222,7 @@ interface ClientPortalProps {
   onAddTeamMember?: (user: User) => void;
   onUpdateTeamMember?: (user: User) => void;
   onDeleteTeamMember?: (userId: string) => void;
+  previewMode?: boolean; // "Voir en tant que" : on incarne le client (auth reste celle de l'admin)
 }
 
 const COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444'];
@@ -254,7 +255,12 @@ const STATUS_TOOLTIP: Record<string, string> = {
   [PackageStatus.RETURNED]: 'Retourné au centre',
 };
 
-const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, quotes, companyUsers = [], onNavigate, onAddQuote, onUpdateQuoteStatus, onAddTeamMember, onUpdateTeamMember, onDeleteTeamMember }) => {
+const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, quotes, companyUsers = [], onNavigate, onAddQuote, onUpdateQuoteStatus, onAddTeamMember, onUpdateTeamMember, onDeleteTeamMember, previewMode = false }) => {
+  // En mode "Voir en tant que", l'auth Firebase reste celle de l'admin : on
+  // interdit le changement de mot de passe (il modifierait le compte admin).
+  const blockedChangePassword = async () => {
+    throw new Error('Changement de mot de passe indisponible en mode test (aperçu).');
+  };
   // Navigation Local State REMOVED in favor of activeView prop
   const [listFilter, setListFilter] = useState<'active' | 'history'>('active');
   
@@ -2217,7 +2223,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
             companyUsers={companyUsers}
             packages={clientPackages}
             onClose={() => setShowAccountHub(false)}
-            onChangePassword={changePassword}
+            onChangePassword={previewMode ? blockedChangePassword : changePassword}
             onSaveCompany={handleSaveCompanyFromHub}
           />
         )}

@@ -11,7 +11,7 @@
  */
 import React, { useState, useMemo, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
-import { User, QuoteRequest } from '../types';
+import { User, QuoteRequest, ViewState } from '../types';
 import { PermissionsProvider } from '../usePermissions';
 import { Eye, X, Search, Building2 } from 'lucide-react';
 
@@ -29,6 +29,7 @@ const ViewAsSwitcher: React.FC<ViewAsSwitcherProps> = ({ currentUser, users, quo
   const [pickerOpen, setPickerOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [previewClient, setPreviewClient] = useState<User | null>(null);
+  const [previewView, setPreviewView] = useState<ViewState>('client_dashboard');
 
   const clients = useMemo(
     () => users.filter(u => String(u.role || '').toLowerCase().includes('client'))
@@ -89,7 +90,7 @@ const ViewAsSwitcher: React.FC<ViewAsSwitcherProps> = ({ currentUser, users, quo
               {filtered.map(c => (
                 <button
                   key={c.id}
-                  onClick={() => { setPreviewClient(c); setPickerOpen(false); }}
+                  onClick={() => { setPreviewClient(c); setPreviewView('client_dashboard'); setPickerOpen(false); }}
                   className="w-full text-left py-2.5 px-1 hover:bg-slate-50 rounded-lg flex items-center gap-3"
                 >
                   <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0"><Building2 size={16} /></div>
@@ -114,7 +115,7 @@ const ViewAsSwitcher: React.FC<ViewAsSwitcherProps> = ({ currentUser, users, quo
           <div className="bg-amber-500 text-white px-4 py-2 flex items-center justify-between shrink-0">
             <span className="font-bold text-sm flex items-center gap-2 min-w-0">
               <Eye size={16} className="shrink-0" />
-              <span className="truncate">Aperçu client : {clientLabel(previewClient)} — lecture seule</span>
+              <span className="truncate">Tu agis en tant que : {clientLabel(previewClient)} — mode test (actions réelles)</span>
             </span>
             <button
               onClick={() => setPreviewClient(null)}
@@ -128,13 +129,14 @@ const ViewAsSwitcher: React.FC<ViewAsSwitcherProps> = ({ currentUser, users, quo
               <Suspense fallback={<div className="p-10 text-center text-slate-400">Chargement de l'aperçu…</div>}>
                 <PermissionsProvider currentUser={previewClient}>
                   <ClientPortal
-                    activeView="client_shipments"
+                    activeView={previewView}
                     currentUser={previewClient}
                     quotes={previewQuotes}
                     companyUsers={[]}
-                    onNavigate={noop}
+                    onNavigate={(v) => setPreviewView(v)}
                     onAddQuote={noop}
                     onUpdateQuoteStatus={noop}
+                    previewMode
                   />
                 </PermissionsProvider>
               </Suspense>
