@@ -335,7 +335,8 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   const [isLoadingPackages, setIsLoadingPackages] = useState(true);
   const [shipmentSearch, setShipmentSearch] = useState('');
   const [shipmentFilter, setShipmentFilter] = useState<'all' | 'pending' | 'transit' | 'delivered' | 'failed'>('all');
-  const [expandedShipmentId, setExpandedShipmentId] = useState<string | null>(null); // timeline dépliée
+  const [expandedShipmentId, setExpandedShipmentId] = useState<string | null>(null); // timeline colis dépliée
+  const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null); // groupe pharmacie déplié
   const [selectedLabels, setSelectedLabels] = useState<Set<string>>(new Set());
   const [showCreateShipment, setShowCreateShipment] = useState(false);
   const [showImportRecipients, setShowImportRecipients] = useState(false);
@@ -855,8 +856,44 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
               </div>
             </div>
 
+            {/* Check-list de démarrage (masquée une fois tout fait) */}
+            {(() => {
+              const step1 = companyInfoComplete;
+              const step2 = savedAddresses.length > 0;
+              const step3 = clientPackages.length > 0;
+              if (step1 && step2 && step3) return null;
+              const steps = [
+                { done: step1, label: 'Complétez votre entreprise', hint: 'Raison sociale + adresse (pour vos BL)', action: () => document.getElementById('mon-entreprise')?.scrollIntoView({ behavior: 'smooth' }), cta: 'Compléter' },
+                { done: step2, label: 'Importez vos destinataires', hint: 'Une fois, puis choix en un clic', action: () => setShowImportRecipients(true), cta: 'Importer' },
+                { done: step3, label: 'Créez votre 1ʳᵉ expédition', hint: 'Formulaire + étiquette', action: () => setShowCreateShipment(true), cta: 'Créer' },
+              ];
+              return (
+                <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-4 sm:p-5">
+                  <h3 className="font-bold text-indigo-900 mb-3">🚀 Pour bien démarrer</h3>
+                  <div className="space-y-2">
+                    {steps.map((s, i) => (
+                      <div key={i} className={`flex items-center gap-3 bg-white rounded-xl p-3 ${s.done ? 'opacity-70' : ''}`}>
+                        <span className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 font-bold text-sm ${s.done ? 'bg-green-500 text-white' : 'bg-indigo-100 text-indigo-700'}`}>
+                          {s.done ? <CheckCircle size={16} /> : i + 1}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className={`text-sm font-bold ${s.done ? 'text-slate-500 line-through' : 'text-slate-800'}`}>{s.label}</p>
+                          <p className="text-[11px] text-slate-400">{s.hint}</p>
+                        </div>
+                        {!s.done && (
+                          <button onClick={s.action} className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-bold active:scale-95 transition-transform shrink-0">
+                            {s.cta}
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Mon entreprise (identité expéditeur pour les BL) */}
-            <div className={`bg-white rounded-2xl border p-4 sm:p-5 shadow-sm ${companyInfoComplete ? 'border-slate-200' : 'border-amber-300'}`}>
+            <div id="mon-entreprise" className={`bg-white rounded-2xl border p-4 sm:p-5 shadow-sm ${companyInfoComplete ? 'border-slate-200' : 'border-amber-300'}`}>
               <div className="flex items-center gap-2 mb-3">
                 <Building2 size={18} className="text-indigo-600" />
                 <h3 className="font-bold text-slate-800">Mon entreprise (expéditeur)</h3>
@@ -1430,181 +1467,104 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
 
                     return (
                         <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-                            {/* Header tableau */}
-                            <div className="hidden md:grid grid-cols-12 gap-2 px-4 py-3 bg-slate-50 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wide">
-                                <div className="col-span-1 flex items-center">
-                                    <input
-                                        type="checkbox"
-                                        checked={selectedLabels.size === filtered.length && filtered.length > 0}
-                                        onChange={(e) => {
-                                            if (e.target.checked) setSelectedLabels(new Set(filtered.map(p => p.id)));
-                                            else setSelectedLabels(new Set());
-                                        }}
-                                        className="rounded"
-                                    />
-                                </div>
-                                <div className="col-span-2">Code-barres</div>
-                                <div className="col-span-3">Destinataire</div>
-                                <div className="col-span-2">Ville</div>
-                                <div className="col-span-2">Statut</div>
-                                <div className="col-span-2 text-right">Actions</div>
+                            {/* En-tête : une ligne par PHARMACIE (point de livraison), dépliable */}
+                            <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wide">
+                                Vos colis, regroupés par pharmacie
                             </div>
 
-                            {/* Lignes — regroupées par jour d'import */}
+                            {/* Lignes — regroupées par jour puis par pharmacie */}
                             <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto">
-                                {filtered.map((pkg, idx) => {
-                                    // En-tête de jour quand la date change (liste triée par date décroissante)
-                                    const dayOf = (p: PackageType) => new Date(p.createdAt).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-                                    const day = dayOf(pkg);
-                                    const isNewDay = idx === 0 || dayOf(filtered[idx - 1]) !== day;
-                                    const dayCount = isNewDay ? filtered.filter(p => dayOf(p) === day).length : 0;
-                                    const statusColors = PACKAGE_STATUS_COLORS[pkg.status] || { bg: 'bg-slate-100', text: 'text-slate-700' };
-                                    const lastMove = pkg.movements?.[pkg.movements.length - 1];
-                                    
-                                    const isExpanded = expandedShipmentId === pkg.id;
-                                    return (
-                                        <React.Fragment key={pkg.id}>
-                                        {isNewDay && (
+                                {(() => {
+                                    // Regroupement par JOUR puis par PHARMACIE (point de livraison)
+                                    const pointKey = (p: PackageType) => `${(p.address||'').toLowerCase().trim()}|${(p.postalCode||'').trim()}|${(p.city||'').toLowerCase().trim()}`;
+                                    const dayOf = (p: PackageType) => new Date(p.createdAt).toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+                                    const dayMap = new Map<string, Map<string, PackageType[]>>();
+                                    for (const p of filtered) {
+                                        const d = dayOf(p);
+                                        if (!dayMap.has(d)) dayMap.set(d, new Map());
+                                        const pm = dayMap.get(d)!;
+                                        const k = pointKey(p);
+                                        if (!pm.has(k)) pm.set(k, []);
+                                        pm.get(k)!.push(p);
+                                    }
+                                    const summaryStatus = (pkgs: PackageType[]) => {
+                                        if (pkgs.some(p => p.status === PackageStatus.FAILED || p.status === PackageStatus.RETURNED)) return PackageStatus.FAILED;
+                                        if (pkgs.some(p => p.status === PackageStatus.IN_DELIVERY)) return PackageStatus.IN_DELIVERY;
+                                        if (pkgs.every(p => p.status === PackageStatus.DELIVERED)) return PackageStatus.DELIVERED;
+                                        if (pkgs.some(p => [PackageStatus.COLLECTED,PackageStatus.AT_HUB,PackageStatus.SORTED,PackageStatus.IN_TRANSIT,PackageStatus.LOADED].includes(p.status))) return PackageStatus.IN_TRANSIT;
+                                        return pkgs[0].status;
+                                    };
+                                    return Array.from(dayMap.entries()).map(([day, pointsMap]) => {
+                                        const dayCount = Array.from(pointsMap.values()).reduce((acc: number, arr) => acc + arr.length, 0);
+                                        return (
+                                        <React.Fragment key={day}>
                                             <div className="px-4 py-2 bg-indigo-50/70 border-y border-indigo-100 flex items-center justify-between sticky top-0 z-10">
                                                 <p className="text-xs font-bold text-indigo-800 capitalize">📅 {day}</p>
-                                                <span className="text-[11px] font-bold text-indigo-500">{dayCount} colis</span>
+                                                <span className="text-[11px] font-bold text-indigo-500">{dayCount} colis · {pointsMap.size} pharmacie(s)</span>
                                             </div>
-                                        )}
-                                        <div
-                                            onClick={(e) => {
-                                                // Ne pas déplier quand on clique sur un bouton/checkbox de la ligne
-                                                if ((e.target as HTMLElement).closest('button, input')) return;
-                                                setExpandedShipmentId(isExpanded ? null : pkg.id);
-                                            }}
-                                            className={`grid grid-cols-1 md:grid-cols-12 gap-2 px-4 py-3 items-center hover:bg-slate-50 transition-colors cursor-pointer border-l-4 ${STATUS_BORDER[pkg.status] || 'border-l-slate-300'}`}>
-                                            {/* Checkbox */}
-                                            <div className="hidden md:flex col-span-1 items-center">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={selectedLabels.has(pkg.id)}
-                                                    onChange={(e) => {
-                                                        const next = new Set(selectedLabels);
-                                                        e.target.checked ? next.add(pkg.id) : next.delete(pkg.id);
-                                                        setSelectedLabels(next);
-                                                    }}
-                                                    className="rounded"
-                                                />
-                                            </div>
-
-                                            {/* Code-barres */}
-                                            <div className="md:col-span-2">
-                                                <p className="font-mono text-xs font-bold text-slate-800">{pkg.externalId || pkg.barcode || pkg.orderNumber}</p>
-                                                <p className="text-[10px] text-slate-400">Cmd: {pkg.orderNumber}</p>
-                                            </div>
-
-                                            {/* Destinataire */}
-                                            <div className="md:col-span-3">
-                                                <p className="text-sm font-semibold text-slate-800 truncate">{pkg.contactName}</p>
-                                                <p className="text-xs text-slate-500 truncate">{pkg.address}</p>
-                                            </div>
-
-                                            {/* Ville */}
-                                            <div className="md:col-span-2">
-                                                <p className="text-xs font-medium text-slate-600">{pkg.postalCode} {pkg.city}</p>
-                                                <p className="text-[10px] text-slate-400">{pkg.zone}</p>
-                                            </div>
-
-                                            {/* Statut */}
-                                            <div className="md:col-span-2">
-                                                <span title={STATUS_TOOLTIP[pkg.status] || pkg.status} className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-bold cursor-help ${statusColors.bg} ${statusColors.text}`}>
-                                                    {pkg.status === PackageStatus.DELIVERED && '✅'}
-                                                    {pkg.status === PackageStatus.PENDING && '⏳'}
-                                                    {pkg.status === PackageStatus.COLLECTED && '📦'}
-                                                    {(pkg.status === PackageStatus.IN_TRANSIT || pkg.status === PackageStatus.IN_DELIVERY) && '🚚'}
-                                                    {pkg.status === PackageStatus.FAILED && '❌'}
-                                                    {pkg.status}
-                                                </span>
-                                                {lastMove && (
-                                                    <p className="text-[10px] text-slate-400 mt-0.5">
-                                                        {new Date(lastMove.timestamp).toLocaleDateString('fr-FR')} {new Date(lastMove.timestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-                                                    </p>
-                                                )}
-                                                {pkg.status === PackageStatus.IN_DELIVERY && pkg.estimatedDeliveryAt && (() => {
-                                                    const eta = new Date(pkg.estimatedDeliveryAt);
-                                                    if (isNaN(eta.getTime())) return null;
-                                                    const today = eta.toDateString() === new Date().toDateString();
-                                                    const hhmm = eta.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-                                                    return (
-                                                        <p className="text-[10px] font-bold text-orange-600 mt-0.5">
-                                                            🕒 Livraison prévue {today ? `vers ${hhmm}` : `le ${eta.toLocaleDateString('fr-FR')} vers ${hhmm}`}
-                                                        </p>
-                                                    );
-                                                })()}
-                                            </div>
-
-                                            {/* Actions */}
-                                            <div className="md:col-span-2 flex items-center justify-end gap-2">
-                                                {/* Imprimer étiquette */}
-                                                <button
-                                                    onClick={() => {
-                                                        const html = generateBatchLabelsHTML([pkg as PackageType], 'FleetGenius Transport');
-                                                        const win = window.open('', '_blank');
-                                                        if (win) { win.document.write(html); win.document.close(); }
-                                                    }}
-                                                    title="Imprimer l'étiquette"
-                                                    className="p-2 bg-slate-100 hover:bg-indigo-100 text-slate-600 hover:text-indigo-700 rounded-lg transition-colors"
-                                                >
-                                                    <QrCode size={14} />
-                                                </button>
-
-                                                {/* Bon de livraison (BL) — regroupe les colis du même point */}
-                                                <button
-                                                    onClick={() => openDeliveryNote(
-                                                        pkg as PackageType,
-                                                        clientPackages,
-                                                        {
-                                                            companyName: companyForm.companyName || currentUser?.companyName || pkg.clientName,
-                                                            address: companyForm.companyAddress || undefined,
-                                                            siret: companyForm.companySiret || undefined,
-                                                            phone: companyForm.companyPhone || undefined,
-                                                            email: currentUser?.email,
-                                                        }
+                                            {Array.from(pointsMap.entries()).map(([key, pkgs]) => {
+                                                const rep = pkgs[0];
+                                                const groupId = day + '||' + key;
+                                                const open = expandedGroupId === groupId;
+                                                const sStatus = summaryStatus(pkgs);
+                                                const sColors = PACKAGE_STATUS_COLORS[sStatus] || { bg:'bg-slate-100', text:'text-slate-700' };
+                                                const delivered = pkgs.filter(p => p.status === PackageStatus.DELIVERED).length;
+                                                const etaPkg = pkgs.find(p => p.status === PackageStatus.IN_DELIVERY && p.estimatedDeliveryAt);
+                                                return (
+                                                <React.Fragment key={groupId}>
+                                                    <div onClick={(e) => { if ((e.target as HTMLElement).closest('button')) return; setExpandedGroupId(open ? null : groupId); }}
+                                                        className={`flex items-center gap-3 px-4 py-3 hover:bg-slate-50 cursor-pointer border-l-4 ${STATUS_BORDER[sStatus] || 'border-l-slate-300'}`}>
+                                                        <div className="min-w-0 flex-1">
+                                                            <p className="text-sm font-bold text-slate-800 truncate">{rep.contactName}</p>
+                                                            <p className="text-xs text-slate-500 truncate">{rep.address} · {rep.postalCode} {rep.city}</p>
+                                                            {etaPkg && (() => { const eta=new Date(etaPkg.estimatedDeliveryAt!); if(isNaN(eta.getTime()))return null; const today=eta.toDateString()===new Date().toDateString(); const hhmm=eta.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}); return <p className="text-[10px] font-bold text-orange-600 mt-0.5">🕒 Livraison prévue {today?`vers ${hhmm}`:`le ${eta.toLocaleDateString('fr-FR')} vers ${hhmm}`}</p>; })()}
+                                                        </div>
+                                                        <div className="flex items-center gap-2 shrink-0">
+                                                            <div className="text-center leading-none"><span className="text-base font-black text-slate-700">{pkgs.length}</span><br/><span className="text-[9px] text-slate-400">colis</span></div>
+                                                            <span title={STATUS_TOOLTIP[sStatus] || sStatus} className={`hidden sm:inline-flex items-center px-2 py-1 rounded-lg text-[11px] font-bold cursor-help ${sColors.bg} ${sColors.text}`}>
+                                                                {delivered === pkgs.length ? 'Tous livrés' : delivered > 0 ? `${delivered}/${pkgs.length} livrés` : sStatus}
+                                                            </span>
+                                                            <button onClick={() => { const html = generateBatchLabelsHTML(pkgs as PackageType[], currentUser.companyName || 'Expéditeur'); const win=window.open('','_blank'); if(win){win.document.write(html);win.document.close();} }} title="Imprimer les étiquettes" className="p-2 bg-slate-100 hover:bg-indigo-100 text-slate-600 hover:text-indigo-700 rounded-lg"><QrCode size={14} /></button>
+                                                            <button onClick={() => openDeliveryNote(rep as PackageType, clientPackages, { companyName: companyForm.companyName || currentUser?.companyName || rep.clientName, address: companyForm.companyAddress || undefined, siret: companyForm.companySiret || undefined, phone: companyForm.companyPhone || undefined, email: currentUser?.email })} title="Bon de livraison (PDF)" className="p-2 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded-lg"><FileText size={14} /></button>
+                                                            <button onClick={() => setExpandedGroupId(open ? null : groupId)} className="p-2 bg-slate-100 hover:bg-blue-100 text-slate-600 rounded-lg">{open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</button>
+                                                        </div>
+                                                    </div>
+                                                    {open && (
+                                                        <div className="bg-slate-50/70 border-t border-slate-100 divide-y divide-slate-100">
+                                                            {pkgs.map(pkg => {
+                                                                const sc = PACKAGE_STATUS_COLORS[pkg.status] || { bg:'bg-slate-100', text:'text-slate-700' };
+                                                                const tOpen = expandedShipmentId === pkg.id;
+                                                                return (
+                                                                <div key={pkg.id} className={`px-6 py-2.5 border-l-4 ${STATUS_BORDER[pkg.status] || 'border-l-slate-300'}`}>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <div className="min-w-0 flex-1">
+                                                                            <p className="font-mono text-xs font-bold text-slate-800 truncate">{pkg.externalId || pkg.barcode || pkg.orderNumber}</p>
+                                                                            <p className="text-[10px] text-slate-400">Cmd: {pkg.orderNumber}{pkg.clientReference ? ` · Réf: ${pkg.clientReference}` : ''}</p>
+                                                                        </div>
+                                                                        <span title={STATUS_TOOLTIP[pkg.status] || pkg.status} className={`inline-flex items-center px-2 py-1 rounded-lg text-[11px] font-bold cursor-help ${sc.bg} ${sc.text}`}>{pkg.status}</span>
+                                                                        <button onClick={() => { const html = generateBatchLabelsHTML([pkg as PackageType], currentUser.companyName || 'Expéditeur'); const win=window.open('','_blank'); if(win){win.document.write(html);win.document.close();} }} title="Étiquette" className="p-1.5 bg-slate-100 hover:bg-indigo-100 text-slate-600 rounded-lg"><QrCode size={13} /></button>
+                                                                        {pkg.status === PackageStatus.DELIVERED && pkg.pod && (
+                                                                            <button onClick={() => setViewingPOD({ pod: pkg.pod!, quote: { id: pkg.id, clientName: pkg.clientName, destination: pkg.city, destinationAddress: pkg.address, destinationContact: { name: pkg.contactName } } as any })} title="Preuve de livraison" className="p-1.5 bg-green-100 hover:bg-green-200 text-green-700 rounded-lg"><Eye size={13} /></button>
+                                                                        )}
+                                                                        <button onClick={() => setExpandedShipmentId(tOpen ? null : pkg.id)} title="Suivi" className="p-1.5 bg-slate-100 hover:bg-blue-100 text-slate-600 rounded-lg">{tOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}</button>
+                                                                    </div>
+                                                                    {tOpen && (
+                                                                        <div className="mt-2">
+                                                                            <PackageTimeline movements={pkg.movements || []} showActors pod={pkg.pod} />
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                                );
+                                                            })}
+                                                        </div>
                                                     )}
-                                                    title="Bon de livraison (PDF)"
-                                                    className="p-2 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded-lg transition-colors"
-                                                >
-                                                    <FileText size={14} />
-                                                </button>
-
-                                                {/* Voir POD si livré */}
-                                                {pkg.status === PackageStatus.DELIVERED && pkg.pod && (
-                                                    <button
-                                                        onClick={() => setViewingPOD({ pod: pkg.pod!, quote: { id: pkg.id, clientName: pkg.clientName, destination: pkg.city, destinationAddress: pkg.address, destinationContact: { name: pkg.contactName } } as any })}
-                                                        title="Preuve de livraison"
-                                                        className="p-2 bg-green-100 hover:bg-green-200 text-green-700 rounded-lg transition-colors"
-                                                    >
-                                                        <Eye size={14} />
-                                                    </button>
-                                                )}
-
-                                                {/* Chevron timeline */}
-                                                <button
-                                                    onClick={() => setExpandedShipmentId(isExpanded ? null : pkg.id)}
-                                                    title={isExpanded ? 'Masquer le suivi' : 'Voir le suivi du colis'}
-                                                    className="p-2 bg-slate-100 hover:bg-blue-100 text-slate-600 hover:text-blue-700 rounded-lg transition-colors"
-                                                >
-                                                    {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                                                </button>
-                                            </div>
-                                        </div>
-
-                                        {/* Timeline du colis (dépliable) */}
-                                        {isExpanded && (
-                                            <div className="px-6 pb-4 pt-1 bg-slate-50/70 border-t border-slate-100">
-                                                <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">
-                                                    Traçabilité complète — colis {pkg.externalId || pkg.barcode || pkg.orderNumber}
-                                                </p>
-                                                <PackageTimeline movements={pkg.movements || []} showActors pod={pkg.pod} />
-                                            </div>
-                                        )}
+                                                </React.Fragment>
+                                                );
+                                            })}
                                         </React.Fragment>
-                                    );
-                                })}
+                                        );
+                                    });
+                                })()}
 
                                 {isLoadingPackages && filtered.length === 0 && (
                                     <div className="text-center py-16">
@@ -1616,10 +1576,20 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                 {!isLoadingPackages && filtered.length === 0 && (
                                     <div className="text-center py-16">
                                         <Package className="mx-auto text-slate-300 mb-3" size={40} />
-                                        <p className="text-slate-500 font-medium">Aucune expédition trouvée</p>
-                                        <p className="text-xs text-slate-400 mt-1">
-                                            {shipmentSearch ? 'Essayez un autre terme de recherche' : 'Vos colis apparaîtront ici après import'}
+                                        <p className="text-slate-600 font-bold">
+                                            {shipmentSearch ? 'Aucun colis ne correspond à votre recherche' : 'Vous n\'avez pas encore de colis'}
                                         </p>
+                                        <p className="text-xs text-slate-400 mt-1 mb-4">
+                                            {shipmentSearch ? 'Essayez un autre terme de recherche' : 'Créez votre première expédition en un clic.'}
+                                        </p>
+                                        {!shipmentSearch && (
+                                            <button
+                                                onClick={() => setShowCreateShipment(true)}
+                                                className="inline-flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-bold text-sm shadow-lg active:scale-95 transition-transform"
+                                            >
+                                                <Plus size={16} /> Créer une expédition
+                                            </button>
+                                        )}
                                     </div>
                                 )}
                             </div>

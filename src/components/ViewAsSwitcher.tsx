@@ -10,6 +10,7 @@
  * Volontairement autonome : n'altère pas le currentUser global de l'app.
  */
 import React, { useState, useMemo, lazy, Suspense } from 'react';
+import { createPortal } from 'react-dom';
 import { User, QuoteRequest } from '../types';
 import { PermissionsProvider } from '../usePermissions';
 import { Eye, X, Search, Building2 } from 'lucide-react';
@@ -66,9 +67,9 @@ const ViewAsSwitcher: React.FC<ViewAsSwitcherProps> = ({ currentUser, users, quo
         <span className="hidden sm:inline">Voir en tant que</span>
       </button>
 
-      {/* Sélecteur de client */}
-      {pickerOpen && !previewClient && (
-        <div className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4" onClick={() => setPickerOpen(false)}>
+      {/* Sélecteur de client (portail → au-dessus de la sidebar) */}
+      {pickerOpen && !previewClient && createPortal(
+        <div className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-4" onClick={() => setPickerOpen(false)}>
           <div className="bg-white rounded-2xl max-w-md w-full max-h-[80vh] flex flex-col p-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-bold text-slate-800 flex items-center gap-2"><Eye size={18} className="text-indigo-600" /> Voir en tant que client</h3>
@@ -103,12 +104,13 @@ const ViewAsSwitcher: React.FC<ViewAsSwitcherProps> = ({ currentUser, users, quo
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {/* Overlay d'aperçu (lecture seule) */}
-      {previewClient && (
-        <div className="fixed inset-0 z-[70] bg-slate-50 flex flex-col">
+      {/* Overlay d'aperçu (lecture seule) — portail → au-dessus de la sidebar */}
+      {previewClient && createPortal(
+        <div className="fixed inset-0 z-[100] bg-slate-50 flex flex-col">
           <div className="bg-amber-500 text-white px-4 py-2 flex items-center justify-between shrink-0">
             <span className="font-bold text-sm flex items-center gap-2 min-w-0">
               <Eye size={16} className="shrink-0" />
@@ -138,7 +140,8 @@ const ViewAsSwitcher: React.FC<ViewAsSwitcherProps> = ({ currentUser, users, quo
               </Suspense>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );
