@@ -10,6 +10,7 @@ import { Package, PackageStatus } from '../types';
 import { computeClientMetrics, MetricPeriod } from '../services/clientMetrics';
 import { KpiTile, TrendChart, BarByDimension, DonutStatuses, TopList } from './analytics/AnalyticsWidgets';
 import InsightsPanel from './analytics/InsightsPanel';
+import AskData from './analytics/AskData';
 import { getClientInsights } from '../services/clientInsights';
 import { BarChart3 } from 'lucide-react';
 
@@ -87,6 +88,9 @@ const ClientAnalytics: React.FC<ClientAnalyticsProps> = ({ packages }) => {
 
       {/* Ce qui compte (insights automatiques) */}
       <InsightsPanel insights={insights} />
+
+      {/* Demander à mes données (IA — chiffres garantis exacts) */}
+      <AskData packages={packages} />
 
       {/* Filtres */}
       <div className="flex flex-wrap items-center gap-2">
