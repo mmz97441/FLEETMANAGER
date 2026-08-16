@@ -23,6 +23,7 @@ import ClientAnalytics from './ClientAnalytics';
 import InsightsPanel from './analytics/InsightsPanel';
 import RecipientsManager from './RecipientsManager';
 import ClientHelp, { HelpNavTarget } from './ClientHelp';
+import HintTooltip from './shared/Tooltip';
 import { getClientInsights } from '../services/clientInsights';
 import { changePassword } from '../services/accountService';
 
@@ -925,7 +926,6 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                   <button
                     key={i}
                     onClick={a.onClick}
-                    title={`${a.label} — ${a.hint}`}
                     className="bg-white rounded-2xl border border-slate-200 p-4 text-left hover:shadow-md hover:border-indigo-200 active:scale-95 transition-all flex flex-col gap-2"
                   >
                     <span className={`w-11 h-11 rounded-xl ${a.color} text-white flex items-center justify-center`}>
@@ -1621,12 +1621,12 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                                         </div>
                                                         <div className="flex items-center gap-2 shrink-0">
                                                             <div className="text-center leading-none"><span className="text-base font-black text-slate-700">{pkgs.length}</span><br/><span className="text-[9px] text-slate-400">colis</span></div>
-                                                            <span title={STATUS_TOOLTIP[sStatus] || sStatus} className={`hidden sm:inline-flex items-center px-2 py-1 rounded-lg text-[11px] font-bold cursor-help ${sColors.bg} ${sColors.text}`}>
+                                                            <HintTooltip label={STATUS_TOOLTIP[sStatus] || sStatus}><span className={`hidden sm:inline-flex items-center px-2 py-1 rounded-lg text-[11px] font-bold cursor-help ${sColors.bg} ${sColors.text}`}>
                                                                 {delivered === pkgs.length ? 'Tous livrés' : delivered > 0 ? `${delivered}/${pkgs.length} livrés` : sStatus}
-                                                            </span>
-                                                            <button onClick={() => { const html = generateBatchLabelsHTML(pkgs as PackageType[], currentUser.companyName || 'Expéditeur'); const win=window.open('','_blank'); if(win){win.document.write(html);win.document.close();} }} title="Imprimer les étiquettes" className="p-2 bg-slate-100 hover:bg-indigo-100 text-slate-600 hover:text-indigo-700 rounded-lg"><QrCode size={14} /></button>
-                                                            <button onClick={() => openDeliveryNote(rep as PackageType, clientPackages, { companyName: companyForm.companyName || currentUser?.companyName || rep.clientName, address: companyForm.companyAddress || undefined, siret: companyForm.companySiret || undefined, phone: companyForm.companyPhone || undefined, email: currentUser?.email })} title="Bon de livraison (PDF)" className="p-2 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded-lg"><FileText size={14} /></button>
-                                                            <button onClick={() => setExpandedGroupId(open ? null : groupId)} className="p-2 bg-slate-100 hover:bg-blue-100 text-slate-600 rounded-lg">{open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</button>
+                                                            </span></HintTooltip>
+                                                            <HintTooltip label="Imprimer les étiquettes"><button onClick={() => { const html = generateBatchLabelsHTML(pkgs as PackageType[], currentUser.companyName || 'Expéditeur'); const win=window.open('','_blank'); if(win){win.document.write(html);win.document.close();} }} className="p-2 bg-slate-100 hover:bg-indigo-100 text-slate-600 hover:text-indigo-700 rounded-lg"><QrCode size={14} /></button></HintTooltip>
+                                                            <HintTooltip label="Bon de livraison (PDF)"><button onClick={() => openDeliveryNote(rep as PackageType, clientPackages, { companyName: companyForm.companyName || currentUser?.companyName || rep.clientName, address: companyForm.companyAddress || undefined, siret: companyForm.companySiret || undefined, phone: companyForm.companyPhone || undefined, email: currentUser?.email })} className="p-2 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded-lg"><FileText size={14} /></button></HintTooltip>
+                                                            <HintTooltip label={open ? 'Masquer les colis' : 'Voir les colis'}><button onClick={() => setExpandedGroupId(open ? null : groupId)} className="p-2 bg-slate-100 hover:bg-blue-100 text-slate-600 rounded-lg">{open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</button></HintTooltip>
                                                         </div>
                                                     </div>
                                                     {open && (
@@ -1641,12 +1641,12 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                                                             <p className="font-mono text-xs font-bold text-slate-800 truncate">{pkg.externalId || pkg.barcode || pkg.orderNumber}</p>
                                                                             <p className="text-[10px] text-slate-400">Cmd: {pkg.orderNumber}{pkg.clientReference ? ` · Réf: ${pkg.clientReference}` : ''}</p>
                                                                         </div>
-                                                                        <span title={STATUS_TOOLTIP[pkg.status] || pkg.status} className={`inline-flex items-center px-2 py-1 rounded-lg text-[11px] font-bold cursor-help ${sc.bg} ${sc.text}`}>{pkg.status}</span>
-                                                                        <button onClick={() => { const html = generateBatchLabelsHTML([pkg as PackageType], currentUser.companyName || 'Expéditeur'); const win=window.open('','_blank'); if(win){win.document.write(html);win.document.close();} }} title="Étiquette" className="p-1.5 bg-slate-100 hover:bg-indigo-100 text-slate-600 rounded-lg"><QrCode size={13} /></button>
+                                                                        <HintTooltip label={STATUS_TOOLTIP[pkg.status] || pkg.status}><span className={`inline-flex items-center px-2 py-1 rounded-lg text-[11px] font-bold cursor-help ${sc.bg} ${sc.text}`}>{pkg.status}</span></HintTooltip>
+                                                                        <HintTooltip label="Étiquette de ce colis"><button onClick={() => { const html = generateBatchLabelsHTML([pkg as PackageType], currentUser.companyName || 'Expéditeur'); const win=window.open('','_blank'); if(win){win.document.write(html);win.document.close();} }} className="p-1.5 bg-slate-100 hover:bg-indigo-100 text-slate-600 rounded-lg"><QrCode size={13} /></button></HintTooltip>
                                                                         {pkg.status === PackageStatus.DELIVERED && pkg.pod && (
-                                                                            <button onClick={() => setViewingPOD({ pod: pkg.pod!, quote: { id: pkg.id, clientName: pkg.clientName, destination: pkg.city, destinationAddress: pkg.address, destinationContact: { name: pkg.contactName } } as any })} title="Preuve de livraison" className="p-1.5 bg-green-100 hover:bg-green-200 text-green-700 rounded-lg"><Eye size={13} /></button>
+                                                                            <HintTooltip label="Preuve de livraison"><button onClick={() => setViewingPOD({ pod: pkg.pod!, quote: { id: pkg.id, clientName: pkg.clientName, destination: pkg.city, destinationAddress: pkg.address, destinationContact: { name: pkg.contactName } } as any })} className="p-1.5 bg-green-100 hover:bg-green-200 text-green-700 rounded-lg"><Eye size={13} /></button></HintTooltip>
                                                                         )}
-                                                                        <button onClick={() => setExpandedShipmentId(tOpen ? null : pkg.id)} title="Suivi" className="p-1.5 bg-slate-100 hover:bg-blue-100 text-slate-600 rounded-lg">{tOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}</button>
+                                                                        <HintTooltip label={tOpen ? 'Masquer le suivi' : 'Voir le suivi'}><button onClick={() => setExpandedShipmentId(tOpen ? null : pkg.id)} className="p-1.5 bg-slate-100 hover:bg-blue-100 text-slate-600 rounded-lg">{tOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}</button></HintTooltip>
                                                                     </div>
                                                                     {tOpen && (
                                                                         <div className="mt-2">

@@ -38,7 +38,7 @@ const SECTION_TARGET: Record<string, { target: HelpNavTarget; label: string }> =
   bl: { target: 'shipments', label: 'Voir mes colis (BL)' },
 };
 
-type TabId = 'guide' | 'faq';
+type TabId = 'guide' | 'faq' | 'news';
 
 interface GuideSection {
   id: string;
@@ -53,6 +53,12 @@ interface FaqItem {
   id: string;
   question: string;
   answer: string;
+}
+
+interface VersionNews {
+  version: string;
+  date: string;
+  items: string[];
 }
 
 // --- Normalisation pour recherche insensible à la casse ET aux accents ---
@@ -71,11 +77,12 @@ const GUIDE_SECTIONS: GuideSection[] = [
     icon: Home,
     emoji: '🏠',
     title: 'Accueil',
-    intro: 'La question « Que voulez-vous faire ? » et de grandes tuiles pour aller partout en un clic.',
+    intro: 'Votre point de départ : la question « Que voulez-vous faire ? » et de grandes tuiles pour aller partout en un clic.',
     steps: [
-      'Ouvrez l\'application : la page d\'accueil s\'affiche en premier.',
-      'Choisissez une grande tuile (Créer, Mes Colis, Destinataires…).',
-      'Chaque tuile vous emmène directement au bon endroit.',
+      'Connectez-vous : la page d\'accueil s\'affiche automatiquement en premier.',
+      'Sous « Que voulez-vous faire ? », repérez les grandes tuiles colorées.',
+      'Appuyez sur une tuile (« Créer une expédition », « Mes Colis », « Mes Destinataires »…) pour ouvrir la page correspondante.',
+      'Pour revenir ici à tout moment, cliquez sur le logo en haut ou sur l\'onglet « Accueil » du menu.',
     ],
   },
   {
@@ -85,10 +92,11 @@ const GUIDE_SECTIONS: GuideSection[] = [
     title: 'Créer une expédition',
     intro: 'Préparez un envoi vers une pharmacie en quelques secondes.',
     steps: [
-      'Choisissez un destinataire dans votre carnet, ou saisissez-le à la main.',
-      'Indiquez le nombre de colis à envoyer.',
-      'Imprimez l\'étiquette au format A4, A5 ou A6.',
-      'Un code de suivi est généré automatiquement pour cet envoi.',
+      'Cliquez sur l\'onglet « Créer une expédition » (ou la tuile du même nom sur l\'accueil).',
+      'Dans le champ « Destinataire », choisissez une pharmacie de votre carnet, ou cliquez sur « Saisir à la main » pour taper l\'adresse.',
+      'Dans « Nombre de colis », indiquez combien de colis vous envoyez.',
+      'Appuyez sur « Créer l\'expédition » : un code de suivi est généré automatiquement.',
+      'Choisissez le format d\'étiquette (A4, A5 ou A6), puis cliquez sur « Imprimer l\'étiquette » et collez-la sur le colis.',
     ],
   },
   {
@@ -98,10 +106,11 @@ const GUIDE_SECTIONS: GuideSection[] = [
     title: 'Mes Colis',
     intro: 'Le suivi de tous vos envois, regroupés par pharmacie.',
     steps: [
-      'Repérez le statut grâce au code couleur : gris = en attente, bleu = collecté, orange = en livraison, vert = livré, rouge = échec.',
-      'Consultez l\'heure de livraison prévue pour chaque point.',
-      'Cliquez sur un colis pour voir la traçabilité complète.',
-      'Accédez à la preuve de livraison (signature, photo, GPS) et téléchargez le Bon de Livraison.',
+      'Cliquez sur l\'onglet « Mes Colis » : vos envois sont regroupés par pharmacie.',
+      'Lisez le statut grâce à la pastille de couleur : gris = en attente, bleu = collecté, orange = en livraison, vert = livré, rouge = échec.',
+      'Regardez l\'heure de livraison prévue affichée à côté de chaque pharmacie.',
+      'Appuyez sur une ligne de colis pour ouvrir sa fiche et voir la traçabilité complète.',
+      'Dans la fiche, consultez la preuve de livraison (signature, photo, position GPS) et cliquez sur « Bon de Livraison » pour le télécharger.',
     ],
   },
   {
@@ -111,9 +120,10 @@ const GUIDE_SECTIONS: GuideSection[] = [
     title: 'Mes Destinataires',
     intro: 'Le carnet d\'adresses de toutes vos pharmacies.',
     steps: [
-      'Ajoutez, modifiez ou supprimez une pharmacie quand vous voulez.',
-      'Importez votre liste complète depuis un fichier Excel ou CSV.',
-      'Téléchargez le fichier modèle pour remplir votre liste sans erreur.',
+      'Cliquez sur l\'onglet « Mes Destinataires » pour ouvrir votre carnet.',
+      'Appuyez sur « Ajouter un destinataire » pour créer une pharmacie ; sur l\'icône crayon pour la modifier, sur la corbeille pour la supprimer.',
+      'Pour un ajout en masse, cliquez d\'abord sur « Télécharger le modèle » (fichier Excel à remplir).',
+      'Remplissez le modèle avec vos pharmacies, puis cliquez sur « Importer » et sélectionnez votre fichier Excel ou CSV.',
     ],
   },
   {
@@ -123,10 +133,10 @@ const GUIDE_SECTIONS: GuideSection[] = [
     title: 'Statistiques',
     intro: 'Vos indicateurs clés, avec des objectifs et des réponses claires.',
     steps: [
-      'Suivez vos chiffres : nombre de colis, taux de livraison, ponctualité, délai moyen.',
-      'Comparez chaque indicateur à son objectif.',
-      'Consultez « Ce qui compte » : des alertes automatiques sur les points à surveiller.',
-      'Utilisez « Demander à mes données » : posez une question en français, la réponse est calculée et garantie exacte.',
+      'Cliquez sur l\'onglet « Statistiques » pour afficher vos chiffres : nombre de colis, taux de livraison, ponctualité, délai moyen.',
+      'Sous chaque indicateur, comparez la valeur à son objectif (barre ou repère de couleur).',
+      'Consultez l\'encart « Ce qui compte » : des alertes automatiques signalent les points à surveiller.',
+      'Dans « Demander à mes données », tapez votre question en français (ex. « Combien de colis livrés cette semaine ? ») puis appuyez sur Entrée : la réponse est calculée à partir de vos données réelles.',
     ],
   },
   {
@@ -136,10 +146,11 @@ const GUIDE_SECTIONS: GuideSection[] = [
     title: 'Mon compte',
     intro: 'Vos informations personnelles et celles de votre entreprise.',
     steps: [
-      'Consultez et mettez à jour votre profil.',
-      'Changez votre mot de passe en toute sécurité.',
-      'Renseignez vos informations d\'entreprise (elles figurent sur les étiquettes et les BL).',
-      'Gérez votre équipe et les accès.',
+      'Cliquez sur votre nom ou l\'onglet « Mon compte » en haut à droite.',
+      'Dans « Profil », mettez à jour vos informations, puis cliquez sur « Enregistrer ».',
+      'Pour la sécurité, ouvrez « Changer le mot de passe », saisissez l\'ancien puis le nouveau, et validez.',
+      'Dans l\'onglet « Mon Entreprise », renseignez nom, adresse et SIRET (ils apparaissent sur vos étiquettes et vos BL).',
+      'Dans « Équipe », ajoutez vos collègues et gérez leurs accès.',
     ],
   },
   {
@@ -149,9 +160,10 @@ const GUIDE_SECTIONS: GuideSection[] = [
     title: 'Bon de livraison (BL)',
     intro: 'Un document officiel par pharmacie livrée.',
     steps: [
-      'Un Bon de Livraison est créé pour chaque pharmacie.',
-      'Téléchargez-le ou imprimez-le quand vous en avez besoin.',
-      'Il inclut la preuve de livraison (signature, photo, GPS).',
+      'Ouvrez l\'onglet « Mes Colis » et sélectionnez la pharmacie concernée.',
+      'Dans sa fiche, cliquez sur « Bon de Livraison » : un BL est généré pour cette pharmacie.',
+      'Utilisez « Télécharger » (PDF) ou « Imprimer » selon votre besoin.',
+      'Le BL inclut la preuve de livraison (signature, photo et position GPS).',
     ],
   },
 ];
@@ -220,6 +232,25 @@ const FAQ_ITEMS: FaqItem[] = [
   },
 ];
 
+// --- Contenu des NOUVEAUTÉS (historique des versions) ---
+// Ajoutez la nouvelle version en haut (la plus récente en premier).
+const VERSIONS: VersionNews[] = [
+  {
+    version: 'v3.32',
+    date: 'Août 2026',
+    items: [
+      'Espace client repensé, plus simple et plus clair.',
+      'Créer une expédition en quelques clics + étiquettes aux formats A4, A5 et A6.',
+      'Suivi groupé par pharmacie, avec codes couleurs par statut et heure de livraison prévue.',
+      'Traçabilité complète + preuve de livraison (signature, photo, position GPS).',
+      'Bon de Livraison par pharmacie, téléchargeable/imprimable.',
+      'Mes Destinataires : carnet à gérer (ajouter, modifier, supprimer) + import Excel.',
+      'Statistiques : indicateurs, alertes automatiques et « Demander à mes données ».',
+      'Nouvel onglet « Mon Entreprise » et centre d’Aide intégré.',
+    ],
+  },
+];
+
 const ClientHelp: React.FC<ClientHelpProps> = ({ onClose, onNavigate, embedded = false }) => {
   const [activeTab, setActiveTab] = useState<TabId>('guide');
   const [query, setQuery] = useState('');
@@ -247,6 +278,17 @@ const ClientHelp: React.FC<ClientHelpProps> = ({ onClose, onNavigate, embedded =
     });
   }, [nq]);
 
+  // --- Filtrage des nouveautés (version + date + items) ---
+  const filteredNews = useMemo<VersionNews[]>(() => {
+    if (!nq) return VERSIONS;
+    return VERSIONS.filter((entry) => {
+      const haystack = normalize(
+        [entry.version, entry.date, ...entry.items].join(' '),
+      );
+      return haystack.includes(nq);
+    });
+  }, [nq]);
+
   const toggleFaq = (id: string) => {
     setOpenFaqId((prev) => (prev === id ? null : id));
   };
@@ -254,6 +296,7 @@ const ClientHelp: React.FC<ClientHelpProps> = ({ onClose, onNavigate, embedded =
   const tabs: { id: TabId; label: string; count: number }[] = [
     { id: 'guide', label: "Guide d'utilisation", count: filteredGuide.length },
     { id: 'faq', label: 'FAQ', count: filteredFaq.length },
+    { id: 'news', label: 'Nouveautés', count: filteredNews.length },
   ];
 
   const panel = (
@@ -391,41 +434,77 @@ const ClientHelp: React.FC<ClientHelpProps> = ({ onClose, onNavigate, embedded =
                 })}
               </div>
             )
-          ) : filteredFaq.length === 0 ? (
+          ) : activeTab === 'faq' ? (
+            filteredFaq.length === 0 ? (
+              <EmptyState query={query} />
+            ) : (
+              <div className="space-y-2.5">
+                {filteredFaq.map((item) => {
+                  const isOpen = openFaqId === item.id;
+                  return (
+                    <div
+                      key={item.id}
+                      className="rounded-2xl border border-slate-200 bg-white overflow-hidden"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => toggleFaq(item.id)}
+                        aria-expanded={isOpen}
+                        className="w-full flex items-center gap-3 text-left px-4 py-3.5 hover:bg-slate-50 transition-colors"
+                      >
+                        <span className="flex-1 font-semibold text-slate-900 text-sm">
+                          {item.question}
+                        </span>
+                        <ChevronDown
+                          className={`w-5 h-5 text-slate-400 shrink-0 transition-transform ${
+                            isOpen ? 'rotate-180' : ''
+                          }`}
+                        />
+                      </button>
+                      {isOpen && (
+                        <div className="px-4 pb-4 -mt-1">
+                          <p className="text-sm text-slate-600 leading-relaxed">{item.answer}</p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )
+          ) : filteredNews.length === 0 ? (
             <EmptyState query={query} />
           ) : (
-            <div className="space-y-2.5">
-              {filteredFaq.map((item) => {
-                const isOpen = openFaqId === item.id;
-                return (
-                  <div
-                    key={item.id}
-                    className="rounded-2xl border border-slate-200 bg-white overflow-hidden"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => toggleFaq(item.id)}
-                      aria-expanded={isOpen}
-                      className="w-full flex items-center gap-3 text-left px-4 py-3.5 hover:bg-slate-50 transition-colors"
-                    >
-                      <span className="flex-1 font-semibold text-slate-900 text-sm">
-                        {item.question}
-                      </span>
-                      <ChevronDown
-                        className={`w-5 h-5 text-slate-400 shrink-0 transition-transform ${
-                          isOpen ? 'rotate-180' : ''
-                        }`}
-                      />
-                    </button>
-                    {isOpen && (
-                      <div className="px-4 pb-4 -mt-1">
-                        <p className="text-sm text-slate-600 leading-relaxed">{item.answer}</p>
-                      </div>
-                    )}
+            // Timeline verticale des nouveautés (version la plus récente en haut)
+            <ol className="relative border-l-2 border-indigo-100 ml-3 space-y-6">
+              {filteredNews.map((entry) => (
+                <li key={entry.version} className="relative pl-6">
+                  <span
+                    className="absolute -left-[7px] top-1.5 w-3 h-3 rounded-full bg-indigo-600 ring-4 ring-indigo-100"
+                    aria-hidden="true"
+                  />
+                  <div className="flex items-center gap-2 mb-3 flex-wrap">
+                    <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-indigo-600 text-white text-xs font-bold">
+                      {entry.version}
+                    </span>
+                    <span className="text-sm font-medium text-slate-500">{entry.date}</span>
                   </div>
-                );
-              })}
-            </div>
+                  <ul className="space-y-2">
+                    {entry.items.map((item, index) => (
+                      <li
+                        key={index}
+                        className="flex items-start gap-2 text-sm text-slate-700"
+                      >
+                        <span
+                          className="mt-1.5 w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0"
+                          aria-hidden="true"
+                        />
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              ))}
+            </ol>
           )}
         </div>
       </div>
