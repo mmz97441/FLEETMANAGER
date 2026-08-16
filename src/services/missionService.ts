@@ -608,6 +608,71 @@ export const createClientShipment = async (params: {
   return toCreate.map((p, idx) => ({ ...(p as Package), id: ids[idx], createdAt: now, updatedAt: now }));
 };
 
+/**
+ * Import en masse d'expéditions par l'expéditeur (fichier Excel/CSV).
+ * Une ligne = un colis, identifié par SON numéro (ex. BR-…), qui devient
+ * l'identité du colis (externalId/barcode/orderNumber). Écriture groupée.
+ * La zone est estimée depuis l'adresse (défaut Nord, ajustable par le transporteur).
+ */
+export const createClientShipmentsBatch = async (params: {
+  client: { id: string; companyName: string };
+  rows: Array<{
+    colisNumber: string;   // ex. BR-000123
+    contactName: string;
+    address: string;
+    postalCode: string;
+    city: string;
+    contactPhone?: string;
+    contactEmail?: string;
+    weight?: number;
+    clientReference?: string;
+    comment?: string;
+    zone?: Zone;           // estimée en amont (défaut Nord, ajustée par le transporteur)
+  }>;
+}): Promise<Package[]> => {
+  const { client, rows } = params;
+  const now = new Date().toISOString();
+  const batchId = `client-import-${now}`;
+
+  const toCreate: Omit<Package, 'id' | 'createdAt' | 'updatedAt'>[] = [];
+  for (const r of rows) {
+    const zone: Zone = r.zone || Zone.NORD;
+    const cp = r.postalCode;
+    const code = r.colisNumber.trim();
+    toCreate.push({
+      clientId: client.id,
+      clientName: client.companyName,
+      importBatchId: batchId,
+      externalId: code,
+      orderNumber: code,
+      barcode: code,
+      address: r.address,
+      city: r.city,
+      postalCode: cp,
+      zone,
+      contactName: r.contactName,
+      contactPhone: r.contactPhone,
+      contactEmail: r.contactEmail,
+      serviceTime: 5,
+      comment: r.comment,
+      weight: r.weight,
+      clientReference: r.clientReference,
+      createdByClient: true,
+      packageIndex: 1,
+      packageTotal: 1,
+      status: PackageStatus.PENDING,
+      movements: [{
+        timestamp: now,
+        action: 'IMPORTED' as const,
+        notes: `Importé par l'expéditeur ${client.companyName} — colis ${code}`
+      }]
+    } as Omit<Package, 'id' | 'createdAt' | 'updatedAt'>);
+  }
+
+  const ids = await addPackagesBatch(toCreate);
+  return toCreate.map((p, idx) => ({ ...(p as Package), id: ids[idx], createdAt: now, updatedAt: now }));
+};
+
 // ============================================================================
 // MISSIONS
 // ============================================================================

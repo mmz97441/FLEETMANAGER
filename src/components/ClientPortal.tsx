@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { QuoteRequest, QuoteStatus, User, UserRole, ViewState, SavedAddress, DeliveryTimeSlot, Zone, ProofOfDelivery, Package as PackageType, PackageStatus, PACKAGE_STATUS_COLORS } from '../types';
-import { Package, MapPin, Calendar, Plus, CheckCircle, XCircle, Clock, Truck, Euro, Send, X, ArrowRight, User as UserIcon, Phone, Box, Info, Bell, FileText, Weight, Building2, StickyNote, BarChart3, Users, Mail, UserPlus, AlertTriangle, PieChart as PieChartIcon, Edit, Trash2, HelpCircle, PhoneCall, FileQuestion, BookOpen, ChevronDown, ChevronUp, Bookmark, Star, Printer, Search, Download, QrCode, Eye } from 'lucide-react';
+import { Package, MapPin, Calendar, Plus, CheckCircle, XCircle, Clock, Truck, Euro, Send, X, ArrowRight, User as UserIcon, Phone, Box, Info, Bell, FileText, Weight, Building2, StickyNote, BarChart3, Users, Mail, UserPlus, AlertTriangle, PieChart as PieChartIcon, Edit, Trash2, HelpCircle, PhoneCall, FileQuestion, BookOpen, ChevronDown, ChevronUp, Bookmark, Star, Printer, Search, Download, QrCode, Eye, FileSpreadsheet } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import Modal from './shared/Modal';
 import ConfirmModal from './ConfirmModal';
@@ -17,6 +17,7 @@ import ShippingLabel, { quoteToLabelData, ShippingLabelData } from './ShippingLa
 import PODViewer from './PODViewer';
 import { openDeliveryNote } from '../utils/deliveryNote';
 import CreateShipmentModal from './CreateShipmentModal';
+import ImportShipmentsModal from './ImportShipmentsModal';
 import ImportRecipientsModal from './ImportRecipientsModal';
 import AccountHub from './AccountHub';
 import ClientAnalytics from './ClientAnalytics';
@@ -401,6 +402,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null); // groupe pharmacie déplié
   const [selectedLabels, setSelectedLabels] = useState<Set<string>>(new Set());
   const [showCreateShipment, setShowCreateShipment] = useState(false);
+  const [showImportShipments, setShowImportShipments] = useState(false);
   const [showImportRecipients, setShowImportRecipients] = useState(false);
   const [showAccountHub, setShowAccountHub] = useState(false);
 
@@ -1465,6 +1467,12 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                 <UserPlus size={16} /> Importer mes destinataires
                             </button>
                             <button
+                                onClick={() => setShowImportShipments(true)}
+                                className="flex items-center gap-2 px-4 py-2.5 bg-white/15 hover:bg-white/25 text-white rounded-xl font-bold text-sm transition-colors"
+                            >
+                                <FileSpreadsheet size={16} /> Importer des expéditions
+                            </button>
+                            <button
                                 onClick={() => setShowCreateShipment(true)}
                                 className="flex items-center gap-2 px-4 py-2.5 bg-white text-indigo-700 rounded-xl font-bold text-sm shadow-lg active:scale-95 transition-transform"
                             >
@@ -2259,6 +2267,19 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
             onClose={() => setShowCreateShipment(false)}
             onCreated={() => { /* la liste se met à jour via l'abonnement temps réel */ }}
             onSaveRecipient={handleCreateRecipient}
+          />
+        )}
+
+        {/* IMPORTER DES EXPÉDITIONS (fichier Excel/CSV, avec contrôle qualité) */}
+        {showImportShipments && (
+          <ImportShipmentsModal
+            currentUser={currentUser}
+            onClose={() => setShowImportShipments(false)}
+            onImported={(count) => {
+              setShowImportShipments(false);
+              setAddressSaveMessage(`✅ ${count} expédition(s) importée(s) — retrouvez-les dans « Mes Colis ».`);
+              setTimeout(() => setAddressSaveMessage(''), 6000);
+            }}
           />
         )}
 
