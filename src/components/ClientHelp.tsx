@@ -236,11 +236,22 @@ const FAQ_ITEMS: FaqItem[] = [
 // Ajoutez la nouvelle version en haut (la plus récente en premier).
 const VERSIONS: VersionNews[] = [
   {
-    version: 'v3.32',
+    version: 'v4.1.1',
     date: 'Août 2026',
     items: [
+      'Import de vos expéditions directement depuis votre espace : plus besoin de nous envoyer votre fichier.',
+      'Votre fichier de tournée habituel est lu tel quel : les colonnes sont détectées automatiquement (le code postal et la ville sont même reconnus dans une seule case).',
+      'Contrôle qualité à l’import : chaque erreur est signalée ligne par ligne (numéro de colis manquant ou invalide, doublon, adresse ou téléphone manquant) avant toute création.',
+      'Création d’expédition simplifiée : le champ destinataire cherche dans votre carnet au fil de la frappe, crée un nouveau destinataire à la volée et propose « Voir tout mon carnet ».',
+      'Étiquettes aux formats A4, A5 et A6 à l’impression.',
+      'Info-bulles d’aide et centre d’Aide enrichi, avec ce journal des Nouveautés.',
+    ],
+  },
+  {
+    version: 'v3.32',
+    date: 'Juillet 2026',
+    items: [
       'Espace client repensé, plus simple et plus clair.',
-      'Créer une expédition en quelques clics + étiquettes aux formats A4, A5 et A6.',
       'Suivi groupé par pharmacie, avec codes couleurs par statut et heure de livraison prévue.',
       'Traçabilité complète + preuve de livraison (signature, photo, position GPS).',
       'Bon de Livraison par pharmacie, téléchargeable/imprimable.',
