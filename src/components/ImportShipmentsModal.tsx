@@ -43,18 +43,34 @@ interface ParsedRow {
 const normalize = (s: string): string =>
   String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 
-// Alias d'entêtes acceptés (déjà normalisés).
+// Alias d'entêtes acceptés (déjà normalisés). Couvre le modèle DELIVREX ET les
+// exports courants (ex. fichier tournée : « Numéro colis », « Contact », « Adress »,
+// « Order Number », « Comment », « Weight »…).
 const HEADER_ALIASES: Record<keyof Omit<ParsedRow, 'line' | 'errors'>, string[]> = {
-  colisNumber: ['numero de colis', 'n° colis', 'n colis', 'colis', 'code colis', 'br'],
-  contactName: ['nom du destinataire', 'destinataire', 'nom', 'pharmacie'],
-  address: ['adresse'],
-  postalCode: ['code postal', 'cp'],
-  city: ['ville'],
-  contactPhone: ['telephone', 'tel', 'tel'],
-  contactEmail: ['email', 'e-mail', 'mail'],
-  weight: ['poids (kg)', 'poids'],
-  clientReference: ['reference', 'ref'],
-  comment: ['remarque', 'consignes', 'note'],
+  colisNumber: ['numero de colis', 'numero colis', 'n° colis', 'n colis', 'colis', 'code colis', 'br', 'barcode', 'code barre'],
+  contactName: ['nom du destinataire', 'destinataire', 'nom', 'pharmacie', 'contact', 'client', 'raison sociale'],
+  address: ['adresse', 'adress', 'address'],
+  postalCode: ['code postal', 'cp', 'postal code', 'zip'],
+  city: ['ville', 'city', 'commune'],
+  contactPhone: ['telephone', 'tel', 'phone', 'gsm', 'mobile', 'portable'],
+  contactEmail: ['email', 'e-mail', 'mail', 'courriel'],
+  weight: ['poids (kg)', 'poids', 'weight'],
+  clientReference: ['reference', 'ref', 'order number', 'numero de commande', 'n° commande', 'commande', 'order'],
+  comment: ['remarque', 'consignes', 'note', 'comment', 'commentaire', 'instructions'],
+};
+
+// Éclate une adresse « tout-en-un » (rue + CP + ville) en trois morceaux.
+// Ex. « 19 RUE ADRIEN LAGOURGUE  97424 PITON SAINT LEU »
+//   → { street: '19 RUE ADRIEN LAGOURGUE', postalCode: '97424', city: 'PITON SAINT LEU' }
+const splitAddress = (full: string): { street: string; postalCode: string; city: string } => {
+  const s = String(full || '').replace(/\s+/g, ' ').trim();
+  const m = s.match(/(97\d{3}|98\d{3}|\d{5})/); // Réunion/Outre-mer 97xxx/98xxx, sinon 5 chiffres
+  if (!m) return { street: s, postalCode: '', city: '' };
+  const cp = m[1];
+  const idx = s.indexOf(cp);
+  const street = s.slice(0, idx).trim().replace(/[,;]+$/, '').trim();
+  const city = s.slice(idx + cp.length).trim().replace(/^[,;]+/, '').trim();
+  return { street: street || s, postalCode: cp, city };
 };
 
 // Récupère la valeur d'une colonne en cherchant l'entête par égalité normalisée.
@@ -96,20 +112,35 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
       if (raw.length === 0) { setError('Aucune ligne trouvée dans le fichier.'); setRows(null); return; }
 
       // 1er passage : lecture + mapping des colonnes
-      const parsed: ParsedRow[] = raw.map((r, i) => ({
-        line: i + 2,               // ligne 1 = entêtes
-        colisNumber: getField(r, 'colisNumber'),
-        contactName: getField(r, 'contactName'),
-        address: getField(r, 'address'),
-        postalCode: getField(r, 'postalCode'),
-        city: getField(r, 'city'),
-        contactPhone: getField(r, 'contactPhone'),
-        contactEmail: getField(r, 'contactEmail'),
-        weight: getField(r, 'weight'),
-        clientReference: getField(r, 'clientReference'),
-        comment: getField(r, 'comment'),
-        errors: [],
-      }));
+      const parsed: ParsedRow[] = raw.map((r, i) => {
+        const addressRaw = getField(r, 'address');
+        let street = addressRaw;
+        let postalCode = getField(r, 'postalCode');
+        let city = getField(r, 'city');
+        // Adresse « tout-en-un » : si CP/ville absents, on les extrait de l'adresse.
+        if (!postalCode || !city) {
+          const sp = splitAddress(addressRaw);
+          if (sp.postalCode) {
+            if (!postalCode) postalCode = sp.postalCode;
+            if (!city) city = sp.city;
+            street = sp.street; // on ne garde que la rue dans l'adresse
+          }
+        }
+        return {
+          line: i + 2,               // ligne 1 = entêtes
+          colisNumber: getField(r, 'colisNumber'),
+          contactName: getField(r, 'contactName'),
+          address: street,
+          postalCode,
+          city,
+          contactPhone: getField(r, 'contactPhone'),
+          contactEmail: getField(r, 'contactEmail'),
+          weight: getField(r, 'weight'),
+          clientReference: getField(r, 'clientReference'),
+          comment: getField(r, 'comment'),
+          errors: [],
+        };
+      });
 
       // Comptage des numéros de colis (pour repérer les doublons dans le fichier)
       const counts = new Map<string, number>();
@@ -145,36 +176,29 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
   };
 
   const downloadTemplate = () => {
+    // Modèle aligné sur les exports de tournée habituels : l'adresse contient la
+    // rue + le code postal + la ville dans une seule colonne (séparés à l'import).
     const example = [
       {
-        'Numéro de colis': 'BR-000123',
-        'Nom du destinataire': 'PHARMACIE DE LA PLAGE',
-        'Adresse': '2 boulevard du Front de Mer',
-        'Code postal': '97434',
-        'Ville': 'Saint-Gilles',
-        'Téléphone': '0692 00 00 00',
-        'Email': 'contact@pharmacie.fr',
-        'Poids (kg)': '1.5',
-        'Référence': 'CMD-4521',
+        'Numéro de colis': 'BR1148',
+        'Destinataire': 'SARL PHCIE DU PITON',
+        'Adresse': '19 RUE ADRIEN LAGOURGUE 97424 PITON SAINT LEU',
+        'Téléphone': '0262343377',
+        'Référence': '13953047',
         'Remarque': '',
       },
       {
-        'Numéro de colis': 'BR-000124',
-        'Nom du destinataire': 'PHARMACIE CENTRALE',
-        'Adresse': '15 rue du Maréchal Leclerc',
-        'Code postal': '97400',
-        'Ville': 'Saint-Denis',
-        'Téléphone': '0262 00 00 00',
-        'Email': '',
-        'Poids (kg)': '',
-        'Référence': '',
+        'Numéro de colis': 'BR1156',
+        'Destinataire': 'PHCIE LA RAVINE',
+        'Adresse': '2 CHEMIN MOULIN A CAFE 97432 RAVINE DES CABRIS',
+        'Téléphone': '0262495044',
+        'Référence': '13953057',
         'Remarque': 'Livrer avant 12h',
       },
     ];
     const ws = XLSX.utils.json_to_sheet(example);
     ws['!cols'] = [
-      { wch: 16 }, { wch: 26 }, { wch: 30 }, { wch: 12 }, { wch: 18 },
-      { wch: 16 }, { wch: 24 }, { wch: 12 }, { wch: 14 }, { wch: 24 },
+      { wch: 16 }, { wch: 26 }, { wch: 46 }, { wch: 16 }, { wch: 14 }, { wch: 24 },
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Expéditions');
@@ -252,9 +276,11 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
         {!rows && (
           <>
             <p className="text-sm text-slate-600 mb-3">
-              Importez votre fichier (Excel/CSV). Une ligne = un colis. Colonnes reconnues :{' '}
-              <b>Numéro de colis</b>, <b>Nom du destinataire</b>, <b>Adresse</b>, <b>Code postal</b>, <b>Ville</b>,{' '}
-              <b>Téléphone</b>, <b>Email</b>, <b>Poids (kg)</b>, <b>Référence</b>, <b>Remarque</b>.
+              Importez votre fichier (Excel/CSV). Une ligne = un colis. Les colonnes sont{' '}
+              <b>détectées automatiquement</b> : numéro de colis (BR…), destinataire, adresse
+              (le code postal et la ville sont reconnus même s'ils sont dans la même case),
+              téléphone, et si présents e-mail, poids, référence, remarque. Pas besoin de reformater
+              votre fichier habituel.
             </p>
             <button
               onClick={() => inputRef.current?.click()}
