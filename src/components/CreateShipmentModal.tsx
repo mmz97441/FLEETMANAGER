@@ -12,13 +12,15 @@ import { User, SavedAddress, Package, Zone } from '../types';
 import { createClientShipment } from '../services/missionService';
 import { estimateZoneFromAddress } from '../services/deliveryService';
 import { generateBatchLabelsHTML, LabelFormat } from '../services/pickupService';
-import { X, Search, Package as PackageIcon, Printer, MapPin, AlertTriangle } from 'lucide-react';
+import { X, Search, Package as PackageIcon, Printer, MapPin, AlertTriangle, Check, UserPlus, BookUser } from 'lucide-react';
 
 interface CreateShipmentModalProps {
   currentUser: User;
   savedAddresses: SavedAddress[];
   onClose: () => void;
   onCreated: (packages: Package[]) => void;
+  /** Enregistre un nouveau destinataire dans le carnet (si coché à la création). */
+  onSaveRecipient?: (fields: { contactName: string; address: string; city: string; contactPhone: string; contactEmail?: string }) => Promise<void>;
 }
 
 const splitCity = (city: string): { postalCode: string; cityName: string } => {
@@ -28,7 +30,7 @@ const splitCity = (city: string): { postalCode: string; cityName: string } => {
   return { postalCode, cityName };
 };
 
-const CreateShipmentModal: React.FC<CreateShipmentModalProps> = ({ currentUser, savedAddresses, onClose, onCreated }) => {
+const CreateShipmentModal: React.FC<CreateShipmentModalProps> = ({ currentUser, savedAddresses, onClose, onCreated, onSaveRecipient }) => {
   const [contactName, setContactName] = useState('');
   const [address, setAddress] = useState('');
   const [postalCode, setPostalCode] = useState('');
@@ -41,22 +43,31 @@ const CreateShipmentModal: React.FC<CreateShipmentModalProps> = ({ currentUser, 
   const [clientReference, setClientReference] = useState('');
   const [format, setFormat] = useState<LabelFormat>('A6');
 
-  const [addrSearch, setAddrSearch] = useState('');
-  const [showPicker, setShowPicker] = useState(false);
+  const [nameFocused, setNameFocused] = useState(false);
+  const [linkedId, setLinkedId] = useState<string | null>(null); // destinataire choisi dans le carnet
+  const [saveToBook, setSaveToBook] = useState(true);            // enregistrer un nouveau destinataire
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [zoneWarn, setZoneWarn] = useState(false);
 
-  const filteredAddresses = useMemo(() => {
-    const q = addrSearch.trim().toLowerCase();
-    const list = savedAddresses.filter(a => a.type === 'delivery' || a.type === 'both');
-    if (!q) return list.slice(0, 30);
-    return list.filter(a =>
-      (a.contactName || '').toLowerCase().includes(q) ||
+  const deliveryBook = useMemo(
+    () => savedAddresses.filter(a => a.type === 'delivery' || a.type === 'both'),
+    [savedAddresses]
+  );
+
+  // Suggestions du carnet en fonction de ce qui est tapé dans « Nom du destinataire »
+  const nameMatches = useMemo(() => {
+    const q = contactName.trim().toLowerCase();
+    if (!q) return deliveryBook.slice(0, 8);
+    return deliveryBook.filter(a =>
+      (a.contactName || a.label || '').toLowerCase().includes(q) ||
       (a.address || '').toLowerCase().includes(q) ||
       (a.city || '').toLowerCase().includes(q)
-    ).slice(0, 30);
-  }, [savedAddresses, addrSearch]);
+    ).slice(0, 8);
+  }, [deliveryBook, contactName]);
+
+  const showSuggestions = nameFocused && !linkedId && nameMatches.length > 0;
+  const isNewRecipient = !linkedId && contactName.trim().length >= 2 && nameMatches.length === 0;
 
   const pickAddress = (a: SavedAddress) => {
     const { postalCode: cp, cityName } = splitCity(a.city);
@@ -66,8 +77,14 @@ const CreateShipmentModal: React.FC<CreateShipmentModalProps> = ({ currentUser, 
     setCity(cityName || a.city || '');
     setContactPhone(a.contactPhone || '');
     setContactEmail(a.contactEmail || '');
-    setShowPicker(false);
-    setAddrSearch('');
+    setLinkedId(a.id);
+    setNameFocused(false);
+  };
+
+  // Toute modification manuelle du nom « délie » du carnet (redevient nouveau/éditable)
+  const onNameChange = (v: string) => {
+    setContactName(v);
+    if (linkedId) setLinkedId(null);
   };
 
   const canSubmit = contactName.trim() && address.trim() && (postalCode.trim() || city.trim()) && contactPhone.trim();
@@ -101,6 +118,19 @@ const CreateShipmentModal: React.FC<CreateShipmentModalProps> = ({ currentUser, 
         clientReference: clientReference.trim() || undefined,
       });
 
+      // Nouveau destinataire → on l'ajoute au carnet (si demandé), pour ne plus le retaper
+      if (!linkedId && saveToBook && onSaveRecipient) {
+        try {
+          await onSaveRecipient({
+            contactName: contactName.trim(),
+            address: address.trim(),
+            city: `${cp || postalCode.trim()} ${city.trim()}`.trim(),
+            contactPhone: contactPhone.trim(),
+            contactEmail: contactEmail.trim() || undefined,
+          });
+        } catch { /* non bloquant : l'expédition est déjà créée */ }
+      }
+
       // Impression immédiate au format choisi
       const html = generateBatchLabelsHTML(
         packages,
@@ -128,33 +158,61 @@ const CreateShipmentModal: React.FC<CreateShipmentModalProps> = ({ currentUser, 
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
         </div>
 
-        {/* Choisir depuis le carnet */}
-        <div className="relative mb-3">
-          <button
-            onClick={() => setShowPicker(v => !v)}
-            className="w-full flex items-center gap-2 px-3 py-2.5 bg-indigo-50 text-indigo-700 rounded-xl text-sm font-bold"
-          >
-            <Search size={16} /> Choisir un destinataire dans mon carnet
-          </button>
-          {showPicker && (
-            <div className="absolute z-10 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-64 overflow-y-auto">
-              <div className="p-2 sticky top-0 bg-white border-b border-slate-100">
-                <input value={addrSearch} onChange={e => setAddrSearch(e.target.value)} placeholder="Rechercher…" className={inputCls} autoFocus />
-              </div>
-              {filteredAddresses.map(a => (
-                <button key={a.id} onClick={() => pickAddress(a)} className="w-full text-left px-3 py-2 hover:bg-slate-50 text-sm">
-                  <div className="font-semibold text-slate-800 truncate">{a.contactName || a.label}</div>
-                  <div className="text-xs text-slate-500 truncate">{a.address} · {a.city}</div>
-                </button>
-              ))}
-              {filteredAddresses.length === 0 && <p className="text-xs text-slate-400 text-center py-4">Aucun destinataire — saisis-le ci-dessous, il sera dans ta liste.</p>}
-            </div>
-          )}
+        {/* Aide : commencez par taper le nom → on cherche dans votre carnet */}
+        <div className="mb-2 flex items-center gap-1.5 text-[12px] text-slate-500">
+          <BookUser size={14} className="text-indigo-500" />
+          Tapez le nom : s'il est dans votre carnet, il apparaît. Sinon, remplissez et il sera enregistré.
         </div>
 
         {/* Formulaire destinataire */}
         <div className="space-y-2">
-          <input value={contactName} onChange={e => setContactName(e.target.value)} placeholder="Nom du destinataire *" className={inputCls} />
+          {/* Champ nom = recherche instantanée dans le carnet */}
+          <div className="relative">
+            <div className="relative">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <input
+                value={contactName}
+                onChange={e => onNameChange(e.target.value)}
+                onFocus={() => setNameFocused(true)}
+                onBlur={() => setTimeout(() => setNameFocused(false), 150)}
+                placeholder="Nom du destinataire (pharmacie) *"
+                className={`${inputCls} pl-9 ${linkedId ? 'border-emerald-400 ring-1 ring-emerald-300' : ''}`}
+                autoComplete="off"
+              />
+            </div>
+
+            {/* Suggestions du carnet */}
+            {showSuggestions && (
+              <div className="absolute z-20 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl max-h-60 overflow-y-auto">
+                <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400 bg-slate-50 border-b border-slate-100">
+                  Dans votre carnet
+                </div>
+                {nameMatches.map(a => (
+                  <button
+                    key={a.id}
+                    onMouseDown={e => { e.preventDefault(); pickAddress(a); }}
+                    className="w-full text-left px-3 py-2 hover:bg-indigo-50 text-sm border-b border-slate-50 last:border-0"
+                  >
+                    <div className="font-semibold text-slate-800 truncate">{a.contactName || a.label}</div>
+                    <div className="text-xs text-slate-500 truncate">{a.address} · {a.city}</div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Statut : destinataire connu ou nouveau */}
+          {linkedId && (
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-1.5">
+              <Check size={14} /> Destinataire de votre carnet — champs remplis automatiquement.
+            </div>
+          )}
+          {isNewRecipient && (
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5">
+              <UserPlus size={14} /> Nouveau destinataire — complétez l'adresse ci-dessous.
+            </div>
+          )}
+
           <input value={address} onChange={e => setAddress(e.target.value)} placeholder="Adresse (rue et numéro) *" className={inputCls} />
           <div className="grid grid-cols-3 gap-2">
             <input value={postalCode} onChange={e => setPostalCode(e.target.value)} placeholder="Code postal" className={inputCls} />
@@ -164,6 +222,15 @@ const CreateShipmentModal: React.FC<CreateShipmentModalProps> = ({ currentUser, 
             <input value={contactPhone} onChange={e => setContactPhone(e.target.value)} placeholder="Téléphone *" className={inputCls} />
             <input value={contactEmail} onChange={e => setContactEmail(e.target.value)} placeholder="Email (copie du BL)" className={inputCls} />
           </div>
+
+          {/* Enregistrer le nouveau destinataire dans le carnet */}
+          {!linkedId && contactName.trim() && onSaveRecipient && (
+            <label className="flex items-center gap-2 text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 cursor-pointer select-none">
+              <input type="checkbox" checked={saveToBook} onChange={e => setSaveToBook(e.target.checked)} className="w-4 h-4 accent-indigo-600" />
+              Ajouter ce destinataire à mon carnet <span className="text-slate-400">(pour ne plus le retaper)</span>
+            </label>
+          )}
+
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="text-[11px] text-slate-500 font-medium">Nombre de colis</label>

@@ -2258,6 +2258,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
             savedAddresses={savedAddresses}
             onClose={() => setShowCreateShipment(false)}
             onCreated={() => { /* la liste se met à jour via l'abonnement temps réel */ }}
+            onSaveRecipient={handleCreateRecipient}
           />
         )}
 
