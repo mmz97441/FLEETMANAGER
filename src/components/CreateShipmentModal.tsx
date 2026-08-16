@@ -44,6 +44,7 @@ const CreateShipmentModal: React.FC<CreateShipmentModalProps> = ({ currentUser, 
   const [format, setFormat] = useState<LabelFormat>('A6');
 
   const [nameFocused, setNameFocused] = useState(false);
+  const [showAllBook, setShowAllBook] = useState(false);          // « voir tout mon carnet »
   const [linkedId, setLinkedId] = useState<string | null>(null); // destinataire choisi dans le carnet
   const [saveToBook, setSaveToBook] = useState(true);            // enregistrer un nouveau destinataire
   const [busy, setBusy] = useState(false);
@@ -58,13 +59,13 @@ const CreateShipmentModal: React.FC<CreateShipmentModalProps> = ({ currentUser, 
   // Suggestions du carnet en fonction de ce qui est tapé dans « Nom du destinataire »
   const nameMatches = useMemo(() => {
     const q = contactName.trim().toLowerCase();
-    if (!q) return deliveryBook.slice(0, 8);
+    if (!q) return deliveryBook.slice(0, showAllBook ? 500 : 8);
     return deliveryBook.filter(a =>
       (a.contactName || a.label || '').toLowerCase().includes(q) ||
       (a.address || '').toLowerCase().includes(q) ||
       (a.city || '').toLowerCase().includes(q)
     ).slice(0, 8);
-  }, [deliveryBook, contactName]);
+  }, [deliveryBook, contactName, showAllBook]);
 
   const showSuggestions = nameFocused && !linkedId && nameMatches.length > 0;
   const isNewRecipient = !linkedId && contactName.trim().length >= 2 && nameMatches.length === 0;
@@ -84,6 +85,7 @@ const CreateShipmentModal: React.FC<CreateShipmentModalProps> = ({ currentUser, 
   // Toute modification manuelle du nom « délie » du carnet (redevient nouveau/éditable)
   const onNameChange = (v: string) => {
     setContactName(v);
+    setShowAllBook(false);
     if (linkedId) setLinkedId(null);
   };
 
@@ -200,6 +202,17 @@ const CreateShipmentModal: React.FC<CreateShipmentModalProps> = ({ currentUser, 
               </div>
             )}
           </div>
+
+          {/* Voir tout mon carnet (quand le champ est vide) */}
+          {!contactName.trim() && !linkedId && deliveryBook.length > 0 && (
+            <button
+              type="button"
+              onMouseDown={e => { e.preventDefault(); setShowAllBook(true); setNameFocused(true); }}
+              className="flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800"
+            >
+              <BookUser size={14} /> Voir tout mon carnet ({deliveryBook.length})
+            </button>
+          )}
 
           {/* Statut : destinataire connu ou nouveau */}
           {linkedId && (
