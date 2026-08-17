@@ -89,6 +89,7 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
   const [rows, setRows] = useState<ParsedRow[] | null>(null);
   const [fileName, setFileName] = useState('');
   const [format, setFormat] = useState<LabelFormat>('A6');
+  const [printLabels, setPrintLabels] = useState(true); // impression dissociée de l'import
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');       // erreur de lecture / d'import
   const inputRef = useRef<HTMLInputElement>(null);
@@ -249,10 +250,12 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
         rows: rowsWithZone,
       });
 
-      // Impression immédiate des étiquettes au format choisi
-      const html = generateBatchLabelsHTML(packages, currentUser.companyName || 'Expéditeur', format);
-      const win = window.open('', '_blank');
-      if (win) { win.document.write(html); win.document.close(); }
+      // Impression des étiquettes UNIQUEMENT si demandé (sinon : plus tard depuis « Mes Colis »)
+      if (printLabels) {
+        const html = generateBatchLabelsHTML(packages, currentUser.companyName || 'Expéditeur', format);
+        const win = window.open('', '_blank');
+        if (win) { win.document.write(html); win.document.close(); }
+      }
 
       onImported(packages.length);
       onClose();
@@ -360,24 +363,38 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
               ))}
             </div>
 
-            {/* Format d'étiquette */}
-            <div className="mb-3">
-              <label className="text-[11px] text-slate-500 font-medium">Format d'étiquette</label>
-              <div className="flex gap-2 mt-1">
-                {(['A4', 'A5', 'A6'] as LabelFormat[]).map(f => (
-                  <button
-                    key={f}
-                    onClick={() => setFormat(f)}
-                    className={`flex-1 py-2 rounded-xl text-sm font-bold border ${
-                      format === f ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200'
-                    }`}
-                  >
-                    {f}
-                  </button>
-                ))}
+            {/* Impression des étiquettes : dissociée de l'import */}
+            <label className="flex items-center gap-2 text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 mb-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={printLabels}
+                onChange={e => setPrintLabels(e.target.checked)}
+                className="w-4 h-4 accent-indigo-600"
+              />
+              Imprimer les étiquettes tout de suite
+              <span className="text-slate-400">(sinon, à tout moment depuis « Mes Colis »)</span>
+            </label>
+
+            {/* Format d'étiquette (uniquement si on imprime maintenant) */}
+            {printLabels && (
+              <div className="mb-3">
+                <label className="text-[11px] text-slate-500 font-medium">Format d'étiquette</label>
+                <div className="flex gap-2 mt-1">
+                  {(['A4', 'A5', 'A6'] as LabelFormat[]).map(f => (
+                    <button
+                      key={f}
+                      onClick={() => setFormat(f)}
+                      className={`flex-1 py-2 rounded-xl text-sm font-bold border ${
+                        format === f ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200'
+                      }`}
+                    >
+                      {f}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">A6 = 1 étiquette/page (entrepôt) · A4 = 4/page</p>
               </div>
-              <p className="text-[11px] text-slate-400 mt-1">A6 = 1 étiquette/page (entrepôt) · A4 = 4/page</p>
-            </div>
+            )}
 
             {/* Note : les lignes en erreur ne sont pas importées */}
             <p className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 mb-3">
@@ -396,8 +413,10 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
                 disabled={validCount === 0 || busy}
                 className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-indigo-600 text-white rounded-xl font-bold text-sm disabled:opacity-40"
               >
-                <Printer size={16} />
-                {busy ? 'Import en cours…' : `Importer les ${validCount} expédition(s) valides + imprimer`}
+                {printLabels ? <Printer size={16} /> : <CheckCircle size={16} />}
+                {busy
+                  ? 'Import en cours…'
+                  : `Importer les ${validCount} expédition(s) valide(s)${printLabels ? ' + imprimer' : ''}`}
               </button>
             </div>
           </>
