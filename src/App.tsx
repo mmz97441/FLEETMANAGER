@@ -779,6 +779,17 @@ const App: React.FC = () => {
     const isClientRole = currentUser.role === UserRole.CLIENT || String(currentUser.role || '').toLowerCase().includes('client');
     const CLIENT_ALLOWED = ['client_dashboard', 'client_list', 'client_shipments', 'client_team', 'client_analytics', 'client_recipients', 'client_company', 'client_help', 'help', 'settings'];
     const view: ViewState = (isClientRole && !CLIENT_ALLOWED.includes(currentView)) ? 'client_dashboard' : currentView;
+
+    // GARDE-FOU CARTE CHAUFFEURS : réservée à la direction + secrétariat (défense
+    // en profondeur, même par accès direct à l'URL /carte-chauffeurs).
+    if (view === 'fleet_map') {
+      const r = String(currentUser.role || '').toLowerCase();
+      const canSeeFleetMap = /pr[eé]sident|directeur|directrice|direction|secr[eé]ta|admin/.test(r);
+      if (!canSeeFleetMap) {
+        return <div className="p-10 text-center text-slate-500 font-semibold">Accès réservé à la direction et au secrétariat.</div>;
+      }
+    }
+
     switch (view) {
       case 'dashboard':
         return <Dashboard
