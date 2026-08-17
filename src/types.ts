@@ -602,6 +602,7 @@ export type ViewState =
   | 'client_shipments'
   | 'hub_operations'
   | 'driver_tour'
+  | 'fleet_map'
   | 'import_export';
 
 // ============================================================================
@@ -1237,4 +1238,18 @@ export interface PostalCodeMapping {
   zone: Zone;                      // NORD
   city: string;                    // "Saint-Denis"
   hubId?: string;                  // Hub par défaut pour ce code postal
+}
+
+// Position live d'un chauffeur (publiée ~toutes les 30s tant qu'il est connecté).
+// Doc id = driverId dans la collection 'driverLocations'.
+export interface DriverLocation {
+  driverId: string;
+  driverName: string;
+  lat: number;
+  lng: number;
+  accuracy?: number;               // précision GPS en mètres
+  heading?: number;                // cap en degrés (si dispo)
+  speed?: number;                  // vitesse m/s (si dispo)
+  vehiclePlate?: string;
+  updatedAt: string;               // ISO — dernière mise à jour
 }

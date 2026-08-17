@@ -75,6 +75,12 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
       icon: Eye,
       permission: Permission.DASHBOARD_KPI_FLEET
     },
+    {
+      id: 'fleet_map',
+      label: 'Carte chauffeurs',
+      icon: MapPin,
+      permission: Permission.DASHBOARD_KPI_FLEET
+    },
 
     {
       id: 'dashboard',

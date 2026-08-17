@@ -12,6 +12,7 @@ import QuickScanButton from './components/QuickScanButton';
 import NotificationCenter from './components/NotificationCenter';
 import ViewAsSwitcher from './components/ViewAsSwitcher';
 import Login from './components/Login';
+import { useDriverLocationPublisher } from './hooks/useDriverLocationPublisher';
 import { Menu, Loader2, WifiOff } from 'lucide-react';
 
 // === CODE SPLITTING : Lazy loading de tous les composants lourds ===
@@ -24,6 +25,7 @@ const IssueManager = lazy(() => import('./components/IssueManager'));
 const UserManager = lazy(() => import('./components/UserManager'));
 const AIAdvisor = lazy(() => import('./components/AIAdvisor'));
 const FleetMap = lazy(() => import('./components/FleetMap'));
+const FleetMapView = lazy(() => import('./components/FleetMapView'));
 const ClientPortal = lazy(() => import('./components/ClientPortal'));
 const QuoteManager = lazy(() => import('./components/QuoteManager'));
 const AbsenceManager = lazy(() => import('./components/AbsenceManager'));
@@ -127,7 +129,9 @@ const App: React.FC = () => {
   const [fuelLogs, setFuelLogs] = useState<FuelLog[]>([]);
   const [maintenanceLogs, setMaintenanceLogs] = useState<MaintenanceLog[]>([]);
   const [issues, setIssues] = useState<Issue[]>([]);
-  const [users, setUsers] = useState<User[]>([]); 
+  const [users, setUsers] = useState<User[]>([]);
+  // Publie la position du chauffeur connecté (~30s) pour la carte dispatch
+  useDriverLocationPublisher(currentUser);
   const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
   const [absences, setAbsences] = useState<Absence[]>([]);
   const [quotes, setQuotes] = useState<QuoteRequest[]>([]);
@@ -974,6 +978,9 @@ const App: React.FC = () => {
 
       case 'president_overview':
         return <PresidentOverview />;
+
+      case 'fleet_map':
+        return <FleetMapView users={users} />;
 
       case 'missions': {
         // Chauffeurs → vue mobile dédiée

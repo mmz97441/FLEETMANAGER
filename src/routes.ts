@@ -27,6 +27,7 @@ export const VIEW_TO_PATH: Record<ViewState, string> = {
   activity_logs: '/activity-logs',
   error_logs: '/error-logs',
   president_overview: '/vue-de-dieu',
+  fleet_map: '/carte-chauffeurs',
   missions: '/missions',
   notifications_settings: '/notifications-settings',
   api_diagnostic: '/api-diagnostic',

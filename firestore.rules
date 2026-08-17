@@ -147,6 +147,17 @@ service cloud.firestore {
     }
 
     // ============================================================
+    // POSITION CHAUFFEURS (live) — doc id = driverId
+    // ============================================================
+    // Lecture : tous les internes (carte dispatch)
+    // Écriture : chaque chauffeur écrit UNIQUEMENT sa propre position
+    match /driverLocations/{driverId} {
+      allow read: if isInternalUser();
+      allow create, update: if isAuthenticated() && request.auth.uid == driverId;
+      allow delete: if isAdminRole();
+    }
+
+    // ============================================================
     // INCIDENTS
     // ============================================================
     // Lecture : tous les internes (dashboard alertes)
