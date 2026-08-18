@@ -907,7 +907,9 @@ export const findDispatchedPackageByCode = async (code: string): Promise<Package
   if (!cleaned) return null;
   const values = [...new Set([cleaned, cleaned.toUpperCase()])];
 
-  for (const field of ['barcode', 'externalId', 'orderNumber'] as const) {
+  // clientReference en dernier : identifiant potentiellement partagé (N° de
+  // commande client), donc après les identifiants uniques (barcode/externalId).
+  for (const field of ['barcode', 'externalId', 'orderNumber', 'clientReference'] as const) {
     for (const value of values) {
       const snap = await getDocs(query(
         collection(db, PACKAGES_COLLECTION),
@@ -948,7 +950,9 @@ export const findPackageByCode = async (code: string): Promise<Package | null> =
   const uniq = [...new Set(candidates)];
   if (uniq.length === 0) return null;
 
-  for (const field of ['barcode', 'externalId', 'orderNumber'] as const) {
+  // clientReference inclus (N° de commande client imprimé sur le 1D BOIRON),
+  // placé en dernier car potentiellement partagé entre colis d'une même commande.
+  for (const field of ['barcode', 'externalId', 'orderNumber', 'clientReference'] as const) {
     for (const value of uniq) {
       const snap = await getDocs(query(
         collection(db, PACKAGES_COLLECTION),

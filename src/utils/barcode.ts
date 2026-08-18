@@ -14,11 +14,17 @@ export interface ScannableCodes {
   barcode?: string;
   externalId?: string;
   orderNumber?: string;
+  clientReference?: string;
 }
 
-/** Tous les codes scannables d'un colis, normalisés en majuscules. */
+/**
+ * Tous les codes scannables d'un colis, normalisés en majuscules.
+ * Inclut clientReference : sur les imports client (BOIRON), le N° de commande
+ * imprimé sur le code-barres 1D du carton y est stocké — le chauffeur scanne
+ * souvent CE code plutôt que le code DELIVREX.
+ */
 export const packageScanCodes = (pkg: ScannableCodes): string[] =>
-  [pkg.barcode, pkg.externalId, pkg.orderNumber]
+  [pkg.barcode, pkg.externalId, pkg.orderNumber, pkg.clientReference]
     .filter((c): c is string => !!c && c.trim() !== '')
     .map(c => c.trim().toUpperCase());
 
