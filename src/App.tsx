@@ -144,6 +144,9 @@ const App: React.FC = () => {
 
   // --- ROUTAGE URL : chaque vue a une URL (deep-link, refresh, retour navigateur) ---
   useEffect(() => {
+    // Ne JAMAIS réécrire l'URL tant qu'un lien d'activation (?token=) est présent :
+    // sinon on écrase le token avant que la page d'activation ne puisse le lire.
+    if (new URLSearchParams(window.location.search).get('token')) return;
     const path = viewToPath(currentView);
     if (window.location.pathname !== path) {
       window.history.pushState({}, '', path);
