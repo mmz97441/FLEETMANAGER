@@ -677,6 +677,48 @@ export const createClientShipmentsBatch = async (params: {
 // MISSIONS
 // ============================================================================
 
+/**
+ * Suivi live côté expéditeur : dénormalise la position du livreur + le nombre de
+ * colis restants avant chacun, DIRECTEMENT sur les colis de la tournée en cours.
+ * Le client ne lit que ses propres colis (règles Firestore) → aucune fuite entre
+ * clients. Appelé ~toutes les 30s par le téléphone du chauffeur.
+ */
+export const publishLiveTrackingForMission = async (
+  mission: Mission,
+  driverPos: { lat: number; lng: number },
+  driverName: string
+): Promise<void> => {
+  const now = new Date().toISOString();
+  const deliveryStops = (mission.stops || [])
+    .filter(s => s.type === 'DELIVERY')
+    .sort((a, b) => a.sequence - b.sequence);
+
+  const batch = writeBatch(db);
+  let running = 0; // colis dans les arrêts NON terminés déjà rencontrés
+  let ops = 0;
+
+  for (const stop of deliveryStops) {
+    if (stop.status === StopStatus.COMPLETED) continue; // déjà livré → pas de suivi live
+    const before = running; // colis restants avant CET arrêt
+    for (const pid of (stop.packageIds || [])) {
+      batch.set(
+        doc(db, PACKAGES_COLLECTION, pid),
+        {
+          liveDriver: { lat: driverPos.lat, lng: driverPos.lng, updatedAt: now, driverName },
+          remainingBeforeMine: before,
+        },
+        { merge: true }
+      );
+      ops++;
+      if (ops >= 450) break; // garde-fou limite d'un batch Firestore
+    }
+    running += (stop.packageCount || (stop.packageIds ? stop.packageIds.length : 0));
+    if (ops >= 450) break;
+  }
+
+  if (ops > 0) await batch.commit();
+};
+
 export const subscribeToMissions = (
   callback: (missions: Mission[]) => void,
   filters?: { date?: string; zone?: Zone; status?: MissionStatus; driverId?: string }

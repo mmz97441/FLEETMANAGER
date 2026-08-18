@@ -215,6 +215,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
       items: [
         { id: 'client_dashboard', label: 'Accueil', icon: LayoutDashboard, permission: Permission.CLIENT_DASHBOARD },
         { id: 'client_shipments', label: 'Mes Colis', icon: Package, permission: Permission.CLIENT_REQUESTS_VIEW_OWN },
+        { id: 'client_tracking', label: 'Suivi live', icon: Navigation, permission: Permission.CLIENT_REQUESTS_VIEW_OWN },
         { id: 'client_analytics', label: 'Statistiques', icon: BarChart3, permission: Permission.CLIENT_DASHBOARD },
         { id: 'client_recipients', label: 'Mes Destinataires', icon: MapPin, permission: Permission.CLIENT_ADDRESSES_VIEW },
         { id: 'client_list', label: 'Mes Devis', icon: List, permission: Permission.CLIENT_REQUESTS_VIEW_OWN },

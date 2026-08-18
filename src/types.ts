@@ -600,6 +600,7 @@ export type ViewState =
   | 'delivery_schedule'
   | 'zone_management'
   | 'client_shipments'
+  | 'client_tracking'
   | 'hub_operations'
   | 'driver_tour'
   | 'fleet_map'
@@ -870,7 +871,16 @@ export interface Package {
   // Tracking
   movements: PackageMovement[];    // Historique complet
   estimatedDeliveryAt?: string;    // Heure de passage prévue (dénormalisée depuis l'arrêt) — affichée au client
-  
+
+  // Suivi live (dénormalisé sur le colis pour l'expéditeur — jamais de données d'un autre client)
+  liveDriver?: {                   // position live du livreur qui transporte CE colis
+    lat: number;
+    lng: number;
+    updatedAt: string;             // ISO
+    driverName?: string;
+  };
+  remainingBeforeMine?: number;    // nb de colis encore à livrer AVANT celui-ci dans la tournée
+
   // POD
   pod?: ProofOfDelivery;
   failureReason?: FailureReason;

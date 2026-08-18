@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { QuoteRequest, QuoteStatus, User, UserRole, ViewState, SavedAddress, DeliveryTimeSlot, Zone, ProofOfDelivery, Package as PackageType, PackageStatus, PACKAGE_STATUS_COLORS } from '../types';
-import { Package, MapPin, Calendar, Plus, CheckCircle, XCircle, Clock, Truck, Euro, Send, X, ArrowRight, User as UserIcon, Phone, Box, Info, Bell, FileText, Weight, Building2, StickyNote, BarChart3, Users, Mail, UserPlus, AlertTriangle, PieChart as PieChartIcon, Edit, Trash2, HelpCircle, PhoneCall, FileQuestion, BookOpen, ChevronDown, ChevronUp, Bookmark, Star, Printer, Search, Download, QrCode, Eye, FileSpreadsheet } from 'lucide-react';
+import { Package, MapPin, Calendar, Plus, CheckCircle, XCircle, Clock, Truck, Euro, Send, X, ArrowRight, User as UserIcon, Phone, Box, Info, Bell, FileText, Weight, Building2, StickyNote, BarChart3, Users, Mail, UserPlus, AlertTriangle, PieChart as PieChartIcon, Edit, Trash2, HelpCircle, PhoneCall, FileQuestion, BookOpen, ChevronDown, ChevronUp, Bookmark, Star, Printer, Search, Download, QrCode, Eye, FileSpreadsheet, Navigation } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import Modal from './shared/Modal';
 import ConfirmModal from './ConfirmModal';
@@ -23,6 +23,7 @@ import AccountHub from './AccountHub';
 import ClientAnalytics from './ClientAnalytics';
 import InsightsPanel from './analytics/InsightsPanel';
 import RecipientsManager from './RecipientsManager';
+import ClientLiveTracking from './ClientLiveTracking';
 import ClientHelp, { HelpNavTarget } from './ClientHelp';
 import HintTooltip from './shared/Tooltip';
 import { getClientInsights } from '../services/clientInsights';
@@ -920,6 +921,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                 {[
                   { icon: Plus, label: 'Créer une expédition', hint: 'Nouvel envoi + étiquette', color: 'bg-indigo-600', onClick: () => setShowCreateShipment(true) },
                   { icon: Search, label: 'Suivre mes colis', hint: 'Où sont mes envois ?', color: 'bg-blue-600', onClick: () => onNavigate?.('client_shipments') },
+                  { icon: Navigation, label: 'Suivi live', hint: 'Le livreur en direct', color: 'bg-teal-600', onClick: () => onNavigate?.('client_tracking') },
                   { icon: BarChart3, label: 'Mes statistiques', hint: 'KPI & graphiques', color: 'bg-fuchsia-600', onClick: () => onNavigate?.('client_analytics') },
                   { icon: UserPlus, label: 'Mes destinataires', hint: 'Ajouter, modifier, importer', color: 'bg-emerald-600', onClick: () => onNavigate?.('client_recipients') },
                   { icon: Building2, label: 'Mon Entreprise', hint: 'Infos société + équipe', color: 'bg-amber-500', onClick: () => onNavigate?.('client_company') },
@@ -1425,6 +1427,11 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
         {/* --- VIEW: STATISTIQUES (Studio Analytique) --- */}
         {activeView === 'client_analytics' && (
             <ClientAnalytics packages={clientPackages} />
+        )}
+
+        {/* --- VIEW: SUIVI LIVE (livreurs de mes colis en cours) --- */}
+        {activeView === 'client_tracking' && (
+            <ClientLiveTracking packages={clientPackages} currentUser={currentUser} />
         )}
 
         {/* --- VIEW: AIDE (guide + FAQ, onglet) --- */}
