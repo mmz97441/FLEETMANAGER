@@ -753,8 +753,11 @@ const App: React.FC = () => {
   const urlParams = new URLSearchParams(window.location.search);
   const activationToken = urlParams.get('token');
   
-  // Si token présent ET pas encore connecté → afficher page d'activation
-  if (activationToken && !currentUser) {
+  // Si un token d'activation est présent dans l'URL → afficher la page d'activation,
+  // MÊME si une autre session est ouverte (sinon le lien ouvrait juste le tableau de
+  // bord de la personne connectée). L'activation valide le token puis connecte le
+  // nouveau compte.
+  if (activationToken) {
     return (
       <Suspense fallback={<div className="h-screen w-screen flex items-center justify-center bg-slate-50"><Loader2 size={48} className="animate-spin text-blue-600" /></div>}>
         <ActivateAccount 
