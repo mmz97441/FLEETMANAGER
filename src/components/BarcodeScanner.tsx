@@ -128,13 +128,11 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
           { facingMode: 'environment' },  // Caméra arrière
           {
             fps: 15, // acquisition plus rapide pour le scan en rafale
-            // Zone de visée CARRÉE : les étiquettes clients (BOIRON) sont des
-            // DataMatrix carrés — une zone paysage les cadrait mal. Carré ~72%
-            // du plus petit côté du flux → bon cadrage 2D sur iPhone et Android.
-            qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
-              const size = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.72);
-              return { width: size, height: size };
-            },
+            // PAS de qrbox : on décode TOUTE l'image de la caméra. Ainsi la
+            // position du code n'a plus d'importance (le trait/viseur n'a plus
+            // besoin d'être « en face »), ce qui fiabilise le scan pour tous.
+            // (Avant : zone restreinte 72% désalignée du viseur affiché.)
+            aspectRatio: undefined,
           },
           (decodedText) => {
             if (mounted) feedbackScanRef.current(decodedText);
@@ -217,6 +215,17 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 bg-black flex flex-col">
+      {/* La caméra html5-qrcode remplit tout le conteneur (sinon bandes noires
+          et viseur désaligné). object-fit: cover → aperçu plein écran, centré. */}
+      <style>{`
+        #${scannerContainerId} { width: 100%; height: 100%; }
+        #${scannerContainerId} video {
+          width: 100% !important;
+          height: 100% !important;
+          object-fit: cover !important;
+        }
+        #${scannerContainerId} img { display: none !important; }
+      `}</style>
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 bg-black/80">
         <h3 className="text-white font-bold text-sm">{title}</h3>
@@ -281,19 +290,19 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
               </div>
             )}
 
-            {/* Overlay viseur */}
+            {/* Cadre de confort (purement visuel). On décode TOUTE l'image, donc
+                le code peut être n'importe où : pas besoin d'être « en face ». */}
             {isScanning && (
-              <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                <div className="absolute inset-0 bg-black/30" />
-                {/* Viseur carré — adapté aux DataMatrix/QR (codes carrés) et aux 1D */}
-                <div className="relative w-64 h-64 max-w-[72vw] max-h-[72vw] border-2 border-white/80 rounded-lg">
-                  <div className="absolute -top-1 -left-1 w-6 h-6 border-t-4 border-l-4 border-green-400 rounded-tl-lg" />
-                  <div className="absolute -top-1 -right-1 w-6 h-6 border-t-4 border-r-4 border-green-400 rounded-tr-lg" />
-                  <div className="absolute -bottom-1 -left-1 w-6 h-6 border-b-4 border-l-4 border-green-400 rounded-bl-lg" />
-                  <div className="absolute -bottom-1 -right-1 w-6 h-6 border-b-4 border-r-4 border-green-400 rounded-br-lg" />
-                  {/* Ligne de scan animée */}
-                  <div className="absolute left-2 right-2 h-0.5 bg-green-400 animate-pulse" style={{ top: '50%' }} />
+              <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
+                <div className="relative w-72 h-72 max-w-[80vw] max-h-[80vw] rounded-2xl ring-2 ring-white/70">
+                  <div className="absolute -top-1 -left-1 w-7 h-7 border-t-4 border-l-4 border-green-400 rounded-tl-2xl" />
+                  <div className="absolute -top-1 -right-1 w-7 h-7 border-t-4 border-r-4 border-green-400 rounded-tr-2xl" />
+                  <div className="absolute -bottom-1 -left-1 w-7 h-7 border-b-4 border-l-4 border-green-400 rounded-bl-2xl" />
+                  <div className="absolute -bottom-1 -right-1 w-7 h-7 border-b-4 border-r-4 border-green-400 rounded-br-2xl" />
                 </div>
+                <p className="mt-4 px-3 py-1.5 rounded-full bg-black/60 text-white text-xs font-semibold">
+                  Visez le code — n'importe où dans l'image
+                </p>
               </div>
             )}
           </>
