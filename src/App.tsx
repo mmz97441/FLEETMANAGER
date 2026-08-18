@@ -1256,19 +1256,16 @@ const App: React.FC = () => {
         {/* Raccourci scan rapide — disponible sur tous les écrans (usage interne) */}
         {currentUser.role !== UserRole.CLIENT && <QuickScanButton currentUser={currentUser} clients={users.filter(u => u.role === UserRole.CLIENT || String(u.role).toLowerCase().includes('client'))} />}
 
-        {/* MODAL ALERTE DOCUMENTS NON SIGNÉS */}
+        {/* GATE DOCUMENTS OBLIGATOIRES — BLOQUANT : tant qu'il reste des documents
+            à lire/signer, impossible d'utiliser le reste de l'app. Le modal
+            réapparaît à chaque connexion/ouverture et dès qu'on quitte la page
+            Documents sans avoir tout traité. Pas de « Plus tard ». */}
         <Suspense fallback={null}>
           <DocumentAlertModal
-            isOpen={showDocumentAlert}
-            onClose={() => {
-              setShowDocumentAlert(false);
-              setDocumentAlertDismissed(true);
-            }}
-            onGoToDocuments={() => {
-              setShowDocumentAlert(false);
-              setDocumentAlertDismissed(true);
-              setCurrentView('documents');
-            }}
+            isOpen={pendingDocumentsList.length > 0 && currentView !== 'documents' && currentView !== 'company_docs'}
+            blocking
+            onClose={() => setCurrentView('documents')}
+            onGoToDocuments={() => setCurrentView('documents')}
             pendingDocuments={pendingDocumentsList}
             currentUser={currentUser}
           />

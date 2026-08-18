@@ -8,6 +8,8 @@ interface DocumentAlertModalProps {
   onGoToDocuments: () => void;
   pendingDocuments: CompanyDocument[];
   currentUser: User;
+  /** true = obligatoire : pas de « Plus tard », l'utilisateur DOIT lire/signer. */
+  blocking?: boolean;
 }
 
 const DocumentAlertModal: React.FC<DocumentAlertModalProps> = ({
@@ -15,7 +17,8 @@ const DocumentAlertModal: React.FC<DocumentAlertModalProps> = ({
   onClose,
   onGoToDocuments,
   pendingDocuments,
-  currentUser
+  currentUser,
+  blocking = false
 }) => {
   if (!isOpen || pendingDocuments.length === 0) return null;
 
@@ -140,22 +143,24 @@ const DocumentAlertModal: React.FC<DocumentAlertModalProps> = ({
 
         {/* Actions */}
         <div className="p-4 bg-slate-50 border-t border-slate-200 flex gap-3">
-          <button
-            onClick={onClose}
-            className="flex-1 py-3 px-4 border border-slate-300 rounded-xl text-slate-600 font-medium hover:bg-slate-100 transition-colors"
-          >
-            Plus tard
-          </button>
+          {!blocking && (
+            <button
+              onClick={onClose}
+              className="flex-1 py-3 px-4 border border-slate-300 rounded-xl text-slate-600 font-medium hover:bg-slate-100 transition-colors"
+            >
+              Plus tard
+            </button>
+          )}
           <button
             onClick={onGoToDocuments}
             className={`flex-1 py-3 px-4 rounded-xl text-white font-bold flex items-center justify-center gap-2 transition-colors ${
-              hasUrgent 
-                ? 'bg-red-500 hover:bg-red-600' 
+              hasUrgent
+                ? 'bg-red-500 hover:bg-red-600'
                 : 'bg-amber-500 hover:bg-amber-600'
             }`}
           >
             <FileSignature size={18} />
-            Signer maintenant
+            {blocking ? 'Lire et signer maintenant' : 'Signer maintenant'}
           </button>
         </div>
       </div>
