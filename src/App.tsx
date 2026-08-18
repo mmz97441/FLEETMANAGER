@@ -13,7 +13,7 @@ import NotificationCenter from './components/NotificationCenter';
 import ViewAsSwitcher from './components/ViewAsSwitcher';
 import Login from './components/Login';
 import { useDriverLocationPublisher } from './hooks/useDriverLocationPublisher';
-import { Menu, Loader2, WifiOff } from 'lucide-react';
+import { Menu, Loader2, WifiOff, LogOut } from 'lucide-react';
 
 // === CODE SPLITTING : Lazy loading de tous les composants lourds ===
 const Dashboard = lazy(() => import('./components/Dashboard'));
@@ -786,12 +786,12 @@ const App: React.FC = () => {
     const CLIENT_ALLOWED = ['client_dashboard', 'client_list', 'client_shipments', 'client_tracking', 'client_team', 'client_analytics', 'client_recipients', 'client_company', 'client_help', 'help', 'settings'];
     const view: ViewState = (isClientRole && !CLIENT_ALLOWED.includes(currentView)) ? 'client_dashboard' : currentView;
 
-    // GARDE-FOU CARTE CHAUFFEURS : réservée à la direction + secrétariat (défense
-    // en profondeur, même par accès direct à l'URL /carte-chauffeurs).
-    if (view === 'fleet_map') {
+    // GARDE-FOU : Carte chauffeurs ET Vue de dieu réservées à la direction +
+    // secrétariat (jamais stagiaire), même par accès direct à l'URL.
+    if (view === 'fleet_map' || view === 'president_overview') {
       const r = String(currentUser.role || '').toLowerCase();
-      const canSeeFleetMap = /pr[eé]sident|directeur|directrice|direction|secr[eé]ta|admin/.test(r);
-      if (!canSeeFleetMap) {
+      const allowed = /pr[eé]sident|directeur|directrice|direction|secr[eé]ta|admin/.test(r);
+      if (!allowed) {
         return <div className="p-10 text-center text-slate-500 font-semibold">Accès réservé à la direction et au secrétariat.</div>;
       }
     }
@@ -1201,9 +1201,13 @@ const App: React.FC = () => {
               <div className="flex items-center gap-2">
                 {canViewAs && <ViewAsSwitcher currentUser={currentUser} users={users} quotes={quotes} />}
                 <NotificationCenter currentUser={currentUser} onNavigate={setCurrentView} />
-                <div className="w-6">
-                  {currentUser.avatarUrl && <img src={currentUser.avatarUrl} className="w-6 h-6 rounded-full border border-slate-200" />}
-                </div>
+                <button
+                  onClick={handleLogout}
+                  title="Se déconnecter"
+                  className="flex items-center gap-1 text-slate-500 hover:text-red-600 p-1.5 rounded-lg"
+                >
+                  <LogOut size={20} />
+                </button>
               </div>
           </div>
 

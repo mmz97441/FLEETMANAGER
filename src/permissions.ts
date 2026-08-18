@@ -23,6 +23,8 @@ export const Permission = {
   DASHBOARD_KPI_FLEET: 'dashboard.kpi.fleet',
   // Carte live des chauffeurs (dispatch) — réservée direction + secrétariat
   FLEET_MAP_VIEW: 'fleet.map.view',
+  // Vue de dieu (tableau stratégique + finances) — réservée direction + secrétariat (jamais stagiaire)
+  PRESIDENT_OVERVIEW_VIEW: 'president.overview.view',
   DASHBOARD_KPI_FUEL: 'dashboard.kpi.fuel',
   DASHBOARD_KPI_FUEL_COSTS: 'dashboard.kpi.fuel.costs',
   DASHBOARD_KPI_MAINTENANCE: 'dashboard.kpi.maintenance',
@@ -369,6 +371,7 @@ export const DEFAULT_ROLE_TEMPLATES: Record<UserRole, PermissionKey[]> = {
     Permission.DASHBOARD_VIEW,
     Permission.DASHBOARD_KPI_FLEET,
     Permission.FLEET_MAP_VIEW,
+    Permission.PRESIDENT_OVERVIEW_VIEW,
     Permission.DASHBOARD_KPI_FUEL,
     Permission.DASHBOARD_KPI_MAINTENANCE,
     Permission.DASHBOARD_KPI_HR,
@@ -454,6 +457,7 @@ export const DEFAULT_ROLE_TEMPLATES: Record<UserRole, PermissionKey[]> = {
     Permission.DASHBOARD_VIEW,
     Permission.DASHBOARD_KPI_FLEET,
     Permission.FLEET_MAP_VIEW,
+    Permission.PRESIDENT_OVERVIEW_VIEW,
     Permission.DASHBOARD_KPI_FUEL,
     Permission.DASHBOARD_KPI_MAINTENANCE,
     Permission.DASHBOARD_KPI_HR,

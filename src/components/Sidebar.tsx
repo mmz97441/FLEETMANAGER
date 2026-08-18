@@ -73,7 +73,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
       id: 'president_overview',
       label: 'Vue de dieu',
       icon: Eye,
-      permission: Permission.DASHBOARD_KPI_FLEET
+      permission: Permission.PRESIDENT_OVERVIEW_VIEW
     },
     {
       id: 'fleet_map',
