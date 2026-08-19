@@ -80,7 +80,12 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && (
-        request.auth.uid == userId || isAdminRole()
+        request.auth.uid == userId
+        || isAdminRole()
+        // Un client peut ajouter un membre à SA PROPRE société, uniquement en rôle client
+        || (isClient()
+            && request.resource.data.role.matches('(?i)client')
+            && request.resource.data.companyName == getUserData().companyName)
       );
       // Update : admin = tous les champs. Self-update = OK SAUF champs sensibles
       // (role, customPermissions, etc.). Sinon escalade de privilèges triviale.
@@ -104,8 +109,14 @@ service cloud.firestore {
     // validateInvitationToken (Admin SDK), et l'activation par activateAccount :
     // le client n'a donc jamais besoin de lire ni modifier cette collection.
     match /invitations/{invitationId} {
-      allow read: if isAdminRole();
-      allow create, update, delete: if isAdminRole();
+      // Admin : tout. Client : uniquement SES propres invitations (invitedBy = lui),
+      // pour pouvoir inviter/gérer les membres de sa société.
+      allow read: if isAdminRole()
+        || (isClient() && resource.data.invitedBy == request.auth.uid);
+      allow create: if isAdminRole()
+        || (isClient() && request.resource.data.invitedBy == request.auth.uid);
+      allow update, delete: if isAdminRole()
+        || (isClient() && resource.data.invitedBy == request.auth.uid);
     }
 
     // ============================================================

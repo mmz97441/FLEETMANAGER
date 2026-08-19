@@ -605,6 +605,8 @@ export const DEFAULT_ROLE_TEMPLATES: Record<UserRole, PermissionKey[]> = {
     Permission.CLIENT_REQUESTS_VIEW_OWN,
     Permission.CLIENT_REQUESTS_CREATE,
     Permission.CLIENT_TEAM_VIEW,
+    Permission.CLIENT_TEAM_MANAGE,          // gérer sa propre équipe (inviter/retirer)
+    Permission.CLIENT_TEAM_INVITE_RESEND,   // renvoyer une invitation
     Permission.CLIENT_ADDRESSES_VIEW,
     Permission.CLIENT_ADDRESSES_MANAGE,
   ],
