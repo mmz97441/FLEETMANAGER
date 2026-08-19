@@ -292,7 +292,9 @@ service cloud.firestore {
     // TODO: déplacer tout envoi de mail vers une Cloud Function callable qui construit
     // le template côté serveur (résout aussi le XSS sur les interpolations HTML).
     match /mail/{mailId} {
-      allow create: if isInternalUser();
+      // Internes + clients authentifiés (pour envoyer leurs invitations d'équipe /
+      // copies de BL). L'extension Trigger Email traite la file.
+      allow create: if isInternalUser() || isClient();
       allow read, update, delete: if false;
     }
 

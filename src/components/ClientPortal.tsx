@@ -691,10 +691,10 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                       activationUrl,
                       expiresAt
                     );
-                    alert(`✅ Un email d'invitation a été envoyé à ${pendingAction.data.email}`);
+                    alert(`✅ Invitation envoyée à ${pendingAction.data.email}.\n\nIl/elle va recevoir un email avec un lien pour créer son mot de passe (valable 7 jours) et accéder à votre espace. En attendant, le collaborateur apparaît dans votre équipe avec le statut « Invité ».`);
                   } catch (emailError) {
                     console.error('❌ Erreur envoi email invitation:', emailError);
-                    alert(`⚠️ Le compte a été créé mais l'email n'a pas pu être envoyé. Veuillez renvoyer l'invitation.`);
+                    alert(`⚠️ Le collaborateur a été ajouté à votre équipe, mais l'email n'a pas pu partir. Réessayez « Renvoyer l'invitation » depuis la fiche du collaborateur.`);
                   }
               }
               break;
