@@ -13,6 +13,7 @@ import NotificationCenter from './components/NotificationCenter';
 import ViewAsSwitcher from './components/ViewAsSwitcher';
 import Login from './components/Login';
 import { useDriverLocationPublisher } from './hooks/useDriverLocationPublisher';
+import { useAutoUpdate } from './hooks/useAutoUpdate';
 import { Menu, Loader2, WifiOff, LogOut } from 'lucide-react';
 
 // === CODE SPLITTING : Lazy loading de tous les composants lourds ===
@@ -132,6 +133,8 @@ const App: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   // Publie la position du chauffeur connecté (~30s) pour la carte dispatch
   useDriverLocationPublisher(currentUser);
+  // Recharge automatiquement l'app quand une nouvelle version est déployée
+  useAutoUpdate();
   const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
   const [absences, setAbsences] = useState<Absence[]>([]);
   const [quotes, setQuotes] = useState<QuoteRequest[]>([]);
