@@ -27,6 +27,12 @@ service cloud.firestore {
       return request.auth != null && getUserRole().matches('(?i)^(admin|pr[eé]siden.*|directeur.*|directrice.*|direction|secr[eé]ta.*)$');
     }
 
+    // ÉQUIPE DE DIRECTION uniquement (SANS secrétariat) — habilitée à déclarer
+    // les arrêts maladie / accidents du travail.
+    function isDirection() {
+      return request.auth != null && getUserRole().matches('(?i)^(admin|pr[eé]siden.*|directeur.*|directrice.*|direction)$');
+    }
+
     // Rôles internes (tous sauf Client)
     function isInternalUser() {
       return request.auth != null && getUserRole().matches('(?i)^(admin|pr[eé]siden.*|directeur.*|directrice.*|direction|secr[eé]ta.*|chauffeu.*|m[eé]canicien.*|stagiaire)$');
@@ -206,9 +212,11 @@ service cloud.firestore {
     // Suppression : admin ou le créateur (si statut pending)
     match /absences/{absenceId} {
       allow read: if isInternalUser();
-      allow create: if isInternalUser();
-      allow update: if isAdminRole()
-        || resource.data.userId == request.auth.uid;
+      // Maladie / Accident du travail : DIRECTION uniquement. Autres types : interne.
+      allow create: if isInternalUser()
+        && (!(request.resource.data.type in ['Arrêt Maladie', 'Accident de Travail']) || isDirection());
+      allow update: if (isAdminRole() || resource.data.userId == request.auth.uid)
+        && (!(request.resource.data.type in ['Arrêt Maladie', 'Accident de Travail']) || isDirection());
       allow delete: if isAdminRole()
         || (resource.data.userId == request.auth.uid
             && resource.data.status == 'pending');

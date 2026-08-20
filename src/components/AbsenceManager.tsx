@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import {
   Absence, AbsenceStatus, AbsenceType, AbsenceDocument, AbsenceModificationProposal, User, UserRole,
-  ABSENCE_REQUIRES_DOCUMENT, ABSENCE_EMPLOYEE_CAN_REQUEST, ABSENCE_IMPACTS_CP_BALANCE,
+  ABSENCE_REQUIRES_DOCUMENT, ABSENCE_EMPLOYEE_CAN_REQUEST, ABSENCE_DIRECTION_ONLY, ABSENCE_IMPACTS_CP_BALANCE,
   Zone, ZONE_COLORS
 } from '../types';
 import Modal from './shared/Modal';
@@ -257,6 +257,12 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
   const isManager = canViewAll;
   const canValidate = canValidateAbsence;
   const isDriver = canViewOwn && !canViewAll;
+  // ÉQUIPE DE DIRECTION uniquement (président / directeur / admin — PAS secrétariat) :
+  // seule habilitée à déclarer les arrêts maladie et accidents du travail.
+  const isDirection = (() => {
+    const r = normalizeRole(currentUser.role);
+    return r.includes('admin') || r.includes('presid') || r.includes('direct');
+  })();
 
   // --- COMPUTED ---
   const drivers = useMemo(() => {
@@ -1579,7 +1585,14 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
             <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Type d'absence</label>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
               {Object.values(AbsenceType)
-                .filter(type => isManager || ABSENCE_EMPLOYEE_CAN_REQUEST.includes(type))
+                .filter(type => {
+                  // Maladie / AT : direction uniquement
+                  if (ABSENCE_DIRECTION_ONLY.includes(type)) return isDirection;
+                  // Autres types manager : tout manager (dont secrétariat)
+                  if (isManager) return true;
+                  // Salarié : uniquement les types auto-demandables
+                  return ABSENCE_EMPLOYEE_CAN_REQUEST.includes(type);
+                })
                 .map(type => (
                   <button
                     key={type}

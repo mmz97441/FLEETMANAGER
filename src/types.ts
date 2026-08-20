@@ -297,6 +297,13 @@ export const ABSENCE_EMPLOYEE_CAN_REQUEST: AbsenceType[] = [
   AbsenceType.AUTRE
 ];
 
+// Types réservés à l'ÉQUIPE DE DIRECTION (jamais le salarié ni le secrétariat) :
+// arrêts maladie et accidents du travail se déclarent uniquement par la direction.
+export const ABSENCE_DIRECTION_ONLY: AbsenceType[] = [
+  AbsenceType.MALADIE,
+  AbsenceType.AT
+];
+
 // Types qui impactent le solde CP
 export const ABSENCE_IMPACTS_CP_BALANCE: AbsenceType[] = [
   AbsenceType.CP
