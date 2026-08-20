@@ -200,6 +200,15 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
   // VÉRIFICATION D'ACCÈS BASÉE SUR LES PERMISSIONS
   // =====================================================
   const checkAccess = (item: NavItem | NavGroup): boolean => {
+    // L'ESPACE CLIENT est réservé aux VRAIS clients. Président/Admin héritent de
+    // toutes les permissions (dont celles du client) mais ne doivent JAMAIS voir
+    // le portail expéditeur. Pour prévisualiser un client, ils ont « Voir en tant que ».
+    const itemId = String((item as { id?: string }).id || '');
+    const isClientRole = String(currentUser.role || '').toLowerCase().includes('client');
+    if (itemId === 'client_space' || itemId.startsWith('client_')) {
+      return isClientRole;
+    }
+
     // Si pas de permission définie = accessible à tous
     if (!item.permission && !item.permissions) {
       return true;

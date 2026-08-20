@@ -788,7 +788,12 @@ const App: React.FC = () => {
     // currentView était forcé à une valeur interne, on le ramène au portail.
     const isClientRole = currentUser.role === UserRole.CLIENT || String(currentUser.role || '').toLowerCase().includes('client');
     const CLIENT_ALLOWED = ['client_dashboard', 'client_list', 'client_shipments', 'client_tracking', 'client_team', 'client_analytics', 'client_recipients', 'client_company', 'client_help', 'help', 'settings'];
-    const view: ViewState = (isClientRole && !CLIENT_ALLOWED.includes(currentView)) ? 'client_dashboard' : currentView;
+    let view: ViewState = (isClientRole && !CLIENT_ALLOWED.includes(currentView)) ? 'client_dashboard' : currentView;
+    // GARDE-FOU INVERSE : un utilisateur INTERNE ne rend jamais une vue client
+    // (président/admin héritent des permissions client mais n'ont pas d'espace expéditeur).
+    if (!isClientRole && String(view).startsWith('client_')) {
+      view = 'dashboard';
+    }
 
     // GARDE-FOU : Carte chauffeurs ET Vue de dieu réservées à la direction +
     // secrétariat (jamais stagiaire), même par accès direct à l'URL.
