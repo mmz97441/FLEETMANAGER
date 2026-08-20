@@ -67,36 +67,45 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
   const menuStructure: (NavItem | NavGroup)[] = [
     
     // ─────────────────────────────────────────────────────
-    // TABLEAU DE BORD
+    // 📊 PILOTAGE — vues de situation
     // ─────────────────────────────────────────────────────
     {
-      id: 'president_overview',
-      label: 'Vue de dieu',
-      icon: Eye,
-      permission: Permission.PRESIDENT_OVERVIEW_VIEW
-    },
-    {
-      id: 'fleet_map',
-      label: 'Carte chauffeurs',
-      icon: MapPin,
-      permission: Permission.FLEET_MAP_VIEW
-    },
-
-    {
-      id: 'dashboard',
-      label: 'Tableau de Bord',
+      id: 'pilotage',
+      label: 'Pilotage',
       icon: LayoutDashboard,
-      permission: Permission.DASHBOARD_VIEW
+      permissions: [Permission.DASHBOARD_VIEW, Permission.PRESIDENT_OVERVIEW_VIEW, Permission.FLEET_MAP_VIEW],
+      items: [
+        { id: 'dashboard', label: 'Tableau de bord', icon: LayoutDashboard, permission: Permission.DASHBOARD_VIEW },
+        { id: 'president_overview', label: 'Vue de dieu', icon: Eye, permission: Permission.PRESIDENT_OVERVIEW_VIEW },
+        { id: 'fleet_map', label: 'Carte chauffeurs', icon: MapPin, permission: Permission.FLEET_MAP_VIEW },
+      ]
     },
 
     // ─────────────────────────────────────────────────────
-    // 🚛 FLOTTE - Tout ce qui touche aux véhicules
+    // 🚚 EXPLOITATION — le quotidien du dispatch
+    // ─────────────────────────────────────────────────────
+    {
+      id: 'exploitation',
+      label: 'Exploitation',
+      icon: Route,
+      permissions: [Permission.MISSIONS_VIEW, Permission.MISSIONS_VIEW_OWN, Permission.QUOTES_VIEW],
+      badgeKey: 'quotes',
+      items: [
+        { id: 'missions', label: 'Missions', icon: Route, permission: Permission.MISSIONS_VIEW },
+        { id: 'hub_operations', label: 'Opérations Hub', icon: Package, permission: Permission.MISSIONS_VIEW },
+        { id: 'quotes', label: 'Demandes & Devis', icon: FileCheck, permission: Permission.QUOTES_VIEW, badgeKey: 'quotes' },
+        { id: 'driver_tour', label: 'Ma Tournée', icon: Navigation, permission: Permission.MISSIONS_VIEW_OWN },
+      ]
+    },
+
+    // ─────────────────────────────────────────────────────
+    // 🚛 FLOTTE & ATELIER
     // ─────────────────────────────────────────────────────
     {
       id: 'flotte',
-      label: 'Flotte',
+      label: 'Flotte & Atelier',
       icon: Truck,
-      permission: Permission.VEHICLES_VIEW,
+      permissions: [Permission.VEHICLES_VIEW, Permission.FUEL_VIEW, Permission.MAINTENANCE_VIEW, Permission.ISSUES_VIEW],
       items: [
         { id: 'vehicles', label: 'Véhicules', icon: Truck, permission: Permission.VEHICLES_VIEW },
         { id: 'fuel', label: 'Carburant', icon: Droplet, permission: Permission.FUEL_VIEW },
@@ -106,102 +115,54 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
     },
 
     // ─────────────────────────────────────────────────────
-    // 💼 ACTIVITÉ - Commercial et transport
-    // ─────────────────────────────────────────────────────
-    {
-      id: 'activite',
-      label: 'Activité',
-      icon: Euro,
-      permission: Permission.QUOTES_VIEW,
-      items: [
-        { id: 'quotes', label: 'Demandes & Devis', icon: FileCheck, permission: Permission.QUOTES_VIEW, badgeKey: 'quotes' },
-      ]
-    },
-
-    // ─────────────────────────────────────────────────────
-    // 🚚 MISSIONS - Tournées et livraisons
-    // ─────────────────────────────────────────────────────
-    { 
-      id: 'missions', 
-      label: 'Missions', 
-      icon: Route, 
-      permission: Permission.MISSIONS_VIEW
-    },
-    {
-      id: 'driver_tour',
-      label: 'Ma Tournée',
-      icon: Navigation,
-      permission: Permission.MISSIONS_VIEW_OWN
-    },
-    {
-      id: 'hub_operations',
-      label: 'Opérations Hub',
-      icon: Package,
-      permission: Permission.MISSIONS_VIEW
-    },
-
-    // ─────────────────────────────────────────────────────
-    // 👥 ÉQUIPE - Gestion des personnes
+    // 👥 ÉQUIPE & RH
     // ─────────────────────────────────────────────────────
     {
       id: 'equipe',
-      label: 'Équipe',
+      label: 'Équipe & RH',
       icon: Users,
       permissions: [Permission.DRIVERS_VIEW, Permission.ABSENCES_VIEW_OWN, Permission.DOCS_VIEW_OWN],
-      badgeKey: 'docs', // Badge sur le groupe si docs en attente
+      badgeKey: 'docs',
       items: [
         { id: 'drivers', label: 'Chauffeurs', icon: Users, permission: Permission.DRIVERS_VIEW },
         { id: 'leaves', label: 'Congés', icon: Palmtree, permission: Permission.ABSENCES_VIEW_OWN, badgeKey: 'leaves' },
         { id: 'absences', label: 'Absences', icon: CalendarDays, permission: Permission.ABSENCES_VIEW_OWN, badgeKey: 'absences' },
         { id: 'company_docs', label: 'Documents', icon: FileSignature, permission: Permission.DOCS_VIEW_ALL, badgeKey: 'docs' },
-        // Vue spéciale chauffeur pour ses propres documents
         { id: 'documents', label: 'Mes Documents', icon: FileCheck, permission: Permission.DOCS_VIEW_OWN, badgeKey: 'docs' },
       ]
     },
 
     // ─────────────────────────────────────────────────────
-    // 🤖 FLEETGENIUS IA - Accès direct
-    // ─────────────────────────────────────────────────────
-    { 
-      id: 'ai_advisor', 
-      label: 'FleetGenius IA', 
-      icon: BrainCircuit, 
-      permission: Permission.AI_ACCESS
-    },
-
-    // ─────────────────────────────────────────────────────
-    // ⚙️ ADMINISTRATION - Gestion du système
+    // ⚙️ ADMINISTRATION — gestion + réglages
     // ─────────────────────────────────────────────────────
     {
       id: 'administration',
       label: 'Administration',
       icon: UserCog,
-      permissions: [Permission.USERS_VIEW, Permission.LOGS_VIEW],
+      permissions: [Permission.USERS_VIEW, Permission.LOGS_VIEW, Permission.SETTINGS_ACCESS, Permission.SETTINGS_COMPANY, Permission.IMPORT_EXPORT_ACCESS],
       items: [
         { id: 'users', label: 'Utilisateurs', icon: Users, permission: Permission.USERS_VIEW },
         { id: 'permissions', label: 'Permissions', icon: Shield, permission: Permission.USERS_PERMISSIONS },
         { id: 'company_settings', label: 'Entreprise', icon: Building2, permission: Permission.SETTINGS_COMPANY },
-        { id: 'activity_logs', label: 'Logs d\'activité', icon: ClipboardList, permission: Permission.LOGS_VIEW },
-        { id: 'error_logs', label: 'Journal d\'erreurs', icon: AlertTriangle, permission: Permission.LOGS_VIEW },
+        { id: 'delivery_schedule', label: 'Horaires livraison', icon: Clock, permission: Permission.SETTINGS_COMPANY },
+        { id: 'zone_management', label: 'Zones (codes postaux)', icon: MapPin, permission: Permission.SETTINGS_COMPANY },
+        { id: 'import_export', label: 'Imports / Exports', icon: Download, permission: Permission.IMPORT_EXPORT_ACCESS },
+        { id: 'notifications_settings', label: 'Notifications', icon: Bell, permission: Permission.SETTINGS_ACCESS },
+        { id: 'settings', label: 'Préférences', icon: SettingsIcon, permission: Permission.SETTINGS_ACCESS },
+        { id: 'activity_logs', label: "Logs d'activité", icon: ClipboardList, permission: Permission.LOGS_VIEW },
+        { id: 'error_logs', label: "Journal d'erreurs", icon: AlertTriangle, permission: Permission.LOGS_VIEW },
+        { id: 'api_diagnostic', label: 'Diagnostic API', icon: Activity, permission: Permission.SETTINGS_COMPANY },
       ]
     },
 
     // ─────────────────────────────────────────────────────
-    // 🔧 PARAMÈTRES - Configuration
+    // 🤖 ASSISTANT IA
     // ─────────────────────────────────────────────────────
     {
-      id: 'parametres',
-      label: 'Paramètres',
-      icon: SettingsIcon,
-      permission: Permission.SETTINGS_ACCESS,
-      items: [
-        { id: 'settings', label: 'Préférences', icon: SettingsIcon, permission: Permission.SETTINGS_ACCESS },
-        { id: 'delivery_schedule', label: 'Horaires livraison', icon: Clock, permission: Permission.SETTINGS_COMPANY },
-        { id: 'zone_management', label: 'Zones (codes postaux)', icon: MapPin, permission: Permission.SETTINGS_COMPANY },
-        { id: 'notifications_settings', label: 'Notifications', icon: Bell, permission: Permission.SETTINGS_ACCESS },
-        { id: 'import_export', label: 'Imports / Exports', icon: Download, permission: Permission.IMPORT_EXPORT_ACCESS },
-        { id: 'api_diagnostic', label: 'Diagnostic API', icon: Activity, permission: Permission.SETTINGS_COMPANY },
-      ]
+      id: 'ai_advisor',
+      label: 'Assistant IA',
+      icon: BrainCircuit,
+      permission: Permission.AI_ACCESS
     },
 
     // ─────────────────────────────────────────────────────
