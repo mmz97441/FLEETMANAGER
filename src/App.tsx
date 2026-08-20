@@ -11,6 +11,7 @@ import MobileNavBar from './components/MobileNavBar';
 import QuickScanButton from './components/QuickScanButton';
 import NotificationCenter from './components/NotificationCenter';
 import ViewAsSwitcher from './components/ViewAsSwitcher';
+import DriverGpsGate from './components/DriverGpsGate';
 import Login from './components/Login';
 import { useDriverLocationPublisher } from './hooks/useDriverLocationPublisher';
 import { useAutoUpdate } from './hooks/useAutoUpdate';
@@ -1164,7 +1165,10 @@ const App: React.FC = () => {
     <ErrorBoundary>
       <PermissionsProvider currentUser={currentUser}>
       <div className="flex h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden">
-        
+
+        {/* VERROU GPS — chauffeurs : app inutilisable sans localisation active */}
+        <DriverGpsGate currentUser={currentUser} />
+
         {/* NETWORK STATUS BANNER */}
         {isOffline && (
             <div className="fixed top-0 left-0 right-0 bg-red-600 text-white text-center text-xs font-bold py-1 z-[1000] flex items-center justify-center gap-2 animate-pulse">
