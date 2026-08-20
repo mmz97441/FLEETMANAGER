@@ -611,6 +611,7 @@ export type ViewState =
   | 'hub_operations'
   | 'driver_tour'
   | 'fleet_map'
+  | 'tours_overview'
   | 'import_export';
 
 // ============================================================================

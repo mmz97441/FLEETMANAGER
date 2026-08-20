@@ -92,6 +92,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
       badgeKey: 'quotes',
       items: [
         { id: 'missions', label: 'Missions', icon: Route, permission: Permission.MISSIONS_VIEW },
+        { id: 'tours_overview', label: 'Suivi des tournées', icon: ClipboardList, permission: Permission.MISSIONS_VIEW },
         { id: 'hub_operations', label: 'Opérations Hub', icon: Package, permission: Permission.MISSIONS_VIEW },
         { id: 'quotes', label: 'Demandes & Devis', icon: FileCheck, permission: Permission.QUOTES_VIEW, badgeKey: 'quotes' },
         { id: 'driver_tour', label: 'Ma Tournée', icon: Navigation, permission: Permission.MISSIONS_VIEW_OWN },

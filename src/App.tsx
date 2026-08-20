@@ -28,6 +28,7 @@ const UserManager = lazy(() => import('./components/UserManager'));
 const AIAdvisor = lazy(() => import('./components/AIAdvisor'));
 const FleetMap = lazy(() => import('./components/FleetMap'));
 const FleetMapView = lazy(() => import('./components/FleetMapView'));
+const ToursOverview = lazy(() => import('./components/ToursOverview'));
 const ClientPortal = lazy(() => import('./components/ClientPortal'));
 const QuoteManager = lazy(() => import('./components/QuoteManager'));
 const AbsenceManager = lazy(() => import('./components/AbsenceManager'));
@@ -1007,6 +1008,9 @@ const App: React.FC = () => {
 
       case 'fleet_map':
         return <FleetMapView users={users} />;
+
+      case 'tours_overview':
+        return <ToursOverview users={users} />;
 
       case 'missions': {
         // Chauffeurs → vue mobile dédiée

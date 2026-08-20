@@ -10,6 +10,7 @@
  * missions) ; il suffit de lui passer la liste des utilisateurs.
  */
 import React, { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -30,7 +31,11 @@ interface FleetMapViewProps {
 }
 
 // Bucket de statut d'un chauffeur
-type DriverBucket = 'ON_TOUR' | 'AVAILABLE' | 'OFFLINE';
+// - ON_TOUR   : en tournée, position fraîche
+// - AVAILABLE : disponible (sans tournée), position fraîche
+// - STALE     : a une position mais périmée (>= 3 min) — marqueur gris sur la carte
+// - NEVER     : aucune entrée driverLocations — jamais connecté, absent de la carte
+type DriverBucket = 'ON_TOUR' | 'AVAILABLE' | 'STALE' | 'NEVER';
 
 interface ParsedDriver {
   user: User;
@@ -160,7 +165,8 @@ const FleetMapView: React.FC<FleetMapViewProps> = ({ users }) => {
   const [openGroups, setOpenGroups] = useState<Record<DriverBucket, boolean>>({
     ON_TOUR: true,
     AVAILABLE: true,
-    OFFLINE: false,
+    STALE: false,
+    NEVER: false,
   });
 
   // Abonnements temps réel (nettoyés au démontage)
@@ -210,7 +216,8 @@ const FleetMapView: React.FC<FleetMapViewProps> = ({ users }) => {
           : false;
 
         let bucket: DriverBucket;
-        if (!location) bucket = 'OFFLINE';
+        if (!location) bucket = 'NEVER'; // aucune position publiée
+        else if (!isFresh) bucket = 'STALE'; // position présente mais périmée
         else if (isOnTour) bucket = 'ON_TOUR';
         else bucket = 'AVAILABLE';
 
@@ -240,7 +247,8 @@ const FleetMapView: React.FC<FleetMapViewProps> = ({ users }) => {
     return {
       ON_TOUR: parsedDrivers.filter((d) => d.bucket === 'ON_TOUR'),
       AVAILABLE: parsedDrivers.filter((d) => d.bucket === 'AVAILABLE'),
-      OFFLINE: parsedDrivers.filter((d) => d.bucket === 'OFFLINE'),
+      STALE: parsedDrivers.filter((d) => d.bucket === 'STALE'),
+      NEVER: parsedDrivers.filter((d) => d.bucket === 'NEVER'),
     };
   }, [parsedDrivers]);
 
@@ -276,12 +284,15 @@ const FleetMapView: React.FC<FleetMapViewProps> = ({ users }) => {
           <LegendDot color={COLOR_ON_TOUR} label="En tournée" />
           <LegendDot color={COLOR_AVAILABLE} label="Disponible" />
           <LegendDot color={COLOR_STALE} label="Position ancienne" />
-          <div className="flex items-center gap-2 text-slate-600">
+          <LegendDot color={COLOR_STALE} label="Jamais connecté" hollow />
+          <div className="flex flex-wrap items-center gap-2 text-slate-600">
             <span className="font-semibold text-green-600">{groups.ON_TOUR.length}</span> en tournée
             <span className="text-slate-300">·</span>
             <span className="font-semibold text-amber-600">{groups.AVAILABLE.length}</span> disponibles
             <span className="text-slate-300">·</span>
-            <span className="font-semibold text-slate-500">{groups.OFFLINE.length}</span> hors ligne
+            <span className="font-semibold text-slate-500">{groups.STALE.length}</span> position ancienne
+            <span className="text-slate-300">·</span>
+            <span className="font-semibold text-slate-400">{groups.NEVER.length}</span> jamais connectés
           </div>
         </div>
       </div>
@@ -309,11 +320,21 @@ const FleetMapView: React.FC<FleetMapViewProps> = ({ users }) => {
             onSelect={setSelectedId}
           />
           <SidePanelGroup
-            title="Hors ligne"
+            title="Position ancienne"
             color={COLOR_STALE}
-            drivers={groups.OFFLINE}
-            open={openGroups.OFFLINE}
-            onToggle={() => toggleGroup('OFFLINE')}
+            drivers={groups.STALE}
+            open={openGroups.STALE}
+            onToggle={() => toggleGroup('STALE')}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+          />
+          <SidePanelGroup
+            title="Jamais connecté"
+            color={COLOR_STALE}
+            hollow
+            drivers={groups.NEVER}
+            open={openGroups.NEVER}
+            onToggle={() => toggleGroup('NEVER')}
             selectedId={selectedId}
             onSelect={setSelectedId}
           />
@@ -369,11 +390,19 @@ const FleetMapView: React.FC<FleetMapViewProps> = ({ users }) => {
 // SOUS-COMPOSANTS UI
 // ---------------------------------------------------------------------------
 
-const LegendDot: React.FC<{ color: string; label: string }> = ({ color, label }) => (
+const LegendDot: React.FC<{ color: string; label: string; hollow?: boolean }> = ({
+  color,
+  label,
+  hollow,
+}) => (
   <div className="flex items-center gap-1.5 text-slate-600">
     <span
-      className="inline-block h-3 w-3 rounded-full border border-white"
-      style={{ background: color, boxShadow: '0 1px 2px rgba(0,0,0,0.3)' }}
+      className="inline-block h-3 w-3 rounded-full"
+      style={
+        hollow
+          ? { background: 'transparent', border: `2px solid ${color}` }
+          : { background: color, border: '1px solid #ffffff', boxShadow: '0 1px 2px rgba(0,0,0,0.3)' }
+      }
     />
     {label}
   </div>
@@ -382,12 +411,14 @@ const LegendDot: React.FC<{ color: string; label: string }> = ({ color, label })
 const bucketLabel = (d: ParsedDriver): string => {
   if (d.bucket === 'ON_TOUR') return '🟢 En tournée';
   if (d.bucket === 'AVAILABLE') return '🟡 Disponible';
-  return '⚪ Hors ligne';
+  if (d.bucket === 'STALE') return '⚪ Position ancienne';
+  return '⚫ Jamais connecté';
 };
 
 interface SidePanelGroupProps {
   title: string;
   color: string;
+  hollow?: boolean;
   drivers: ParsedDriver[];
   open: boolean;
   onToggle: () => void;
@@ -398,6 +429,7 @@ interface SidePanelGroupProps {
 const SidePanelGroup: React.FC<SidePanelGroupProps> = ({
   title,
   color,
+  hollow,
   drivers,
   open,
   onToggle,
@@ -413,7 +445,11 @@ const SidePanelGroup: React.FC<SidePanelGroupProps> = ({
       <span className="flex items-center gap-2 font-semibold text-slate-700">
         <span
           className="inline-block h-3 w-3 rounded-full"
-          style={{ background: color }}
+          style={
+            hollow
+              ? { background: 'transparent', border: `2px solid ${color}` }
+              : { background: color }
+          }
         />
         {title}
         <span className="text-slate-400 font-normal">({drivers.length})</span>
@@ -454,8 +490,12 @@ const DriverRow: React.FC<DriverRowProps> = ({ driver, selected, onSelect }) => 
     }`}
   >
     <span
-      className="mt-1 inline-block h-3 w-3 rounded-full border border-white flex-shrink-0"
-      style={{ background: bucketColor(driver), boxShadow: '0 1px 2px rgba(0,0,0,0.3)' }}
+      className="mt-1 inline-block h-3 w-3 rounded-full flex-shrink-0"
+      style={
+        driver.bucket === 'NEVER'
+          ? { background: 'transparent', border: `2px solid ${COLOR_STALE}` }
+          : { background: bucketColor(driver), border: '1px solid #ffffff', boxShadow: '0 1px 2px rgba(0,0,0,0.3)' }
+      }
     />
     <div className="min-w-0 flex-1">
       <div className="flex items-center gap-2">
@@ -475,13 +515,13 @@ const DriverRow: React.FC<DriverRowProps> = ({ driver, selected, onSelect }) => 
         {driver.bucket === 'ON_TOUR' && driver.location && (
           <span> · maj {timeAgo(driver.location.updatedAt)}</span>
         )}
-        {driver.bucket === 'AVAILABLE' &&
-          (driver.location ? (
-            <span>maj {timeAgo(driver.location.updatedAt)}</span>
-          ) : (
-            <span>pas de position</span>
-          ))}
-        {driver.bucket === 'OFFLINE' && <span>pas de position publiée</span>}
+        {driver.bucket === 'AVAILABLE' && driver.location && (
+          <span>maj {timeAgo(driver.location.updatedAt)}</span>
+        )}
+        {driver.bucket === 'STALE' && driver.location && (
+          <span className="text-slate-400">position ancienne · maj {timeAgo(driver.location.updatedAt)}</span>
+        )}
+        {driver.bucket === 'NEVER' && <span className="text-slate-400">Jamais connecté</span>}
       </div>
     </div>
   </button>
@@ -491,6 +531,7 @@ const DriverRow: React.FC<DriverRowProps> = ({ driver, selected, onSelect }) => 
 
 const DriverDetail: React.FC<{ driver: ParsedDriver }> = ({ driver }) => {
   const { activeMission } = driver;
+  const [showTour, setShowTour] = useState(false);
 
   // Arrêts de livraison, triés par séquence
   const deliveryStops = useMemo<MissionStop[]>(
@@ -513,6 +554,7 @@ const DriverDetail: React.FC<{ driver: ParsedDriver }> = ({ driver }) => {
   const pct = total > 0 ? Math.round((delivered / total) * 100) : 0;
 
   return (
+    <>
     <div className="rounded-xl border border-blue-200 bg-white overflow-hidden">
       <div className="px-4 py-3 bg-blue-50 border-b border-blue-100">
         <div className="flex items-center justify-between">
@@ -551,6 +593,15 @@ const DriverDetail: React.FC<{ driver: ParsedDriver }> = ({ driver }) => {
                 />
               </div>
             </div>
+
+            {/* Voir la tournée (lecture seule) */}
+            <button
+              type="button"
+              onClick={() => setShowTour(true)}
+              className="w-full rounded-2xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 active:bg-indigo-800 transition-colors"
+            >
+              🗺️ Voir la tournée
+            </button>
 
             {/* Prochain arrêt */}
             {nextStop ? (
@@ -601,6 +652,11 @@ const DriverDetail: React.FC<{ driver: ParsedDriver }> = ({ driver }) => {
         )}
       </div>
     </div>
+
+    {showTour && activeMission && (
+      <DriverTourModal driver={driver} onClose={() => setShowTour(false)} />
+    )}
+    </>
   );
 };
 
@@ -614,6 +670,152 @@ const formatEta = (eta: string): string => {
     });
   }
   return eta;
+};
+
+// ---- Modale « Voir la tournée » (supervision, lecture seule) ----
+
+const DriverTourModal: React.FC<{ driver: ParsedDriver; onClose: () => void }> = ({
+  driver,
+  onClose,
+}) => {
+  const { activeMission } = driver;
+
+  // Fermeture au clavier (Échap)
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  // TOUS les arrêts de livraison, triés par séquence
+  const deliveryStops = useMemo<MissionStop[]>(
+    () =>
+      (activeMission?.stops || [])
+        .filter((s) => s.type === 'DELIVERY')
+        .sort((a, b) => a.sequence - b.sequence),
+    [activeMission]
+  );
+
+  const total = deliveryStops.length;
+  const delivered = deliveryStops.filter((s) => s.status === StopStatus.COMPLETED).length;
+  const pct = total > 0 ? Math.round((delivered / total) * 100) : 0;
+
+  // Prochain arrêt = 1er PENDING/ARRIVED dans l'ordre
+  const nextStopId = deliveryStops.find(
+    (s) => s.status === StopStatus.PENDING || s.status === StopStatus.ARRIVED
+  )?.id;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[130] bg-black/50 flex items-center justify-center p-4"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        className="max-w-lg w-full max-h-[85vh] overflow-y-auto rounded-2xl bg-white shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* En-tête */}
+        <div className="sticky top-0 z-10 px-5 py-4 bg-indigo-600 text-white rounded-t-2xl">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-base font-bold truncate">{driver.name}</div>
+              <div className="mt-0.5 text-xs text-indigo-100">
+                {driver.plate ? `Véhicule ${driver.plate}` : 'Aucun véhicule'}
+                {activeMission?.zone && <span> · Zone {activeMission.zone}</span>}
+              </div>
+              <div className="mt-0.5 text-xs text-indigo-100">
+                {driver.location
+                  ? `Position maj ${timeAgo(driver.location.updatedAt)}`
+                  : 'Aucune position'}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Fermer"
+              className="flex-shrink-0 h-8 w-8 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center text-lg leading-none"
+            >
+              ×
+            </button>
+          </div>
+
+          {/* Barre de progression */}
+          <div className="mt-3">
+            <div className="flex items-center justify-between text-xs text-indigo-100 mb-1">
+              <span>Livraisons</span>
+              <span className="font-semibold text-white">
+                {delivered}/{total}
+              </span>
+            </div>
+            <div className="h-2 rounded-full bg-white/25 overflow-hidden">
+              <div
+                className="h-full bg-white transition-all"
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Liste ordonnée de TOUS les arrêts de livraison */}
+        <div className="px-4 py-4">
+          {deliveryStops.length === 0 ? (
+            <p className="text-sm text-slate-500">Aucun arrêt de livraison sur cette tournée.</p>
+          ) : (
+            <ol className="flex flex-col gap-2">
+              {deliveryStops.map((s, idx) => {
+                const isNext = s.id === nextStopId;
+                return (
+                  <li
+                    key={s.id}
+                    className={`rounded-2xl border px-3 py-2.5 ${
+                      isNext
+                        ? 'border-amber-300 bg-amber-50 ring-1 ring-amber-200'
+                        : 'border-slate-200 bg-white'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="mt-0.5 flex-shrink-0 h-6 w-6 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold flex items-center justify-center">
+                        {idx + 1}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-medium text-slate-800 truncate">
+                            {s.contactName || 'Destinataire'}
+                          </span>
+                          <StopStatusBadge status={s.status} />
+                        </div>
+                        <div className="mt-0.5 text-xs text-slate-500 truncate">
+                          {s.address}
+                          {s.city && <span> — {s.city}</span>}
+                        </div>
+                        <div className="mt-1 flex items-center gap-2 text-xs">
+                          {isNext && (
+                            <span className="font-semibold text-amber-700 uppercase tracking-wide">
+                              Prochain arrêt
+                            </span>
+                          )}
+                          {s.estimatedArrival && (
+                            <span className="text-slate-500">
+                              Prévu {formatEta(s.estimatedArrival)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
 };
 
 const StopStatusBadge: React.FC<{ status: StopStatus }> = ({ status }) => {
