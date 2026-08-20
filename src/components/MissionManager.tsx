@@ -8,7 +8,8 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Mission, MissionStatus, MissionType, MissionStop, StopStatus, Package, PackageStatus,
   ImportBatch, ImportBatchStatus, Hub, Zone, User, UserRole, Vehicle,
-  ZONE_COLORS, MISSION_STATUS_COLORS, PACKAGE_STATUS_COLORS
+  ZONE_COLORS, MISSION_STATUS_COLORS, PACKAGE_STATUS_COLORS,
+  Absence, AbsenceStatus
 } from '../types';
 import {
   subscribeToMissions,
@@ -58,6 +59,7 @@ interface MissionManagerProps {
   currentUser: User;
   users: User[];
   vehicles: Vehicle[];
+  absences?: Absence[];
 }
 
 type TabType = 'dashboard' | 'dispatch' | 'imports' | 'missions' | 'packages' | 'hubs';
@@ -65,8 +67,19 @@ type TabType = 'dashboard' | 'dispatch' | 'imports' | 'missions' | 'packages' | 
 const MissionManager: React.FC<MissionManagerProps> = ({
   currentUser,
   users,
-  vehicles
+  vehicles,
+  absences = []
 }) => {
+  // Un chauffeur est indisponible s'il a une absence VALIDÉE (accordée) couvrant
+  // la date sélectionnée. Les demandes en attente ne bloquent PAS le dispatch.
+  const isDriverOnLeave = useCallback((driverId: string, dateISO: string): boolean => {
+    return absences.some(a =>
+      a.userId === driverId &&
+      a.status === AbsenceStatus.APPROVED &&
+      a.startDate <= dateISO &&
+      dateISO <= a.endDate
+    );
+  }, [absences]);
   // États
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
   const [missions, setMissions] = useState<Mission[]>([]);
@@ -3289,10 +3302,13 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                   <option value="">Sélectionner un chauffeur...</option>
                   {users.filter(u => u.role === UserRole.DRIVER && !u.isDisabled).map(driver => {
                     const vehicle = vehicles.find(v => v.assignedDriverId === driver.id);
+                    const onLeave = isDriverOnLeave(driver.id, selectedDate);
                     return (
-                      <option key={driver.id} value={driver.id}>
+                      <option key={driver.id} value={driver.id} disabled={onLeave}>
                         {driver.firstName} {driver.lastName}
-                        {vehicle ? ` — ${vehicle.plate}` : ' (sans véhicule)'}
+                        {onLeave
+                          ? ' — 🌴 en congé (indisponible)'
+                          : (vehicle ? ` — ${vehicle.plate}` : ' (sans véhicule)')}
                       </option>
                     );
                   })}
@@ -3342,7 +3358,12 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                 disabled={!quickDispatchDriverId || !quickDispatchHubId || isQuickDispatching}
                 onClick={async () => {
                   if (!quickDispatchDriverId || !quickDispatchHubId) return;
-                  
+                  // Sécurité : refuser un chauffeur en congé validé sur la date
+                  if (isDriverOnLeave(quickDispatchDriverId, selectedDate)) {
+                    alert('Ce chauffeur est en congé validé à cette date. Choisissez un autre chauffeur.');
+                    return;
+                  }
+
                   setIsQuickDispatching(true);
                   
                   try {

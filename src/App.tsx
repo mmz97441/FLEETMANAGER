@@ -1017,6 +1017,7 @@ const App: React.FC = () => {
             currentUser={currentUser}
             users={users}
             vehicles={vehicles}
+            absences={absences}
           />
         );
       }
