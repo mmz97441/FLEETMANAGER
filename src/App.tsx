@@ -904,6 +904,7 @@ const App: React.FC = () => {
             onDeleteDocument={handleDeleteCompanyDocument}
             onAcknowledge={handleAcknowledgeDocument}
             viewMode="employee"
+            autoOpenPendingSignature={pendingDocumentsList.length > 0}
         />;
 
       case 'ai_advisor':

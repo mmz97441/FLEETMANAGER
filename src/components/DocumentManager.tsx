@@ -24,6 +24,7 @@ interface DocumentManagerProps {
   onDeleteDocument: (id: string) => Promise<void>;
   onAcknowledge: (ack: DocumentAcknowledgment) => Promise<void>;
   viewMode?: 'admin' | 'employee'; // Mode d'affichage : admin (gestion) ou employee (lecture seule)
+  autoOpenPendingSignature?: boolean; // true = ouvre d'office le 1er doc en attente et empêche de fermer sans lire+signer
 }
 
 // Helper pour normaliser les rôles (gardé pour le filtrage des documents par rôle cible)
@@ -43,7 +44,7 @@ const normalizeRole = (role: string | UserRole): UserRole => {
 const DocumentManager: React.FC<DocumentManagerProps> = ({
   documents, acknowledgments, users, currentUser,
   onAddDocument, onUpdateDocument, onDeleteDocument, onAcknowledge,
-  viewMode = 'admin'
+  viewMode = 'admin', autoOpenPendingSignature = false
 }) => {
   // === PERMISSIONS ===
   const { hasPermission } = usePermissions();
@@ -137,6 +138,21 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
       return false;
     });
   }, [myDocuments, acknowledgments, currentUser.id]);
+
+  // Mode FORCÉ (arrivée via le verrou documents) : ouvre d'office le 1er document
+  // en attente pour obliger à le lire + signer immédiatement.
+  React.useEffect(() => {
+    if (!autoOpenPendingSignature) return;
+    if (isViewModalOpen || isSignModalOpen) return;
+    const first = pendingDocuments[0];
+    if (first) {
+      setSelectedDocument(first);
+      setReadStartTime(Date.now());
+      setHasReadDocument(false);
+      setIsViewModalOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpenPendingSignature, pendingDocuments]);
 
   // Stats pour un document
   const getDocumentStats = (doc: CompanyDocument) => {
@@ -754,7 +770,11 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
       {/* MODAL LECTURE + SIGNATURE - RESPONSIVE */}
       <Modal
         isOpen={isViewModalOpen && !!selectedDocument}
-        onClose={() => setIsViewModalOpen(false)}
+        onClose={() => {
+          // Mode forcé : on ne peut PAS fermer tant que le document en attente n'est pas lu+signé
+          if (autoOpenPendingSignature && selectedDocument && pendingDocuments.some(d => d.id === selectedDocument.id)) return;
+          setIsViewModalOpen(false);
+        }}
         title={selectedDocument?.title || ''}
         subtitle={selectedDocument ? `Publié le ${new Date(selectedDocument.createdAt).toLocaleDateString()}` : ''}
         size="2xl"
