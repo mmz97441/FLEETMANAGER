@@ -287,8 +287,11 @@ service cloud.firestore {
     // Modification/suppression : interdite (immuable)
     match /documentAcknowledgments/{ackId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated()
-        && request.resource.data.userId == request.auth.uid;
+      // Un utilisateur interne enregistre sa propre lecture/signature. La stricte
+      // égalité userId == auth.uid échouait pour les comptes dont l'id de profil
+      // diffère de l'uid d'authentification (→ « je signe mais ça revient »).
+      allow create: if isInternalUser()
+        || (isAuthenticated() && request.resource.data.userId == request.auth.uid);
       allow update, delete: if false;
     }
 
