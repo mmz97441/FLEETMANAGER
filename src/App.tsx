@@ -1214,7 +1214,7 @@ const App: React.FC = () => {
               </button>
               <div className="flex flex-col items-center">
                   <span className="font-bold text-lg text-slate-800">FleetGenius</span>
-                  <span className="text-[10px] font-bold text-brand-600 uppercase tracking-wide">{currentUser.role}</span>
+                  <span className="text-[10px] font-bold text-brand-600 uppercase tracking-wide">{currentUser.role} · v{__APP_VERSION__}</span>
               </div>
               <div className="flex items-center gap-2">
                 {canViewAs && <ViewAsSwitcher currentUser={currentUser} users={users} quotes={quotes} />}
@@ -1236,7 +1236,8 @@ const App: React.FC = () => {
               >
                   <Menu size={20} />
               </button>
-              <div className="flex items-center gap-2 pr-2">
+              <div className="flex items-center gap-3 pr-2">
+                <span className="text-[11px] font-medium text-slate-400 select-none">v{__APP_VERSION__}</span>
                 {canViewAs && <ViewAsSwitcher currentUser={currentUser} users={users} quotes={quotes} />}
                 <NotificationCenter currentUser={currentUser} onNavigate={setCurrentView} />
               </div>
