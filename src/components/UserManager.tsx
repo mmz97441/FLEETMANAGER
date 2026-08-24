@@ -1093,6 +1093,16 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
                                         <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 text-indigo-400" size={18} />
                                         <input required type="text" className="w-full pl-10 pr-4 py-2.5 border border-indigo-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-indigo-900 font-bold bg-white" placeholder="Entreprise SAS" value={formData.companyName} onChange={e => setFormData({...formData, companyName: e.target.value})} />
                                     </div>
+                                    <label className="block text-xs font-bold text-indigo-700 uppercase mb-1 mt-3">Préfixe code colis</label>
+                                    <input
+                                        type="text"
+                                        maxLength={5}
+                                        className="w-full px-4 py-2.5 border border-indigo-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-indigo-900 font-bold bg-white uppercase"
+                                        placeholder="Ex. BR, AUT…"
+                                        value={formData.codePrefix || ''}
+                                        onChange={e => setFormData({...formData, codePrefix: e.target.value.toUpperCase().replace(/[^A-Z]/g, '')})}
+                                    />
+                                    <p className="text-[11px] text-indigo-500 mt-1">Préfixe des codes-barres DELIVREX de ce client (2 à 5 lettres). Sert à générer et reconnaître ses colis.</p>
                                 </div>
                             )}
 

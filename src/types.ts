@@ -67,6 +67,7 @@ export interface User {
   companyAddress?: string;   // Adresse complète (rue, CP, ville)
   companySiret?: string;     // N° SIRET
   companyPhone?: string;     // Téléphone société
+  codePrefix?: string;       // Préfixe des codes colis DELIVREX de ce client (ex. BR, AUT) — défini par le créateur du compte
   leaveBalance: number;
   driverLicenseScanDate?: string;
   isHeavyGoodsDriver?: boolean;

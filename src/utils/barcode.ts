@@ -18,29 +18,30 @@ export interface ScannableCodes {
 }
 
 /**
- * Tous les codes scannables d'un colis, normalisés en majuscules.
- * Inclut clientReference : sur les imports client (BOIRON), le N° de commande
- * imprimé sur le code-barres 1D du carton y est stocké — le chauffeur scanne
- * souvent CE code plutôt que le code DELIVREX.
+ * Codes servant à VALIDER un colis à la livraison : uniquement le code DELIVREX
+ * DISTINCT par colis (barcode / externalId / orderNumber, ex. BR1018).
+ * On N'INCLUT PAS clientReference (= le n° de commande du client, PARTAGÉ entre
+ * tous les colis d'une commande) : sinon scanner ce code partagé validerait
+ * plusieurs colis d'un coup et bloquerait le 2e en « déjà scanné ».
  */
 export const packageScanCodes = (pkg: ScannableCodes): string[] =>
-  [pkg.barcode, pkg.externalId, pkg.orderNumber, pkg.clientReference]
+  [pkg.barcode, pkg.externalId, pkg.orderNumber]
     .filter((c): c is string => !!c && c.trim() !== '')
     .map(c => c.trim().toUpperCase());
 
 /**
- * Extrait les identifiants candidats d'un code scanné. Les étiquettes 2D
- * (DataMatrix BOIRON) encodent parfois une chaîne enrichie : on en isole le
- * N° colis (BR1018), les suites de chiffres (N° commande 13937412) et la
- * version sans suffixe de rang ("13937412003" → "13937412").
+ * Extrait les identifiants candidats d'un code scanné. Le DataMatrix DELIVREX
+ * peut encoder une chaîne enrichie : on en isole le code colis à préfixe client
+ * (BR1018, AUT0451, AUR…) — préfixe GÉNÉRIQUE, non codé en dur — et les suites
+ * de chiffres (fallback), en retirant un éventuel rang final (…003).
  */
 export const extractScanTokens = (raw: string): string[] => {
   const s = raw.trim().toUpperCase();
   const tokens = new Set<string>();
   if (s) tokens.add(s);
-  const br = s.match(/BR\d{3,}/);          // N° colis client (externalId)
-  if (br) tokens.add(br[0]);
-  for (const d of s.match(/\d{6,}/g) || []) {   // suites de ≥6 chiffres (N° commande)
+  // Code colis DELIVREX : 2 à 5 lettres (préfixe client) suivies de chiffres.
+  for (const m of s.match(/[A-Z]{2,5}\d{2,}/g) || []) tokens.add(m);
+  for (const d of s.match(/\d{6,}/g) || []) {   // suites de ≥6 chiffres (fallback)
     tokens.add(d);
     if (d.length > 8) tokens.add(d.slice(0, d.length - 3)); // retire le rang (…003)
   }

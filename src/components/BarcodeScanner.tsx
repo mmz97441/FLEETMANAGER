@@ -22,6 +22,7 @@ interface BarcodeScannerProps {
   alreadyScanned?: string[];          // Codes déjà scannés (pour anti-doublon visuel)
   title?: string;
   progress?: { done: number; total: number }; // Compteur permanent pour le scan en rafale
+  hint?: string; // Message d'aide permanent (ex. quel code viser)
 }
 
 const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
@@ -30,7 +31,8 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   expectedBarcodes = [],
   alreadyScanned = [],
   title = 'Scanner un code-barres',
-  progress
+  progress,
+  hint
 }) => {
   const [isScanning, setIsScanning] = useState(false);
   const [manualMode, setManualMode] = useState(false);
@@ -244,6 +246,13 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Aide permanente : quel code viser */}
+      {!manualMode && hint && (
+        <div className="px-4 py-2 bg-amber-500/90 text-white text-xs font-semibold text-center">
+          {hint}
+        </div>
+      )}
 
       {/* Compteur permanent — scan en rafale (enlèvement de plusieurs colis) */}
       {!manualMode && progress && progress.total > 0 && (

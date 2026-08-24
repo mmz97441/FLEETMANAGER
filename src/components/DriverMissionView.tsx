@@ -2197,6 +2197,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
               expectedBarcodes={stopPackages.flatMap(p => packageScanCodes(p))}
               alreadyScanned={scannedBarcodes}
               title={`${isPickupStop ? 'Scan enlèvement' : 'Scan livraison'} — ${currentStop?.contactName || ''}`}
+              hint={isPickupStop ? undefined : 'Scannez le code DELIVREX — le petit carré (DataMatrix) en bas à gauche'}
               progress={stopPackages.length > 0 ? { done: deliveryScannedCount, total: stopPackages.length } : undefined}
             />
           </Suspense>
