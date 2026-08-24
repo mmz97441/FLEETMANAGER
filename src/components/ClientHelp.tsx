@@ -236,6 +236,14 @@ const FAQ_ITEMS: FaqItem[] = [
 // Ajoutez la nouvelle version en haut (la plus récente en premier).
 const VERSIONS: VersionNews[] = [
   {
+    version: 'v4.2',
+    date: 'Août 2026',
+    items: [
+      'Suivi live de vos livraisons : suivez en direct le livreur qui transporte vos colis (carte + progression, arrêt par arrêt).',
+      'Espace plus clair et plus rapide, avec des scans de livraison plus fiables (chaque colis validé individuellement).',
+    ],
+  },
+  {
     version: 'v4.1.1',
     date: 'Août 2026',
     items: [
