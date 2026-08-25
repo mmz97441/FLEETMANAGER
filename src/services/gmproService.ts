@@ -9,26 +9,8 @@
 
 import { Package, Hub, User, Vehicle, MissionStop, StopStatus } from '../types';
 import { optimizeToursCF, GMPROModel, GMPROResult } from './cloudFunctions';
-
-// ============================================================================
-// NORMALISATION D'ADRESSE (regroupement des colis par point de livraison)
-// ============================================================================
-
-// Normalise une adresse pour comparer deux libellés « à l'œil » identiques :
-// minuscules, accents retirés, ponctuation/espaces multiples réduits à 1 espace.
-// Identique à normAddr côté DriverMissionView, pour que dispatch et filet de
-// sécurité chauffeur regroupent EXACTEMENT de la même façon.
-const normAddr = (s?: string): string =>
-  (s || '')
-    .toLowerCase()
-    .normalize('NFD').replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim();
-
-// Clé de regroupement d'un colis par point de livraison : adresse + CP + ville,
-// toutes normalisées. JAMAIS le nom ni le n° de commande (cf. règle métier).
-const placeKey = (p: { address?: string; postalCode?: string; city?: string }): string =>
-  `${normAddr(p.address)}|${(p.postalCode || '').trim()}|${normAddr(p.city)}`;
+// Source de vérité UNIQUE du regroupement par point de livraison (cf. address.ts).
+import { placeKey } from '../utils/address';
 
 // ============================================================================
 // TYPES

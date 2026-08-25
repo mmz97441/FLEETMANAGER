@@ -31,6 +31,7 @@ import {
   PostalCodeMapping, User, UserRole
 } from '../types';
 import { extractScanTokens } from '../utils/barcode';
+import { placeKey } from '../utils/address';
 import { geocodeAddress, getGoogleMapsApiKey } from './gmproService';
 import { reportError } from './logService';
 
@@ -1042,7 +1043,7 @@ export const transferPackagesToDriver = async (input: RoadTransferInput): Promis
     let maxSeq = m.stops.reduce((mx, s) => Math.max(mx, s.sequence), 0);
     const byAddress = new Map<string, Package[]>();
     for (const p of toAdd) {
-      const key = `${p.address.toLowerCase().trim()}|${p.postalCode}|${p.city.toLowerCase().trim()}`;
+      const key = placeKey(p);
       if (!byAddress.has(key)) byAddress.set(key, []);
       byAddress.get(key)!.push(p);
     }

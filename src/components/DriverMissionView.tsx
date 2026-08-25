@@ -39,6 +39,7 @@ import ClaimScanModal from './ClaimScanModal';
 import ScanGateDialog from './ScanGateDialog';
 import StopReorderModal from './StopReorderModal';
 import { packageMatchesCode, packageScanCodes, packageDisplayCode } from '../utils/barcode';
+import { sameDeliveryPoint } from '../utils/address';
 const BarcodeScanner = lazy(() => import('./BarcodeScanner'));
 import {
   Truck, Package as PackageIcon, MapPin, Clock, Phone,
@@ -54,25 +55,9 @@ import {
 // dans l'arrêt courant, pour éviter que le chauffeur reparte en oubliant un colis.
 // ============================================================================
 
-const normAddr = (s?: string): string =>
-  (s || '')
-    .toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim();
-
-const normPhone = (s?: string): string => (s || '').replace(/\D/g, '');
-
-/** Un colis et un arrêt sont-ils au MÊME point de livraison ? (adresse OU tél+CP) */
-const samePlace = (
-  a: { address?: string; postalCode?: string; city?: string; contactPhone?: string },
-  b: { address?: string; postalCode?: string; city?: string; contactPhone?: string }
-): boolean => {
-  const key = (x: typeof a) => `${normAddr(x.address)}|${(x.postalCode || '').trim()}|${normAddr(x.city)}`;
-  if (key(a) === key(b)) return true;
-  const pa = normPhone(a.contactPhone), pb = normPhone(b.contactPhone);
-  return pa.length >= 6 && pa === pb && (a.postalCode || '').trim() === (b.postalCode || '').trim();
-};
+/** Un colis et un arrêt sont-ils au MÊME point de livraison ? (adresse OU tél+CP)
+ *  Règle centralisée dans utils/address.ts (source de vérité unique). */
+const samePlace = sameDeliveryPoint;
 
 // ============================================================================
 // TYPES

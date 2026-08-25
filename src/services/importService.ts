@@ -16,6 +16,8 @@ import {
   addImportBatch,
   getHubByZone
 } from './missionService';
+// Source de vérité UNIQUE du regroupement par point de livraison (cf. address.ts).
+import { placeKey, phoneSignal, sameDeliveryPoint } from '../utils/address';
 
 /**
  * Génère un suffixe de barcode collision-résistant (10 chars base36 = ~3.7e15 combinaisons).
@@ -405,9 +407,9 @@ export const groupPackagesByAddress = (
   const groups = new Map<string, Package[]>();
   
   for (const pkg of packages) {
-    // Clé = adresse normalisée
-    const key = `${pkg.address.toLowerCase().trim()}|${pkg.postalCode}|${pkg.city.toLowerCase().trim()}`;
-    
+    // Clé = adresse normalisée (source de vérité unique : utils/address.ts)
+    const key = placeKey(pkg);
+
     if (!groups.has(key)) {
       groups.set(key, []);
     }
@@ -598,30 +600,9 @@ export const parseExcelForReview = async (file: File): Promise<ReviewResult> => 
 // Renfort : même téléphone + même CP = même client (rattrape les fautes de
 // frappe dans l'adresse).
 
-const normalizeAddr = (s?: string): string =>
-  (s || '')
-    .toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // accents
-    .replace(/[^a-z0-9]+/g, ' ')                      // ponctuation → espace
-    .trim();
-
-const normalizePhone = (s?: string): string => (s || '').replace(/\D/g, '');
-
-const addrKey = (r: ReviewRow): string =>
-  `${normalizeAddr(r.address)}|${(r.postalCode || '').trim()}|${normalizeAddr(r.city)}`;
-
-/** Téléphone exploitable comme signal (≥ 6 chiffres), sinon vide. */
-const phoneSignal = (r: ReviewRow): string => {
-  const p = normalizePhone(r.contactPhone);
-  return p.length >= 6 ? p : '';
-};
-
-/** Deux lignes = même point de livraison ? (adresse identique OU même tél+CP) */
-const sameDeliveryPoint = (a: ReviewRow, b: ReviewRow): boolean => {
-  if (addrKey(a) === addrKey(b)) return true;
-  const pa = phoneSignal(a), pb = phoneSignal(b);
-  return !!pa && pa === pb && (a.postalCode || '').trim() === (b.postalCode || '').trim();
-};
+// normAddr / normPhone / placeKey / phoneSignal / sameDeliveryPoint sont
+// désormais importés depuis utils/address.ts (source de vérité unique).
+// addrKey (adresse+CP+ville normalisés) == placeKey.
 
 const annotateMultiColisAndDuplicates = (reviewRows: ReviewRow[]): void => {
   const active = reviewRows.filter(r => r._status !== 'deleted');
@@ -635,7 +616,7 @@ const annotateMultiColisAndDuplicates = (reviewRows: ReviewRow[]): void => {
   const byAddr = new Map<string, number>();
   const byPhone = new Map<string, number>();
   active.forEach((r, i) => {
-    const ak = addrKey(r);
+    const ak = placeKey(r);
     if (byAddr.has(ak)) union(i, byAddr.get(ak)!); else byAddr.set(ak, i);
     const pk = phoneSignal(r);
     if (pk) {
