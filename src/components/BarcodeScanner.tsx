@@ -102,7 +102,15 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
     if (manualMode) return;
 
     let mounted = true;
-    const startScanner = async () => {
+    // Démarrage de la caméra avec RETRY. Au 2ᵉ/3ᵉ scan d'affilée, le flux vidéo
+    // de l'ouverture précédente n'est parfois pas encore libéré par l'OS →
+    // start() échoue ("NotReadableError / Could not start video source"). Avant,
+    // on basculait aussitôt en saisie manuelle (caméra « qui ne s'ouvre pas »).
+    // Désormais on retente 2 fois à 700 ms d'intervalle, ce qui laisse le temps
+    // au téléphone de rendre la caméra. Seul un refus de permission bascule
+    // directement en manuel (inutile de réessayer).
+    const attemptStart = async (attempt: number): Promise<void> => {
+      if (!mounted) return;
       try {
         // Formats à décoder. Les étiquettes rencontrées sont variées :
         // - clients (BOIRON) : codes 2D DataMatrix + QR imprimés sur le carton
@@ -142,22 +150,42 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
           () => {} // Ignore erreurs de scan continu
         );
 
-        if (mounted) {
-          setIsScanning(true);
-          // Détecter la disponibilité de la torche (Android surtout ; iOS ne la
-          // supporte pas via le web, le bouton reste alors masqué)
-          try {
-            const torch = scanner.getRunningTrackCameraCapabilities().torchFeature();
-            if (torch.isSupported()) setTorchAvailable(true);
-          } catch {}
+        if (!mounted) {
+          // Composant démonté pendant le start : on relâche la caméra proprement.
+          try { await scanner.stop(); } catch {}
+          try { scanner.clear(); } catch {}
+          scannerRef.current = null;
+          return;
         }
+
+        setError(null);
+        setIsScanning(true);
+        // Détecter la disponibilité de la torche (Android surtout ; iOS ne la
+        // supporte pas via le web, le bouton reste alors masqué)
+        try {
+          const torch = scanner.getRunningTrackCameraCapabilities().torchFeature();
+          if (torch.isSupported()) setTorchAvailable(true);
+        } catch {}
       } catch (err: any) {
-        console.error('Scanner error:', err);
+        console.error(`Scanner error (essai ${attempt + 1}):`, err);
+        // Libérer l'instance ratée avant tout nouvel essai.
+        try { await scannerRef.current?.stop(); } catch {}
+        try { scannerRef.current?.clear(); } catch {}
+        scannerRef.current = null;
+
+        const msg = String(err?.message || err || '');
+        const permissionDenied = msg.includes('NotAllowed') || msg.includes('Permission');
+
+        if (!permissionDenied && attempt < 2 && mounted) {
+          await new Promise((r) => setTimeout(r, 700));
+          return attemptStart(attempt + 1);
+        }
+
         if (mounted) {
           setError(
-            err?.message?.includes('NotAllowed') || err?.message?.includes('Permission')
+            permissionDenied
               ? 'Accès caméra refusé. Autorisez la caméra ou utilisez la saisie manuelle.'
-              : 'Impossible de démarrer la caméra. Utilisez la saisie manuelle.'
+              : 'Impossible de démarrer la caméra. Réessayez ou utilisez la saisie manuelle.'
           );
           setManualMode(true);
         }
@@ -165,7 +193,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
     };
 
     // Petit délai pour laisser le DOM se monter
-    const timer = setTimeout(startScanner, 300);
+    const timer = setTimeout(() => { void attemptStart(0); }, 300);
 
     return () => {
       mounted = false;

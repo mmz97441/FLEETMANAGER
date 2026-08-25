@@ -11,6 +11,26 @@ import { Package, Hub, User, Vehicle, MissionStop, StopStatus } from '../types';
 import { optimizeToursCF, GMPROModel, GMPROResult } from './cloudFunctions';
 
 // ============================================================================
+// NORMALISATION D'ADRESSE (regroupement des colis par point de livraison)
+// ============================================================================
+
+// Normalise une adresse pour comparer deux libellés « à l'œil » identiques :
+// minuscules, accents retirés, ponctuation/espaces multiples réduits à 1 espace.
+// Identique à normAddr côté DriverMissionView, pour que dispatch et filet de
+// sécurité chauffeur regroupent EXACTEMENT de la même façon.
+const normAddr = (s?: string): string =>
+  (s || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+
+// Clé de regroupement d'un colis par point de livraison : adresse + CP + ville,
+// toutes normalisées. JAMAIS le nom ni le n° de commande (cf. règle métier).
+const placeKey = (p: { address?: string; postalCode?: string; city?: string }): string =>
+  `${normAddr(p.address)}|${(p.postalCode || '').trim()}|${normAddr(p.city)}`;
+
+// ============================================================================
 // TYPES
 // ============================================================================
 
@@ -85,7 +105,7 @@ const geocodePackages = async (
   // Dédupliquer par adresse
   const uniqueAddresses = new Map<string, Package>();
   for (const pkg of needsGeocoding) {
-    const key = `${pkg.address.toLowerCase().trim()}|${pkg.postalCode}|${pkg.city.toLowerCase().trim()}`;
+    const key = placeKey(pkg);
     if (!uniqueAddresses.has(key)) {
       uniqueAddresses.set(key, pkg);
     }
@@ -117,21 +137,20 @@ const groupPackagesByStop = (
   geocodedAddresses: Map<string, { lat: number; lng: number }>
 ): StopGroup[] => {
   const groups = new Map<string, Package[]>();
-  
+
   for (const pkg of packages) {
-    const key = `${pkg.address}|${pkg.postalCode}|${pkg.city}`;
+    const key = placeKey(pkg);
     if (!groups.has(key)) {
       groups.set(key, []);
     }
     groups.get(key)?.push(pkg);
   }
-  
+
   const stopGroups: StopGroup[] = [];
-  
+
   for (const [key, pkgs] of groups) {
     const firstPkg = pkgs[0];
-    const addressKey = `${firstPkg.address.toLowerCase().trim()}|${firstPkg.postalCode}|${firstPkg.city.toLowerCase().trim()}`;
-    const coords = geocodedAddresses.get(addressKey) || firstPkg.coordinates;
+    const coords = geocodedAddresses.get(key) || firstPkg.coordinates;
     
     stopGroups.push({
       key,
