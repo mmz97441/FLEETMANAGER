@@ -13,6 +13,7 @@ import { todayISO } from '../utils/date';
 import { findPackageByCode, claimPackagesForDelivery, createAndClaimPackage } from '../services/missionService';
 import { reportError } from '../services/logService';
 import { packageDisplayCode } from '../utils/barcode';
+import { getCurrentPosition } from '../utils/geo';
 import PackageTimeline from './PackageTimeline';
 
 interface QuickScanButtonProps {
@@ -51,9 +52,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
     try {
       let location: { lat: number; lng: number } | undefined;
       try {
-        location = await new Promise((resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }), reject, { timeout: 5000 });
-        });
+        location = await getCurrentPosition({ timeout: 5000 });
       } catch { /* optionnel */ }
       const client = clients.find(c => c.id === createForm.clientId);
       await createAndClaimPackage({
@@ -90,11 +89,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
     try {
       let location: { lat: number; lng: number } | undefined;
       try {
-        location = await new Promise((resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(
-            pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }), reject, { timeout: 5000 }
-          );
-        });
+        location = await getCurrentPosition({ timeout: 5000 });
       } catch { /* géoloc optionnelle */ }
       await claimPackagesForDelivery({
         packages: [result.pkg],

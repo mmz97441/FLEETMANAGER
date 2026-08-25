@@ -4,6 +4,7 @@ import Modal from './shared/Modal';
 import { QuoteRequest, QuoteStatus } from '../types';
 import { Package, MapPin, Search, CheckCircle, Clock, XCircle, Euro, Send, Filter, ArrowRight, User, Phone, Box, Calendar, AlertTriangle, FileText, ChevronRight, Calculator, StickyNote, Printer } from 'lucide-react';
 import ShippingLabel, { quoteToLabelData, ShippingLabelData } from './ShippingLabel';
+import { formatEuro, formatWeight } from '../utils/format';
 
 interface QuoteManagerProps {
   quotes: QuoteRequest[];
@@ -128,7 +129,7 @@ const QuoteManager: React.FC<QuoteManagerProps> = ({ quotes, onUpdateQuote }) =>
                             
                             <div className="flex justify-between items-end">
                                 <span className="text-xs text-slate-600 truncate max-w-[150px] bg-slate-100 px-2 py-1 rounded">{quote.goodsDescription}</span>
-                                {quote.priceOffer && <span className="font-bold text-slate-900 text-sm">{quote.priceOffer} €</span>}
+                                {quote.priceOffer && <span className="font-bold text-slate-900 text-sm">{formatEuro(quote.priceOffer)}</span>}
                             </div>
                         </div>
                     </div>
@@ -206,7 +207,7 @@ const QuoteManager: React.FC<QuoteManagerProps> = ({ quotes, onUpdateQuote }) =>
                                         <div className="grid grid-cols-2 gap-4">
                                             <div>
                                                 <span className="text-xs text-slate-500 block">Poids</span>
-                                                <span className="text-sm font-bold text-slate-900">{selectedQuote.weight ? `${selectedQuote.weight} kg` : '-'}</span>
+                                                <span className="text-sm font-bold text-slate-900">{formatWeight(selectedQuote.weight) || '-'}</span>
                                             </div>
                                             <div>
                                                 <span className="text-xs text-slate-500 block">Volume</span>
@@ -394,7 +395,7 @@ const QuoteManager: React.FC<QuoteManagerProps> = ({ quotes, onUpdateQuote }) =>
                         </div>
                         <h3 className="text-xl font-bold text-slate-900">Confirmer l'envoi ?</h3>
                         <p className="text-slate-600 mt-2 text-sm">
-                            Vous êtes sur le point d'envoyer une offre de <strong className="text-slate-900 text-lg">{Number(offerPrice).toLocaleString()} € HT</strong> à <span className="font-bold">{selectedQuote.clientName}</span>.
+                            Vous êtes sur le point d'envoyer une offre de <strong className="text-slate-900 text-lg">{formatEuro(Number(offerPrice))} HT</strong> à <span className="font-bold">{selectedQuote.clientName}</span>.
                         </p>
                     </div>
                     

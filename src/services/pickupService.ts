@@ -15,20 +15,34 @@ import { ref, uploadString, getDownloadURL } from 'firebase/storage';
 import { Package, PackageStatus } from '../types';
 import { compressImage } from './podService';
 import { reportError } from './logService';
+import { cleanUndefined } from '../utils/firestore';
+import { formatWeight } from '../utils/format';
+import JsBarcode from 'jsbarcode';
+
+/**
+ * Rend un code-barres Code128 en image data-URI (PNG), généré AU MOMENT de la
+ * création via le paquet jsbarcode local + un canvas. Avant, les étiquettes
+ * chargeaient jsbarcode depuis un CDN jsdelivr et généraient les codes au
+ * runtime → cassé hors-ligne et sous CSP stricte. Ici : aucune dépendance
+ * réseau, l'image est déjà dans le HTML.
+ */
+const barcodeDataUri = (code: string): string => {
+  if (typeof document === 'undefined' || !code) return '';
+  try {
+    const canvas = document.createElement('canvas');
+    JsBarcode(canvas, code, {
+      format: 'CODE128', width: 2, height: 45,
+      displayValue: true, fontSize: 12, font: 'monospace',
+      fontOptions: 'bold', margin: 2,
+    });
+    return canvas.toDataURL('image/png');
+  } catch {
+    return '';
+  }
+};
 
 const PICKUPS_COLLECTION = 'pickups';
 const PACKAGES_COLLECTION = 'packages';
-
-// Firestore rejette toute valeur `undefined`. On nettoie en profondeur avant
-// écriture (location/vehicleId absents = fréquent → sinon updateDoc plante).
-const stripUndefined = (obj: any): any => {
-  if (obj === undefined || obj === null) return null;
-  if (typeof obj !== 'object') return obj;
-  if (Array.isArray(obj)) return obj.map(stripUndefined);
-  const out: Record<string, any> = {};
-  for (const [k, v] of Object.entries(obj)) if (v !== undefined) out[k] = stripUndefined(v);
-  return out;
-};
 
 // ============================================================================
 // TYPES
@@ -134,7 +148,7 @@ export const finalizePickup = async (params: {
         }
 
         const pkg = pkgSnap.data() as Package;
-        const movements = [...(pkg.movements || []), stripUndefined({
+        const movements = [...(pkg.movements || []), cleanUndefined({
           timestamp,
           action: 'COLLECTED' as const,
           driverId,
@@ -145,7 +159,7 @@ export const finalizePickup = async (params: {
           notes: `Enlevé chez ${clientName}`
         })];
 
-        await updateDoc(pkgRef, stripUndefined({
+        await updateDoc(pkgRef, cleanUndefined({
           status: PackageStatus.COLLECTED,
           currentDriverId: driverId,
           currentVehicleId: vehicleId,
@@ -277,7 +291,7 @@ export const generateBatchLabelsHTML = (
         <span class="zone">${pkg.zone || ''}</span>
       </div>
       <div class="barcode-zone">
-        <svg id="bc-${pkg.id}"></svg>
+        <img class="barcode-img" src="${barcodeDataUri(pkg.barcode || pkg.orderNumber)}" alt="${pkg.barcode || pkg.orderNumber}" />
       </div>
       <div class="dest-zone">
         <div class="dest-label">DESTINATAIRE</div>
@@ -293,20 +307,14 @@ export const generateBatchLabelsHTML = (
       ${pkg.comment ? `<div class="comment">📝 ${pkg.comment}</div>` : ''}
       <div class="ref-zone">
         <span>Suivi: ${pkg.orderNumber}${pkg.clientReference ? ` · Réf: ${pkg.clientReference}` : ''}</span>
-        ${pkg.weight ? `<span>${pkg.weight} kg</span>` : ''}
+        ${pkg.weight ? `<span>${formatWeight(pkg.weight)}</span>` : ''}
       </div>
     </div>
   `).join('\n');
 
-  const barcodeIds = packages.map(pkg => ({
-    id: pkg.id,
-    code: pkg.barcode || pkg.orderNumber
-  }));
-
   return `<!DOCTYPE html>
 <html><head>
 <title>Étiquettes - ${packages.length} colis</title>
-<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"><\/script>
 <style>
   @page { size: ${cfg.page}; margin: 5mm; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -327,7 +335,7 @@ export const generateBatchLabelsHTML = (
   .company { font-size: 10pt; font-weight: bold; }
   .zone { font-size: 13pt; font-weight: bold; color: #333; background: #e0e0e0; padding: 1mm 3mm; border-radius: 3px; }
   .barcode-zone { text-align: center; padding: 3mm 0; border-bottom: 1px solid #ccc; }
-  .barcode-zone svg { width: 80mm; height: 18mm; }
+  .barcode-zone img { width: 80mm; height: 18mm; object-fit: contain; }
   .dest-zone { flex: 1; padding: 3mm 2mm; border-bottom: 1px solid #ccc; }
   .dest-label { font-size: 7pt; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 1mm; }
   .dest-name { font-size: 13pt; font-weight: bold; margin-bottom: 1mm; }
@@ -345,19 +353,8 @@ export const generateBatchLabelsHTML = (
 ${labels}
 </div>
 <script>
-  const barcodes = ${JSON.stringify(barcodeIds)};
-  barcodes.forEach(bc => {
-    const el = document.getElementById('bc-' + bc.id);
-    if (el) {
-      try {
-        JsBarcode(el, bc.code, {
-          format: 'CODE128', width: 2, height: 45,
-          displayValue: true, fontSize: 12, font: 'monospace',
-          fontOptions: 'bold', margin: 2
-        });
-      } catch(e) { /* silenced */ }
-    }
-  });
+  // Les codes-barres sont déjà des images data-URI (générées à la création,
+  // sans CDN). Ici on ne fait plus que la pagination + l'impression.
   // Regrouper en pages selon le format
   const PER_PAGE = ${cfg.perPage};
   const labels = document.querySelectorAll('.label');

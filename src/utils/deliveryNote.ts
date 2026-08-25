@@ -17,6 +17,7 @@ import { Package, PackageStatus, ProofOfDelivery, DeliveryLocation } from '../ty
 // Source de vérité UNIQUE du « même point de livraison ? » (adresse OU tél+CP).
 import { sameDeliveryPoint } from './address';
 import { localDatePart } from './date';
+import { formatWeight } from './format';
 
 // ---------------------------------------------------------------------------
 // Regroupement par point de livraison : on délègue à sameDeliveryPoint
@@ -110,7 +111,7 @@ export const buildDeliveryNoteHTML = (
         <td class="mono">${esc(p.externalId || p.barcode || p.orderNumber)}</td>
         <td class="mono">${esc(p.orderNumber)}</td>
         <td>${p.comment ? esc(p.comment) : '<span style="color:#94a3b8">—</span>'}</td>
-        <td style="text-align:right">${p.weight ? esc(p.weight) + ' kg' : '—'}</td>
+        <td style="text-align:right">${formatWeight(p.weight) || '—'}</td>
         <td style="color:${st.color};font-weight:600;text-align:center">${esc(st.label)}</td>
       </tr>`;
   }).join('');
@@ -317,7 +318,7 @@ export const buildDeliveryNoteHTML = (
       <table class="pkgs">
         <thead><tr><th>#</th><th>N° Colis</th><th>N° Commande</th><th>Remarque client</th><th style="text-align:right">Poids</th><th style="text-align:center">Statut</th></tr></thead>
         <tbody>${rowsHtml}</tbody>
-        <tfoot><tr><td colspan="4">TOTAL</td><td style="text-align:right">${totalWeight ? totalWeight.toFixed(1) + ' kg' : '—'}</td><td style="text-align:center">${pkgs.length} colis</td></tr></tfoot>
+        <tfoot><tr><td colspan="4">TOTAL</td><td style="text-align:right">${formatWeight(totalWeight) || '—'}</td><td style="text-align:center">${pkgs.length} colis</td></tr></tfoot>
       </table>
       </div>
     </div>

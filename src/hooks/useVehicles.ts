@@ -4,7 +4,7 @@
  */
 
 import { useMemo, useState, useCallback } from 'react';
-import { Vehicle, User, Issue, MaintenanceLog, VehicleStatus, UserRole, IssueStatus } from '../types';
+import { Vehicle, User, Issue, MaintenanceLog, MaintenanceStatus, VehicleStatus, UserRole, IssueStatus } from '../types';
 import { usePermissions, Permission } from '../usePermissions';
 import { normalizeRole, roleKey } from '../utils/role';
 
@@ -55,7 +55,7 @@ export const getEffectiveStatus = (
   
   // 1. Maintenance active (Logs "Pending") ?
   const hasActiveMaintenance = maintenanceLogs.some(
-    m => m.vehicleId === vehicle.id && m.status === 'Pending'
+    m => m.vehicleId === vehicle.id && m.status === MaintenanceStatus.PENDING
   );
   if (hasActiveMaintenance) {
     return { status: VehicleStatus.MAINTENANCE, isRepairing: true };

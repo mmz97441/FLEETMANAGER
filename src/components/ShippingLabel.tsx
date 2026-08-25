@@ -17,6 +17,7 @@ import React, { useRef, useEffect, useCallback } from 'react';
 import JsBarcode from 'jsbarcode';
 import { QuoteRequest, Zone, ZONE_COLORS } from '../types';
 import { Printer, X } from 'lucide-react';
+import { formatWeight } from '../utils/format';
 
 export interface ShippingLabelData {
   // Identifiants
@@ -413,7 +414,7 @@ const ShippingLabel: React.FC<ShippingLabelProps> = ({
               <div className="flex border-b border-black">
                 <div className="flex-1 px-2 py-1.5 border-r border-black text-center">
                   <div style={{ fontSize: '6pt', fontWeight: 'bold', textTransform: 'uppercase', color: '#999' }}>Poids</div>
-                  <div style={{ fontSize: '10pt', fontWeight: 'bold' }}>{data.weight ? `${data.weight} kg` : '—'}</div>
+                  <div style={{ fontSize: '10pt', fontWeight: 'bold' }}>{formatWeight(data.weight) || '—'}</div>
                 </div>
                 <div className="flex-1 px-2 py-1.5 border-r border-black text-center">
                   <div style={{ fontSize: '6pt', fontWeight: 'bold', textTransform: 'uppercase', color: '#999' }}>Volume</div>

@@ -15,6 +15,7 @@ import {
 } from '../types';
 import { optimizeMultiVehicle, isGMPROConfigured, getGoogleMapsApiKey, TourResult, OptimizationResult, DriverVehicle } from '../services/gmproService';
 import { todayISO } from '../utils/date';
+import { formatDistance, formatDuration } from '../utils/format';
 import { addMission, updatePackageStatus } from '../services/missionService';
 import { notifyMissionAssigned } from '../services/notificationService';
 import { logActivity } from '../services/activityLogService';
@@ -807,7 +808,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
                   <div className="grid grid-cols-3 gap-3 text-sm">
                     <div className="text-center">
                       <p className="text-slate-500">Distance totale</p>
-                      <p className="font-bold text-slate-800">{optimResult.totalDistance} km</p>
+                      <p className="font-bold text-slate-800">{formatDistance(optimResult.totalDistance)}</p>
                     </div>
                     <div className="text-center">
                       <p className="text-slate-500">Durée totale</p>
@@ -882,8 +883,8 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
                           </p>
                         </div>
                         <div className="text-right shrink-0">
-                          <p className="text-sm font-bold text-slate-700">{tour.totalDistance} km</p>
-                          <p className="text-xs text-slate-500">~{tour.estimatedDuration} min</p>
+                          <p className="text-sm font-bold text-slate-700">{formatDistance(tour.totalDistance)}</p>
+                          <p className="text-xs text-slate-500">~{formatDuration(tour.estimatedDuration)}</p>
                         </div>
                         {expandedTour === idx ? (
                           <ChevronUp size={16} className="text-slate-400" />

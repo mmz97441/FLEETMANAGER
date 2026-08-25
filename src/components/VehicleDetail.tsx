@@ -5,6 +5,7 @@
 import React, { useState, useMemo } from 'react';
 import { Vehicle, VehicleStatus, FuelLog, MaintenanceLog } from '../types';
 import { todayISO } from '../utils/date';
+import { formatEuro } from '../utils/format';
 import { Truck, Calendar, Gauge, AlertTriangle, ChevronLeft, Wrench, Droplet, ArrowRight, Download, Info } from 'lucide-react';
 import Modal from './shared/Modal';
 
@@ -126,7 +127,7 @@ const VehicleDetail: React.FC<VehicleDetailProps> = ({ vehicle, logs = [], maint
                       <span className="text-xs font-medium bg-white px-2 py-1 rounded border border-slate-200 text-slate-600 flex items-center gap-1">
                         <Gauge size={12} /> {event.mileage.toLocaleString()} km
                       </span>
-                      <span className="text-xs font-bold text-slate-800">{event.cost.toFixed(2)} €</span>
+                      <span className="text-xs font-bold text-slate-800">{formatEuro(event.cost)}</span>
                     </div>
                   </div>
                 </div>
@@ -170,7 +171,7 @@ const VehicleDetail: React.FC<VehicleDetailProps> = ({ vehicle, logs = [], maint
                   </div>
                   <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
                     <span className="flex items-center gap-2 text-slate-600"><Info size={16}/> Coût Mensuel</span>
-                    <span className="font-bold text-slate-800">{vehicle.monthlyCost ? `${vehicle.monthlyCost} €` : '0 €'}</span>
+                    <span className="font-bold text-slate-800">{formatEuro(vehicle.monthlyCost || 0)}</span>
                   </div>
                 </div>
               </div>

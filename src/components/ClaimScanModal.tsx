@@ -11,6 +11,7 @@ import { Package, User, PackageStatus } from '../types';
 import { todayISO } from '../utils/date';
 import { findPackageByCode, claimPackagesForDelivery } from '../services/missionService';
 import { packageDisplayCode } from '../utils/barcode';
+import { getCurrentPosition } from '../utils/geo';
 
 const BarcodeScanner = lazy(() => import('./BarcodeScanner'));
 
@@ -92,12 +93,7 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
     try {
       let location: { lat: number; lng: number } | undefined;
       try {
-        location = await new Promise((resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(
-            pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-            reject, { timeout: 5000 }
-          );
-        });
+        location = await getCurrentPosition({ timeout: 5000 });
       } catch { /* géoloc optionnelle */ }
 
       const today = todayISO();

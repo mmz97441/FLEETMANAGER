@@ -205,6 +205,13 @@ export interface InvoiceLine {
   total: number;
 }
 
+// Statut d'un log de maintenance. Enum (valeurs = anciennes chaînes brutes, donc
+// rétrocompatible) pour éviter les fautes de frappe silencieuses côté code.
+export enum MaintenanceStatus {
+  PENDING = 'Pending',
+  COMPLETED = 'Completed'
+}
+
 export interface MaintenanceLog {
   id: string;
   vehicleId: string;
@@ -216,7 +223,7 @@ export interface MaintenanceLog {
   garageName?: string;
   provider?: string;
   invoiceNumber?: string;
-  status?: 'Pending' | 'Completed';
+  status?: MaintenanceStatus;
   lines?: InvoiceLine[];
   linkedIssueId?: string;      // Lien vers l'incident source
   invoiceUrl?: string;         // Photo de la facture

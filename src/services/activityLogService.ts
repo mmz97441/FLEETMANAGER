@@ -20,24 +20,10 @@ import {
   QueryConstraint
 } from 'firebase/firestore';
 import { ActivityLog, ActivityAction, ActivityCategory, User } from '../types';
+import { cleanUndefined } from '../utils/firestore';
 
 // Collection Firestore
 const LOGS_COLLECTION = 'activity_logs';
-
-// Helper pour nettoyer les données avant Firestore
-const cleanData = (obj: any): any => {
-  if (obj === undefined || obj === null) return null;
-  if (typeof obj !== 'object') return obj;
-  if (Array.isArray(obj)) return obj.map(cleanData);
-  
-  const cleaned: Record<string, any> = {};
-  for (const [key, value] of Object.entries(obj)) {
-    if (value !== undefined) {
-      cleaned[key] = cleanData(value);
-    }
-  }
-  return cleaned;
-};
 
 // Mapper action -> catégorie
 const getCategory = (action: ActivityAction): ActivityCategory => {
@@ -172,7 +158,7 @@ export const logActivity = async (
       createdAt: new Date().toISOString()
     };
     
-    await addDoc(collection(db, LOGS_COLLECTION), cleanData(logEntry));
+    await addDoc(collection(db, LOGS_COLLECTION), cleanUndefined(logEntry));
   } catch (error) {
     console.error('Erreur lors de l\'enregistrement du log:', error);
     // Ne pas faire échouer l'action principale si le log échoue

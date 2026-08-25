@@ -1,8 +1,9 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import Modal from './shared/Modal';
-import { MaintenanceLog, Vehicle, UserRole, InvoiceLine } from '../types';
+import { MaintenanceLog, MaintenanceStatus, Vehicle, UserRole, InvoiceLine } from '../types';
 import { todayISO } from '../utils/date';
+import { formatEuro } from '../utils/format';
 import { Wrench, Plus, Search, Calendar, CheckCircle2, Clock, Filter, X, Save, Car, Euro, BarChart3, List, AlertTriangle, ArrowRight, Trash2, FileText, Lock } from 'lucide-react';
 import ConfirmModal from './ConfirmModal';
 import { usePermissions, Permission } from '../usePermissions';
@@ -163,7 +164,7 @@ const MaintenanceManager: React.FC<MaintenanceManagerProps> = ({ logs, vehicles,
           garageName: newMaintenance.provider || 'Interne',
           provider: newMaintenance.provider,
           invoiceNumber: newMaintenance.invoiceNumber,
-          status: 'Pending',
+          status: MaintenanceStatus.PENDING,
           lines: invoiceLines
       };
 
@@ -397,10 +398,10 @@ const MaintenanceManager: React.FC<MaintenanceManagerProps> = ({ logs, vehicles,
                                 </td>
                                 <td className="px-6 py-4 text-slate-700 font-medium">{log.provider || log.garageName || '-'}</td>
                                 {showCosts && (
-                                    <td className="px-6 py-4 font-bold text-slate-900">{log.cost.toLocaleString()} €</td>
+                                    <td className="px-6 py-4 font-bold text-slate-900">{formatEuro(log.cost)}</td>
                                 )}
                                 <td className="px-6 py-4">
-                                    {log.status === 'Completed' ? (
+                                    {log.status === MaintenanceStatus.COMPLETED ? (
                                         <span className="flex items-center gap-1 text-green-700 text-xs font-bold uppercase">
                                             <CheckCircle2 size={14} /> Terminé
                                         </span>
@@ -574,7 +575,7 @@ const MaintenanceManager: React.FC<MaintenanceManagerProps> = ({ logs, vehicles,
                                                 </div>
                                                 <div className="col-span-2 text-right">
                                                     <label className="text-[10px] uppercase text-slate-500 font-bold">Total</label>
-                                                    <div className="font-bold text-slate-900 text-sm py-1">{line.total.toFixed(2)} €</div>
+                                                    <div className="font-bold text-slate-900 text-sm py-1">{formatEuro(line.total)}</div>
                                                 </div>
                                                 <div className="col-span-1 flex justify-center pb-1">
                                                     <button type="button" onClick={() => handleRemoveLine(line.id)} className="text-red-400 hover:text-red-600"><Trash2 size={16}/></button>

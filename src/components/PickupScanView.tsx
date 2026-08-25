@@ -20,6 +20,7 @@ import {
   Loader2, PenTool, Search, AlertTriangle, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { packageMatchesCode, packageDisplayCode } from '../utils/barcode';
+import { formatWeight } from '../utils/format';
 import ScanGateDialog from './ScanGateDialog';
 
 interface PickupPackage {
@@ -230,7 +231,7 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
 
                     {/* Poids */}
                     {pkg.weight && (
-                      <span className="text-[10px] text-slate-400 flex-shrink-0">{pkg.weight} kg</span>
+                      <span className="text-[10px] text-slate-400 flex-shrink-0">{formatWeight(pkg.weight)}</span>
                     )}
                   </div>
                 );

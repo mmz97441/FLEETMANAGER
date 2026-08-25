@@ -11,6 +11,8 @@ import { Package, Hub, User, Vehicle, MissionStop, StopStatus } from '../types';
 import { optimizeToursCF, GMPROModel, GMPROResult } from './cloudFunctions';
 // Source de vérité UNIQUE du regroupement par point de livraison (cf. address.ts).
 import { placeKey } from '../utils/address';
+// Source de vérité UNIQUE des distances (cf. geo.ts).
+import { haversineKm } from '../utils/geo';
 
 // ============================================================================
 // TYPES
@@ -523,20 +525,6 @@ const createFallbackOptimization = (
 // UTILITAIRES
 // ============================================================================
 
-const haversineDistance = (
-  a: { lat: number; lng: number },
-  b: { lat: number; lng: number }
-): number => {
-  const R = 6371;
-  const dLat = (b.lat - a.lat) * Math.PI / 180;
-  const dLng = (b.lng - a.lng) * Math.PI / 180;
-  const sinLat = Math.sin(dLat / 2);
-  const sinLng = Math.sin(dLng / 2);
-  const h = sinLat * sinLat +
-    Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * sinLng * sinLng;
-  return 2 * R * Math.asin(Math.sqrt(h));
-};
-
 const estimateDistanceForStops = (
   stops: MissionStop[],
   hubCoords: { lat: number; lng: number }
@@ -552,7 +540,7 @@ const estimateDistanceForStops = (
   if (points.length >= 2) {
     let total = 0;
     for (let i = 1; i < points.length; i++) {
-      total += haversineDistance(points[i - 1], points[i]);
+      total += haversineKm(points[i - 1], points[i]);
     }
     return Math.round(total * 1.4 * 10) / 10;
   }

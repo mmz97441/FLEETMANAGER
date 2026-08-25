@@ -14,6 +14,7 @@ import {
 import { Package, Mission, User, TransferReason, PackageStatus } from '../types';
 import { findDispatchedPackageByCode, transferPackagesToDriver } from '../services/missionService';
 import { packageDisplayCode } from '../utils/barcode';
+import { getCurrentPosition } from '../utils/geo';
 
 const BarcodeScanner = lazy(() => import('./BarcodeScanner'));
 
@@ -92,13 +93,7 @@ const TransferReceiveModal: React.FC<TransferReceiveModalProps> = ({
     try {
       let location: { lat: number; lng: number } | undefined;
       try {
-        location = await new Promise((resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(
-            pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-            reject,
-            { timeout: 5000 }
-          );
-        });
+        location = await getCurrentPosition({ timeout: 5000 });
       } catch { /* géoloc indisponible : le transfert reste valide */ }
 
       const count = await transferPackagesToDriver({

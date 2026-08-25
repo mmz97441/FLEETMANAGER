@@ -18,6 +18,7 @@ import {
   PieChart, Pie, Cell, LineChart, Line
 } from 'recharts';
 import { localDatePart } from '../utils/date';
+import { formatDistance } from '../utils/format';
 import {
   TrendingUp, Package as PackageIcon, Truck,
   XCircle, Clock, MapPin, Users, AlertTriangle,
@@ -648,7 +649,7 @@ const MissionKPIs: React.FC<MissionKPIsProps> = ({
                         />
                       </div>
                       <p className="text-[10px] text-slate-400 mt-0.5">
-                        {d.delivered} livrés • {d.failed} échecs • {d.missions} mission{d.missions > 1 ? 's' : ''} • {d.distance} km
+                        {d.delivered} livrés • {d.failed} échecs • {d.missions} mission{d.missions > 1 ? 's' : ''} • {formatDistance(d.distance)}
                       </p>
                     </div>
                   </div>

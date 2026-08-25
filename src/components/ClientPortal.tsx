@@ -17,6 +17,7 @@ import ShippingLabel, { quoteToLabelData, ShippingLabelData } from './ShippingLa
 import PODViewer from './PODViewer';
 import { openDeliveryNote } from '../utils/deliveryNote';
 import { placeKey } from '../utils/address';
+import { formatEuro, formatWeight } from '../utils/format';
 import CreateShipmentModal from './CreateShipmentModal';
 import ImportShipmentsModal from './ImportShipmentsModal';
 import ImportRecipientsModal from './ImportRecipientsModal';
@@ -1311,7 +1312,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                     <p className="font-bold text-slate-800 text-sm">
                                         {quote.volume.toFixed(2)} m3 
                                         <span className="text-slate-300 mx-2">|</span>
-                                        {quote.weight ? `${quote.weight} kg` : '-'}
+                                        {formatWeight(quote.weight) || '-'}
                                     </p>
                                 </div>
                             </div>
@@ -1338,7 +1339,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                         </div>
                                         <div>
                                             <p className="text-xs text-blue-600 font-bold uppercase">Offre reçue</p>
-                                            <p className="text-2xl font-extrabold text-slate-900">{quote.priceOffer?.toLocaleString()} € <span className="text-sm font-medium text-slate-500">HT</span></p>
+                                            <p className="text-2xl font-extrabold text-slate-900">{formatEuro(quote.priceOffer ?? 0)} <span className="text-sm font-medium text-slate-500">HT</span></p>
                                         </div>
                                     </div>
                                     
@@ -1375,7 +1376,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                         <div>
                                             <p className="text-xs text-emerald-600 font-bold uppercase">Commande validée</p>
                                             <p className="text-sm text-slate-600">
-                                                {quote.priceOffer?.toLocaleString()} € HT
+                                                {formatEuro(quote.priceOffer ?? 0)} HT
                                                 {quote.convertedToPackageId && (
                                                     <span className="ml-2 text-xs text-emerald-500">• Colis créé ✓</span>
                                                 )}

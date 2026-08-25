@@ -20,6 +20,7 @@ import {
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { Vehicle, FuelLog, MaintenanceLog, Issue, VehicleStatus, User, UserRole, LeaveRequest, QuoteRequest, CompanyDocument, DocumentAcknowledgment, SavedAddress } from "../types";
 import { reportError } from "./logService";
+import { cleanUndefined } from "../utils/firestore";
 
 // --- HELPER UTILS ---
 const mapDbStatusToApp = (dbStatus: any): VehicleStatus => {
@@ -34,16 +35,11 @@ const mapDbStatusToApp = (dbStatus: any): VehicleStatus => {
   return VehicleStatus.ACTIVE; // Fallback sûr
 };
 
-// Fonction pour retirer les champs undefined (non supportés par Firestore updateDoc)
-const cleanFirestoreData = (data: any) => {
-    const cleaned: any = {};
-    Object.keys(data).forEach(key => {
-        if (data[key] !== undefined) {
-            cleaned[key] = data[key];
-        }
-    });
-    return cleaned;
-};
+// Retire les champs undefined (non supportés par Firestore). Délègue à la source
+// de vérité unique `cleanUndefined` (utils/firestore) : nettoyage RÉCURSIF, donc
+// plus robuste que l'ancienne variante shallow (les undefined imbriqués — dans
+// customDeadlines/logs/photos/location… — sont désormais retirés eux aussi).
+const cleanFirestoreData = <T>(data: T): T => cleanUndefined(data);
 
 // NB : un ancien helper `isStaffOrAdmin` classait le MÉCANICIEN comme admin —
 // en contradiction avec firestore.rules `isAdminRole()` (qui l'exclut). Il

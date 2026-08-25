@@ -12,12 +12,13 @@ import {
   AlertCircle, CheckSquare, XCircle, PlayCircle, Gauge, Fuel,
   Route, Calculator, Trophy, Award, Target, TrendingDown as TrendDown, Wallet
 } from 'lucide-react';
-import { Vehicle, VehicleStatus, FuelLog, MaintenanceLog, User, UserRole, ViewState, QuoteRequest, Issue, IssueStatus, LeaveRequest, LeaveStatus, Absence, AbsenceStatus, AbsenceType } from '../types';
+import { Vehicle, VehicleStatus, FuelLog, MaintenanceLog, MaintenanceStatus, User, UserRole, ViewState, QuoteRequest, Issue, IssueStatus, LeaveRequest, LeaveStatus, Absence, AbsenceStatus, AbsenceType } from '../types';
 import { MissionStatus } from '../types';
 import Modal from './shared/Modal';
 import { usePermissions, Permission } from '../usePermissions';
 import { useMissionStats } from '../hooks/useMissionStats';
 import { normalizeRole, roleKey } from '../utils/role';
+import { formatEuro, formatDistance } from '../utils/format';
 
 // ============================================================================
 // TYPES & INTERFACES
@@ -50,7 +51,7 @@ interface AlertItem {
 // ============================================================================
 
 const getEffectiveStatus = (v: Vehicle, allIssues: Issue[], allMaint: MaintenanceLog[]): VehicleStatus => {
-  const hasActiveMaintenance = allMaint.some(m => m.vehicleId === v.id && m.status === 'Pending');
+  const hasActiveMaintenance = allMaint.some(m => m.vehicleId === v.id && m.status === MaintenanceStatus.PENDING);
   if (hasActiveMaintenance) return VehicleStatus.MAINTENANCE;
   const activeIssue = allIssues.find(i => i.vehicleId === v.id && i.status !== IssueStatus.RESOLVED);
   if (activeIssue) {
@@ -1071,7 +1072,7 @@ const Dashboard: React.FC<DashboardProps> = ({
           />
           <KpiCard
             title="Coût maintenance"
-            value={`${commonKpis.maintCost.toLocaleString()} €`}
+            value={formatEuro(commonKpis.maintCost)}
             subtitle="ce mois"
             icon={<CreditCard size={24} />}
             color="purple"
@@ -1157,7 +1158,7 @@ const Dashboard: React.FC<DashboardProps> = ({
           />
           <KpiCard
             title="Carburant"
-            value={`${commonKpis.fuelCost.toLocaleString()} €`}
+            value={formatEuro(commonKpis.fuelCost)}
             subtitle="ce mois"
             icon={<Droplet size={24} />}
             color="blue"
@@ -1166,7 +1167,7 @@ const Dashboard: React.FC<DashboardProps> = ({
           />
           <KpiCard
             title="Maintenance"
-            value={`${commonKpis.maintCost.toLocaleString()} €`}
+            value={formatEuro(commonKpis.maintCost)}
             subtitle="ce mois"
             icon={<Wrench size={24} />}
             color="orange"
@@ -1393,7 +1394,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="font-bold text-red-600">{v.totalCost.toLocaleString('fr-FR')} €</div>
+                      <div className="font-bold text-red-600">{formatEuro(v.totalCost)}</div>
                       <div className="text-xs text-slate-500">
                         {v.costPerKm > 0 ? `${v.costPerKm.toFixed(2)} €/km` : '—'}
                       </div>
@@ -1441,7 +1442,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                     </div>
                     <div className="text-right">
                       <div className="font-bold text-green-600">{d.consumption?.toFixed(1)} L/100km</div>
-                      <div className="text-xs text-slate-500">{d.distance.toLocaleString('fr-FR')} km</div>
+                      <div className="text-xs text-slate-500">{formatDistance(d.distance)}</div>
                     </div>
                   </div>
                 ))
@@ -1537,7 +1538,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                 <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b'}} />
                 <Tooltip 
                   contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                  formatter={(value: number) => `${value.toLocaleString()} €`}
+                  formatter={(value: number) => formatEuro(value)}
                 />
                 <Bar dataKey="carburant" name="Carburant" fill="#0ea5e9" radius={[4, 4, 0, 0]} stackId="stack" />
                 <Bar dataKey="maintenance" name="Maintenance" fill="#f97316" radius={[4, 4, 0, 0]} stackId="stack" />
@@ -1921,7 +1922,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                 <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b'}} />
                 <Tooltip 
                   contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                  formatter={(value: number) => `${value.toLocaleString()} €`}
+                  formatter={(value: number) => formatEuro(value)}
                 />
                 <Bar dataKey="carburant" name="Carburant" fill="#0ea5e9" radius={[4, 4, 0, 0]} stackId="stack" />
                 <Bar dataKey="maintenance" name="Maintenance" fill="#f97316" radius={[4, 4, 0, 0]} stackId="stack" />
@@ -2000,7 +2001,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                       {log.volume} L
                     </td>
                     <td className="px-4 py-3 text-right text-sm font-bold text-slate-800">
-                      {log.cost.toFixed(2)} €
+                      {formatEuro(log.cost)}
                     </td>
                     <td className="px-4 py-3 text-center">
                       {isOverConsuming ? (

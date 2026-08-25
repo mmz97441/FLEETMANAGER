@@ -92,7 +92,7 @@ import {
 
 import { logActivity } from './services/activityLogService';
 import { convertQuoteToPackage } from './services/deliveryService';
-import { ActivityAction, ActivityCategory } from './types';
+import { ActivityAction, ActivityCategory, MaintenanceStatus } from './types';
 import { normalizeRole } from './utils/role';
 
 import {
@@ -346,7 +346,7 @@ const App: React.FC = () => {
     leaves: leaves.filter(l => l.status === LeaveStatus.PENDING).length,
     absences: absences.filter(a => a.status === AbsenceStatus.PENDING).length,
     issues: issues.filter(i => i.status === IssueStatus.NEW).length,
-    maintenance: maintenanceLogs.filter(m => m.status === 'Pending').length,
+    maintenance: maintenanceLogs.filter(m => m.status === MaintenanceStatus.PENDING).length,
     quotes: quotes.filter(q => q.status === QuoteStatus.REQUESTED).length,
   }), [leaves, absences, issues, maintenanceLogs, quotes]);
 

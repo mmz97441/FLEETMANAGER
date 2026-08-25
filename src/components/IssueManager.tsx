@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { Issue, Vehicle, User, IssueStatus, UserRole, MaintenanceLog, InvoiceLine, IssueLog, VehicleStatus } from '../types';
+import { Issue, Vehicle, User, IssueStatus, UserRole, MaintenanceLog, MaintenanceStatus, InvoiceLine, IssueLog, VehicleStatus } from '../types';
 import { 
   AlertCircle, Plus, AlertTriangle, CheckCircle, Clock, Filter, Calendar, X, Wrench, 
   Save, MessageSquare, ShieldAlert, User as UserIcon, ArrowUpDown, Receipt, Euro, 
@@ -15,7 +15,8 @@ import { updateIssueInFirestore, uploadImageToStorage } from '../services/firest
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
-import { 
+import { formatEuro } from '../utils/format';
+import {
   sendIncidentCreatedEmail, 
   sendIncidentResponseEmail, 
   sendIncidentClosedEmail,
@@ -538,8 +539,8 @@ const IssueManager: React.FC<IssueManagerProps> = ({
           mileageAtService: 0, 
           garageName: closeForm.provider, 
           provider: closeForm.provider, 
-          invoiceNumber: closeForm.invoiceNumber, 
-          status: 'Completed',
+          invoiceNumber: closeForm.invoiceNumber,
+          status: MaintenanceStatus.COMPLETED,
           completedDate: new Date().toISOString(),
           lines: invoiceLines,
           linkedIssueId: selectedIssue.id,
@@ -1366,7 +1367,7 @@ const IssueManager: React.FC<IssueManagerProps> = ({
                           onChange={e => updateInvoiceLine(idx, 'unitPrice', Number(e.target.value))}
                           className="w-20 px-2 py-1.5 border border-slate-200 rounded-lg text-sm text-right"
                         />
-                        <span className="w-24 text-right font-bold text-sm text-slate-700">{line.total.toFixed(2)} €</span>
+                        <span className="w-24 text-right font-bold text-sm text-slate-700">{formatEuro(line.total)}</span>
                         <button 
                           onClick={() => removeInvoiceLine(idx)} 
                           className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
@@ -1384,7 +1385,7 @@ const IssueManager: React.FC<IssueManagerProps> = ({
                     <Euro size={18} /> TOTAL
                   </span>
                   <span className="text-2xl font-extrabold text-green-700">
-                    {invoiceLines.reduce((acc, l) => acc + l.total, 0).toFixed(2)} €
+                    {formatEuro(invoiceLines.reduce((acc, l) => acc + l.total, 0))}
                   </span>
                 </div>
               </div>

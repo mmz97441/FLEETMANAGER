@@ -13,6 +13,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { MapPin, Loader2, RefreshCw } from 'lucide-react';
 import { User } from '../types';
+import { getCurrentPosition } from '../utils/geo';
 
 type GpsState = 'checking' | 'ok' | 'need_permission' | 'denied' | 'unavailable';
 
@@ -32,14 +33,12 @@ const DriverGpsGate: React.FC<DriverGpsGateProps> = ({ currentUser }) => {
   const tryGetPosition = useCallback(() => {
     if (!('geolocation' in navigator)) { setState('unavailable'); return; }
     setState('checking');
-    navigator.geolocation.getCurrentPosition(
-      () => { passedRef.current = true; setState('ok'); },
-      (err) => {
-        if (err.code === err.PERMISSION_DENIED) setState('denied');
+    getCurrentPosition({ enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 })
+      .then(() => { passedRef.current = true; setState('ok'); })
+      .catch((err: any) => {
+        if (err && err.code === err.PERMISSION_DENIED) setState('denied');
         else setState('unavailable'); // position indispo / timeout → GPS OS coupé ou pas de signal
-      },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
-    );
+      });
   }, []);
 
   const check = useCallback(() => {

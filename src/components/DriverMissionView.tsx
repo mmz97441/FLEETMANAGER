@@ -29,7 +29,8 @@ import {
   optimizeDriverMission,
   addManualStopToMission,
   updateMissionStatus,
-  updatePackageStatus
+  updatePackageStatus,
+  recomputeMissionCounters
 } from '../services/missionService';
 import { uploadAndCreatePOD, uploadFailurePOD, UploadProgress } from '../services/podService';
 import { finalizePickup } from '../services/pickupService';
@@ -42,6 +43,8 @@ import StopReorderModal from './StopReorderModal';
 import { packageMatchesCode, packageScanCodes, packageDisplayCode } from '../utils/barcode';
 import { sameDeliveryPoint } from '../utils/address';
 import { getTourProgress } from '../utils/missionProgress';
+import { getCurrentPosition } from '../utils/geo';
+import { formatDistance, formatDuration } from '../utils/format';
 const BarcodeScanner = lazy(() => import('./BarcodeScanner'));
 import {
   Truck, Package as PackageIcon, MapPin, Clock, Phone,
@@ -435,19 +438,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   };
 
   // === GPS ===
-  const getCurrentPosition = (): Promise<{ lat: number; lng: number }> => {
-    return new Promise((resolve, reject) => {
-      if (!navigator.geolocation) {
-        reject(new Error('GPS non supporté'));
-        return;
-      }
-      navigator.geolocation.getCurrentPosition(
-        (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-        (err) => reject(err),
-        { enableHighAccuracy: true, timeout: 10000 }
-      );
-    });
-  };
+  // getCurrentPosition est centralisé dans utils/geo (défaut : enableHighAccuracy,
+  // timeout 10 s, maximumAge 0 — équivalent aux anciennes options locales).
 
   // Message GPS personnalisé (prénom) + ciblé selon la cause de l'échec.
   const buildGpsMessage = (err: any): { msg: string; isPermission: boolean } => {
@@ -721,8 +713,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
       );
 
       // 2. Compter les stats
-      const completedStops = updatedStops.filter(s => s.status === StopStatus.COMPLETED).length;
-      const failedStops = updatedStops.filter(s => s.status === StopStatus.FAILED || s.status === StopStatus.SKIPPED).length;
+      const { completedStops, failedStops } = recomputeMissionCounters(updatedStops);
       const deliveredPkgs = (activeMission.deliveredPackages || 0) + currentStop.packageCount;
 
       // 3. Check si toute la mission est terminée
@@ -866,8 +857,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
         } : s
       );
 
-      const completedStops = updatedStops.filter(s => s.status === StopStatus.COMPLETED).length;
-      const failedStops = updatedStops.filter(s => s.status === StopStatus.FAILED || s.status === StopStatus.SKIPPED).length;
+      const { completedStops, failedStops } = recomputeMissionCounters(updatedStops);
       const failedPkgs = (activeMission.failedPackages || 0) + currentStop.packageCount;
 
       const allDone = updatedStops.every(s =>
@@ -1111,8 +1101,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
         } : s
       );
 
-      const completedStops = updatedStops.filter(s => s.status === StopStatus.COMPLETED).length;
-      const failedStops = updatedStops.filter(s => s.status === StopStatus.FAILED || s.status === StopStatus.SKIPPED).length;
+      const { completedStops, failedStops } = recomputeMissionCounters(updatedStops);
       const collectedPkgs = (activeMission.deliveredPackages || 0) + scannedIds.length;
 
       const allDone = updatedStops.every(s =>
@@ -2422,11 +2411,11 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
               <div className="grid grid-cols-3 gap-2 mb-3">
                 <div className="bg-slate-50 rounded-lg p-2 text-center">
                   <p className="text-xs text-slate-500">Distance</p>
-                  <p className="text-sm font-bold text-slate-800">{mission.totalDistance ? Math.round(mission.totalDistance) + ' km' : '-'}</p>
+                  <p className="text-sm font-bold text-slate-800">{formatDistance(mission.totalDistance) || '-'}</p>
                 </div>
                 <div className="bg-slate-50 rounded-lg p-2 text-center">
                   <p className="text-xs text-slate-500">Durée est.</p>
-                  <p className="text-sm font-bold text-slate-800">{mission.estimatedDuration ? Math.round(mission.estimatedDuration) + ' min' : '-'}</p>
+                  <p className="text-sm font-bold text-slate-800">{formatDuration(mission.estimatedDuration) || '-'}</p>
                 </div>
                 <div className="bg-slate-50 rounded-lg p-2 text-center">
                   <p className="text-xs text-slate-500">Livrés</p>

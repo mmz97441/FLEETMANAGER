@@ -8,6 +8,7 @@
 import { db } from '../firebaseConfig';
 import { collection, doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { DriverLocation } from '../types';
+import { cleanUndefined } from '../utils/firestore';
 
 const COLLECTION = 'driverLocations';
 
@@ -19,10 +20,8 @@ export const publishDriverLocation = async (
     ...loc,
     updatedAt: new Date().toISOString(),
   };
-  // On retire les champs undefined (Firestore les refuse)
-  const clean = Object.fromEntries(
-    Object.entries(payload).filter(([, v]) => v !== undefined)
-  );
+  // On retire les champs undefined (Firestore les refuse), en profondeur.
+  const clean = cleanUndefined(payload);
   await setDoc(doc(db, COLLECTION, loc.driverId), clean, { merge: true });
 };
 

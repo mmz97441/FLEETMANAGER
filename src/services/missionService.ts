@@ -33,6 +33,8 @@ import {
 import { extractScanTokens } from '../utils/barcode';
 import { placeKey } from '../utils/address';
 import { localDatePart } from '../utils/date';
+import { cleanUndefined } from '../utils/firestore';
+import { haversineKm } from '../utils/geo';
 import { geocodeAddress, getGoogleMapsApiKey } from './gmproService';
 import { reportError } from './logService';
 
@@ -49,19 +51,6 @@ const POSTAL_CODES_COLLECTION = 'postal_code_mappings';
 // ============================================================================
 
 const generateId = () => `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-const cleanUndefined = (obj: any): any => {
-  if (obj === undefined || obj === null) return null;
-  if (typeof obj !== 'object') return obj;
-  if (Array.isArray(obj)) return obj.map(cleanUndefined);
-  const cleaned: Record<string, any> = {};
-  for (const [key, value] of Object.entries(obj)) {
-    if (value !== undefined) {
-      cleaned[key] = cleanUndefined(value);
-    }
-  }
-  return cleaned;
-};
 
 // ── Fabrique d'ARRÊT de livraison — forme UNIQUE ─────────────────────────────
 // Avant, un MissionStop était fabriqué à la main à plusieurs endroits, avec des
@@ -1045,7 +1034,7 @@ export interface RoadTransferInput {
  * - un document package_transfers par tournée d'origine (traçabilité)
  */
 // Recompteurs cohérents d'une mission à partir de ses stops
-const recomputeMissionCounters = (stops: MissionStop[]) => ({
+export const recomputeMissionCounters = (stops: MissionStop[]) => ({
   totalPackages: stops.reduce((a, s) => a + (s.packageCount || 0), 0),
   completedStops: stops.filter(s => s.status === StopStatus.COMPLETED).length,
   failedStops: stops.filter(s => s.status === StopStatus.FAILED || s.status === StopStatus.SKIPPED).length,
@@ -1345,15 +1334,6 @@ export const createAndClaimPackage = async (params: {
 };
 
 // ---- Optimisation & édition de tournée côté chauffeur ----
-
-const haversineKm = (a: { lat: number; lng: number }, b: { lat: number; lng: number }): number => {
-  const R = 6371;
-  const dLat = (b.lat - a.lat) * Math.PI / 180;
-  const dLng = (b.lng - a.lng) * Math.PI / 180;
-  const s = Math.sin(dLat / 2) ** 2 +
-    Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(s));
-};
 
 /**
  * Optimise l'ordre des arrêts d'une tournée par plus-proche-voisin depuis le

@@ -12,6 +12,7 @@ import {
   Absence, AbsenceStatus
 } from '../types';
 import { todayISO, localDatePart } from '../utils/date';
+import { formatDistance, formatDuration } from '../utils/format';
 import {
   subscribeToMissions,
   subscribeToHubs,
@@ -409,7 +410,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           </div>
           <div class="meta-item">
             <div class="meta-label">Distance / Durée estimée</div>
-            <div class="meta-value">${mission.totalDistance ? Math.round(mission.totalDistance) + ' km' : '-'} / ${mission.estimatedDuration ? Math.round(mission.estimatedDuration) + ' min' : '-'}</div>
+            <div class="meta-value">${formatDistance(mission.totalDistance) || '-'} / ${formatDuration(mission.estimatedDuration) || '-'}</div>
           </div>
         </div>
 
@@ -978,13 +979,13 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                             {mission.totalDistance != null && (
                               <span className="flex items-center gap-1 text-slate-600">
                                 <Navigation size={14} />
-                                {Math.round(mission.totalDistance)} km
+                                {formatDistance(mission.totalDistance)}
                               </span>
                             )}
                             {mission.estimatedDuration != null && (
                               <span className="flex items-center gap-1 text-slate-600">
                                 <Clock size={14} />
-                                {Math.round(mission.estimatedDuration)} min
+                                {formatDuration(mission.estimatedDuration)}
                               </span>
                             )}
                           </div>
@@ -1177,8 +1178,8 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                                 )}
                                 {stop.distanceFromPrevious != null && stop.distanceFromPrevious > 0 && (
                                   <p className="text-xs text-slate-400 mt-1">
-                                    ↳ {stop.distanceFromPrevious.toFixed(1)} km depuis le stop précédent 
-                                    {stop.durationFromPrevious ? ` (~${Math.round(stop.durationFromPrevious)} min)` : ''}
+                                    ↳ {formatDistance(stop.distanceFromPrevious)} depuis le stop précédent
+                                    {stop.durationFromPrevious ? ` (~${formatDuration(stop.durationFromPrevious)})` : ''}
                                   </p>
                                 )}
                                 
