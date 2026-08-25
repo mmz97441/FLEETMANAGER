@@ -2,6 +2,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import Modal from './shared/Modal';
 import { MaintenanceLog, Vehicle, UserRole, InvoiceLine } from '../types';
+import { todayISO } from '../utils/date';
 import { Wrench, Plus, Search, Calendar, CheckCircle2, Clock, Filter, X, Save, Car, Euro, BarChart3, List, AlertTriangle, ArrowRight, Trash2, FileText, Lock } from 'lucide-react';
 import ConfirmModal from './ConfirmModal';
 import { usePermissions, Permission } from '../usePermissions';
@@ -39,7 +40,7 @@ const MaintenanceManager: React.FC<MaintenanceManagerProps> = ({ logs, vehicles,
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newMaintenance, setNewMaintenance] = useState({
       vehicleId: '',
-      date: new Date().toISOString().slice(0, 10),
+      date: todayISO(),
       type: 'Révision',
       description: '',
       provider: '',
@@ -175,7 +176,7 @@ const MaintenanceManager: React.FC<MaintenanceManagerProps> = ({ logs, vehicles,
           setIsModalOpen(false);
           setNewMaintenance({
               vehicleId: '',
-              date: new Date().toISOString().slice(0, 10),
+              date: todayISO(),
               type: 'Révision',
               description: '',
               provider: '',
@@ -345,7 +346,7 @@ const MaintenanceManager: React.FC<MaintenanceManagerProps> = ({ logs, vehicles,
                         onClick={() => {
                              setNewMaintenance({
                                  vehicleId: '',
-                                 date: new Date().toISOString().slice(0, 10),
+                                 date: todayISO(),
                                  type: 'Révision',
                                  description: '',
                                  provider: '',

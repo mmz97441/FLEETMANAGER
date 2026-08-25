@@ -16,6 +16,7 @@
 import { Package, PackageStatus, ProofOfDelivery, DeliveryLocation } from '../types';
 // Source de vérité UNIQUE du « même point de livraison ? » (adresse OU tél+CP).
 import { sameDeliveryPoint } from './address';
+import { localDatePart } from './date';
 
 // ---------------------------------------------------------------------------
 // Regroupement par point de livraison : on délègue à sameDeliveryPoint
@@ -30,10 +31,10 @@ import { sameDeliveryPoint } from './address';
  * complet de la pharmacie.
  */
 export const packagesAtSamePoint = (pkg: Package, all: Package[]): Package[] => {
-  const day = (pkg.createdAt || '').slice(0, 10);
+  const day = localDatePart(pkg.createdAt || '');
   return all.filter(p => {
     if (p.id === pkg.id) return true;
-    const sameDay = !day || (p.createdAt || '').slice(0, 10) === day;
+    const sameDay = !day || localDatePart(p.createdAt || '') === day;
     return sameDeliveryPoint(pkg, p) && sameDay;
   });
 };

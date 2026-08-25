@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { User } from '../types';
+import { todayISO } from '../utils/date';
 import { FileText, CheckCircle, AlertTriangle, Upload, Calendar, Clock, Truck } from 'lucide-react';
 
 interface DriverDocumentsProps {
@@ -28,7 +29,7 @@ const DriverDocuments: React.FC<DriverDocumentsProps> = ({ currentUser }) => {
       setIsUploading(true);
       setTimeout(() => {
           setIsUploading(false);
-          setLastScanDate(new Date().toISOString().split('T')[0]);
+          setLastScanDate(todayISO());
           alert("Nouveau scan de permis validé et enregistré !");
       }, 1500);
   };

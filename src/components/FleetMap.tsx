@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import L from 'leaflet';
-import { Vehicle, VehicleStatus } from '../types';
+import { Vehicle, VehicleStatus, VEHICLE_STATUS_COLORS } from '../types';
 
 interface FleetMapProps {
   vehicles: Vehicle[];
@@ -37,14 +37,10 @@ const FleetMap: React.FC<FleetMapProps> = ({ vehicles, onVehicleSelect }) => {
         const lat = vehicle.location?.lat || 46.603354 + (Math.random() - 0.5) * 5;
         const lng = vehicle.location?.lng || 1.888334 + (Math.random() - 0.5) * 5;
 
-        const getColor = (status: VehicleStatus) => {
-            switch(status) {
-                case VehicleStatus.ACTIVE: return '#22c55e';
-                case VehicleStatus.ISSUE: return '#ef4444';
-                case VehicleStatus.MAINTENANCE: return '#f97316';
-                default: return '#64748b';
-            }
-        };
+        // Couleur depuis le registre central (les 5 statuts, cf. types.ts) —
+        // avant, seuls 3 étaient gérés (IDLE/IMMOBILIZED tombaient en gris).
+        const getColor = (status: VehicleStatus) =>
+            VEHICLE_STATUS_COLORS[status]?.hex ?? '#64748b';
 
         const markerHtml = `
             <div style="

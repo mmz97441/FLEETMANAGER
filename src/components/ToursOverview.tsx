@@ -19,8 +19,10 @@ import {
   MissionStop,
   StopStatus,
   MISSION_STATUS_COLORS,
+  STOP_STATUS_COLORS,
 } from '../types';
 import { subscribeToMissions } from '../services/missionService';
+import { getDeliveryStopStats } from '../utils/missionProgress';
 
 interface ToursOverviewProps {
   users: User[];
@@ -80,16 +82,10 @@ const resolveDriverName = (mission: Mission, usersById: Map<string, User>): stri
   return mission.driverName || 'Chauffeur inconnu';
 };
 
-/** Badge de statut d'un arrêt (couleurs métier). */
+/** Badge de statut d'un arrêt — couleurs depuis le registre central (types.ts). */
 const stopStatusBadge = (status: StopStatus): { cls: string } => {
-  const styles: Record<StopStatus, string> = {
-    [StopStatus.PENDING]: 'bg-slate-100 text-slate-600',
-    [StopStatus.ARRIVED]: 'bg-orange-100 text-orange-700',
-    [StopStatus.COMPLETED]: 'bg-green-100 text-green-700',
-    [StopStatus.SKIPPED]: 'bg-slate-200 text-slate-500',
-    [StopStatus.FAILED]: 'bg-red-100 text-red-700',
-  };
-  return { cls: styles[status] || 'bg-slate-100 text-slate-600' };
+  const c = STOP_STATUS_COLORS[status];
+  return { cls: c ? `${c.bg} ${c.text}` : 'bg-slate-100 text-slate-600' };
 };
 
 const StopStatusBadge: React.FC<{ status: StopStatus }> = ({ status }) => (
@@ -147,11 +143,7 @@ const ToursOverview: React.FC<ToursOverviewProps> = ({ users }) => {
         .filter((s) => s.type === 'DELIVERY')
         .sort((a, b) => a.sequence - b.sequence);
 
-      const total = deliveryStops.length;
-      const delivered = deliveryStops.filter(
-        (s) => s.status === StopStatus.COMPLETED
-      ).length;
-      const pct = total > 0 ? Math.round((delivered / total) * 100) : 0;
+      const { delivered, total, pct } = getDeliveryStopStats({ stops: deliveryStops });
 
       const nextStop = deliveryStops.find(
         (s) => s.status === StopStatus.PENDING || s.status === StopStatus.ARRIVED

@@ -11,6 +11,7 @@ import {
   ZONE_COLORS, MISSION_STATUS_COLORS, PACKAGE_STATUS_COLORS,
   Absence, AbsenceStatus
 } from '../types';
+import { todayISO, localDatePart } from '../utils/date';
 import {
   subscribeToMissions,
   subscribeToHubs,
@@ -27,6 +28,7 @@ import {
   deletePackage,
   updatePackageFields,
   updateMissionFields,
+  addManualStopToMission,
   DEFAULT_POSTAL_CODE_MAPPINGS,
   MissionStats,
   resyncPackageStatusesFromStops
@@ -89,7 +91,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   
   // Filtres
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState(todayISO());
   const [selectedZone, setSelectedZone] = useState<Zone | 'all'>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedMissionId, setExpandedMissionId] = useState<string | null>(null);
@@ -235,8 +237,8 @@ const MissionManager: React.FC<MissionManagerProps> = ({
     ];
     return packages.filter(p =>
       activeStatuses.includes(p.status) ||
-      p.createdAt.startsWith(selectedDate) ||
-      p.updatedAt?.startsWith(selectedDate)
+      localDatePart(p.createdAt) === selectedDate ||
+      localDatePart(p.updatedAt || '') === selectedDate
     );
   }, [packages, selectedDate]);
 
@@ -1518,30 +1520,20 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
     setIsSavingPkg(true);
     try {
-      const newStopId = `stop_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-      const maxSequence = Math.max(...mission.stops.map(s => s.sequence), 0);
-
-      const newStop: MissionStop = {
-        id: newStopId,
-        sequence: maxSequence + 1,
-        type: 'DELIVERY',
-        address: newStopForm.address,
-        city: newStopForm.city,
-        postalCode: newStopForm.postalCode,
-        contactName: newStopForm.contactName,
+      // Délégué au service transactionnel (runTransaction + cleanUndefined + ID
+      // uniforme) au lieu d'un read-modify-write non atomique côté composant, qui
+      // pouvait écraser un stop ajouté entre-temps.
+      await addManualStopToMission(mission.id, {
+        contactName: newStopForm.contactName!,
+        address: newStopForm.address!,
+        postalCode: newStopForm.postalCode!,
+        city: newStopForm.city!,
         contactPhone: newStopForm.contactPhone || undefined,
-        packageIds: [], // Pas de colis associé pour l'instant
-        packageCount: 0,
         timeWindowStart: newStopForm.timeWindowStart || undefined,
         timeWindowEnd: newStopForm.timeWindowEnd || undefined,
-        serviceTime: parseInt(newStopForm.serviceTime) || 5,
+        serviceTime: newStopForm.serviceTime ? parseInt(newStopForm.serviceTime) : undefined,
         notes: newStopForm.notes || undefined,
-        status: StopStatus.PENDING
-      };
-
-      const updatedStops = [...mission.stops, newStop];
-
-      await updateMissionFields(mission.id, { stops: updatedStops });
+      });
 
       await logActivity(currentUser, ActivityAction.MISSION_UPDATED, {
         targetType: 'mission',

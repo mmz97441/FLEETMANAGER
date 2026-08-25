@@ -20,6 +20,7 @@ import {
   User, MISSION_STATUS_COLORS, Issue, IssueStatus
 } from '../types';
 import { addIssueToFirestore } from '../services/firestore';
+import { todayISO, localDatePart } from '../utils/date';
 import {
   subscribeToMissions,
   subscribeToPackages,
@@ -40,6 +41,7 @@ import ScanGateDialog from './ScanGateDialog';
 import StopReorderModal from './StopReorderModal';
 import { packageMatchesCode, packageScanCodes, packageDisplayCode } from '../utils/barcode';
 import { sameDeliveryPoint } from '../utils/address';
+import { getTourProgress } from '../utils/missionProgress';
 const BarcodeScanner = lazy(() => import('./BarcodeScanner'));
 import {
   Truck, Package as PackageIcon, MapPin, Clock, Phone,
@@ -310,7 +312,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   const [showReturnSignature, setShowReturnSignature] = useState(false);
   const returnPhotoInputRef = useRef<HTMLInputElement>(null);
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayISO();
 
   // === Abonnement missions du chauffeur ===
   useEffect(() => {
@@ -374,7 +376,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
           p.status !== PackageStatus.FAILED &&
           (p.currentDriverId === currentUser.id ||
             (!!activeMission && p.missionId === activeMission.id) ||
-            (p.createdAt || '').startsWith(today))
+            localDatePart(p.createdAt || '') === today)
         );
         setOtherAtAddress(others);
       } else {
@@ -422,10 +424,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   }, [sortedStops]);
 
   const missionProgress = useMemo(() => {
-    if (!activeMission || sortedStops.length === 0) return 0;
-    const done = sortedStops.filter(s => s.status === StopStatus.COMPLETED || s.status === StopStatus.FAILED || s.status === StopStatus.SKIPPED).length;
-    return Math.round((done / sortedStops.length) * 100);
-  }, [activeMission, sortedStops]);
+    if (!activeMission) return 0;
+    return getTourProgress(activeMission).pct; // avancement = arrêts traités / total
+  }, [activeMission]);
 
   // === Notifications éphémères ===
   const showNotif = (msg: string) => {
@@ -2184,6 +2185,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
               title={`${isPickupStop ? 'Scan enlèvement' : 'Scan livraison'} — ${currentStop?.contactName || ''}`}
               hint={isPickupStop ? undefined : 'Scannez le code DELIVREX — le petit carré (DataMatrix) en bas à gauche'}
               progress={stopPackages.length > 0 ? { done: deliveryScannedCount, total: stopPackages.length } : undefined}
+              isMatch={(code) => stopPackages.some(p => packageMatchesCode(p, code))}
             />
           </Suspense>
         )}

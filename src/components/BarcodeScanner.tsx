@@ -23,6 +23,11 @@ interface BarcodeScannerProps {
   title?: string;
   progress?: { done: number; total: number }; // Compteur permanent pour le scan en rafale
   hint?: string; // Message d'aide permanent (ex. quel code viser)
+  // Prédicat « ce code correspond-il à un colis attendu ? ». Si fourni, il fait
+  // AUTORITÉ pour le feedback couleur (à brancher sur packageMatchesCode côté
+  // parent), au lieu d'une simple égalité de chaîne sur expectedBarcodes — qui
+  // affichait « non prévu » sur un DataMatrix/code à rang pourtant valide.
+  isMatch?: (code: string) => boolean;
 }
 
 const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
@@ -32,7 +37,8 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   alreadyScanned = [],
   title = 'Scanner un code-barres',
   progress,
-  hint
+  hint,
+  isMatch
 }) => {
   const [isScanning, setIsScanning] = useState(false);
   const [manualMode, setManualMode] = useState(false);
@@ -64,22 +70,26 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
       return;
     }
 
-    // Vérifier si attendu (insensible à la casse)
-    const isExpected = expectedBarcodes.length === 0 ||
-      expectedBarcodes.some(b => b.toUpperCase() === barcode.toUpperCase());
+    // Vérifier si attendu. Si un prédicat isMatch est fourni (branché sur
+    // packageMatchesCode côté parent : tokens + inclusion), il FAIT AUTORITÉ —
+    // sinon repli sur l'égalité de chaîne (insensible à la casse) avec la liste.
+    const isExpected = isMatch
+      ? isMatch(barcode)
+      : (expectedBarcodes.length === 0 ||
+         expectedBarcodes.some(b => b.toUpperCase() === barcode.toUpperCase()));
     setLastScanned(barcode);
     setLastScanResult(isExpected ? 'success' : 'unknown');
 
     // Vibration différente : succès = double pulse, erreur = single long
-    try { 
-      navigator.vibrate?.(isExpected ? [100, 50, 100] : [300]); 
+    try {
+      navigator.vibrate?.(isExpected ? [100, 50, 100] : [300]);
     } catch {}
 
     // Remonter au parent
     onScan(barcode);
 
     setTimeout(() => setLastScanResult(null), 2000);
-  }, [onScan, expectedBarcodes, alreadyScanned, lastScanned]);
+  }, [onScan, expectedBarcodes, alreadyScanned, lastScanned, isMatch]);
 
   // Référence toujours à jour vers feedbackScan, pour que l'effet caméra ne
   // dépende PAS de feedbackScan (sinon il redémarre la caméra à chaque scan,

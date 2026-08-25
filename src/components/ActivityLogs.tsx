@@ -8,7 +8,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   ActivityLog, ActivityCategory, ActivityAction, User 
 } from '../types';
-import { 
+import { todayISO, localDatePart } from '../utils/date';
+import {
   getActivityLogs, 
   subscribeToActivityLogs, 
   exportLogsToCSV,
@@ -154,7 +155,7 @@ const ActivityLogs: React.FC<ActivityLogsProps> = ({ users, currentUser, initial
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `logs-activite-${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = `logs-activite-${todayISO()}.csv`;
     a.click();
   };
 
@@ -185,8 +186,8 @@ const ActivityLogs: React.FC<ActivityLogsProps> = ({ users, currentUser, initial
 
   // Stats rapides
   const stats = useMemo(() => {
-    const today = new Date().toISOString().split('T')[0];
-    const todayLogs = logs.filter(l => l.createdAt.startsWith(today));
+    const today = todayISO();
+    const todayLogs = logs.filter(l => localDatePart(l.createdAt) === today);
     
     return {
       total: logs.length,

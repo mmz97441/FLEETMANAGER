@@ -12,6 +12,7 @@ import {
   Plus, AlertTriangle, ArrowRight, Check
 } from 'lucide-react';
 import { Vehicle, VehicleStatus, VehicleOwnership, ReplacementSource, User as UserType } from '../types';
+import { todayISO } from '../utils/date';
 
 interface ReplacementModalProps {
   isOpen: boolean;
@@ -67,7 +68,7 @@ const ReplacementModal: React.FC<ReplacementModalProps> = ({
   const [dailyCost, setDailyCost] = useState('');
   
   // Commun
-  const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
+  const [startDate, setStartDate] = useState(todayISO());
   const [endDate, setEndDate] = useState('');
   const [assignedDriverId, setAssignedDriverId] = useState(
     immobilizedVehicle.assignedDriverId || immobilizedVehicle.driverId || ''

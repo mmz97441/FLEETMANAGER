@@ -21,6 +21,7 @@ import {
   Mission, MissionStatus, MissionStop, StopStatus, Package, PackageStatus,
   Zone, ZONE_COLORS, User, UserRole, Vehicle
 } from '../types';
+import { todayISO } from '../utils/date';
 import {
   subscribeToMissions,
   subscribeToPackages,
@@ -98,7 +99,7 @@ const DriverTourView: React.FC<DriverTourViewProps> = ({ currentUser, vehicles }
   const [expandedStopId, setExpandedStopId] = useState<string | null>(null);
   const [showNavOptions, setShowNavOptions] = useState<string | null>(null);
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayISO();
 
   // ============================================================================
   // SUBSCRIPTIONS

@@ -17,6 +17,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line
 } from 'recharts';
+import { localDatePart } from '../utils/date';
 import {
   TrendingUp, Package as PackageIcon, Truck,
   XCircle, Clock, MapPin, Users, AlertTriangle,
@@ -64,8 +65,8 @@ const getDateRange = (selectedDate: string, period: Period): { start: string; en
     const sunday = new Date(monday);
     sunday.setDate(monday.getDate() + 6);
     return {
-      start: monday.toISOString().split('T')[0],
-      end: sunday.toISOString().split('T')[0]
+      start: localDatePart(monday),
+      end: localDatePart(sunday)
     };
   }
 
@@ -73,8 +74,8 @@ const getDateRange = (selectedDate: string, period: Period): { start: string; en
   const firstDay = new Date(date.getFullYear(), date.getMonth(), 1);
   const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0);
   return {
-    start: firstDay.toISOString().split('T')[0],
-    end: lastDay.toISOString().split('T')[0]
+    start: localDatePart(firstDay),
+    end: localDatePart(lastDay)
   };
 };
 
@@ -106,8 +107,8 @@ const MissionKPIs: React.FC<MissionKPIsProps> = ({
   // Packages de la période (via createdAt ou updatedAt)
   const periodPackages = useMemo(() =>
     packages.filter(p =>
-      isInRange(p.createdAt.split('T')[0], dateRange.start, dateRange.end) ||
-      (p.updatedAt && isInRange(p.updatedAt.split('T')[0], dateRange.start, dateRange.end))
+      isInRange(localDatePart(p.createdAt), dateRange.start, dateRange.end) ||
+      (p.updatedAt && isInRange(localDatePart(p.updatedAt), dateRange.start, dateRange.end))
     ),
     [packages, dateRange]
   );
@@ -140,10 +141,10 @@ const MissionKPIs: React.FC<MissionKPIsProps> = ({
     // statuts réels des colis (pas les compteurs de missions).
     const yesterday = new Date(selectedDate);
     yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = yesterday.toISOString().split('T')[0];
+    const yesterdayStr = localDatePart(yesterday);
     const yesterdayPackages = packages.filter(p =>
-      isInRange(p.createdAt.split('T')[0], yesterdayStr, yesterdayStr) ||
-      (p.updatedAt && isInRange(p.updatedAt.split('T')[0], yesterdayStr, yesterdayStr))
+      isInRange(localDatePart(p.createdAt), yesterdayStr, yesterdayStr) ||
+      (p.updatedAt && isInRange(localDatePart(p.updatedAt), yesterdayStr, yesterdayStr))
     );
     const yesterdayPkgs = yesterdayPackages.length;
     const yesterdayDelivered = yesterdayPackages.filter(p => p.status === PackageStatus.DELIVERED).length;
@@ -288,15 +289,15 @@ const MissionKPIs: React.FC<MissionKPIsProps> = ({
     // (qui ne sont chargées que pour le jour sélectionné). Par jour :
     // total = colis importés ce jour ; delivered/failed = via leurs mouvements.
     const movedOn = (p: Package, day: string, actions: string[]) =>
-      (p.movements || []).some(m => actions.includes(m.action) && (m.timestamp || '').startsWith(day));
+      (p.movements || []).some(m => actions.includes(m.action) && localDatePart(m.timestamp || '') === day);
 
     for (let i = 13; i >= 0; i--) {
       const d = new Date(selectedDate);
       d.setDate(d.getDate() - i);
-      const dateStr = d.toISOString().split('T')[0];
+      const dateStr = localDatePart(d);
       const dayLabel = d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
 
-      const total = packages.filter(p => (p.createdAt || '').startsWith(dateStr)).length;
+      const total = packages.filter(p => localDatePart(p.createdAt || '') === dateStr).length;
       const delivered = packages.filter(p => movedOn(p, dateStr, ['DELIVERED'])).length;
       const failed = packages.filter(p => movedOn(p, dateStr, ['FAILED', 'RETURNED'])).length;
       // delivered (mouvement DELIVERED ce jour) et total (colis créés ce jour)

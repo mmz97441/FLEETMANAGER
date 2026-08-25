@@ -14,6 +14,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line, AreaChart, Area
 } from 'recharts';
+import { todayISO, localDatePart } from '../utils/date';
 import {
   TrendingUp, Package as PackageIcon, CheckCircle, XCircle,
   Clock, MapPin, AlertTriangle, ArrowUp, ArrowDown, Minus,
@@ -42,7 +43,7 @@ interface ClientKPIsProps {
 
 const getDateRange = (period: Period): { start: string; end: string } => {
   const now = new Date();
-  const today = now.toISOString().split('T')[0];
+  const today = localDatePart(now);
   
   if (period === 'today') {
     return { start: today, end: today };
@@ -55,16 +56,16 @@ const getDateRange = (period: Period): { start: string; end: string } => {
     const sunday = new Date(monday);
     sunday.setDate(monday.getDate() + 6);
     return {
-      start: monday.toISOString().split('T')[0],
-      end: sunday.toISOString().split('T')[0]
+      start: localDatePart(monday),
+      end: localDatePart(sunday)
     };
   }
   
   const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
   const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
   return {
-    start: firstDay.toISOString().split('T')[0],
-    end: lastDay.toISOString().split('T')[0]
+    start: localDatePart(firstDay),
+    end: localDatePart(lastDay)
   };
 };
 
@@ -84,7 +85,7 @@ const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages, clientName = 'Client'
     title: 'Voir ces colis'
   } : {};
   const drillClass = onDrillDown ? ' cursor-pointer hover:shadow-md hover:border-indigo-300 transition-all active:scale-95' : '';
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayISO();
   // Filtre de période : défaut = aujourd'hui. Raccourcis (jour/semaine/mois) +
   // choix libre d'une date ou d'une plage "Du…Au…".
   const [preset, setPreset] = useState<Period | 'custom'>('today');
@@ -107,7 +108,7 @@ const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages, clientName = 'Client'
 
   // Packages de la période
   const periodPackages = useMemo(() => 
-    packages.filter(p => isInRange(p.createdAt.split('T')[0], dateRange.start, dateRange.end)),
+    packages.filter(p => isInRange(localDatePart(p.createdAt), dateRange.start, dateRange.end)),
     [packages, dateRange]
   );
 
@@ -146,8 +147,8 @@ const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages, clientName = 'Client'
     if (preset !== 'today') return null;
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
-    const yStr = yesterday.toISOString().split('T')[0];
-    const yPkgs = packages.filter(p => p.createdAt.split('T')[0] === yStr);
+    const yStr = localDatePart(yesterday);
+    const yPkgs = packages.filter(p => localDatePart(p.createdAt) === yStr);
     const yDelivered = yPkgs.filter(p => p.status === PackageStatus.DELIVERED).length;
     const yFailed = yPkgs.filter(p => p.status === PackageStatus.FAILED || p.status === PackageStatus.RETURNED).length;
     const yResolved = yDelivered + yFailed;
@@ -166,10 +167,10 @@ const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages, clientName = 'Client'
     for (let i = 13; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
-      const dateStr = d.toISOString().split('T')[0];
+      const dateStr = localDatePart(d);
       const dayLabel = d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
       
-      const dayPkgs = packages.filter(p => p.createdAt.split('T')[0] === dateStr);
+      const dayPkgs = packages.filter(p => localDatePart(p.createdAt) === dateStr);
       
       days.push({
         label: dayLabel,

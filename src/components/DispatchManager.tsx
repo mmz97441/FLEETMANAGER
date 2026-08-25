@@ -14,6 +14,7 @@ import {
   ZONE_COLORS
 } from '../types';
 import { optimizeMultiVehicle, isGMPROConfigured, getGoogleMapsApiKey, TourResult, OptimizationResult, DriverVehicle } from '../services/gmproService';
+import { todayISO } from '../utils/date';
 import { addMission, updatePackageStatus } from '../services/missionService';
 import { notifyMissionAssigned } from '../services/notificationService';
 import { logActivity } from '../services/activityLogService';
@@ -201,7 +202,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
     if (!selectedZoneStats || selectedDriversVehicles.length === 0 || !departureHub) return;
     
     // Vérifier que l'heure de départ n'est pas dans le passé (si aujourd'hui)
-    const isToday = selectedDate === new Date().toISOString().split('T')[0];
+    const isToday = selectedDate === todayISO();
     if (isToday) {
       const minTime = getMinDepartureTime();
       if (plannedDepartureTime < minTime) {
@@ -392,7 +393,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
     setExpandedTour(null);
     
     // Mettre à jour l'heure de départ à l'heure actuelle (arrondie)
-    const isToday = selectedDate === new Date().toISOString().split('T')[0];
+    const isToday = selectedDate === todayISO();
     if (isToday) {
       setPlannedDepartureTime(getMinDepartureTime());
     }
@@ -637,7 +638,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
                 Heure de départ prévue
               </label>
               {(() => {
-                const isToday = selectedDate === new Date().toISOString().split('T')[0];
+                const isToday = selectedDate === todayISO();
                 const minTime = isToday ? getMinDepartureTime() : '00:00';
                 const isPastTime = isToday && plannedDepartureTime < minTime;
                 

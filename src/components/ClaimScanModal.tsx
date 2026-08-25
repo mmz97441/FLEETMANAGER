@@ -8,6 +8,7 @@
 import React, { useState, useRef, lazy, Suspense } from 'react';
 import { X, Camera, Loader2, CheckCircle, AlertTriangle, Trash2, PackageCheck } from 'lucide-react';
 import { Package, User, PackageStatus } from '../types';
+import { todayISO } from '../utils/date';
 import { findPackageByCode, claimPackagesForDelivery } from '../services/missionService';
 import { packageDisplayCode } from '../utils/barcode';
 
@@ -99,7 +100,7 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
         });
       } catch { /* géoloc optionnelle */ }
 
-      const today = new Date().toISOString().split('T')[0];
+      const today = todayISO();
       const count = await claimPackagesForDelivery({
         packages: scannedPkgs,
         driver: { id: currentUser.id, name: `${currentUser.firstName} ${currentUser.lastName}` },

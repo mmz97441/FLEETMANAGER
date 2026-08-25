@@ -4,6 +4,7 @@ import {
   CompanyDocument, DocumentAcknowledgment, DocumentType, DocumentPriority, 
   User, UserRole 
 } from '../types';
+import { todayISO } from '../utils/date';
 import { 
   FileText, Plus, Eye, Edit2, Trash2, CheckCircle, Clock, AlertTriangle, 
   Users, Calendar, Download, Upload, X, Search, Filter, Shield, 
@@ -94,7 +95,7 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
     content: '',
     targetRoles: [],
     requiresSignature: true,
-    effectiveDate: new Date().toISOString().slice(0, 10),
+    effectiveDate: todayISO(),
     version: '1.0',
     priority: DocumentPriority.NORMAL,
     isActive: true
@@ -967,7 +968,7 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `suivi-signatures-${selectedDocument.title.replace(/[^a-z0-9]/gi, '_')}-${new Date().toISOString().split('T')[0]}.csv`;
+                    a.download = `suivi-signatures-${selectedDocument.title.replace(/[^a-z0-9]/gi, '_')}-${todayISO()}.csv`;
                     a.click();
                   }}
                   className="flex items-center gap-1 text-xs text-brand-600 hover:text-brand-800 font-medium"

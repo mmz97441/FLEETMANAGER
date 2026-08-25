@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { User, Vehicle, LeaveRequest, UserRole, LeaveStatus, VehicleStatus, Zone, ZONE_COLORS } from '../types';
+import { todayISO } from '../utils/date';
 import { ShieldCheck, ShieldAlert, Truck, Calendar, CheckCircle2, AlertCircle, Clock, Battery, MapPin, Edit, X, Save, Plus, Lock } from 'lucide-react';
 import Modal from './shared/Modal';
 import AssignmentModal from './AssignmentModal';
@@ -51,7 +52,7 @@ const DriverList: React.FC<DriverListProps> = ({ users, vehicles, leaves, curren
   }
 
   const getDriverStatus = (userId: string) => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayISO();
     const currentLeave = leaves.find(l => 
         l.userId === userId && 
         l.status === LeaveStatus.APPROVED &&

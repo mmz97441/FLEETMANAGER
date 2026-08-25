@@ -21,10 +21,12 @@ import {
   MissionStatus,
   MissionStop,
   StopStatus,
+  STOP_STATUS_COLORS,
   DriverLocation,
 } from '../types';
 import { subscribeToDriverLocations } from '../services/driverLocationService';
 import { subscribeToMissions } from '../services/missionService';
+import { getDeliveryStopStats } from '../utils/missionProgress';
 
 interface FleetMapViewProps {
   users: User[];
@@ -698,9 +700,7 @@ const DriverTourModal: React.FC<{ driver: ParsedDriver; onClose: () => void }> =
     [activeMission]
   );
 
-  const total = deliveryStops.length;
-  const delivered = deliveryStops.filter((s) => s.status === StopStatus.COMPLETED).length;
-  const pct = total > 0 ? Math.round((delivered / total) * 100) : 0;
+  const { delivered, total, pct } = getDeliveryStopStats({ stops: deliveryStops });
 
   // Prochain arrêt = 1er PENDING/ARRIVED dans l'ordre
   const nextStopId = deliveryStops.find(
@@ -819,16 +819,10 @@ const DriverTourModal: React.FC<{ driver: ParsedDriver; onClose: () => void }> =
 };
 
 const StopStatusBadge: React.FC<{ status: StopStatus }> = ({ status }) => {
-  const styles: Record<StopStatus, string> = {
-    [StopStatus.PENDING]: 'bg-slate-100 text-slate-600',
-    [StopStatus.ARRIVED]: 'bg-blue-100 text-blue-700',
-    [StopStatus.COMPLETED]: 'bg-green-100 text-green-700',
-    [StopStatus.SKIPPED]: 'bg-amber-100 text-amber-700',
-    [StopStatus.FAILED]: 'bg-red-100 text-red-700',
-  };
+  const c = STOP_STATUS_COLORS[status];
   return (
     <span
-      className={`text-xs rounded px-1.5 py-0.5 flex-shrink-0 ${styles[status] || 'bg-slate-100 text-slate-600'}`}
+      className={`text-xs rounded px-1.5 py-0.5 flex-shrink-0 ${c ? `${c.bg} ${c.text}` : 'bg-slate-100 text-slate-600'}`}
     >
       {status}
     </span>

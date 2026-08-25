@@ -7,6 +7,18 @@ export enum VehicleStatus {
   IMMOBILIZED = 'Immobilisé'  // Nouveau: panne sur route, en attente de réparation
 }
 
+// Registre couleurs UNIQUE des statuts véhicule. `hex` pour les marqueurs de
+// carte (FleetMap), `bg`/`text` pour les badges Tailwind (VehicleStatusBadge).
+// Le LIBELLÉ canonique = la valeur de l'enum (ne pas re-mapper « Disponible » en
+// « Au repos »). Couvre les 5 statuts (FleetMap n'en gérait que 3).
+export const VEHICLE_STATUS_COLORS: Record<VehicleStatus, { bg: string; text: string; hex: string }> = {
+  [VehicleStatus.ACTIVE]: { bg: 'bg-green-100', text: 'text-green-700', hex: '#16a34a' },
+  [VehicleStatus.MAINTENANCE]: { bg: 'bg-amber-100', text: 'text-amber-700', hex: '#d97706' },
+  [VehicleStatus.IDLE]: { bg: 'bg-blue-100', text: 'text-blue-700', hex: '#2563eb' },
+  [VehicleStatus.ISSUE]: { bg: 'bg-red-100', text: 'text-red-700', hex: '#dc2626' },
+  [VehicleStatus.IMMOBILIZED]: { bg: 'bg-red-200', text: 'text-red-800', hex: '#b91c1c' }
+};
+
 // Type de véhicule (propriété vs remplacement)
 export enum VehicleOwnership {
   OWNED = 'Propriété',
@@ -950,6 +962,17 @@ export enum StopStatus {
   SKIPPED = 'Passé',
   FAILED = 'Échec'
 }
+
+// Registre couleurs UNIQUE des statuts d'arrêt (badges). Avant, ToursOverview et
+// FleetMapView avaient chacun leur table → mêmes statuts, couleurs différentes
+// (ARRIVED orange vs bleu, SKIPPED slate vs amber). Source unique ici.
+export const STOP_STATUS_COLORS: Record<StopStatus, { bg: string; text: string }> = {
+  [StopStatus.PENDING]: { bg: 'bg-slate-100', text: 'text-slate-600' },
+  [StopStatus.ARRIVED]: { bg: 'bg-blue-100', text: 'text-blue-700' },
+  [StopStatus.COMPLETED]: { bg: 'bg-green-100', text: 'text-green-700' },
+  [StopStatus.SKIPPED]: { bg: 'bg-amber-100', text: 'text-amber-700' },
+  [StopStatus.FAILED]: { bg: 'bg-red-100', text: 'text-red-700' }
+};
 
 export interface MissionStop {
   id: string;

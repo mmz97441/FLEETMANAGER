@@ -6,7 +6,7 @@
 import { useMemo, useState, useCallback } from 'react';
 import { Vehicle, User, Issue, MaintenanceLog, VehicleStatus, UserRole, IssueStatus } from '../types';
 import { usePermissions, Permission } from '../usePermissions';
-import { normalizeRole } from '../utils/role';
+import { normalizeRole, roleKey } from '../utils/role';
 
 // === TYPES ===
 export type SortOption = 'plate' | 'wear_desc' | 'wear_asc';
@@ -202,8 +202,10 @@ export const useVehicles = ({
   // === CHAUFFEURS DISPONIBLES ===
   const availableDrivers = useMemo(() => {
     return users.filter(u => {
-      const role = normalizeRole(u.role);
-      return role === UserRole.DRIVER;
+      // Rôle vide/inconnu → normalizeRole renvoie DRIVER (défaut sûr) : on exige
+      // donc un rôle d'origine NON vide pour ne pas lister un compte fantôme.
+      if (!roleKey(u.role)) return false;
+      return normalizeRole(u.role) === UserRole.DRIVER;
     });
   }, [users]);
 

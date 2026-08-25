@@ -9,6 +9,7 @@
 import React, { useState, lazy, Suspense } from 'react';
 import { ScanLine, X, Loader2, MapPin, Package as PackageIcon, Search, PackageCheck, CheckCircle, Plus } from 'lucide-react';
 import { Package, PackageStatus, PACKAGE_STATUS_COLORS, User, UserRole } from '../types';
+import { todayISO } from '../utils/date';
 import { findPackageByCode, claimPackagesForDelivery, createAndClaimPackage } from '../services/missionService';
 import { reportError } from '../services/logService';
 import { packageDisplayCode } from '../utils/barcode';
@@ -65,7 +66,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
         city: createForm.city,
         contactPhone: createForm.contactPhone,
         driver: { id: currentUser.id, name: `${currentUser.firstName} ${currentUser.lastName}` },
-        date: new Date().toISOString().split('T')[0],
+        date: todayISO(),
         location
       });
       setShowCreate(false);
@@ -98,7 +99,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
       await claimPackagesForDelivery({
         packages: [result.pkg],
         driver: { id: currentUser.id, name: `${currentUser.firstName} ${currentUser.lastName}` },
-        date: new Date().toISOString().split('T')[0],
+        date: todayISO(),
         location
       });
       setClaimed(true);

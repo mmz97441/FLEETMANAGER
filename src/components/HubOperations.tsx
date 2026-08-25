@@ -15,6 +15,7 @@
 
 import React, { useState, useEffect, useMemo, lazy, Suspense } from 'react';
 import { packageMatchesCode, packageScanCodes } from '../utils/barcode';
+import { todayISO } from '../utils/date';
 import {
   Package as PackageIcon, Truck, ArrowDownToLine, ArrowUpFromLine,
   ScanBarcode, CheckCircle, AlertTriangle, Search, Filter,
@@ -81,7 +82,7 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
   const [wrongColisAlert, setWrongColisAlert] = useState<WrongColisAlert | null>(null);
   const [loadingComplete, setLoadingComplete] = useState(false);
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayISO();
   const isDriver = currentUser.role === UserRole.DRIVER;
 
   // ============================================================================

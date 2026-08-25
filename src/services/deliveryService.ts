@@ -11,6 +11,7 @@ import {
   QuoteRequest, QuoteStatus, Package, PackageStatus, PackageMovement,
   Zone, DeliveryTimeSlot, DeliveryScheduleConfig, User
 } from '../types';
+import { todayISO } from '../utils/date';
 import {
   getZoneFromPostalCode,
   extractPostalCodeFromAddress,
@@ -167,7 +168,7 @@ export const getAvailableSlotsForZone = (
     .sort((a, b) => a.sortOrder - b.sortOrder);
 
   // Si même jour, filtrer les créneaux passés (cutoff)
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayISO();
   if (date === today) {
     if (!config.sameDayEnabled) return [];
 

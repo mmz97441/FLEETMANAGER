@@ -76,9 +76,9 @@ const getPriorityConfig = (priority: string) => {
 const getStatusConfig = (status: IssueStatus) => {
   switch(status) {
     case IssueStatus.NEW: return { bg: 'bg-red-100', text: 'text-red-700', border: 'border-red-200', label: 'Nouveau', icon: AlertCircle };
-    case IssueStatus.ACKNOWLEDGED: return { bg: 'bg-blue-100', text: 'text-blue-700', border: 'border-blue-200', label: 'Pris en charge', icon: CheckSquare };
-    case IssueStatus.IN_PROGRESS: return { bg: 'bg-orange-100', text: 'text-orange-700', border: 'border-orange-200', label: 'En réparation', icon: Wrench };
-    case IssueStatus.RESOLVED: return { bg: 'bg-green-100', text: 'text-green-700', border: 'border-green-200', label: 'Clôturé', icon: CheckCircle };
+    case IssueStatus.ACKNOWLEDGED: return { bg: 'bg-blue-100', text: 'text-blue-700', border: 'border-blue-200', label: IssueStatus.ACKNOWLEDGED, icon: CheckSquare };
+    case IssueStatus.IN_PROGRESS: return { bg: 'bg-orange-100', text: 'text-orange-700', border: 'border-orange-200', label: IssueStatus.IN_PROGRESS, icon: Wrench };
+    case IssueStatus.RESOLVED: return { bg: 'bg-green-100', text: 'text-green-700', border: 'border-green-200', label: IssueStatus.RESOLVED, icon: CheckCircle };
     default: return { bg: 'bg-slate-100', text: 'text-slate-700', border: 'border-slate-200', label: status, icon: Folder };
   }
 };

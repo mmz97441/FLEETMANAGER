@@ -17,7 +17,7 @@ import { MissionStatus } from '../types';
 import Modal from './shared/Modal';
 import { usePermissions, Permission } from '../usePermissions';
 import { useMissionStats } from '../hooks/useMissionStats';
-import { normalizeRole } from '../utils/role';
+import { normalizeRole, roleKey } from '../utils/role';
 
 // ============================================================================
 // TYPES & INTERFACES
@@ -401,8 +401,10 @@ const Dashboard: React.FC<DashboardProps> = ({
 
     // --- RH ---
     const drivers = users.filter(u => {
-      const r = normalizeRole(u.role);
-      return r === UserRole.DRIVER;
+      // Rôle vide/inconnu → défaut DRIVER : on exige un rôle d'origine non vide
+      // pour ne pas compter un compte fantôme comme chauffeur.
+      if (!roleKey(u.role)) return false;
+      return normalizeRole(u.role) === UserRole.DRIVER;
     });
 
     const driversOnLeaveToday = absences.filter(a => {

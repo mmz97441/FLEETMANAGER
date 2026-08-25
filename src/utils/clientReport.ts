@@ -9,6 +9,7 @@
  */
 import * as XLSX from 'xlsx';
 import { Package, PackageStatus, PackageMovement } from '../types';
+import { todayISO } from './date';
 
 export interface ReportSummary {
   total: number;
@@ -130,7 +131,7 @@ export const exportReportExcel = (packages: Package[], clientName: string, perio
   XLSX.utils.book_append_sheet(wb, wsDetail, 'Détail colis');
 
   const safe = (clientName || 'client').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
-  XLSX.writeFile(wb, `rapport-livraison-${safe}-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  XLSX.writeFile(wb, `rapport-livraison-${safe}-${todayISO()}.xlsx`);
 };
 
 const esc = (v: string): string =>

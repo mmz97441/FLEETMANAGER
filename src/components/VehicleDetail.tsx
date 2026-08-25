@@ -4,6 +4,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { Vehicle, VehicleStatus, FuelLog, MaintenanceLog } from '../types';
+import { todayISO } from '../utils/date';
 import { Truck, Calendar, Gauge, AlertTriangle, ChevronLeft, Wrench, Droplet, ArrowRight, Download, Info } from 'lucide-react';
 import Modal from './shared/Modal';
 
@@ -51,7 +52,7 @@ const VehicleDetail: React.FC<VehicleDetailProps> = ({ vehicle, logs = [], maint
     const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = `Historique_${vehicle.plate}_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.download = `Historique_${vehicle.plate}_${todayISO()}.csv`;
     link.click();
   };
 

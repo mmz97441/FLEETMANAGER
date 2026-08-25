@@ -23,6 +23,13 @@ export interface ScannableCodes {
  * On N'INCLUT PAS clientReference (= le n° de commande du client, PARTAGÉ entre
  * tous les colis d'une commande) : sinon scanner ce code partagé validerait
  * plusieurs colis d'un coup et bloquerait le 2e en « déjà scanné ».
+ *
+ * POLITIQUE (asymétrie VOULUE, ne pas « corriger ») : la RECHERCHE d'un colis en
+ * base (findPackageByCode / findDispatchedPackageByCode dans missionService)
+ * inclut, elle, clientReference en DERNIER recours — c'est de l'IDENTIFICATION
+ * (retrouver le colis pour l'afficher/prendre en charge), pas de la VALIDATION.
+ * Identifier par n° de commande est acceptable ; valider une livraison dessus ne
+ * l'est pas. Ces deux couches ne doivent donc PAS être « unifiées » sur ce point.
  */
 export const packageScanCodes = (pkg: ScannableCodes): string[] =>
   [pkg.barcode, pkg.externalId, pkg.orderNumber]

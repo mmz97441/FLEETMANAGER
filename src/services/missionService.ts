@@ -32,6 +32,7 @@ import {
 } from '../types';
 import { extractScanTokens } from '../utils/barcode';
 import { placeKey } from '../utils/address';
+import { localDatePart } from '../utils/date';
 import { geocodeAddress, getGoogleMapsApiKey } from './gmproService';
 import { reportError } from './logService';
 
@@ -61,6 +62,60 @@ const cleanUndefined = (obj: any): any => {
   }
   return cleaned;
 };
+
+// ── Fabrique d'ARRÊT de livraison — forme UNIQUE ─────────────────────────────
+// Avant, un MissionStop était fabriqué à la main à plusieurs endroits, avec des
+// IDs (4 formats, dont Math.random) et des valeurs par défaut divergents. Ici :
+// packageCount toujours = packageIds.length, status PENDING, serviceTime défaut 5,
+// undefined retirés (cleanUndefined). Le serviceTime réel reste au choix de
+// l'appelant (formules légitimement différentes : dispatch vs manuel).
+
+/** Identifiant d'arrêt uniforme : `<prefix>-<horodatage>-<seq>`. */
+export const makeStopId = (prefix: string, seq: number, isoNow: string): string =>
+  `${prefix}-${isoNow.replace(/[:.]/g, '')}-${seq}`;
+
+export interface DeliveryStopInput {
+  id: string;
+  sequence: number;
+  address: string;
+  city: string;
+  postalCode: string;
+  contactName?: string;
+  contactPhone?: string;
+  coordinates?: { lat: number; lng: number };
+  floor?: number;
+  hasElevator?: boolean;
+  packageIds?: string[];
+  serviceTime?: number;
+  timeWindowStart?: string;
+  timeWindowEnd?: string;
+  notes?: string;
+  estimatedArrival?: string;
+}
+
+/** Construit un MissionStop de livraison normalisé (packageCount dérivé, PENDING). */
+export const buildDeliveryStop = (input: DeliveryStopInput): MissionStop =>
+  cleanUndefined({
+    id: input.id,
+    sequence: input.sequence,
+    type: 'DELIVERY',
+    address: input.address,
+    city: input.city,
+    postalCode: input.postalCode,
+    coordinates: input.coordinates,
+    floor: input.floor,
+    hasElevator: input.hasElevator,
+    contactName: input.contactName,
+    contactPhone: input.contactPhone,
+    packageIds: input.packageIds || [],
+    packageCount: (input.packageIds || []).length,
+    serviceTime: input.serviceTime ?? 5,
+    timeWindowStart: input.timeWindowStart,
+    timeWindowEnd: input.timeWindowEnd,
+    notes: input.notes,
+    estimatedArrival: input.estimatedArrival,
+    status: StopStatus.PENDING,
+  }) as MissionStop;
 
 // ============================================================================
 // HUBS
@@ -257,7 +312,7 @@ export const subscribeToPackages = (
     let packages = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Package));
     
     if (filters?.date) {
-      packages = packages.filter(p => p.createdAt.startsWith(filters.date!));
+      packages = packages.filter(p => localDatePart(p.createdAt) === filters.date!);
     }
     if (filters?.zone) {
       packages = packages.filter(p => p.zone === filters.zone);
@@ -869,7 +924,7 @@ export const subscribeToTransfers = (
     let transfers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PackageTransfer));
     
     if (filters?.date) {
-      transfers = transfers.filter(t => t.timestamp.startsWith(filters.date!));
+      transfers = transfers.filter(t => localDatePart(t.timestamp) === filters.date!);
     }
     if (filters?.driverId) {
       transfers = transfers.filter(t => 
@@ -1051,18 +1106,17 @@ export const transferPackagesToDriver = async (input: RoadTransferInput): Promis
     for (const group of byAddress.values()) {
       const first = group[0];
       maxSeq += 1;
-      stops.push(cleanUndefined({
-        id: `transfer-${now.replace(/[:.]/g, '')}-${maxSeq}-${Math.floor(maxSeq)}`,
-        sequence: maxSeq, type: 'DELIVERY',
+      stops.push(buildDeliveryStop({
+        id: makeStopId('transfer', maxSeq, now),
+        sequence: maxSeq,
         address: first.address, city: first.city, postalCode: first.postalCode,
         coordinates: first.coordinates, floor: first.floor, hasElevator: first.hasElevator,
         contactName: first.contactName, contactPhone: first.contactPhone,
-        packageIds: group.map(p => p.id), packageCount: group.length,
+        packageIds: group.map(p => p.id),
         timeWindowStart: first.timeWindowStart, timeWindowEnd: first.timeWindowEnd,
         serviceTime: first.serviceTime || 5,
         notes: claimMode ? 'Pris en charge par scan' : 'Reçu par transfert en route',
-        status: StopStatus.PENDING
-      }) as MissionStop);
+      }));
     }
     const newStops = [...m.stops, ...stops];
     tx.update(toRef, {
@@ -1378,7 +1432,11 @@ export const optimizeDriverMission = async (
  */
 export const addManualStopToMission = async (
   missionId: string,
-  stopData: { contactName: string; address: string; postalCode: string; city: string; contactPhone?: string; notes?: string }
+  stopData: {
+    contactName: string; address: string; postalCode: string; city: string;
+    contactPhone?: string; notes?: string;
+    timeWindowStart?: string; timeWindowEnd?: string; serviceTime?: number;
+  }
 ): Promise<void> => {
   const ref = doc(db, MISSIONS_COLLECTION, missionId);
   const now = new Date().toISOString();
@@ -1386,17 +1444,16 @@ export const addManualStopToMission = async (
     const snap = await tx.get(ref);
     if (!snap.exists()) throw new Error('Tournée introuvable');
     const mission = { id: snap.id, ...snap.data() } as Mission;
-    const maxSeq = mission.stops.reduce((m, s) => Math.max(m, s.sequence), 0);
-    const stop = cleanUndefined({
-      id: `manual-${now.replace(/[:.]/g, '')}-${maxSeq + 1}`,
-      sequence: maxSeq + 1,
-      type: 'DELIVERY',
+    const seq = mission.stops.reduce((m, s) => Math.max(m, s.sequence), 0) + 1;
+    const stop = buildDeliveryStop({
+      id: makeStopId('manual', seq, now),
+      sequence: seq,
       address: stopData.address, city: stopData.city, postalCode: stopData.postalCode,
       contactName: stopData.contactName, contactPhone: stopData.contactPhone,
-      packageIds: [], packageCount: 0, serviceTime: 5,
+      timeWindowStart: stopData.timeWindowStart, timeWindowEnd: stopData.timeWindowEnd,
+      serviceTime: stopData.serviceTime,
       notes: `⚠️ Arrêt ajouté manuellement${stopData.notes ? ' — ' + stopData.notes : ''}`,
-      status: StopStatus.PENDING
-    }) as MissionStop;
+    });
     tx.update(ref, { stops: [...mission.stops, stop], updatedAt: now });
   });
 };

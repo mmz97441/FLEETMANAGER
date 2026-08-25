@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { FuelLog, Vehicle, User, UserRole } from '../types';
+import { todayISO } from '../utils/date';
 import { Droplet, Plus, TrendingUp, DollarSign, Calendar, Filter, X, Save, Car, ChevronDown, ChevronUp, Route, Gauge, Download, Eye, FileText, User as UserIcon, Search, Check, ExternalLink, Lock, Camera, Upload, AlertCircle, Edit2, AlertTriangle } from 'lucide-react';
 import Modal from './shared/Modal';
 import ConfirmModal from './ConfirmModal';
@@ -101,7 +102,7 @@ export const FuelManager: React.FC<FuelManagerProps> = ({ logs, vehicles, users,
 
   const [newLog, setNewLog] = useState({
       vehicleId: '',
-      date: new Date().toISOString().slice(0, 10),
+      date: todayISO(),
       mileage: '' as any,
       volume: '' as any,
       cost: '' as any,
@@ -434,7 +435,7 @@ export const FuelManager: React.FC<FuelManagerProps> = ({ logs, vehicles, users,
           setIsModalOpen(false);
           setNewLog({ 
               vehicleId: accessibleVehicles.length === 1 ? accessibleVehicles[0].id : '', 
-              date: new Date().toISOString().slice(0, 10), 
+              date: todayISO(), 
               mileage: '', 
               volume: '', 
               cost: '', 
@@ -592,7 +593,7 @@ export const FuelManager: React.FC<FuelManagerProps> = ({ logs, vehicles, users,
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `Carburant_Export_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute("download", `Carburant_Export_${todayISO()}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

@@ -8,6 +8,7 @@
 import { useState, useEffect } from 'react';
 import { collection, query, where, orderBy, limit, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
+import { todayISO, localDatePart } from '../utils/date';
 import { Mission, MissionStatus, Package, PackageStatus, Zone } from '../types';
 
 // === Types ===
@@ -70,7 +71,7 @@ export const useMissionStats = (date?: string): MissionDayStats => {
   const [packages, setPackages] = useState<Package[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const today = date || new Date().toISOString().split('T')[0];
+  const today = date || todayISO();
 
   // Abonnement missions du jour
   useEffect(() => {
@@ -129,7 +130,7 @@ function computeStats(
   const missionIds = new Set(missions.map(m => m.id));
   const todayPackages = allPackages.filter(p => 
     (p.missionId && missionIds.has(p.missionId)) ||
-    p.createdAt?.startsWith(today)
+    localDatePart(p.createdAt || '') === today
   );
 
   // Stats missions
