@@ -14,22 +14,14 @@
  * Aucune dépendance ajoutée : HTML + window.print (comme clientReport.ts).
  */
 import { Package, PackageStatus, ProofOfDelivery, DeliveryLocation } from '../types';
+// Source de vérité UNIQUE du « même point de livraison ? » (adresse OU tél+CP).
+import { sameDeliveryPoint } from './address';
 
 // ---------------------------------------------------------------------------
-// Regroupement par point de livraison (même logique que l'import : adresse OU
-// téléphone identiques, en ignorant le n° de commande et le nom).
+// Regroupement par point de livraison : on délègue à sameDeliveryPoint
+// (utils/address.ts) pour que le BL groupe EXACTEMENT comme le dispatch et le
+// chauffeur (adresse OU tél+CP, sans n° de commande ni nom).
 // ---------------------------------------------------------------------------
-const stripAccents = (s: string): string =>
-  s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-
-const normAddr = (p: Package): string =>
-  stripAccents(`${p.address || ''} ${p.postalCode || ''} ${p.city || ''}`)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim();
-
-const normPhone = (p: Package): string =>
-  (p.contactPhone || '').replace(/\D+/g, '').replace(/^0+/, '');
 
 /**
  * Renvoie les colis du MÊME POINT DE LIVRAISON (pharmacie) que `pkg`, et du
@@ -38,15 +30,11 @@ const normPhone = (p: Package): string =>
  * complet de la pharmacie.
  */
 export const packagesAtSamePoint = (pkg: Package, all: Package[]): Package[] => {
-  const a = normAddr(pkg);
-  const ph = normPhone(pkg);
   const day = (pkg.createdAt || '').slice(0, 10);
   return all.filter(p => {
     if (p.id === pkg.id) return true;
-    const sameAddr = a && normAddr(p) === a;
-    const samePhone = ph && normPhone(p) === ph;
     const sameDay = !day || (p.createdAt || '').slice(0, 10) === day;
-    return (sameAddr || samePhone) && sameDay;
+    return sameDeliveryPoint(pkg, p) && sameDay;
   });
 };
 

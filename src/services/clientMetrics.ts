@@ -4,6 +4,8 @@
 // ============================================================================
 
 import { Package, PackageStatus, PackageMovement } from '../types';
+// Source de vérité UNIQUE du regroupement par point de livraison.
+import { placeKey } from '../utils/address';
 
 // ----------------------------------------------------------------------------
 // Types exportés
@@ -76,12 +78,10 @@ function firstMovementTs(p: Package): string | undefined {
   return p.createdAt;
 }
 
-/** Normalisation d'un point de livraison : `${address}|${city}` lowercased trimmed. */
-function pointKey(p: Package): string {
-  const address = (p.address || '').toLowerCase().trim();
-  const city = (p.city || '').toLowerCase().trim();
-  return `${address}|${city}`;
-}
+// Clé de point de livraison = placeKey (utils/address.ts), cohérente avec le
+// dispatch : adresse+CP+ville normalisés (accents/espaces). Avant, cette copie
+// locale (address|city sans CP ni accents) comptait les points différemment.
+const pointKey = placeKey;
 
 /** Un colis est "livré" au sens statut. */
 function isDelivered(p: Package): boolean {

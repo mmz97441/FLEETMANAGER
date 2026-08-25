@@ -6,6 +6,7 @@
 import { useMemo, useState, useCallback } from 'react';
 import { Vehicle, User, Issue, MaintenanceLog, VehicleStatus, UserRole, IssueStatus } from '../types';
 import { usePermissions, Permission } from '../usePermissions';
+import { normalizeRole } from '../utils/role';
 
 // === TYPES ===
 export type SortOption = 'plate' | 'wear_desc' | 'wear_asc';
@@ -35,17 +36,8 @@ export interface EffectiveStatus {
 
 // === FONCTIONS UTILITAIRES (exportées pour réutilisation) ===
 
-export const normalizeRole = (role: string | UserRole): UserRole => {
-  const r = String(role).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  if (r.includes('admin')) return UserRole.ADMIN;
-  if (r.includes('presiden')) return UserRole.PRESIDENT;
-  if (r.includes('direction') || r.includes('directeur')) return UserRole.DIRECTOR;
-  if (r.includes('secret')) return UserRole.SECRETARY;
-  if (r.includes('chauff') || r.includes('driver')) return UserRole.DRIVER;
-  if (r.includes('mecan') || r.includes('mech')) return UserRole.MECHANIC;
-  if (r.includes('client')) return UserRole.CLIENT;
-  return role as UserRole;
-};
+// normalizeRole : r\u00e9-export\u00e9 depuis la source de v\u00e9rit\u00e9 unique (src/utils/role.ts)
+export { normalizeRole };
 
 export const getDriverId = (vehicle: Vehicle): string | null => {
   return vehicle.assignedDriverId || vehicle.driverId || null;

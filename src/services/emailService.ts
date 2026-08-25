@@ -12,6 +12,7 @@
 import { db } from "../firebaseConfig";
 import { collection, addDoc } from "firebase/firestore";
 import { User, Issue, Absence, AbsenceType, Vehicle } from "../types";
+import { roleKey } from "../utils/role";
 
 // ============================================================================
 // TYPES
@@ -683,7 +684,7 @@ export const getAdminEmails = (users: User[]): string[] => {
   
   return users
     .filter(u => {
-      const role = String(u.role).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const role = roleKey(u.role);
       return adminRoles.some(r => role.includes(r)) && u.email;
     })
     .map(u => u.email)

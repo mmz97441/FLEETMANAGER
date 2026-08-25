@@ -45,11 +45,11 @@ const cleanFirestoreData = (data: any) => {
     return cleaned;
 };
 
-// --- HELPER SECURITY ---
-const isStaffOrAdmin = (role: string | UserRole) => {
-    const r = String(role).toLowerCase();
-    return r.includes('admin') || r.includes('presid') || r.includes('direct') || r.includes('secret') || r.includes('mecan');
-};
+// NB : un ancien helper `isStaffOrAdmin` classait le MÉCANICIEN comme admin —
+// en contradiction avec firestore.rules `isAdminRole()` (qui l'exclut). Il
+// n'était utilisé nulle part (code mort) : supprimé pour éviter le piège. Pour
+// « est-ce un interne/direction/client ? », s'appuyer sur permissions.ts et les
+// helpers de utils/role.ts, en miroir strict de firestore.rules.
 
 // --- STORAGE (Fichiers) ---
 

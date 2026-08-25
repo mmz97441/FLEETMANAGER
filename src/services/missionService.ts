@@ -788,10 +788,13 @@ export const updateMissionFields = async (
   missionId: string,
   fields: Partial<Omit<Mission, 'id' | 'createdAt'>>
 ): Promise<void> => {
-  await updateDoc(doc(db, MISSIONS_COLLECTION, missionId), {
+  // cleanUndefined OBLIGATOIRE (comme updateMission) : les appelants passent des
+  // stops avec des champs `|| undefined` (contactPhone, timeWindow, notes…), et
+  // Firestore REJETTE tout undefined imbriqué → écriture perdue (bug 3ca5be7).
+  await updateDoc(doc(db, MISSIONS_COLLECTION, missionId), cleanUndefined({
     ...fields,
     updatedAt: new Date().toISOString()
-  });
+  }));
 };
 
 export const updateMissionStatus = async (missionId: string, status: MissionStatus): Promise<void> => {
@@ -898,38 +901,55 @@ export const confirmTransfer = async (transferId: string, toSignatureUrl?: strin
   });
 };
 
-/**
- * Retrouve un colis dispatché à partir d'un code scanné (tracking GFL,
- * N° colis client type BR0513, ou N° de commande). Utilisé pour les
- * transferts en route : le colis peut appartenir à n'importe quelle tournée.
- */
-export const findDispatchedPackageByCode = async (code: string): Promise<Package | null> => {
-  const cleaned = code.trim();
-  if (!cleaned) return null;
-  const values = [...new Set([cleaned, cleaned.toUpperCase()])];
+// ── Recherche colis par code scanné — SOCLE COMMUN (une seule logique) ───────
+// Les deux points d'entrée (findPackageByCode / findDispatchedPackageByCode)
+// partageaient jadis 90% du code MAIS divergeaient sur un détail critique :
+// seul findPackageByCode appliquait extractScanTokens (isole le BR… d'un
+// DataMatrix, retire le rang -002). Résultat : la passation entre chauffeurs
+// échouait sur des étiquettes qui marchaient partout ailleurs. On centralise :
+// mêmes candidats, même requête ; seul le départage (tie-break) diffère.
 
-  // clientReference en dernier : identifiant potentiellement partagé (N° de
-  // commande client), donc après les identifiants uniques (barcode/externalId).
+/** Candidats de recherche extraits d'un code scanné : chaîne brute + tokens
+ *  (N° colis BR…, N° commande, version sans rang). Couvre les DataMatrix clients. */
+const scanSearchCandidates = (code: string): string[] => {
+  const list = [code.trim(), code.trim().toUpperCase(), ...extractScanTokens(code)].filter(Boolean);
+  return [...new Set(list)];
+};
+
+/** Requête Firestore : renvoie le 1er lot de colis correspondant à un candidat.
+ *  Champs testés dans l'ordre : identifiants uniques d'abord, clientReference
+ *  (N° de commande potentiellement partagé) en DERNIER. */
+const queryPackagesByCandidates = async (uniq: string[]): Promise<Package[]> => {
   for (const field of ['barcode', 'externalId', 'orderNumber', 'clientReference'] as const) {
-    for (const value of values) {
+    for (const value of uniq) {
       const snap = await getDocs(query(
         collection(db, PACKAGES_COLLECTION),
         where(field, '==', value),
         limit(5)
       ));
-      if (snap.empty) continue;
-      const pkgs = snap.docs.map(d => ({ id: d.id, ...d.data() } as Package));
-      // Préférer un colis encore en cours (rattaché à une mission, non livré)
-      const active = pkgs.find(p =>
-        p.missionId &&
-        p.status !== PackageStatus.DELIVERED &&
-        p.status !== PackageStatus.RETURNED
-      );
-      if (active) return active;
-      return pkgs[0];
+      if (!snap.empty) return snap.docs.map(d => ({ id: d.id, ...d.data() } as Package));
     }
   }
-  return null;
+  return [];
+};
+
+/**
+ * Retrouve un colis dispatché à partir d'un code scanné (tracking GFL,
+ * N° colis client type BR0513, ou N° de commande). Utilisé pour les
+ * transferts en route : le colis peut appartenir à n'importe quelle tournée.
+ * Départage : préférer un colis ACTIF (rattaché à une mission, non livré).
+ */
+export const findDispatchedPackageByCode = async (code: string): Promise<Package | null> => {
+  const uniq = scanSearchCandidates(code);
+  if (uniq.length === 0) return null;
+  const pkgs = await queryPackagesByCandidates(uniq);
+  if (pkgs.length === 0) return null;
+  const active = pkgs.find(p =>
+    p.missionId &&
+    p.status !== PackageStatus.DELIVERED &&
+    p.status !== PackageStatus.RETURNED
+  );
+  return active || pkgs[0];
 };
 
 /**
@@ -938,36 +958,16 @@ export const findDispatchedPackageByCode = async (code: string): Promise<Package
  * Repli : si le code scanné se termine par un suffixe d'index (ex "13926865-002"
  * ou "13926865002" pour "colis 02"), on réessaie sur le N° de commande nu —
  * les étiquettes clients encodent souvent commande + rang du colis.
- * Retourne le colis le plus récent en cas d'homonymes.
+ * Départage : le colis le plus RÉCENT en cas d'homonymes.
  */
 export const findPackageByCode = async (code: string): Promise<Package | null> => {
-  // Candidats extraits du code scanné : chaîne brute, N° colis (BR…),
-  // N° commande, version sans suffixe de rang. Couvre les DataMatrix clients.
-  const candidates = [
-    code.trim(),
-    code.trim().toUpperCase(),
-    ...extractScanTokens(code),
-  ].filter(Boolean);
-  const uniq = [...new Set(candidates)];
+  const uniq = scanSearchCandidates(code);
   if (uniq.length === 0) return null;
-
-  // clientReference inclus (N° de commande client imprimé sur le 1D BOIRON),
-  // placé en dernier car potentiellement partagé entre colis d'une même commande.
-  for (const field of ['barcode', 'externalId', 'orderNumber', 'clientReference'] as const) {
-    for (const value of uniq) {
-      const snap = await getDocs(query(
-        collection(db, PACKAGES_COLLECTION),
-        where(field, '==', value),
-        limit(5)
-      ));
-      if (!snap.empty) {
-        return snap.docs
-          .map(d => ({ id: d.id, ...d.data() } as Package))
-          .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())[0];
-      }
-    }
-  }
-  return null;
+  const pkgs = await queryPackagesByCandidates(uniq);
+  if (pkgs.length === 0) return null;
+  return pkgs.sort((a, b) =>
+    new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+  )[0];
 };
 
 export interface RoadTransferInput {

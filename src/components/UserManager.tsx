@@ -11,6 +11,7 @@ import { toggleUserStatus, forcePasswordReset } from '../services/cloudFunctions
 import { cleanupDuplicateUserProfiles } from '../services/firestore';
 import { notifySuccess, notifyError, notifyInfo } from '../services/logService';
 import { usePermissions, Permission } from '../usePermissions';
+import { roleKey } from '../utils/role';
 import { validateName, validateEmail, validatePhone, ValidationResult } from '../utils/validation';
 
 interface UserManagerProps {
@@ -160,14 +161,8 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
     return Object.keys(errors).length === 0;
   };
 
-  // --- HELPER: NORMALISATION DES RÔLES ---
-  const normalizeRole = (role: string | undefined) => {
-      if (!role) return '';
-      return String(role).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  };
-
-  const isDriver = (role: string) => normalizeRole(role).includes('chauff') || normalizeRole(role).includes('driver');
-  const isClient = (role: string) => normalizeRole(role).includes('client');
+  const isDriver = (role: string) => roleKey(role).includes('chauff') || roleKey(role).includes('driver');
+  const isClient = (role: string) => roleKey(role).includes('client');
 
   // --- STATS ---
   const stats = useMemo(() => {
@@ -206,7 +201,7 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
           if (roleFilter === 'all') return matchesSearch;
 
           // Mapping du filtre selectionné vers la logique de normalisation
-          const userRoleNorm = normalizeRole(user.role);
+          const userRoleNorm = roleKey(user.role);
           let matchesRole = false;
 
           switch(roleFilter) {
@@ -225,7 +220,7 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
 
   // --- HELPERS UI (ICONES & BADGES) ---
   const getRoleIcon = (role: string) => {
-      const n = normalizeRole(role);
+      const n = roleKey(role);
       if (n.includes('presid')) return <Shield size={16} className="text-purple-600" />;
       if (n.includes('direct') || n.includes('dirigeant')) return <Briefcase size={16} className="text-blue-600" />;
       if (n.includes('secret') || n.includes('adminis')) return <Settings size={16} className="text-pink-600" />;
@@ -237,7 +232,7 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
   };
 
   const getRoleBadge = (role: string) => {
-      const n = normalizeRole(role);
+      const n = roleKey(role);
       if (n.includes('presid')) return 'bg-purple-100 text-purple-700 border-purple-200';
       if (n.includes('direct') || n.includes('dirigeant')) return 'bg-blue-100 text-blue-700 border-blue-200';
       if (n.includes('secret') || n.includes('adminis')) return 'bg-pink-100 text-pink-700 border-pink-200';

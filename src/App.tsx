@@ -93,6 +93,7 @@ import {
 import { logActivity } from './services/activityLogService';
 import { convertQuoteToPackage } from './services/deliveryService';
 import { ActivityAction, ActivityCategory } from './types';
+import { normalizeRole } from './utils/role';
 
 import {
   ViewState, User, UserRole, Vehicle, FuelLog, MaintenanceLog,
@@ -317,18 +318,6 @@ const App: React.FC = () => {
   const pendingDocumentsCount = useMemo(() => {
     if (!currentUser) return 0;
     
-    // Helper pour normaliser les rôles
-    const normalizeRole = (role: string | UserRole): UserRole => {
-      const r = String(role).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      if (r.includes('admin')) return UserRole.ADMIN;
-      if (r.includes('presiden')) return UserRole.PRESIDENT;
-      if (r.includes('direction') || r.includes('directeur')) return UserRole.DIRECTOR;
-      if (r.includes('secret')) return UserRole.SECRETARY;
-      if (r.includes('chauff') || r.includes('driver')) return UserRole.DRIVER;
-      if (r.includes('mecan') || r.includes('mech')) return UserRole.MECHANIC;
-      if (r.includes('client')) return UserRole.CLIENT;
-      return role as UserRole;
-    };
     
     const effectiveRole = normalizeRole(currentUser.role);
     
@@ -365,17 +354,6 @@ const App: React.FC = () => {
   const pendingDocumentsList = useMemo(() => {
     if (!currentUser) return [];
     
-    const normalizeRole = (role: string | UserRole): UserRole => {
-      const r = String(role).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      if (r.includes('admin')) return UserRole.ADMIN;
-      if (r.includes('presiden')) return UserRole.PRESIDENT;
-      if (r.includes('direction') || r.includes('directeur')) return UserRole.DIRECTOR;
-      if (r.includes('secret')) return UserRole.SECRETARY;
-      if (r.includes('chauff') || r.includes('driver')) return UserRole.DRIVER;
-      if (r.includes('mecan') || r.includes('mech')) return UserRole.MECHANIC;
-      if (r.includes('client')) return UserRole.CLIENT;
-      return role as UserRole;
-    };
     
     const effectiveRole = normalizeRole(currentUser.role);
     

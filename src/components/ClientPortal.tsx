@@ -16,6 +16,7 @@ import { generateBatchLabelsHTML } from '../services/pickupService';
 import ShippingLabel, { quoteToLabelData, ShippingLabelData } from './ShippingLabel';
 import PODViewer from './PODViewer';
 import { openDeliveryNote } from '../utils/deliveryNote';
+import { placeKey } from '../utils/address';
 import CreateShipmentModal from './CreateShipmentModal';
 import ImportShipmentsModal from './ImportShipmentsModal';
 import ImportRecipientsModal from './ImportRecipientsModal';
@@ -497,11 +498,8 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   ): Promise<boolean> => {
     if (!currentUser.companyName) return false;
     
-    // Vérifier si l'adresse existe déjà (même adresse + ville)
-    const exists = savedAddresses.some(addr => 
-      addr.address.toLowerCase().trim() === data.address.toLowerCase().trim() &&
-      addr.city.toLowerCase().trim() === data.city.toLowerCase().trim()
-    );
+    // Vérifier si l'adresse existe déjà (même point de livraison, cf. address.ts)
+    const exists = savedAddresses.some(addr => placeKey(addr) === placeKey(data));
     
     if (exists) {
       setAddressSaveMessage('⚠️ Cette adresse existe déjà dans votre carnet');
@@ -1590,8 +1588,8 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                             {/* Lignes — regroupées par jour puis par pharmacie */}
                             <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto">
                                 {(() => {
-                                    // Regroupement par JOUR puis par PHARMACIE (point de livraison)
-                                    const pointKey = (p: PackageType) => `${(p.address||'').toLowerCase().trim()}|${(p.postalCode||'').trim()}|${(p.city||'').toLowerCase().trim()}`;
+                                    // Regroupement par JOUR puis par PHARMACIE (point de livraison, cf. address.ts)
+                                    const pointKey = (p: PackageType) => placeKey(p);
                                     const dayOf = (p: PackageType) => new Date(p.createdAt).toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
                                     const dayMap = new Map<string, Map<string, PackageType[]>>();
                                     for (const p of filtered) {

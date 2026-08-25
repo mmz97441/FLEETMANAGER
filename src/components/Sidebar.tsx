@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { ViewState, User, UserRole } from '../types';
 import { usePermissions, Permission, PermissionKey } from '../usePermissions';
+import { roleKey } from '../utils/role';
 
 interface PendingCounts {
   leaves: number;
@@ -228,14 +229,9 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
     return true;
   };
 
-  // Helper pour normaliser les rôles (pour l'affichage)
-  const normalizeRoleString = (role: string | UserRole) => {
-    return String(role).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  };
-
   // Label d'affichage du rôle
   const displayRoleLabel = useMemo(() => {
-    const r = normalizeRoleString(currentUser.role);
+    const r = roleKey(currentUser.role);
     if (r.includes('direction') || r.includes('directeur')) return "Direction";
     if (r.includes('presiden')) return "Présidence";
     if (r.includes('secret')) return "Secrétariat";
@@ -249,7 +245,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
 
   // Badge couleur selon le rôle
   const getRoleBadgeStyle = () => {
-    const r = normalizeRoleString(currentUser.role);
+    const r = roleKey(currentUser.role);
     if (r.includes('presiden')) return 'text-amber-300 border-amber-500/50 bg-amber-900/30';
     if (r.includes('direction') || r.includes('directeur')) return 'text-indigo-300 border-indigo-500/50 bg-indigo-900/30';
     if (r.includes('secret')) return 'text-purple-300 border-purple-500/50 bg-purple-900/30';

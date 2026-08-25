@@ -19,36 +19,8 @@ import {
   hasAnyPermission as checkAnyPermission,
   hasAllPermissions as checkAllPermissions,
 } from './permissions';
+import { normalizeRole } from './utils/role';
 
-// ============================================================================
-// HELPER: Normalisation du rôle
-// ============================================================================
-
-/**
- * Normalise un rôle utilisateur vers l'enum UserRole
- * Gère les variations d'accents, de casse et de formulation
- */
-const normalizeRole = (role: string | UserRole): UserRole => {
-  if (!role) return UserRole.DRIVER; // Défaut sécurisé
-  
-  const r = String(role).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-  
-  if (r.includes('admin')) return UserRole.ADMIN;
-  if (r.includes('presiden')) return UserRole.PRESIDENT;
-  if (r.includes('direction') || r.includes('directeur') || r.includes('exploitation')) return UserRole.DIRECTOR;
-  if (r.includes('secret') || r.includes('administra')) return UserRole.SECRETARY;
-  if (r.includes('chauff') || r.includes('driver')) return UserRole.DRIVER;
-  if (r.includes('mecan') || r.includes('mech') || r.includes('atelier')) return UserRole.MECHANIC;
-  if (r.includes('client')) return UserRole.CLIENT;
-  if (r.includes('stag') || r.includes('intern')) return UserRole.INTERN;
-  
-  // Si c'est déjà un UserRole valide
-  if (Object.values(UserRole).includes(role as UserRole)) {
-    return role as UserRole;
-  }
-  
-  return UserRole.DRIVER; // Défaut sécurisé
-};
 
 // ============================================================================
 // TYPES

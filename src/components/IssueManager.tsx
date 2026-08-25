@@ -47,19 +47,6 @@ type SortOrder = 'asc' | 'desc';
 // HELPERS
 // ============================================================================
 
-const normalizeRole = (role: string | UserRole): UserRole => {
-  const r = String(role).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  if (r.includes('admin')) return UserRole.ADMIN;
-  if (r.includes('presiden')) return UserRole.PRESIDENT;
-  if (r.includes('direction') || r.includes('directeur')) return UserRole.DIRECTOR;
-  if (r.includes('secret')) return UserRole.SECRETARY;
-  if (r.includes('chauff') || r.includes('driver')) return UserRole.DRIVER;
-  if (r.includes('mecan') || r.includes('mech')) return UserRole.MECHANIC;
-  if (r.includes('client')) return UserRole.CLIENT;
-  if (r.includes('stag') || r.includes('intern')) return UserRole.INTERN;
-  return role as UserRole;
-};
-
 const getPriorityOrder = (priority: string): number => {
   switch(priority) {
     case 'High': return 0;

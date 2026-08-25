@@ -23,6 +23,7 @@ import {
 } from '../services/emailService';
 import { notifyLeaveRequest } from '../services/notificationService';
 import { usePermissions, Permission } from '../usePermissions';
+import { roleKey } from '../utils/role';
 
 // ============================================================================
 // TYPES & INTERFACES
@@ -48,17 +49,13 @@ type CalendarView = 'month' | 'week';
 // HELPERS
 // ============================================================================
 
-const normalizeRole = (role: string | UserRole): string => {
-  return String(role).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-};
-
 const canManageAbsences = (user: User): boolean => {
-  const r = normalizeRole(user.role);
+  const r = roleKey(user.role);
   return r.includes('admin') || r.includes('presid') || r.includes('direct') || r.includes('secret');
 };
 
 const canValidateAbsences = (user: User): boolean => {
-  const r = normalizeRole(user.role);
+  const r = roleKey(user.role);
   return r.includes('admin') || r.includes('presid') || r.includes('direct') || r.includes('secret');
 };
 
@@ -260,14 +257,14 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
   // ÉQUIPE DE DIRECTION uniquement (président / directeur / admin — PAS secrétariat) :
   // seule habilitée à déclarer les arrêts maladie et accidents du travail.
   const isDirection = (() => {
-    const r = normalizeRole(currentUser.role);
+    const r = roleKey(currentUser.role);
     return r.includes('admin') || r.includes('presid') || r.includes('direct');
   })();
 
   // --- COMPUTED ---
   const drivers = useMemo(() => {
     return users.filter(u => {
-      const r = normalizeRole(u.role);
+      const r = roleKey(u.role);
       return r.includes('chauff') || r.includes('driver');
     });
   }, [users]);
