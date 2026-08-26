@@ -463,13 +463,24 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   // affectés à un AUTRE chauffeur (sinon on lui volerait un colis). On les ajoute
   // DIRECTEMENT à cet arrêt via addPackagesToStop (transaction atomique) → plus
   // aucune dépendance au regroupement placeKey qui bloquait avant.
+  // On ne rattache QUE les colis « libres » : non affectés à un autre chauffeur ET
+  // non déjà rattachés à une AUTRE tournée (sinon on créerait un doublon inter-missions
+  // — le colis serait livré et compté deux fois). Un colis d'une autre mission doit
+  // passer par le flux TRANSFERT (qui le retire de la mission d'origine), pas par ici.
   const claimableOthers = useMemo(() =>
-    otherAtAddress.filter(p => !p.currentDriverId || p.currentDriverId === currentUser.id),
-  [otherAtAddress, currentUser.id]);
+    otherAtAddress.filter(p =>
+      (!p.currentDriverId || p.currentDriverId === currentUser.id) &&
+      (!p.missionId || p.missionId === activeMission?.id)
+    ),
+  [otherAtAddress, currentUser.id, activeMission?.id]);
 
   const [isClaimingOthers, setIsClaimingOthers] = useState(false);
   const handleClaimOthersToStop = async () => {
     if (!activeMission || !currentStop || claimableOthers.length === 0 || isClaimingOthers) return;
+    if (currentStop.status === StopStatus.COMPLETED) {
+      showNotif('⚠️ Arrêt déjà terminé — impossible d’y rattacher des colis');
+      return;
+    }
     setIsClaimingOthers(true);
     try {
       let location: { lat: number; lng: number } | undefined;
@@ -729,23 +740,33 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
     setIsProcessing(false);
   };
 
-  // Intention de livraison PAR COLIS : ensemble des IDs réellement remis. null =
-  // tous. Mémorisé dans un ref pour survivre au retry GPS (qui rappelle
-  // handleDeliverySuccess sans argument).
-  const deliverIdsRef = useRef<Set<string> | null>(null);
+  // Intention de livraison PAR COLIS : ensemble des IDs réellement remis, ESTAMPILLÉ
+  // avec l'arrêt concerné. null = tous remis. Mémorisé dans un ref pour survivre au
+  // retry GPS (qui rappelle handleDeliverySuccess sans argument). L'estampille
+  // stopId est CRUCIALE : sans elle, une intention partielle laissée sur l'arrêt A
+  // (ex. GPS annulé) « fuyait » sur l'arrêt B et marquait à tort ses colis en échec.
+  const deliverIntentRef = useRef<{ stopId: string; ids: Set<string> } | null>(null);
+  // Purge l'intention dès qu'on change d'arrêt (navigation) — double sécurité en
+  // plus de la garde stopId ci-dessous.
+  useEffect(() => { deliverIntentRef.current = null; }, [currentStop?.id]);
 
   // Livraison réussie. `deliveredIds` = colis réellement remis (les autres colis
-  // de l'arrêt sont marqués « non remis »/échec). Absent = tous remis.
+  // de l'arrêt sont marqués « non remis »/échec). Absent = reprendre l'intention
+  // en cours pour CET arrêt (retry GPS), sinon tous remis.
   const handleDeliverySuccess = async (deliveredIds?: Set<string>) => {
-    if (deliveredIds !== undefined) deliverIdsRef.current = deliveredIds;
-    const idsToDeliver = deliverIdsRef.current; // null → tous
+    if (!activeMission || !currentStop) { deliverIntentRef.current = null; return; }
+    if (deliveredIds !== undefined) {
+      deliverIntentRef.current = { stopId: currentStop.id, ids: deliveredIds };
+    }
+    // Garde stopId : on n'utilise l'intention QUE si elle vise l'arrêt courant.
+    const intent = deliverIntentRef.current;
+    const idsToDeliver = intent && intent.stopId === currentStop.id ? intent.ids : null;
     // Trace du scan de contrôle (pour POD + historique colis)
     const scanTrace = stopPackages.length === 0
       ? undefined
       : deliveryScannedCount === stopPackages.length
         ? `Colis scannés: ${deliveryScannedCount}/${stopPackages.length}`
         : `⚠️ Validé sans scan complet (${deliveryScannedCount}/${stopPackages.length} scannés)`;
-    if (!activeMission || !currentStop) return;
     setIsProcessing(true);
     // GPS OBLIGATOIRE : toute LIVRAISON doit avoir un point GPS précis (mode strict).
     // (La passation entre chauffeurs — prise en charge / transfert — n'est PAS
@@ -758,28 +779,105 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
     coords = pos;
     try {
       const now = new Date().toISOString();
+      const driverFullName = `${currentUser.firstName} ${currentUser.lastName}`;
+      const linkFields = {
+        missionId: activeMission.id,
+        stopId: currentStop.id,
+        currentDriverId: currentUser.id,
+        currentVehicleId: activeMission.vehicleId
+      };
 
-      // 1. Mettre à jour le stop
-      const updatedStops = activeMission.stops.map(s =>
-        s.id === currentStop.id ? {
+      // Partition de l'arrêt : colis REMIS vs NON remis (déclarés absents).
+      const stopIds = currentStop.packageIds;
+      const deliverIds = stopIds.filter(id => !idsToDeliver || idsToDeliver.has(id));
+      const failIds = stopIds.filter(id => idsToDeliver && !idsToDeliver.has(id));
+
+      // 1. STATUT DE CHAQUE COLIS D'ABORD = source de vérité. On ne marquera
+      //    l'arrêt « terminé » QUE si TOUTES les écritures colis réussissent :
+      //    sinon un arrêt terminé pourrait contenir un colis resté « en cours »
+      //    que la resync repasserait à tort en « Livré » (faux POD).
+      const okDelivered: string[] = [];
+      const okFailed: string[] = [];
+      let writeErrors = 0;
+      for (const pkgId of deliverIds) {
+        try {
+          await updatePackageStatus(pkgId, PackageStatus.DELIVERED, {
+            action: 'DELIVERED',
+            driverId: currentUser.id, driverName: driverFullName,
+            vehicleId: activeMission.vehicleId, vehiclePlate: activeMission.vehiclePlate,
+            location: coords,
+            notes: [
+              recipientName ? `Réceptionné par: ${recipientName}` : null,
+              scanTrace || null
+            ].filter(Boolean).join(' • ') || undefined
+          }, linkFields);
+          okDelivered.push(pkgId);
+        } catch (e) {
+          writeErrors++;
+          reportError('driver.delivery.item', e, { silent: true, extra: { pkgId, missionId: activeMission.id, stopId: currentStop.id } });
+        }
+      }
+      for (const pkgId of failIds) {
+        try {
+          await updatePackageStatus(pkgId, PackageStatus.FAILED, {
+            action: 'FAILED',
+            driverId: currentUser.id, driverName: driverFullName,
+            vehicleId: activeMission.vehicleId, vehiclePlate: activeMission.vehiclePlate,
+            location: coords,
+            notes: 'Déclaré NON REMIS par le chauffeur (colis absent au point de livraison)'
+          }, linkFields);
+          okFailed.push(pkgId);
+        } catch (e) {
+          writeErrors++;
+          reportError('driver.delivery.item', e, { silent: true, extra: { pkgId, missionId: activeMission.id, stopId: currentStop.id } });
+        }
+      }
+
+      // 2. Une écriture colis a échoué → on NE termine PAS l'arrêt (il reste ouvert),
+      //    on garde l'intention (même stopId) pour un nouvel essai une fois en ligne.
+      if (writeErrors > 0) {
+        reportError('driver.delivery.partial', new Error(`${writeErrors} colis non écrits`), {
+          level: 'warning',
+          userMessage: `⚠️ ${writeErrors} colis sur ${stopIds.length} n'ont pas pu être enregistrés (réseau ?). L'arrêt reste OUVERT — réessayez une fois en ligne.`,
+          extra: { missionId: activeMission.id, stopId: currentStop.id }
+        });
+        setIsProcessing(false);
+        return;
+      }
+
+      // 3. Toutes les écritures OK → l'arrêt courant devient TERMINÉ et ne contient
+      //    QUE les colis livrés. Les non remis partent dans un arrêt FRÈRE marqué
+      //    ÉCHEC (même adresse) : un arrêt TERMINÉ ne référence donc JAMAIS un colis
+      //    non livré (resync sûre par construction) et le total mission est préservé.
+      const updatedStops: typeof activeMission.stops = [];
+      for (const s of activeMission.stops) {
+        if (s.id !== currentStop.id) { updatedStops.push(s); continue; }
+        updatedStops.push({
           ...s,
           status: StopStatus.COMPLETED,
           completionTime: now,
-          arrivalCoordinates: coords || s.arrivalCoordinates
-        } : s
-      );
+          arrivalCoordinates: coords || s.arrivalCoordinates,
+          packageIds: deliverIds,
+          packageCount: deliverIds.length
+        });
+        if (failIds.length > 0) {
+          updatedStops.push({
+            ...s,
+            id: `${s.id}-nonremis`,
+            status: StopStatus.FAILED,
+            completionTime: now,
+            arrivalCoordinates: coords || s.arrivalCoordinates,
+            packageIds: failIds,
+            packageCount: failIds.length,
+            notes: 'Colis non remis (déclarés absents au point de livraison)'
+          });
+        }
+      }
 
-      // 2. Compteurs PAR COLIS (déterministe depuis l'intention, plus depuis
-      //    packageCount qui supposait tout livré). Les colis non remis comptent
-      //    en échec, pas en livré.
-      const stopIds = currentStop.packageIds;
-      const deliveredThisStop = idsToDeliver ? stopIds.filter(id => idsToDeliver.has(id)).length : stopIds.length;
-      const failedThisStop = stopIds.length - deliveredThisStop;
+      // 4. Compteurs déterministes depuis les écritures RÉELLES (plus depuis l'intention).
       const { completedStops, failedStops } = recomputeMissionCounters(updatedStops);
-      const deliveredPkgs = (activeMission.deliveredPackages || 0) + deliveredThisStop;
-      const failedPkgs = (activeMission.failedPackages || 0) + failedThisStop;
-
-      // 3. Check si toute la mission est terminée
+      const deliveredPkgs = (activeMission.deliveredPackages || 0) + okDelivered.length;
+      const failedPkgs = (activeMission.failedPackages || 0) + okFailed.length;
       const allDone = updatedStops.every(s =>
         s.status === StopStatus.COMPLETED || s.status === StopStatus.FAILED || s.status === StopStatus.SKIPPED
       );
@@ -795,67 +893,13 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
         ...(allDone ? { completedAt: now } : {})
       });
 
-      // 4. Statut des colis EN PREMIER = source de vérité de la livraison.
-      //    L'upload des preuves (lourd, sensible au réseau mobile) se fait APRÈS.
-      //    Ainsi, si l'upload échoue, le colis reste bien "Livré" (seule la preuve
-      //    est à renvoyer) au lieu de rester bloqué "En livraison".
-      const driverFullName = `${currentUser.firstName} ${currentUser.lastName}`;
-      const linkFields = {
-        missionId: activeMission.id,
-        stopId: currentStop.id,
-        currentDriverId: currentUser.id,
-        currentVehicleId: activeMission.vehicleId
-      };
-      let writtenCount = 0;
-      for (const pkgId of currentStop.packageIds) {
-        const deliver = !idsToDeliver || idsToDeliver.has(pkgId);
-        try {
-          if (deliver) {
-            await updatePackageStatus(pkgId, PackageStatus.DELIVERED, {
-              action: 'DELIVERED',
-              driverId: currentUser.id, driverName: driverFullName,
-              vehicleId: activeMission.vehicleId, vehiclePlate: activeMission.vehiclePlate,
-              location: coords,
-              notes: [
-                recipientName ? `Réceptionné par: ${recipientName}` : null,
-                scanTrace || null
-              ].filter(Boolean).join(' • ') || undefined
-            }, linkFields);
-          } else {
-            // Colis NON remis (absent / non présenté) → marqué en échec avec motif,
-            // JAMAIS « Livré ». C'est ça la livraison par colis : plus de faux POD.
-            await updatePackageStatus(pkgId, PackageStatus.FAILED, {
-              action: 'FAILED',
-              driverId: currentUser.id, driverName: driverFullName,
-              vehicleId: activeMission.vehicleId, vehiclePlate: activeMission.vehiclePlate,
-              location: coords,
-              notes: 'Non remis au point de livraison (colis absent/non présenté lors d’une livraison à colis multiples)'
-            }, linkFields);
-          }
-          writtenCount++;
-        } catch (e) {
-          reportError('driver.delivery.item', e, {
-            silent: true,
-            extra: { pkgId, missionId: activeMission.id, stopId: currentStop.id }
-          });
-        }
-      }
-      if (writtenCount < currentStop.packageIds.length) {
-        const stuck = currentStop.packageIds.length - writtenCount;
-        reportError('driver.delivery.partial', new Error(`${stuck} colis non écrits`), {
-          level: 'warning',
-          userMessage: `⚠️ ${stuck} colis sur ${currentStop.packageIds.length} n'ont pas pu être enregistrés (réseau ?) — resynchronisez une fois en ligne.`,
-          extra: { missionId: activeMission.id, stopId: currentStop.id }
-        });
-      }
-
       // 5. Upload des preuves (POD) — best-effort : NE DOIT JAMAIS annuler la livraison.
       try {
         setUploadProgress({ step: 'compressing', current: 0, total: 1, message: 'Préparation...' });
         const podResult = await uploadAndCreatePOD({
           missionId: activeMission.id,
           stopId: currentStop.id,
-          packageIds: currentStop.packageIds,
+          packageIds: deliverIds, // la preuve ne couvre QUE les colis réellement remis
           driverId: currentUser.id,
           driverName: `${currentUser.firstName} ${currentUser.lastName}`,
           vehicleId: activeMission.vehicleId || '',
@@ -905,7 +949,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
       }
 
       // Reset UI
-      deliverIdsRef.current = null; // repartir « tous livrés » pour le prochain stop
+      deliverIntentRef.current = null; // repartir « tous livrés » pour le prochain stop
       setSignatureData(null);
       setCapturedPhotos([]);
       setRecipientName('');
@@ -918,6 +962,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
 
       showNotif(allDone ? '🎉 Tournée terminée !' : `✅ Stop ${currentStop.sequence} livré !`);
     } catch (err) {
+      // Ne PAS conserver une intention partielle après une erreur : elle pourrait
+      // « fuiter » sur une prochaine livraison. Le chauffeur repart propre.
+      deliverIntentRef.current = null;
       reportError('driver.delivery', err, { silent: true });
       showNotif(`❌ Erreur livraison${err instanceof Error ? ` — ${err.message}` : ''}`);
     }
@@ -1468,8 +1515,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                 </div>
               )}
 
-              {/* Filet de sécurité : colis à la même adresse hors de cet arrêt */}
-              {!isPickupStop && otherAtAddress.length > 0 && (
+              {/* Filet de sécurité : colis à la même adresse hors de cet arrêt.
+                  Masqué si l'arrêt est déjà terminé (on n'y rattache plus rien). */}
+              {!isPickupStop && currentStop.status !== StopStatus.COMPLETED && otherAtAddress.length > 0 && (
                 <div className="mt-2 p-3 bg-red-50 border-2 border-red-300 rounded-lg">
                   <p className="text-xs font-black text-red-700 flex items-center gap-1.5">
                     <XCircle size={14} />
@@ -1978,9 +2026,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
             total={stopPackages.length}
             actionLabel="Forcer : tout est remis"
             scannedCount={deliveryScannedCount}
-            onDeliverScannedOnly={() => { setShowScanGate(false); setScanBypass(true); handleDeliverySuccess(scannedStopIds); }}
+            onDeliverScannedOnly={() => { setShowScanGate(false); setScanBypass(true); handleDeliverySuccess(new Set(scannedStopIds)); }}
             onCancel={() => setShowScanGate(false)}
-            onForce={() => { setShowScanGate(false); setScanBypass(true); handleDeliverySuccess(); }}
+            onForce={() => { setShowScanGate(false); setScanBypass(true); deliverIntentRef.current = null; handleDeliverySuccess(); }}
           />
         )}
 
@@ -2023,7 +2071,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
               </div>
               <div className="flex gap-2 pt-1">
                 <button
-                  onClick={() => setGpsBlocked(false)}
+                  onClick={() => { setGpsBlocked(false); setGpsRetry(null); deliverIntentRef.current = null; }}
                   className="flex-1 py-3 bg-slate-100 text-slate-700 rounded-xl font-bold text-sm active:scale-95 transition-transform"
                 >
                   Annuler

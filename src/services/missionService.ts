@@ -896,10 +896,16 @@ export const updateImportBatch = async (batch: ImportBatch): Promise<void> => {
  */
 export const getPackagesByIds = async (ids: string[]): Promise<Package[]> => {
   const uniq = [...new Set(ids.filter(Boolean))];
+  // Lectures EN PARALLÈLE par lots (plus de N allers-retours séquentiels qui
+  // pouvaient faire traîner/timeouter la resync sur gros volume).
   const out: Package[] = [];
-  for (const id of uniq) {
-    const snap = await getDoc(doc(db, PACKAGES_COLLECTION, id));
-    if (snap.exists()) out.push({ id: snap.id, ...snap.data() } as Package);
+  const BATCH = 50;
+  for (let i = 0; i < uniq.length; i += BATCH) {
+    const slice = uniq.slice(i, i + BATCH);
+    const snaps = await Promise.all(slice.map(id => getDoc(doc(db, PACKAGES_COLLECTION, id))));
+    for (const snap of snaps) {
+      if (snap.exists()) out.push({ id: snap.id, ...snap.data() } as Package);
+    }
   }
   return out.sort((a, b) =>
     (a.externalId || a.orderNumber || '').localeCompare(b.externalId || b.orderNumber || ''));
@@ -1528,6 +1534,10 @@ export const addPackagesToStop = async (
     const mission = { id: snap.id, ...snap.data() } as Mission;
     const stopIdx = mission.stops.findIndex(s => s.id === stopId);
     if (stopIdx < 0) throw new Error('Arrêt introuvable');
+    // On ne rattache JAMAIS à un arrêt déjà terminé : sinon la resync verrait un
+    // arrêt COMPLETED contenant un colis « en cours » et le passerait à tort en Livré.
+    if (mission.stops[stopIdx].status === StopStatus.COMPLETED)
+      throw new Error('Arrêt déjà terminé — impossible d’y rattacher des colis');
 
     // Lectures AVANT écritures (contrainte transaction Firestore).
     const pkgRefs = packages.map(p => doc(db, PACKAGES_COLLECTION, p.id));
@@ -1540,6 +1550,9 @@ export const addPackagesToStop = async (
       if (!s.exists()) continue;
       const cur = { id: s.id, ...s.data() } as Package;
       if (cur.status === PackageStatus.DELIVERED || cur.status === PackageStatus.RETURNED) continue; // pas de résurrection
+      // Colis déjà rattaché à une AUTRE tournée → on ne le vole pas (doublon inter-missions).
+      // Le bon chemin est le transfert (qui le retire de la mission d'origine).
+      if (cur.missionId && cur.missionId !== missionId) continue;
       if (already.has(cur.id)) continue;
       toAttach.push({ ref: pkgRefs[i], pkg: cur });
       already.add(cur.id);
