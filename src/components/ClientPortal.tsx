@@ -1494,7 +1494,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                         { label: 'En attente', count: clientPackages.filter(p => p.status === PackageStatus.PENDING).length, color: 'bg-slate-100 text-slate-700', filter: 'pending' as const },
                         { label: 'En transit', count: clientPackages.filter(p => [PackageStatus.COLLECTED, PackageStatus.AT_HUB, PackageStatus.SORTED, PackageStatus.IN_TRANSIT, PackageStatus.LOADED, PackageStatus.IN_DELIVERY].includes(p.status)).length, color: 'bg-blue-100 text-blue-700', filter: 'transit' as const },
                         { label: 'Livrés', count: clientPackages.filter(p => p.status === PackageStatus.DELIVERED).length, color: 'bg-green-100 text-green-700', filter: 'delivered' as const },
-                        { label: 'Échecs', count: clientPackages.filter(p => p.status === PackageStatus.FAILED || p.status === PackageStatus.RETURNED).length, color: 'bg-red-100 text-red-700', filter: 'failed' as const },
+                        { label: 'Échecs / Retours', count: clientPackages.filter(p => p.status === PackageStatus.FAILED || p.status === PackageStatus.RETURNED || p.status === PackageStatus.RETURN_REQUESTED).length, color: 'bg-red-100 text-red-700', filter: 'failed' as const },
                         { label: 'Tous', count: clientPackages.length, color: 'bg-indigo-100 text-indigo-700', filter: 'all' as const },
                     ].map(s => (
                         <button
@@ -1561,7 +1561,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                         if (shipmentFilter === 'pending' && p.status !== PackageStatus.PENDING) return false;
                         if (shipmentFilter === 'transit' && ![PackageStatus.COLLECTED, PackageStatus.AT_HUB, PackageStatus.SORTED, PackageStatus.IN_TRANSIT, PackageStatus.LOADED, PackageStatus.IN_DELIVERY].includes(p.status)) return false;
                         if (shipmentFilter === 'delivered' && p.status !== PackageStatus.DELIVERED) return false;
-                        if (shipmentFilter === 'failed' && p.status !== PackageStatus.FAILED && p.status !== PackageStatus.RETURNED) return false;
+                        if (shipmentFilter === 'failed' && p.status !== PackageStatus.FAILED && p.status !== PackageStatus.RETURNED && p.status !== PackageStatus.RETURN_REQUESTED) return false;
                         // Filtre recherche
                         if (shipmentSearch) {
                             const term = shipmentSearch.toLowerCase();
