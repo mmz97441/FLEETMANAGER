@@ -933,13 +933,18 @@ export const commitStopOutcome = async (params: {
     const snap = await tx.get(ref);
     if (!snap.exists()) throw new Error('Tournée introuvable');
     const m = { id: snap.id, ...snap.data() } as Mission;
+    // IDEMPOTENCE : si l'arrêt ciblé est DÉJÀ dans un état terminal (Livré/Échec),
+    // c'est un ré-envoi (double-tap, rejeu) — on NE réincrémente PAS les compteurs
+    // colis (sinon deliveredPackages/failedPackages pourraient dépasser le total).
+    const prev = m.stops.find(s => s.id === params.stopId);
+    const wasTerminal = !!prev && (prev.status === StopStatus.COMPLETED || prev.status === StopStatus.FAILED);
     // On nettoie le patch AVANT le merge : un champ `undefined` (ex. arrivalCoordinates
     // sans GPS) ne doit PAS écraser/supprimer la valeur existante de l'arrêt.
     const cleanPatch = cleanUndefined(params.stopPatch) as Partial<MissionStop>;
     const stops = m.stops.map(s => s.id === params.stopId ? { ...s, ...cleanPatch } : s);
     const { completedStops, failedStops, totalPackages } = recomputeMissionCounters(stops);
-    const deliveredPackages = Math.max(0, (m.deliveredPackages || 0) + (params.deliveredDelta || 0));
-    const failedPackages = Math.max(0, (m.failedPackages || 0) + (params.failedDelta || 0));
+    const deliveredPackages = Math.max(0, (m.deliveredPackages || 0) + (wasTerminal ? 0 : (params.deliveredDelta || 0)));
+    const failedPackages = Math.max(0, (m.failedPackages || 0) + (wasTerminal ? 0 : (params.failedDelta || 0)));
     const allDone = stops.every(s =>
       s.status === StopStatus.COMPLETED || s.status === StopStatus.FAILED || s.status === StopStatus.SKIPPED
     );
