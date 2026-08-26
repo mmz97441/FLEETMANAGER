@@ -6,14 +6,14 @@
  * affiche instantanément sa fiche — statut, destinataire et suivi complet.
  * Lecture seule : aucun risque de modifier une donnée.
  */
-import React, { useState, lazy, Suspense } from 'react';
+import React, { useState, useRef, lazy, Suspense } from 'react';
 import { ScanLine, X, Loader2, MapPin, Package as PackageIcon, Search, PackageCheck, CheckCircle, Plus } from 'lucide-react';
 import { Package, PackageStatus, PACKAGE_STATUS_COLORS, User, UserRole } from '../types';
 import { normalizeRole } from '../utils/role';
 import { todayISO } from '../utils/date';
-import { findPackageByCode, claimPackagesForDelivery, createAndClaimPackage } from '../services/missionService';
+import { findPackageByCode, claimPackagesForDelivery, createAndClaimPackage, getPendingPackagesForClient } from '../services/missionService';
 import { reportError } from '../services/logService';
-import { packageDisplayCode } from '../utils/barcode';
+import { packageDisplayCode, packageScanCodes, packageMatchesCode } from '../utils/barcode';
 import { getCurrentPosition } from '../utils/geo';
 import PackageTimeline from './PackageTimeline';
 
@@ -44,6 +44,54 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createForm, setCreateForm] = useState({ clientId: '', contactName: '', address: '', postalCode: '', city: '', contactPhone: '' });
+
+  // === MODE MANIFESTE D'ENLÈVEMENT — scan = PRISE EN CHARGE IMMÉDIATE ===
+  // Au 1er scan d'un colis d'un client à fichier, on affiche tous ses colis
+  // « En attente » (attendus). CHAQUE scan prend le colis en charge DIRECTEMENT
+  // (aucun bouton « valider » : s'il a scanné, il a pris le colis). En rafale
+  // continue, avec en direct : X pris / N attendus + lesquels manquent.
+  const [manifest, setManifest] = useState<Package[] | null>(null);
+  const [manifestClient, setManifestClient] = useState('');
+  const [manifestScanning, setManifestScanning] = useState(false);
+  const [manifestScannedCodes, setManifestScannedCodes] = useState<string[]>([]);
+  const [manifestClaimedIds, setManifestClaimedIds] = useState<Set<string>>(new Set());
+  const claimingRef = useRef<Set<string>>(new Set());
+
+  const manifestMissing = manifest ? manifest.filter(p => !manifestClaimedIds.has(p.id)) : [];
+
+  // Prise en charge d'UN colis (idempotent + garde anti-double via claimingRef).
+  const claimOne = async (pkg: Package) => {
+    if (claimingRef.current.has(pkg.id)) return;
+    claimingRef.current.add(pkg.id);
+    try {
+      let location: { lat: number; lng: number } | undefined;
+      try { location = await getCurrentPosition({ timeout: 5000 }); } catch { /* optionnel */ }
+      await claimPackagesForDelivery({
+        packages: [pkg],
+        driver: { id: currentUser.id, name: `${currentUser.firstName} ${currentUser.lastName}` },
+        date: todayISO(),
+        location,
+      });
+      setManifestClaimedIds(prev => new Set(prev).add(pkg.id));
+    } catch (e) {
+      setClaimError(e instanceof Error ? e.message : 'Prise en charge échouée — rescanne le colis');
+    } finally {
+      claimingRef.current.delete(pkg.id);
+    }
+  };
+
+  // Rafale : chaque scan prend en charge le colis correspondant NON encore pris.
+  // On NE ferme PAS le scanner → le chauffeur scanne tous ses cartons d'affilée.
+  const handleManifestScan = (code: string) => {
+    setManifestScannedCodes(prev => (prev.includes(code) ? prev : [...prev, code]));
+    setManifestClaimedIds(claimed => {
+      const hit = (manifest || []).find(p =>
+        !claimed.has(p.id) && !claimingRef.current.has(p.id) && packageMatchesCode(p, code)
+      );
+      if (hit) void claimOne(hit);
+      return claimed; // l'ajout réel se fait dans claimOne après succès
+    });
+  };
 
   const handleCreate = async () => {
     if (!result) return;
@@ -112,6 +160,24 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
     setClaimError(null);
     try {
       const pkg = await findPackageByCode(code);
+      // Enlèvement d'un client à fichier : si le colis scanné appartient à un
+      // client qui a PLUSIEURS colis « En attente », on passe en mode MANIFESTE
+      // (liste attendue + complétude) au lieu de la fiche 1 colis.
+      if (pkg && pkg.clientId && pkg.status === PackageStatus.PENDING) {
+        try {
+          const pending = await getPendingPackagesForClient(pkg.clientId);
+          if (pending.length >= 2) {
+            setManifest(pending);
+            setManifestClient(pkg.clientName || 'ce client');
+            setManifestScannedCodes([code]);
+            setManifestClaimedIds(new Set());
+            setIsSearching(false);
+            void claimOne(pkg);        // 1er colis pris en charge immédiatement
+            setManifestScanning(true); // et on enchaîne la rafale (scanner reste ouvert)
+            return;
+          }
+        } catch { /* si le manifeste échoue, on retombe sur la fiche 1 colis */ }
+      }
       // pkg === null => vraiment introuvable ; sinon on affiche la fiche.
       setResult({ pkg, scannedCode: code });
     } catch (e) {
@@ -136,6 +202,12 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
     setShowCreate(false);
     setCreating(false);
     setCreateForm({ clientId: '', contactName: '', address: '', postalCode: '', city: '', contactPhone: '' });
+    setManifest(null);
+    setManifestClient('');
+    setManifestScannedCodes([]);
+    setManifestScanning(false);
+    setManifestClaimedIds(new Set());
+    claimingRef.current = new Set();
   };
 
   const handleClaimClick = () => { setClaimError(null); handleClaim(); };
@@ -169,12 +241,89 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
         </Suspense>
       )}
 
+      {/* Scanner RAFALE du manifeste d'enlèvement */}
+      {manifestScanning && (
+        <Suspense fallback={
+          <div className="fixed inset-0 z-50 bg-black flex items-center justify-center">
+            <Loader2 size={32} className="animate-spin text-white" />
+          </div>
+        }>
+          <BarcodeScanner
+            onScan={handleManifestScan}
+            onClose={() => setManifestScanning(false)}
+            expectedBarcodes={(manifest || []).flatMap(p => packageScanCodes(p))}
+            alreadyScanned={manifestScannedCodes}
+            isMatch={(code) => (manifest || []).some(p => packageMatchesCode(p, code))}
+            title={`Enlèvement ${manifestClient} — scanne tous les cartons`}
+            hint="Chaque scan prend le colis en charge automatiquement"
+            progress={{ done: manifestClaimedIds.size, total: manifest?.length || 0 }}
+          />
+        </Suspense>
+      )}
+
       {/* Recherche en cours */}
       {isSearching && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center">
           <div className="bg-white rounded-2xl px-6 py-5 flex items-center gap-3">
             <Loader2 size={20} className="animate-spin text-brand-600" />
             <span className="text-sm font-medium text-slate-700">Recherche du colis…</span>
+          </div>
+        </div>
+      )}
+
+      {/* MANIFESTE D'ENLÈVEMENT — complétude vs colis attendus du client */}
+      {manifest && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center sm:p-4" onClick={reset}>
+          <div className="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto animate-slide-up" onClick={e => e.stopPropagation()}>
+            {/* En-tête */}
+            <div className="p-4 border-b border-slate-200 flex items-start justify-between">
+              <div className="min-w-0">
+                <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Enlèvement</p>
+                <p className="font-bold text-lg text-slate-800 truncate">{manifestClient}</p>
+              </div>
+              <button onClick={reset} className="p-2 rounded-full hover:bg-slate-100 shrink-0"><X size={20} className="text-slate-400" /></button>
+            </div>
+
+            <div className="p-4 space-y-3">
+              {/* Compteur — se met à jour à CHAQUE scan (prise en charge auto) */}
+              <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 flex items-center justify-between">
+                <span className="text-sm font-medium text-slate-600">Pris en charge</span>
+                <span className={`text-2xl font-black tabular-nums ${manifestMissing.length === 0 ? 'text-green-600' : 'text-slate-800'}`}>{manifestClaimedIds.size} / {manifest.length}</span>
+              </div>
+              {manifestMissing.length === 0 ? (
+                <div className="rounded-xl border border-green-300 bg-green-50 p-3 text-sm font-semibold text-green-800">✅ Tu as bien <b>tous</b> les colis de {manifestClient} ({manifest.length}/{manifest.length}).</div>
+              ) : (
+                <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+                  <p className="font-bold">⚠️ Il te manque {manifestMissing.length} colis sur {manifest.length}.</p>
+                  <p className="text-xs mt-1">À scanner : {manifestMissing.map(packageDisplayCode).join(', ')}</p>
+                </div>
+              )}
+
+              {/* Liste des colis attendus (✅ = pris en charge au scan) */}
+              <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 max-h-[38vh] overflow-y-auto">
+                {manifest.map(p => {
+                  const ok = manifestClaimedIds.has(p.id);
+                  return (
+                    <div key={p.id} className={`px-3 py-2 flex items-center gap-2.5 ${ok ? 'bg-green-50' : 'bg-white'}`}>
+                      {ok ? <CheckCircle size={16} className="text-green-600 shrink-0" /> : <div className="w-4 h-4 rounded-full border-2 border-slate-300 shrink-0" />}
+                      <div className="min-w-0 flex-1">
+                        <p className={`font-mono text-xs font-bold ${ok ? 'text-green-700' : 'text-slate-800'}`}>{packageDisplayCode(p)}</p>
+                        <p className="text-[11px] text-slate-500 truncate">→ {p.contactName} • {p.city}</p>
+                      </div>
+                      {ok && <span className="text-[9px] font-bold px-1.5 py-0.5 bg-green-100 text-green-700 rounded">PRIS</span>}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {claimError && <p className="text-xs text-red-600 font-medium bg-red-50 border border-red-200 rounded-lg p-2">⚠️ {claimError}</p>}
+
+              {/* Scan = prise en charge auto (aucune validation manuelle) */}
+              <button onClick={() => setManifestScanning(true)} className="w-full flex items-center justify-center gap-2 py-3.5 bg-brand-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform">
+                <ScanLine size={18} /> {manifestClaimedIds.size === 0 ? 'Scanner les colis' : 'Scanner un autre colis'}
+              </button>
+              <button onClick={reset} className="w-full py-3 bg-slate-100 text-slate-700 rounded-xl font-medium text-sm">Terminer</button>
+            </div>
           </div>
         </div>
       )}

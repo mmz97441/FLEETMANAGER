@@ -899,6 +899,24 @@ export const getPackagesByIds = async (ids: string[]): Promise<Package[]> => {
     (a.externalId || a.orderNumber || '').localeCompare(b.externalId || b.orderNumber || ''));
 };
 
+/**
+ * Manifeste d'enlèvement : tous les colis encore EN ATTENTE (non pris en charge)
+ * d'un client. Sert à contrôler à l'enlèvement « X pris / N attendus + lesquels
+ * manquent ». Requête par clientId seul (pas d'index composite) + filtre statut.
+ */
+export const getPendingPackagesForClient = async (clientId: string): Promise<Package[]> => {
+  if (!clientId) return [];
+  const snap = await getDocs(query(
+    collection(db, PACKAGES_COLLECTION),
+    where('clientId', '==', clientId),
+    limit(3000)
+  ));
+  return snap.docs
+    .map(d => ({ id: d.id, ...d.data() } as Package))
+    .filter(p => p.status === PackageStatus.PENDING)
+    .sort((a, b) => (a.externalId || a.orderNumber || '').localeCompare(b.externalId || b.orderNumber || ''));
+};
+
 // ============================================================================
 // TRANSFERS
 // ============================================================================
