@@ -838,7 +838,8 @@ export interface PackageMovement {
   vehicleId?: string;
   vehiclePlate?: string;
   driverId?: string;
-  driverName?: string;
+  driverName?: string;         // chauffeur de CETTE étape (receveur pour un transfert)
+  fromDriverName?: string;     // chauffeur SOURCE (transfert entre chauffeurs) — « de X »
   hubId?: string;
   hubName?: string;
   location?: { lat: number; lng: number };

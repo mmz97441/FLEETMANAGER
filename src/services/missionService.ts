@@ -1155,6 +1155,9 @@ export const transferPackagesToDriver = async (input: RoadTransferInput): Promis
       timestamp: now,
       action: claimMode ? 'OUT_FOR_DELIVERY' as const : 'TRANSFERRED' as const,
       driverId: toDriver.id, driverName: toDriver.name,
+      // « de X » = chauffeur source, dès que le colis vient de la tournée d'un
+      // AUTRE (transfert OU prise en charge d'un colis déjà chez un collègue).
+      fromDriverName: fromMission?.driverName,
       vehicleId: toMission.vehicleId, vehiclePlate: toMission.vehiclePlate, location,
       notes: claimMode
         ? `Pris en charge pour livraison par ${toDriver.name}${fromMission?.driverName ? ` (récupéré de ${fromMission.driverName})` : ''}`

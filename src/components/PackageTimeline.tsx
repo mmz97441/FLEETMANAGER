@@ -116,10 +116,16 @@ const PackageTimeline: React.FC<PackageTimelineProps> = ({ movements, showIntern
           meta.tone === 'error' ? 'bg-red-500' :
           isLast ? 'bg-blue-500' : 'bg-slate-300';
 
-        // Intervenants (traçabilité expéditeur)
+        // Intervenants (traçabilité expéditeur). Changement de main : quand un
+        // colis vient de la tournée d'un autre chauffeur, on montre « de X → à Y »
+        // (que ce soit un transfert ou une prise en charge d'un colis déjà pris).
         const actors: string[] = [];
         if (showActors) {
-          if (move.driverName) actors.push(`👤 ${move.driverName}`);
+          if (move.fromDriverName && move.fromDriverName !== move.driverName) {
+            actors.push(`👤 de ${move.fromDriverName} → à ${move.driverName || '?'}`);
+          } else if (move.driverName) {
+            actors.push(`👤 ${move.driverName}`);
+          }
           if (move.vehiclePlate) actors.push(`🚚 ${move.vehiclePlate}`);
         }
 

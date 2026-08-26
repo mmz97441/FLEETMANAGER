@@ -209,6 +209,14 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
                     </span>
                   </div>
 
+                  {/* Changement de main : colis déjà dans la tournée d'un collègue.
+                      Le receveur voit clairement qu'il le RÉCUPÈRE (transfert tracé). */}
+                  {result.pkg.currentDriverId && result.pkg.currentDriverId !== currentUser.id && !!result.pkg.missionId && (
+                    <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
+                      🔁 <b>Ce colis est actuellement porté par {[...(result.pkg.movements || [])].reverse().find(m => m.driverName)?.driverName || 'un autre chauffeur'}.</b> En le prenant en charge, il basculera dans <b>ta tournée</b> (le transfert est tracé : de lui → à toi).
+                    </div>
+                  )}
+
                   {/* Destinataire */}
                   <div className="flex items-start gap-2 text-sm">
                     <PackageIcon size={16} className="text-slate-400 mt-0.5 shrink-0" />
