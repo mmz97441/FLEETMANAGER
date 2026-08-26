@@ -94,12 +94,22 @@ export const useMissionStats = (date?: string): MissionDayStats => {
     return unsub;
   }, [today]);
 
-  // Abonnement colis (les 500 plus récents, filtrés côté client)
+  // Abonnement colis — fenêtre glissante de ~3 jours autour du jour ciblé, au
+  // lieu des « 500 plus récents (tous clients confondus) » qui pouvaient éjecter
+  // les colis du jour sur gros volume. La fenêtre couvre aussi le flux « importé
+  // la veille, livré le jour même » (Boiron). Le filtre fin (missionId du jour OU
+  // créé aujourd'hui) reste appliqué côté client dans computeStats.
+  // NB : where + orderBy sur le MÊME champ createdAt est autorisé par Firestore.
   useEffect(() => {
+    // Midi local du jour ciblé (robuste au fuseau), moins 3 jours.
+    const target = new Date(`${today}T12:00:00`);
+    const windowStartISO = new Date(target.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString();
+
     const q = query(
       collection(db, 'packages'),
+      where('createdAt', '>=', windowStartISO),
       orderBy('createdAt', 'desc'),
-      limit(500)
+      limit(3000) // garde-fou (fenêtre déjà bornée dans le temps)
     );
 
     const unsub = onSnapshot(q, (snapshot) => {
@@ -110,7 +120,7 @@ export const useMissionStats = (date?: string): MissionDayStats => {
     });
 
     return unsub;
-  }, []);
+  }, [today]);
 
   // Calcul des stats
   const stats = computeStats(missions, packages, today, loading);
