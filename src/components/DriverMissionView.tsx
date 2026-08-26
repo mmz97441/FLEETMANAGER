@@ -729,8 +729,16 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
     setIsProcessing(false);
   };
 
-  // Livraison réussie
-  const handleDeliverySuccess = async () => {
+  // Intention de livraison PAR COLIS : ensemble des IDs réellement remis. null =
+  // tous. Mémorisé dans un ref pour survivre au retry GPS (qui rappelle
+  // handleDeliverySuccess sans argument).
+  const deliverIdsRef = useRef<Set<string> | null>(null);
+
+  // Livraison réussie. `deliveredIds` = colis réellement remis (les autres colis
+  // de l'arrêt sont marqués « non remis »/échec). Absent = tous remis.
+  const handleDeliverySuccess = async (deliveredIds?: Set<string>) => {
+    if (deliveredIds !== undefined) deliverIdsRef.current = deliveredIds;
+    const idsToDeliver = deliverIdsRef.current; // null → tous
     // Trace du scan de contrôle (pour POD + historique colis)
     const scanTrace = stopPackages.length === 0
       ? undefined
@@ -761,9 +769,15 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
         } : s
       );
 
-      // 2. Compter les stats
+      // 2. Compteurs PAR COLIS (déterministe depuis l'intention, plus depuis
+      //    packageCount qui supposait tout livré). Les colis non remis comptent
+      //    en échec, pas en livré.
+      const stopIds = currentStop.packageIds;
+      const deliveredThisStop = idsToDeliver ? stopIds.filter(id => idsToDeliver.has(id)).length : stopIds.length;
+      const failedThisStop = stopIds.length - deliveredThisStop;
       const { completedStops, failedStops } = recomputeMissionCounters(updatedStops);
-      const deliveredPkgs = (activeMission.deliveredPackages || 0) + currentStop.packageCount;
+      const deliveredPkgs = (activeMission.deliveredPackages || 0) + deliveredThisStop;
+      const failedPkgs = (activeMission.failedPackages || 0) + failedThisStop;
 
       // 3. Check si toute la mission est terminée
       const allDone = updatedStops.every(s =>
@@ -776,6 +790,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
         completedStops,
         failedStops,
         deliveredPackages: deliveredPkgs,
+        failedPackages: failedPkgs,
         status: allDone ? MissionStatus.COMPLETED : MissionStatus.IN_PROGRESS,
         ...(allDone ? { completedAt: now } : {})
       });
@@ -784,32 +799,40 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
       //    L'upload des preuves (lourd, sensible au réseau mobile) se fait APRÈS.
       //    Ainsi, si l'upload échoue, le colis reste bien "Livré" (seule la preuve
       //    est à renvoyer) au lieu de rester bloqué "En livraison".
-      let deliveredCount = 0;
+      const driverFullName = `${currentUser.firstName} ${currentUser.lastName}`;
+      const linkFields = {
+        missionId: activeMission.id,
+        stopId: currentStop.id,
+        currentDriverId: currentUser.id,
+        currentVehicleId: activeMission.vehicleId
+      };
+      let writtenCount = 0;
       for (const pkgId of currentStop.packageIds) {
+        const deliver = !idsToDeliver || idsToDeliver.has(pkgId);
         try {
-          await updatePackageStatus(
-            pkgId,
-            PackageStatus.DELIVERED,
-            {
+          if (deliver) {
+            await updatePackageStatus(pkgId, PackageStatus.DELIVERED, {
               action: 'DELIVERED',
-              driverId: currentUser.id,
-              driverName: `${currentUser.firstName} ${currentUser.lastName}`,
-              vehicleId: activeMission.vehicleId,
-              vehiclePlate: activeMission.vehiclePlate,
+              driverId: currentUser.id, driverName: driverFullName,
+              vehicleId: activeMission.vehicleId, vehiclePlate: activeMission.vehiclePlate,
               location: coords,
               notes: [
                 recipientName ? `Réceptionné par: ${recipientName}` : null,
                 scanTrace || null
               ].filter(Boolean).join(' • ') || undefined
-            },
-            {
-              missionId: activeMission.id,
-              stopId: currentStop.id,
-              currentDriverId: currentUser.id,
-              currentVehicleId: activeMission.vehicleId
-            }
-          );
-          deliveredCount++;
+            }, linkFields);
+          } else {
+            // Colis NON remis (absent / non présenté) → marqué en échec avec motif,
+            // JAMAIS « Livré ». C'est ça la livraison par colis : plus de faux POD.
+            await updatePackageStatus(pkgId, PackageStatus.FAILED, {
+              action: 'FAILED',
+              driverId: currentUser.id, driverName: driverFullName,
+              vehicleId: activeMission.vehicleId, vehiclePlate: activeMission.vehiclePlate,
+              location: coords,
+              notes: 'Non remis au point de livraison (colis absent/non présenté lors d’une livraison à colis multiples)'
+            }, linkFields);
+          }
+          writtenCount++;
         } catch (e) {
           reportError('driver.delivery.item', e, {
             silent: true,
@@ -817,11 +840,11 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
           });
         }
       }
-      if (deliveredCount < currentStop.packageIds.length) {
-        const stuck = currentStop.packageIds.length - deliveredCount;
-        reportError('driver.delivery.partial', new Error(`${stuck} colis non passés en Livré`), {
+      if (writtenCount < currentStop.packageIds.length) {
+        const stuck = currentStop.packageIds.length - writtenCount;
+        reportError('driver.delivery.partial', new Error(`${stuck} colis non écrits`), {
           level: 'warning',
-          userMessage: `⚠️ ${stuck} colis sur ${currentStop.packageIds.length} n'ont pas pu passer en "Livré" (réseau ?). Ils restent "En livraison" — resynchronisez une fois en ligne.`,
+          userMessage: `⚠️ ${stuck} colis sur ${currentStop.packageIds.length} n'ont pas pu être enregistrés (réseau ?) — resynchronisez une fois en ligne.`,
           extra: { missionId: activeMission.id, stopId: currentStop.id }
         });
       }
@@ -882,6 +905,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
       }
 
       // Reset UI
+      deliverIdsRef.current = null; // repartir « tous livrés » pour le prochain stop
       setSignatureData(null);
       setCapturedPhotos([]);
       setRecipientName('');
@@ -1952,7 +1976,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
             clientName={currentStop.contactName || 'ce client'}
             missingCodes={missingStopCodes}
             total={stopPackages.length}
-            actionLabel="Forcer la livraison"
+            actionLabel="Forcer : tout est remis"
+            scannedCount={deliveryScannedCount}
+            onDeliverScannedOnly={() => { setShowScanGate(false); setScanBypass(true); handleDeliverySuccess(scannedStopIds); }}
             onCancel={() => setShowScanGate(false)}
             onForce={() => { setShowScanGate(false); setScanBypass(true); handleDeliverySuccess(); }}
           />

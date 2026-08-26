@@ -13,13 +13,21 @@ interface ScanGateDialogProps {
   clientName: string;
   missingCodes: string[];   // N° des colis non scannés (BR…/GFL…)
   total: number;
-  actionLabel: string;      // ex : "Forcer la livraison"
-  onForce: () => void;
-  onCancel: () => void;
+  actionLabel: string;      // ex : "Forcer la livraison" (= tout remettre)
+  onForce: () => void;      // livrer TOUS les colis (les non scannés compris)
+  onCancel: () => void;     // continuer le scan
+  /**
+   * Optionnel : livrer UNIQUEMENT les colis scannés, marquer les manquants en
+   * échec (« non remis »). N'apparaît que si au moins 1 colis a été scanné et
+   * qu'il en reste. Évite le faux « tout livré » quand un colis est vraiment absent.
+   */
+  scannedCount?: number;
+  onDeliverScannedOnly?: () => void;
 }
 
 const ScanGateDialog: React.FC<ScanGateDialogProps> = ({
-  clientName, missingCodes, total, actionLabel, onForce, onCancel
+  clientName, missingCodes, total, actionLabel, onForce, onCancel,
+  scannedCount = 0, onDeliverScannedOnly
 }) => (
   <div className="fixed inset-0 z-[60] bg-black/60 flex items-end sm:items-center justify-center sm:p-4" onClick={onCancel}>
     <div
@@ -59,6 +67,14 @@ const ScanGateDialog: React.FC<ScanGateDialogProps> = ({
         >
           <ScanLine size={18} /> Continuer le scan
         </button>
+        {onDeliverScannedOnly && scannedCount > 0 && scannedCount < total && (
+          <button
+            onClick={onDeliverScannedOnly}
+            className="w-full py-3 bg-emerald-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform"
+          >
+            Livrer seulement les {scannedCount} scanné{scannedCount > 1 ? 's' : ''} · {missingCodes.length} manquant{missingCodes.length > 1 ? 's' : ''}
+          </button>
+        )}
         <button
           onClick={onForce}
           className="w-full py-3 bg-white border border-amber-300 text-amber-700 rounded-xl font-bold text-sm active:scale-95 transition-transform"
