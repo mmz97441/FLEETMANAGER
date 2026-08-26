@@ -17,6 +17,7 @@ import {
   subscribeToMissions,
   subscribeToHubs,
   subscribeToPackages,
+  subscribeToDispatchablePackages,
   subscribeToImportBatches,
   getPackagesByIds,
   calculateMissionStats,
@@ -87,6 +88,9 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
   const [missions, setMissions] = useState<Mission[]>([]);
   const [packages, setPackages] = useState<Package[]>([]);
+  // Colis dispatchables (AT_HUB/SORTED) SANS plafond 500 → le tableau de dispatch
+  // voit TOUJOURS tous les colis à affecter, même sur grosse journée.
+  const [dispatchablePackages, setDispatchablePackages] = useState<Package[]>([]);
   const [importBatches, setImportBatches] = useState<ImportBatch[]>([]);
   const [hubs, setHubs] = useState<Hub[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -187,14 +191,16 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   useEffect(() => {
     const unsubMissions = subscribeToMissions(setMissions, { date: selectedDate });
     const unsubPackages = subscribeToPackages(setPackages);
+    const unsubDispatchable = subscribeToDispatchablePackages(setDispatchablePackages);
     const unsubImports = subscribeToImportBatches(setImportBatches);
     const unsubHubs = subscribeToHubs(setHubs);
-    
+
     setIsLoading(false);
-    
+
     return () => {
       unsubMissions();
       unsubPackages();
+      unsubDispatchable();
       unsubImports();
       unsubHubs();
     };
@@ -2622,7 +2628,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
       {activeTab === 'dashboard' && renderDashboard()}
       {activeTab === 'dispatch' && (
         <DispatchManager
-          packages={packages}
+          packages={dispatchablePackages}
           hubs={hubs}
           users={users}
           vehicles={vehicles}
@@ -3294,7 +3300,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                 >
                   <option value="">Sélectionner un chauffeur...</option>
                   {users.filter(u => u.role === UserRole.DRIVER && !u.isDisabled).map(driver => {
-                    const vehicle = vehicles.find(v => v.assignedDriverId === driver.id);
+                    const vehicle = vehicles.find(v => v.driverId === driver.id || v.assignedDriverId === driver.id);
                     const onLeave = isDriverOnLeave(driver.id, selectedDate);
                     return (
                       <option key={driver.id} value={driver.id} disabled={onLeave}>
@@ -3370,7 +3376,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                     
                     // Récupérer le chauffeur et son véhicule
                     const driver = users.find(u => u.id === quickDispatchDriverId);
-                    const vehicle = vehicles.find(v => v.assignedDriverId === quickDispatchDriverId);
+                    const vehicle = vehicles.find(v => v.driverId === quickDispatchDriverId || v.assignedDriverId === quickDispatchDriverId);
                     const hub = hubs.find(h => h.id === quickDispatchHubId);
                     
                     if (!driver || !hub) {

@@ -321,6 +321,29 @@ export const subscribeToPackages = (
 };
 
 /**
+ * Abonnement DÉDIÉ aux colis DISPATCHABLES (tableau de dispatch).
+ *
+ * `subscribeToPackages` ne charge que les 500 colis les plus récents de TOUT le
+ * système avant de filtrer côté client : sur une grosse journée (>500 colis créés
+ * après les colis en attente), d'anciens colis AT_HUB/SORTED non affectés tombaient
+ * hors des 500 → INVISIBLES au dispatch, jamais partis en tournée. Ici on interroge
+ * le serveur par statut (`in`, sans orderBy → aucun index composite requis) : TOUS
+ * les colis dispatchables remontent, quel que soit le volume. Le filtre « non
+ * affecté » reste côté client (missionId/currentDriverId).
+ */
+export const subscribeToDispatchablePackages = (
+  callback: (packages: Package[]) => void
+) => {
+  const q = query(
+    collection(db, PACKAGES_COLLECTION),
+    where('status', 'in', [PackageStatus.AT_HUB, PackageStatus.SORTED])
+  );
+  return onSnapshot(q, (snapshot) => {
+    callback(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Package)));
+  });
+};
+
+/**
  * Abonnement DÉDIÉ aux colis d'un client (portail expéditeur).
  *
  * Corrige un défaut de `subscribeToPackages` qui ne charge que les 500 colis les
@@ -778,11 +801,18 @@ export const subscribeToMissions = (
   callback: (missions: Mission[]) => void,
   filters?: { date?: string; zone?: Zone; status?: MissionStatus; driverId?: string }
 ) => {
-  const q = query(collection(db, MISSIONS_COLLECTION), orderBy('date', 'desc'), limit(100));
-  
+  // À l'échelle, un `limit(100)` global trié par date pouvait EXCLURE la tournée
+  // d'un chauffeur (>100 tournées récentes le même jour) → le chauffeur ouvre
+  // l'app et ne voit AUCUNE tournée. Quand on filtre par chauffeur, on interroge
+  // donc le serveur par `driverId` (aucun index composite requis, périmètre borné
+  // à ses tournées) au lieu de récupérer les 100 dernières puis filtrer côté client.
+  const q = filters?.driverId
+    ? query(collection(db, MISSIONS_COLLECTION), where('driverId', '==', filters.driverId))
+    : query(collection(db, MISSIONS_COLLECTION), orderBy('date', 'desc'), limit(100));
+
   return onSnapshot(q, (snapshot) => {
     let missions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Mission));
-    
+
     if (filters?.date) {
       missions = missions.filter(m => m.date === filters.date);
     }
