@@ -1055,6 +1055,28 @@ export const getPendingPackagesForClient = async (clientId: string, importBatchI
   return sortPending(snap.docs.map(d => ({ id: d.id, ...d.data() } as Package)));
 };
 
+/**
+ * Codes colis (externalId/orderNumber, normalisés MAJUSCULE) DÉJÀ existants pour un
+ * client. Sert à la déduplication INTER-IMPORTS : ré-importer un fichier corrigé
+ * créait auparavant chaque colis en DOUBLE (le `barcode` généré étant aléatoire, rien
+ * ne collisionnait) → le chauffeur se voyait annoncer 2× les cartons réels.
+ */
+export const getExistingClientPackageCodes = async (clientId: string): Promise<Set<string>> => {
+  const set = new Set<string>();
+  if (!clientId) return set;
+  const snap = await getDocs(query(
+    collection(db, PACKAGES_COLLECTION),
+    where('clientId', '==', clientId),
+    limit(5000)
+  ));
+  for (const d of snap.docs) {
+    const p = d.data() as Package;
+    const code = (p.externalId || p.orderNumber || '').trim().toUpperCase();
+    if (code) set.add(code);
+  }
+  return set;
+};
+
 // ============================================================================
 // TRANSFERS
 // ============================================================================

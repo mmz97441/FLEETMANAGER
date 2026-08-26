@@ -19,6 +19,7 @@ import { formatDistance, formatDuration } from '../utils/format';
 import { addMission, updatePackageStatus } from '../services/missionService';
 import { notifyMissionAssigned } from '../services/notificationService';
 import { logActivity } from '../services/activityLogService';
+import { reportError } from '../services/logService';
 import { ActivityAction } from '../types';
 import Modal from './shared/Modal';
 import {
@@ -282,7 +283,8 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
     if (isDispatching) return;
     
     setIsDispatching(true);
-    
+    let dispatchSkipped = 0; // colis introuvables sautés (supprimés entre-temps)
+
     try {
       for (const tour of optimResult.tours) {
         const hub = selectedZoneStats.hub || departureHub;
@@ -315,12 +317,15 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
         };
         
         const missionId = await addMission(mission);
-        
-        // Mettre à jour le statut des colis
+
+        // Mettre à jour le statut des colis. CHAQUE colis est isolé : un colis
+        // supprimé entre l'affichage et le dispatch (updatePackageStatus lève
+        // « Package not found ») ne doit PAS interrompre le dispatch et laisser les
+        // tournées suivantes non créées / des colis en double. On saute et on compte.
         const packageIds = tour.stops.flatMap(s => s.packageIds);
         for (const pkgId of packageIds) {
           const stop = tour.stops.find(s => s.packageIds.includes(pkgId));
-          
+
           // Construire extraFields sans les valeurs undefined
           const extraFields: Record<string, string | undefined> = {
             missionId,
@@ -331,13 +336,18 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
           if (tour.vehicleId) {
             extraFields.currentVehicleId = tour.vehicleId;
           }
-          
-          await updatePackageStatus(pkgId, PackageStatus.SORTED, {
-            action: 'SORTED',
-            driverId: tour.driverId,
-            driverName: tour.driverName,
-            notes: `Dispatché mission ${selectedZone} - ${tour.driverName}`
-          }, extraFields);
+
+          try {
+            await updatePackageStatus(pkgId, PackageStatus.SORTED, {
+              action: 'SORTED',
+              driverId: tour.driverId,
+              driverName: tour.driverName,
+              notes: `Dispatché mission ${selectedZone} - ${tour.driverName}`
+            }, extraFields);
+          } catch (e) {
+            dispatchSkipped++;
+            reportError('dispatch.package', e, { silent: true, extra: { pkgId, missionId } });
+          }
         }
         
         logActivity(currentUser, ActivityAction.ITEM_CREATED, {
@@ -373,7 +383,10 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
       setOptimResult(null);
       
       onMissionCreated();
-      
+      if (dispatchSkipped > 0) {
+        alert(`Dispatch terminé, mais ${dispatchSkipped} colis introuvable(s) ont été ignorés (supprimés entre-temps ?). Vérifiez la liste.`);
+      }
+
     } catch (error) {
       console.error('Dispatch error:', error);
       alert('Erreur lors du dispatch. Vérifiez la console pour plus de détails.');

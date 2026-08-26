@@ -14,7 +14,8 @@ import {
   extractPostalCodeFromAddress,
   addPackagesBatch,
   addImportBatch,
-  getHubByZone
+  getHubByZone,
+  getExistingClientPackageCodes
 } from './missionService';
 // Source de vérité UNIQUE du regroupement par point de livraison (cf. address.ts).
 import { placeKey, phoneSignal, sameDeliveryPoint } from '../utils/address';
@@ -739,6 +740,10 @@ export const confirmReviewedImport = async (
 
   const batchId = `IMP-${Date.now()}`;
   const clientName = client.companyName || `${client.firstName} ${client.lastName}`;
+  // Dédup INTER-IMPORTS : codes colis déjà en base pour ce client (+ ceux du fichier
+  // courant au fil de l'eau) → ré-importer un fichier ne crée plus de colis en double.
+  const existingCodes = await getExistingClientPackageCodes(client.id);
+  let skippedDuplicates = 0;
   const zonePackages: Record<Zone, Omit<Package, 'id' | 'createdAt' | 'updatedAt'>[]> = {
     [Zone.NORD]: [],
     [Zone.EST]: [],
@@ -761,6 +766,15 @@ export const confirmReviewedImport = async (
       result.errors.push({ row: row._rowIndex, message: 'Zone non définie' });
       continue;
     }
+
+    // Colis déjà existant (import précédent OU ligne précédente du même fichier) → on saute.
+    const dupKey = (row.externalId || '').trim().toUpperCase();
+    if (dupKey && existingCodes.has(dupKey)) {
+      skippedDuplicates++;
+      result.errors.push({ row: row._rowIndex, message: `Doublon ignoré : colis ${row.externalId} déjà en base (non recréé)` });
+      continue;
+    }
+    if (dupKey) existingCodes.add(dupKey);
 
     const initialMovement: PackageMovement = {
       timestamp: new Date().toISOString(),
@@ -796,6 +810,10 @@ export const confirmReviewedImport = async (
     result.packages.push(pkg);
     zonePackages[row.zone as Zone].push(pkg);
     result.successCount++;
+  }
+
+  if (skippedDuplicates > 0) {
+    result.errors.push({ row: 0, message: `${skippedDuplicates} colis déjà en base — ignorés (aucun doublon créé).` });
   }
 
   // Zone breakdown
