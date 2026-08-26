@@ -850,8 +850,21 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
             scanTrace || null
           ].filter(Boolean).join(' • ') || undefined
         }, setUploadProgress);
-        if (podResult) showNotif('📸 Preuves uploadées ✓');
+        if (podResult) {
+          showNotif('📸 Preuves uploadées ✓');
+        } else {
+          // uploadAndCreatePOD renvoie null (ne throw pas) en cas d'échec réseau :
+          // le catch ci-dessous ne se déclenchait donc jamais et la perte de preuve
+          // passait EN SILENCE. On avertit explicitement et on trace.
+          showNotif('⚠️ Livré, MAIS preuves (photo/signature) NON envoyées — réseau. À renvoyer.');
+          reportError('driver.delivery.pod.null', new Error('uploadAndCreatePOD a renvoyé null'), {
+            level: 'warning',
+            userMessage: "⚠️ Colis livré, mais l'envoi des preuves a échoué (réseau). À renvoyer une fois en ligne.",
+            extra: { missionId: activeMission.id, stopId: currentStop.id }
+          });
+        }
       } catch (e) {
+        showNotif('⚠️ Livré, MAIS envoi des preuves échoué — à renvoyer.');
         reportError('driver.delivery.pod', e, {
           level: 'warning',
           userMessage: "⚠️ Colis livré, mais l'envoi des preuves (photo/signature) a échoué. Elles pourront être renvoyées.",

@@ -1066,9 +1066,18 @@ export const recomputeMissionCounters = (stops: MissionStop[]) => ({
 
 export const transferPackagesToDriver = async (input: RoadTransferInput): Promise<number> => {
   const { packages: raw, toMission, toDriver, reason, location, notes, newStatus, claimMode } = input;
-  // GARDE : ne jamais transférer / prendre en charge un colis DÉJÀ LIVRÉ ou RETOURNÉ
-  const pkgs = raw.filter(p => p.status !== PackageStatus.DELIVERED && p.status !== PackageStatus.RETURNED);
-  if (pkgs.length === 0) throw new Error('Aucun colis à traiter (colis déjà livrés/retournés exclus)');
+  // GARDE ANTI-RÉSURRECTION : on relit les colis FRAIS en base (et non les snapshots
+  // passés par l'appelant, potentiellement périmés) puis on exclut ceux DÉJÀ LIVRÉS
+  // ou RETOURNÉS. Sinon un colis livré ENTRE le scan et ici serait « ressuscité »
+  // en livraison (course entre la livraison d'un chauffeur et la réception d'un autre).
+  const freshSnaps = await Promise.all(
+    raw.map(p => getDoc(doc(db, PACKAGES_COLLECTION, p.id)))
+  );
+  const pkgs = freshSnaps
+    .filter(s => s.exists())
+    .map(s => ({ id: s.id, ...s.data() } as Package))
+    .filter(p => p.status !== PackageStatus.DELIVERED && p.status !== PackageStatus.RETURNED);
+  if (pkgs.length === 0) throw new Error('Aucun colis à traiter (déjà livrés/retournés ou introuvables)');
   const now = new Date().toISOString();
 
   // --- 1. Retirer les colis de leur tournée d'origine (TRANSACTION par mission) ---
