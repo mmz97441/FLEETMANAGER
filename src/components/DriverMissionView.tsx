@@ -683,14 +683,12 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
       });
 
       // Sauvegarder la preuve de retour dans le colis
-      const { updatePackageFields } = await import('../services/missionService');
-      await updatePackageFields(returningPackage.id, {
+      const { detachPackageFromTour } = await import('../services/missionService');
+      // Détache VRAIMENT le colis (écrit null, pas undefined) → il quitte la
+      // tournée et n'est plus une cible du resync « arrêt terminé ».
+      await detachPackageFromTour(returningPackage.id, {
         returnProof,
         currentHubId: activeMission?.hubId,
-        missionId: undefined,
-        stopId: undefined,
-        currentDriverId: undefined,
-        currentVehicleId: undefined
       });
 
       showNotif('✅ Retour hub confirmé !');

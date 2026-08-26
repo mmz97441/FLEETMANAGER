@@ -471,14 +471,20 @@ export const resyncPackageStatusesFromStops = async (): Promise<StatusResyncResu
 
   if (deliveredStopMeta.size === 0) return result;
 
-  // 2. Colis correspondants qui ne sont PAS encore "Livré" → réparer
-  const pkgsSnap = await getDocs(query(collection(db, PACKAGES_COLLECTION), orderBy('createdAt', 'desc'), limit(500)));
-  for (const pDoc of pkgsSnap.docs) {
-    const pkg = { id: pDoc.id, ...(pDoc.data() as any) } as Package;
+  // 2. Colis correspondants qui ne sont PAS encore "Livré" → réparer.
+  // On lit les colis PAR LEURS IDs (plus de plafond 500 qui laissait des colis
+  // anciens non réparables), et on NE ressuscite JAMAIS un colis dans un état
+  // terminal non-livré (Retourné / À retourner / Échec) : le resync ne fait que
+  // MONTER un colis « en cours » vers Livré, jamais écraser une vérité terrain.
+  const NON_RESURRECT = new Set<PackageStatus>([
+    PackageStatus.DELIVERED, PackageStatus.RETURNED, PackageStatus.RETURN_REQUESTED, PackageStatus.FAILED
+  ]);
+  const pkgs = await getPackagesByIds([...deliveredStopMeta.keys()]);
+  for (const pkg of pkgs) {
     const meta = deliveredStopMeta.get(pkg.id);
     if (!meta) continue;
     result.completedStopPackages++;
-    if (pkg.status === PackageStatus.DELIVERED) continue;
+    if (NON_RESURRECT.has(pkg.status)) continue;
 
     try {
       await updatePackageStatus(pkg.id, PackageStatus.DELIVERED, {
@@ -1684,6 +1690,27 @@ export const updatePackageFields = async (
 ): Promise<void> => {
   await updateDoc(doc(db, PACKAGES_COLLECTION, packageId), cleanUndefined({
     ...fields,
+    updatedAt: new Date().toISOString()
+  }));
+};
+
+/**
+ * DÉTACHE un colis de sa tournée : écrit NULL (et non undefined) sur missionId /
+ * stopId / currentDriverId / currentVehicleId. Indispensable car `cleanUndefined`
+ * RETIRE les clés undefined → l'ancien détachement via updatePackageFields ne
+ * remettait jamais ces champs à vide (colis « retourné » resté rattaché → cible
+ * du resync). `null` est conservé par cleanUndefined et falsy pour les lecteurs.
+ */
+export const detachPackageFromTour = async (
+  packageId: string,
+  extra: Record<string, any> = {}
+): Promise<void> => {
+  await updateDoc(doc(db, PACKAGES_COLLECTION, packageId), cleanUndefined({
+    ...extra,
+    missionId: null,
+    stopId: null,
+    currentDriverId: null,
+    currentVehicleId: null,
     updatedAt: new Date().toISOString()
   }));
 };
