@@ -44,7 +44,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   const [manualMode, setManualMode] = useState(false);
   const [manualInput, setManualInput] = useState('');
   const [lastScanned, setLastScanned] = useState<string | null>(null);
-  const [lastScanResult, setLastScanResult] = useState<'success' | 'duplicate' | 'unknown' | null>(null);
+  const [lastScanResult, setLastScanResult] = useState<'success' | 'duplicate' | 'unknown' | 'read' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [torchOn, setTorchOn] = useState(false);
   const [torchAvailable, setTorchAvailable] = useState(false);
@@ -70,19 +70,25 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
       return;
     }
 
-    // Vérifier si attendu. Si un prédicat isMatch est fourni (branché sur
-    // packageMatchesCode côté parent : tokens + inclusion), il FAIT AUTORITÉ —
-    // sinon repli sur l'égalité de chaîne (insensible à la casse) avec la liste.
-    const isExpected = isMatch
-      ? isMatch(barcode)
-      : (expectedBarcodes.length === 0 ||
-         expectedBarcodes.some(b => b.toUpperCase() === barcode.toUpperCase()));
+    // Feedback HONNÊTE : on n'affiche « ✅ succès » QUE si le scanner a une
+    // AUTORITÉ pour juger (prédicat isMatch fourni, branché sur packageMatchesCode,
+    // OU liste expectedBarcodes non vide). Sans autorité (scan de recherche pur),
+    // on montre un état NEUTRE « 📷 scanné » — le vrai résultat est décidé par le
+    // parent (recherche/prise en charge asynchrone). Avant, l'absence d'autorité
+    // affichait un faux vert systématique.
+    let result: 'success' | 'unknown' | 'read';
+    if (isMatch) result = isMatch(barcode) ? 'success' : 'unknown';
+    else if (expectedBarcodes.length > 0) {
+      result = expectedBarcodes.some(b => b.toUpperCase() === barcode.toUpperCase()) ? 'success' : 'unknown';
+    } else {
+      result = 'read'; // aucune autorité → neutre
+    }
     setLastScanned(barcode);
-    setLastScanResult(isExpected ? 'success' : 'unknown');
+    setLastScanResult(result);
 
-    // Vibration différente : succès = double pulse, erreur = single long
+    // Vibration : succès = double pulse, inconnu = long, neutre = court.
     try {
-      navigator.vibrate?.(isExpected ? [100, 50, 100] : [300]);
+      navigator.vibrate?.(result === 'success' ? [100, 50, 100] : result === 'unknown' ? [300] : 60);
     } catch {}
 
     // Remonter au parent
@@ -313,11 +319,13 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
         <div className={`absolute top-14 left-4 right-4 z-20 px-4 py-3 rounded-xl text-sm font-bold text-center animate-fade-in ${
           lastScanResult === 'success' ? 'bg-green-500 text-white' :
           lastScanResult === 'duplicate' ? 'bg-amber-500 text-white' :
+          lastScanResult === 'read' ? 'bg-slate-700 text-white' :
           'bg-blue-500 text-white'
         }`}>
           {lastScanResult === 'success' && `✅ ${lastScanned}`}
           {lastScanResult === 'duplicate' && `⚠️ Déjà scanné : ${lastScanned}`}
           {lastScanResult === 'unknown' && `📦 ${lastScanned} (non prévu)`}
+          {lastScanResult === 'read' && `📷 ${lastScanned}…`}
         </div>
       )}
 

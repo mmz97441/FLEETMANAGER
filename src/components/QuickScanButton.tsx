@@ -73,8 +73,9 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
         location,
       });
       setManifestClaimedIds(prev => new Set(prev).add(pkg.id));
+      setClaimError(null); // succès → on efface une éventuelle erreur précédente
     } catch (e) {
-      setClaimError(e instanceof Error ? e.message : 'Prise en charge échouée — rescanne le colis');
+      setClaimError(`Colis ${packageDisplayCode(pkg)} NON pris (réseau ?) — rescanne-le`);
     } finally {
       claimingRef.current.delete(pkg.id);
     }
@@ -259,6 +260,15 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
             progress={{ done: manifestClaimedIds.size, total: manifest?.length || 0 }}
           />
         </Suspense>
+      )}
+
+      {/* Erreur de prise en charge VISIBLE au-dessus du scanner (z > scanner) :
+          si un claim échoue en rafale, le chauffeur le voit tout de suite au lieu
+          d'un faux « pris ». Le compteur X/N n'avance QUE sur claim réussi. */}
+      {manifestScanning && claimError && (
+        <div className="fixed top-28 left-4 right-4 z-[60] px-4 py-3 rounded-xl bg-red-600 text-white text-sm font-bold text-center shadow-lg">
+          ⚠️ {claimError}
+        </div>
       )}
 
       {/* Recherche en cours */}
