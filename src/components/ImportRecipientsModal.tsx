@@ -33,14 +33,21 @@ interface ParsedRow {
 const norm = (s: string) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 const digits = (s: string) => String(s || '').replace(/\D+/g, '');
 
-// Trouve la 1re colonne dont l'entête matche un des alias
+// Trouve la colonne dont l'entête matche un des alias.
+// Passe 1 = match EXACT (sinon l'alias 'nom' attrape 'prénom' par sous-chaîne et le
+// prénom se retrouve dans contactName). Passe 2 = repli sous-chaîne.
 const pick = (row: Record<string, any>, aliases: string[]): string => {
-  for (const key of Object.keys(row)) {
+  const keys = Object.keys(row);
+  const val = (key: string): string | null => {
+    const v = row[key];
+    return v != null && String(v).trim() !== '' ? String(v).trim() : null;
+  };
+  for (const key of keys) {
+    if (aliases.includes(norm(key))) { const v = val(key); if (v !== null) return v; }
+  }
+  for (const key of keys) {
     const k = norm(key);
-    if (aliases.some(a => k === a || k.includes(a))) {
-      const v = row[key];
-      if (v != null && String(v).trim() !== '') return String(v).trim();
-    }
+    if (aliases.some(a => k.includes(a))) { const v = val(key); if (v !== null) return v; }
   }
   return '';
 };

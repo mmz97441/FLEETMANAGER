@@ -108,6 +108,21 @@ const HEADER_ALIASES: Record<string, keyof ClientFileRow> = {
  * Normalise les clés d'une ligne vers les noms de colonnes canoniques.
  * Les colonnes inconnues sont conservées telles quelles.
  */
+/**
+ * Restaure un numéro de téléphone dont le tableur a mangé le 0 initial : une cellule
+ * typée NOMBRE ("0262260303") est lue "262260303" (9 chiffres) par XLSX raw:false.
+ * Sans ça, le chauffeur appelle un numéro injoignable. On ne touche pas aux formats
+ * internationaux explicites (+262…, 00…).
+ */
+const normalizeImportedPhone = (raw: unknown): string => {
+  if (raw == null) return '';
+  const s = String(raw).trim();
+  if (!s || s.startsWith('+') || s.startsWith('00')) return s;
+  const digits = s.replace(/\D/g, '');
+  if (/^\d{9}$/.test(digits)) return '0' + digits; // 9 chiffres → 0 perdu, on le remet
+  return s;
+};
+
 const canonicalizeRow = (row: Record<string, unknown>): ClientFileRow => {
   const normalized: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(row)) {
@@ -117,6 +132,8 @@ const canonicalizeRow = (row: Record<string, unknown>): ClientFileRow => {
       normalized[canonical] = value;
     }
   }
+  // Restaurer le 0 initial des téléphones perdu par le typage numérique du tableur.
+  if (normalized.Telephone != null) normalized.Telephone = normalizeImportedPhone(normalized.Telephone);
   return normalized as unknown as ClientFileRow;
 };
 
