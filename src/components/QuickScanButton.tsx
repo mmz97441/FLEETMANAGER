@@ -222,7 +222,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
                   {/* Timeline */}
                   <div className="border-t border-slate-100 pt-2">
                     <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">Suivi du colis</p>
-                    <PackageTimeline movements={result.pkg.movements || []} showInternalDetails />
+                    <PackageTimeline movements={result.pkg.movements || []} showActors showInternalDetails pod={result.pkg.pod} />
                   </div>
                 </div>
               </>

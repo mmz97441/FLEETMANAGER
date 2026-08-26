@@ -2036,7 +2036,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                             <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">
                               Suivi du colis {pkg.externalId || pkg.barcode || pkg.orderNumber}
                             </p>
-                            <PackageTimeline movements={pkg.movements || []} showInternalDetails />
+                            <PackageTimeline movements={pkg.movements || []} showActors showInternalDetails pod={pkg.pod} />
                           </td>
                         </tr>
                       )}
