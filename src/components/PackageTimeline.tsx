@@ -141,6 +141,17 @@ const PackageTimeline: React.FC<PackageTimelineProps> = ({ movements, showIntern
               {actors.length > 0 && (
                 <p className="text-[11px] text-slate-600 mt-0.5 font-medium">{actors.join('  ·  ')}</p>
               )}
+              {/* Point GPS de l'étape (ex. enlèvement) quand il est enregistré. */}
+              {showActors && move.location && (
+                <a
+                  href={`https://www.google.com/maps?q=${move.location.lat},${move.location.lng}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 underline mt-0.5"
+                >
+                  📍 Point GPS de l'étape
+                </a>
+              )}
               {showInternalDetails && move.notes && (
                 <p className="text-[11px] text-slate-500 mt-0.5">{move.notes}</p>
               )}
