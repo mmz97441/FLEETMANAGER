@@ -575,21 +575,25 @@ const getAdminUserIds = async (): Promise<string[]> => {
 };
 
 export const addPackagesBatch = async (packages: Omit<Package, 'id' | 'createdAt' | 'updatedAt'>[]): Promise<string[]> => {
-  const batch = writeBatch(db);
+  // Firestore plafonne un writeBatch à 500 écritures : un fichier client de >500
+  // colis faisait échouer TOUT l'import en silence (aucun colis créé). On découpe
+  // en lots de 450 et on committe lot par lot.
   const ids: string[] = [];
   const now = new Date().toISOString();
-  
-  for (const pkg of packages) {
-    const docRef = doc(collection(db, PACKAGES_COLLECTION));
-    ids.push(docRef.id);
-    batch.set(docRef, cleanUndefined({
-      ...pkg,
-      createdAt: now,
-      updatedAt: now
-    }));
+  const CHUNK = 450;
+  for (let i = 0; i < packages.length; i += CHUNK) {
+    const batch = writeBatch(db);
+    for (const pkg of packages.slice(i, i + CHUNK)) {
+      const docRef = doc(collection(db, PACKAGES_COLLECTION));
+      ids.push(docRef.id);
+      batch.set(docRef, cleanUndefined({
+        ...pkg,
+        createdAt: now,
+        updatedAt: now
+      }));
+    }
+    await batch.commit();
   }
-  
-  await batch.commit();
   return ids;
 };
 
@@ -1072,73 +1076,54 @@ export const recomputeMissionCounters = (stops: MissionStop[]) => ({
 
 export const transferPackagesToDriver = async (input: RoadTransferInput): Promise<number> => {
   const { packages: raw, toMission, toDriver, reason, location, notes, newStatus, claimMode } = input;
-  // GARDE ANTI-RÉSURRECTION : on relit les colis FRAIS en base (et non les snapshots
-  // passés par l'appelant, potentiellement périmés) puis on exclut ceux DÉJÀ LIVRÉS
-  // ou RETOURNÉS. Sinon un colis livré ENTRE le scan et ici serait « ressuscité »
-  // en livraison (course entre la livraison d'un chauffeur et la réception d'un autre).
-  const freshSnaps = await Promise.all(
-    raw.map(p => getDoc(doc(db, PACKAGES_COLLECTION, p.id)))
-  );
-  const pkgs = freshSnaps
-    .filter(s => s.exists())
-    .map(s => ({ id: s.id, ...s.data() } as Package))
-    .filter(p => p.status !== PackageStatus.DELIVERED && p.status !== PackageStatus.RETURNED);
-  if (pkgs.length === 0) throw new Error('Aucun colis à traiter (déjà livrés/retournés ou introuvables)');
   const now = new Date().toISOString();
-
-  // --- 1. Retirer les colis de leur tournée d'origine (TRANSACTION par mission) ---
-  const byOriginMission = new Map<string, Package[]>();
-  for (const p of pkgs) {
-    if (!p.missionId || p.missionId === toMission.id) continue;
-    if (!byOriginMission.has(p.missionId)) byOriginMission.set(p.missionId, []);
-    byOriginMission.get(p.missionId)!.push(p);
-  }
-
-  const originMissions = new Map<string, Mission>();
-  for (const [missionId, missionPkgs] of byOriginMission) {
-    const ref = doc(db, MISSIONS_COLLECTION, missionId);
-    const fromMission = await runTransaction(db, async (tx) => {
-      const snap = await tx.get(ref);
-      if (!snap.exists()) return null;
-      const m = { id: snap.id, ...snap.data() } as Mission;
-      const removed = new Set(missionPkgs.map(p => p.id));
-      const newStops = m.stops
-        .map(s => {
-          const remaining = s.packageIds.filter(id => !removed.has(id));
-          return remaining.length === s.packageIds.length ? s : { ...s, packageIds: remaining, packageCount: remaining.length };
-        })
-        // Retirer les stops vidés (colis partis) SAUF s'ils étaient déjà terminés
-        .filter(s => s.packageIds.length > 0 || s.status === StopStatus.COMPLETED);
-      tx.update(ref, { stops: newStops, ...recomputeMissionCounters(newStops), updatedAt: now });
-      return m;
-    });
-    if (fromMission) originMissions.set(missionId, fromMission);
-  }
-
-  // --- 2. Ajouter à la tournée du receveur (TRANSACTION, avec anti-doublon) ---
+  const ids = [...new Set(raw.map(p => p.id).filter(Boolean))];
+  if (ids.length === 0) throw new Error('Aucun colis à traiter');
   const toRef = doc(db, MISSIONS_COLLECTION, toMission.id);
-  const { addedStops, addedIds } = await runTransaction(db, async (tx) => {
-    const snap = await tx.get(toRef);
-    if (!snap.exists()) throw new Error('Votre tournée est introuvable');
-    const m = { id: snap.id, ...snap.data() } as Mission;
-    const already = new Set(m.stops.flatMap(s => s.packageIds));
-    const toAdd = pkgs.filter(p => !already.has(p.id)); // dédup : colis déjà dans la mission
-    let maxSeq = m.stops.reduce((mx, s) => Math.max(mx, s.sequence), 0);
-    const byAddress = new Map<string, Package[]>();
-    for (const p of toAdd) {
-      const key = placeKey(p);
-      if (!byAddress.has(key)) byAddress.set(key, []);
-      byAddress.get(key)!.push(p);
-    }
 
-    // Clone des arrêts existants + index des arrêts de livraison ENCORE À FAIRE,
-    // par adresse (placeKey). On FUSIONNE les nouveaux colis dans l'arrêt existant
-    // à la même adresse au lieu de créer un arrêt d'1 colis par scan — sinon,
-    // construire la tournée en scannant colis par colis produit N arrêts d'1 colis
-    // au même endroit (bug terrain : « 1 colis au lieu de 4 »).
-    const updatedStops: MissionStop[] = m.stops.map(s => ({ ...s }));
+  // TOUT EN UNE SEULE TRANSACTION : retrait des tournées d'origine, ajout à la
+  // tournée receveuse ET réécriture des pointeurs colis sont désormais atomiques.
+  // Avant, ces 3 phases étaient committées séparément → colis « orphelins »
+  // (retirés de l'origine mais jamais rajoutés si l'étape 2 échouait) et pointeurs
+  // incohérents (colis dans les stops du receveur mais doc pointant encore l'origine)
+  // dès que le réseau tombait en cours de route. Un échec annule maintenant TOUT.
+  const { addedIds, movedByOrigin, originMeta } = await runTransaction(db, async (tx) => {
+    // ===== 1. LECTURES (toutes AVANT les écritures — contrainte Firestore) =====
+    // 1a. Colis FRAIS → anti-résurrection (on ignore livrés/retournés). Les lectures
+    //     dans la transaction servent aussi de détection de conflit : deux chauffeurs
+    //     qui scannent le même colis n'aboutiront jamais à un doublon (le perdant
+    //     rejoue et voit le colis déjà réaffecté).
+    const pkgSnaps = await Promise.all(ids.map(id => tx.get(doc(db, PACKAGES_COLLECTION, id))));
+    const pkgs = pkgSnaps
+      .filter(s => s.exists())
+      .map(s => ({ id: s.id, ...s.data() } as Package))
+      .filter(p => p.status !== PackageStatus.DELIVERED && p.status !== PackageStatus.RETURNED);
+    if (pkgs.length === 0) throw new Error('Aucun colis à traiter (déjà livrés/retournés ou introuvables)');
+    if (pkgs.length > 400) throw new Error('Trop de colis en une fois (>400) — divisez le transfert');
+
+    // 1b. Tournées d'origine distinctes (hors receveuse).
+    const originIds = [...new Set(pkgs.map(p => p.missionId).filter((m): m is string => !!m && m !== toMission.id))];
+    const originSnaps = await Promise.all(originIds.map(id => tx.get(doc(db, MISSIONS_COLLECTION, id))));
+    const originMissions = new Map<string, Mission>();
+    originSnaps.forEach((snap, i) => {
+      if (snap.exists()) originMissions.set(originIds[i], { id: snap.id, ...snap.data() } as Mission);
+    });
+
+    // 1c. Tournée receveuse (lue DANS la transaction → jamais périmée).
+    const toSnap = await tx.get(toRef);
+    if (!toSnap.exists()) throw new Error('Votre tournée est introuvable');
+    const toM = { id: toSnap.id, ...toSnap.data() } as Mission;
+
+    // ===== 2. CALCULS =====
+    // 2a. Dédup : colis déjà présents dans la tournée receveuse.
+    const already = new Set(toM.stops.flatMap(s => s.packageIds));
+    const toAdd = pkgs.filter(p => !already.has(p.id));
+
+    // 2b. Fusion par adresse (placeKey) dans un arrêt existant ENCORE À FAIRE, sinon
+    //     création d'un arrêt — évite « 1 colis au lieu de 4 » quand on scanne un par un.
+    const updatedToStops: MissionStop[] = toM.stops.map(s => ({ ...s, packageIds: [...s.packageIds] }));
     const mergeableByKey = new Map<string, MissionStop>();
-    for (const s of updatedStops) {
+    for (const s of updatedToStops) {
       if (s.type === 'DELIVERY' &&
           s.status !== StopStatus.COMPLETED &&
           s.status !== StopStatus.FAILED &&
@@ -1147,79 +1132,106 @@ export const transferPackagesToDriver = async (input: RoadTransferInput): Promis
         if (!mergeableByKey.has(k)) mergeableByKey.set(k, s);
       }
     }
-
-    const addedStops: MissionStop[] = [];
+    let maxSeq = updatedToStops.reduce((mx, s) => Math.max(mx, s.sequence), 0);
+    const byAddress = new Map<string, Package[]>();
+    for (const p of toAdd) {
+      const k = placeKey(p);
+      if (!byAddress.has(k)) byAddress.set(k, []);
+      byAddress.get(k)!.push(p);
+    }
+    const stopByPkg = new Map<string, string>(); // pkgId → stopId (receveur)
     for (const [key, group] of byAddress) {
-      const existing = mergeableByKey.get(key);
-      if (existing) {
-        existing.packageIds = [...existing.packageIds, ...group.map(p => p.id)];
-        existing.packageCount = existing.packageIds.length;
-        if (!addedStops.includes(existing)) addedStops.push(existing);
-      } else {
-        const first = group[0];
+      let target = mergeableByKey.get(key);
+      if (!target) {
         maxSeq += 1;
-        const s = buildDeliveryStop({
+        const first = group[0];
+        target = buildDeliveryStop({
           id: makeStopId('transfer', maxSeq, now),
           sequence: maxSeq,
           address: first.address, city: first.city, postalCode: first.postalCode,
           coordinates: first.coordinates, floor: first.floor, hasElevator: first.hasElevator,
           contactName: first.contactName, contactPhone: first.contactPhone,
-          packageIds: group.map(p => p.id),
+          packageIds: [],
           timeWindowStart: first.timeWindowStart, timeWindowEnd: first.timeWindowEnd,
           serviceTime: first.serviceTime || 5,
           notes: claimMode ? 'Pris en charge par scan' : 'Reçu par transfert en route',
         });
-        updatedStops.push(s);
-        mergeableByKey.set(key, s);
-        addedStops.push(s);
+        updatedToStops.push(target);
+        mergeableByKey.set(key, target);
       }
+      for (const p of group) {
+        target.packageIds.push(p.id);
+        stopByPkg.set(p.id, target.id);
+      }
+      target.packageCount = target.packageIds.length;
     }
 
-    const newStops = updatedStops;
+    // 2c. Retrait des colis de leurs tournées d'origine (calcul des nouveaux stops).
+    const addedIdSet = new Set(toAdd.map(p => p.id));
+    const removedByOrigin = new Map<string, MissionStop[]>();
+    for (const [mid, m] of originMissions) {
+      const removed = new Set(pkgs.filter(p => p.missionId === mid && addedIdSet.has(p.id)).map(p => p.id));
+      if (removed.size === 0) continue;
+      const newStops = m.stops
+        .map(s => {
+          const remaining = s.packageIds.filter(id => !removed.has(id));
+          return remaining.length === s.packageIds.length ? s : { ...s, packageIds: remaining, packageCount: remaining.length };
+        })
+        // Retirer les stops vidés SAUF s'ils étaient déjà terminés.
+        .filter(s => s.packageIds.length > 0 || s.status === StopStatus.COMPLETED);
+      removedByOrigin.set(mid, newStops);
+    }
+
+    // ===== 3. ÉCRITURES (toutes après les lectures) =====
+    for (const [mid, newStops] of removedByOrigin) {
+      tx.update(doc(db, MISSIONS_COLLECTION, mid), { stops: newStops, ...recomputeMissionCounters(newStops), updatedAt: now });
+    }
     tx.update(toRef, {
-      stops: newStops,
-      totalPackages: recomputeMissionCounters(newStops).totalPackages,
-      status: m.status === MissionStatus.COMPLETED ? MissionStatus.IN_PROGRESS : (m.status || MissionStatus.IN_PROGRESS),
+      stops: updatedToStops,
+      totalPackages: recomputeMissionCounters(updatedToStops).totalPackages,
+      status: toM.status === MissionStatus.COMPLETED ? MissionStatus.IN_PROGRESS : (toM.status || MissionStatus.IN_PROGRESS),
       updatedAt: now
     });
-    return { addedStops, addedIds: new Set(toAdd.map(p => p.id)) };
+    for (const p of toAdd) {
+      const stopId = stopByPkg.get(p.id)!;
+      const fromMission = p.missionId ? originMissions.get(p.missionId) : undefined;
+      const movement: PackageMovement = cleanUndefined({
+        timestamp: now,
+        action: claimMode ? 'OUT_FOR_DELIVERY' as const : 'TRANSFERRED' as const,
+        driverId: toDriver.id, driverName: toDriver.name,
+        // « de X » = chauffeur source (transfert OU prise en charge d'un colis d'un collègue).
+        fromDriverName: fromMission?.driverName,
+        vehicleId: toMission.vehicleId, vehiclePlate: toMission.vehiclePlate, location,
+        notes: claimMode
+          ? `Pris en charge pour livraison par ${toDriver.name}${fromMission?.driverName ? ` (récupéré de ${fromMission.driverName})` : ''}`
+          : `Transfert en route${fromMission?.driverName ? ` — de ${fromMission.driverName}` : ''} à ${toDriver.name}${notes ? ` (${notes})` : ''}`
+      }) as PackageMovement;
+      tx.update(doc(db, PACKAGES_COLLECTION, p.id), cleanUndefined({
+        missionId: toMission.id, stopId,
+        currentDriverId: toDriver.id, currentVehicleId: toMission.vehicleId,
+        ...(newStatus ? { status: newStatus } : {}),
+        movements: [...(p.movements || []), movement],
+        updatedAt: now
+      }));
+    }
+
+    // Métadonnées pour la trace de transfert (créée hors transaction, non critique).
+    const movedByOrigin = new Map<string, string[]>();
+    for (const p of toAdd) {
+      if (!p.missionId || !originMissions.has(p.missionId)) continue;
+      if (!movedByOrigin.has(p.missionId)) movedByOrigin.set(p.missionId, []);
+      movedByOrigin.get(p.missionId)!.push(p.id);
+    }
+    return { addedIds: addedIdSet, movedByOrigin, originMeta: originMissions };
   });
 
-  // --- 3. Mettre à jour les colis réellement ajoutés (les doublons sont ignorés) ---
-  for (const p of pkgs) {
-    if (!addedIds.has(p.id)) continue;
-    const stop = addedStops.find(s => s.packageIds.includes(p.id))!;
-    const fromMission = p.missionId ? originMissions.get(p.missionId) : undefined;
-    const movement: PackageMovement = cleanUndefined({
-      timestamp: now,
-      action: claimMode ? 'OUT_FOR_DELIVERY' as const : 'TRANSFERRED' as const,
-      driverId: toDriver.id, driverName: toDriver.name,
-      // « de X » = chauffeur source, dès que le colis vient de la tournée d'un
-      // AUTRE (transfert OU prise en charge d'un colis déjà chez un collègue).
-      fromDriverName: fromMission?.driverName,
-      vehicleId: toMission.vehicleId, vehiclePlate: toMission.vehiclePlate, location,
-      notes: claimMode
-        ? `Pris en charge pour livraison par ${toDriver.name}${fromMission?.driverName ? ` (récupéré de ${fromMission.driverName})` : ''}`
-        : `Transfert en route${fromMission?.driverName ? ` — de ${fromMission.driverName}` : ''} à ${toDriver.name}${notes ? ` (${notes})` : ''}`
-    }) as PackageMovement;
-
-    await updateDoc(doc(db, PACKAGES_COLLECTION, p.id), cleanUndefined({
-      missionId: toMission.id, stopId: stop.id,
-      currentDriverId: toDriver.id, currentVehicleId: toMission.vehicleId,
-      ...(newStatus ? { status: newStatus } : {}),
-      movements: [...(p.movements || []), movement],
-      updatedAt: now
-    }));
-  }
-
-  // --- 4. Traçabilité : un document de transfert par tournée d'origine ---
-  for (const [missionId, missionPkgs] of byOriginMission) {
-    const fromMission = originMissions.get(missionId);
-    if (!fromMission) continue;
-    const moved = missionPkgs.filter(p => addedIds.has(p.id));
-    if (moved.length === 0) continue;
+  // ===== 4. Traçabilité : un document de transfert par tournée d'origine =====
+  // Hors transaction (non critique) : si ça échoue, les colis sont déjà cohérents.
+  for (const [missionId, movedIds] of movedByOrigin) {
+    const fromMission = originMeta.get(missionId);
+    if (!fromMission || movedIds.length === 0) continue;
     await addTransfer({
-      packageIds: moved.map(p => p.id), packageCount: moved.length,
+      packageIds: movedIds, packageCount: movedIds.length,
       fromDriverId: fromMission.driverId || '', fromDriverName: fromMission.driverName || 'Inconnu',
       fromVehicleId: fromMission.vehicleId || '', fromVehiclePlate: fromMission.vehiclePlate || '',
       fromMissionId: missionId,
