@@ -9,6 +9,7 @@
 import React, { useState, lazy, Suspense } from 'react';
 import { ScanLine, X, Loader2, MapPin, Package as PackageIcon, Search, PackageCheck, CheckCircle, Plus } from 'lucide-react';
 import { Package, PackageStatus, PACKAGE_STATUS_COLORS, User, UserRole } from '../types';
+import { normalizeRole } from '../utils/role';
 import { todayISO } from '../utils/date';
 import { findPackageByCode, claimPackagesForDelivery, createAndClaimPackage } from '../services/missionService';
 import { reportError } from '../services/logService';
@@ -222,7 +223,14 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
                   {/* Timeline */}
                   <div className="border-t border-slate-100 pt-2">
                     <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">Suivi du colis</p>
-                    <PackageTimeline movements={result.pkg.movements || []} showActors showInternalDetails pod={result.pkg.pod} />
+                    {/* Détail complet (chauffeur+véhicule à chaque étape + preuve)
+                        pour tous SAUF le chauffeur (vue chauffeur volontairement sobre). */}
+                    <PackageTimeline
+                      movements={result.pkg.movements || []}
+                      showActors={normalizeRole(currentUser.role) !== UserRole.DRIVER}
+                      showInternalDetails
+                      pod={normalizeRole(currentUser.role) === UserRole.DRIVER ? undefined : result.pkg.pod}
+                    />
                   </div>
                 </div>
               </>
