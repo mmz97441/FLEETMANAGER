@@ -19,7 +19,7 @@ import {
   Package as PackageIcon, CheckCircle, XCircle, Camera,
   Loader2, PenTool, Search, AlertTriangle, ChevronDown, ChevronUp
 } from 'lucide-react';
-import { packageMatchesCode, packageDisplayCode } from '../utils/barcode';
+import { packageMatchesCode, packageDisplayCode, matchScansToPackages, packageScanCodes } from '../utils/barcode';
 import { formatWeight } from '../utils/format';
 import ScanGateDialog from './ScanGateDialog';
 
@@ -60,23 +60,15 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
   const [showSignature, setShowSignature] = useState(false);
   const [showGate, setShowGate] = useState(false);
 
-  // Mapper les scans aux colis (tracking interne, N° colis client ou N° commande)
-  const { scanned, missing, unknown } = useMemo(() => {
-    const scannedPkgs: PickupPackage[] = [];
-    const missingPkgs: PickupPackage[] = [];
-
-    expectedPackages.forEach(pkg => {
-      if (scannedBarcodes.some(b => packageMatchesCode(pkg, b))) {
-        scannedPkgs.push(pkg);
-      } else {
-        missingPkgs.push(pkg);
-      }
-    });
-
+  // Mapper les scans aux colis en 1:1 (matchScansToPackages) : un scan couvre AU
+  // PLUS un colis → pas de sur-comptage quand plusieurs colis partagent un code.
+  const { scanned, missing, unknown, scannedIds } = useMemo(() => {
+    const matchedIds = matchScansToPackages(expectedPackages, scannedBarcodes);
+    const scannedPkgs = expectedPackages.filter(p => matchedIds.has(p.id));
+    const missingPkgs = expectedPackages.filter(p => !matchedIds.has(p.id));
     // Codes scannés qui ne correspondent à aucun colis prévu
     const unknownCodes = scannedBarcodes.filter(b => !expectedPackages.some(p => packageMatchesCode(p, b)));
-
-    return { scanned: scannedPkgs, missing: missingPkgs, unknown: unknownCodes };
+    return { scanned: scannedPkgs, missing: missingPkgs, unknown: unknownCodes, scannedIds: matchedIds };
   }, [expectedPackages, scannedBarcodes]);
 
   const total = expectedPackages.length;
@@ -96,8 +88,7 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
     );
   }, [expectedPackages, searchTerm]);
 
-  const isScanned = (pkg: PickupPackage) =>
-    scannedBarcodes.some(b => packageMatchesCode(pkg, b));
+  const isScanned = (pkg: PickupPackage) => scannedIds.has(pkg.id);
 
   const doFinalize = () => {
     const scannedIds = scanned.map(p => p.id);
@@ -198,6 +189,7 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
             <div className="max-h-60 overflow-y-auto divide-y divide-slate-100">
               {filteredPackages.map(pkg => {
                 const scanned = isScanned(pkg);
+                const noCode = packageScanCodes(pkg).length === 0;
                 return (
                   <div
                     key={pkg.id}
@@ -221,6 +213,11 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
                         {scanned && (
                           <span className="px-1.5 py-0.5 bg-green-100 text-green-700 rounded text-[9px] font-bold">
                             SCANNÉ
+                          </span>
+                        )}
+                        {!scanned && noCode && (
+                          <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-[9px] font-bold" title="Ce colis n’a pas de code scannable — à valider en « Forcer »">
+                            SANS CODE
                           </span>
                         )}
                       </div>
@@ -300,7 +297,7 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
       {/* Bouton finaliser */}
       <button
         onClick={handleFinalize}
-        disabled={isProcessing || scannedCount === 0}
+        disabled={isProcessing || total === 0}
         className={`w-full flex items-center justify-center gap-2 py-4 rounded-xl font-bold text-sm active:scale-95 transition-transform ${
           allScanned && signatureData
             ? 'bg-green-600 text-white shadow-lg shadow-green-200'

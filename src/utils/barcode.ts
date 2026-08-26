@@ -80,3 +80,52 @@ export const packageMatchesCode = (pkg: ScannableCodes, scannedCode: string): bo
 /** Le code affiché au chauffeur : celui de l'étiquette physique en priorité. */
 export const packageDisplayCode = (pkg: ScannableCodes): string =>
   pkg.externalId || pkg.barcode || pkg.orderNumber || '';
+
+/**
+ * Assigne chaque code scanné à AU PLUS UN colis (glouton, 1:1), et renvoie
+ * l'ensemble des IDs de colis effectivement couverts par un scan DISTINCT.
+ *
+ * Pourquoi : compter « les colis dont un code matche » sur-compte quand plusieurs
+ * colis partagent un identifiant (ex. N° de commande présent dans `orderNumber` de
+ * plusieurs cartons — cas réel des anciens imports) : un seul scan validerait tout
+ * l'arrêt. Avec l'assignation 1:1, un scan = un colis au plus, donc le chauffeur
+ * doit voir chaque carton. On ne peut PAS simplement exclure `orderNumber` du
+ * matching : pour certains colis c'est leur SEUL code.
+ */
+export const matchScansToPackages = <T extends { id: string } & ScannableCodes>(
+  packages: T[],
+  scannedCodes: string[]
+): Set<string> => {
+  // Codes distincts (un même code physique scanné 2× = 1 seule entrée).
+  const codes = [...new Set(
+    scannedCodes.map(c => (c || '').trim().toUpperCase()).filter(Boolean)
+  )];
+
+  // Matching BIPARTITE MAXIMUM (algorithme de Kuhn / chemins augmentants) entre
+  // les codes scannés et les colis : un code ↔ un colis, en MAXIMISANT le nombre
+  // de colis couverts. Un simple glouton pouvait sous-compter (ex. un code partagé
+  // assigné à un colis qui avait AUSSI un code distinct, privant un autre colis
+  // dont c'était le seul code). Le matching maximum évite ce faux « manquant ».
+  const adj: number[][] = codes.map(code =>
+    packages.map((_, i) => i).filter(i => packageMatchesCode(packages[i], code))
+  );
+  const pkgToCode = new Array(packages.length).fill(-1);
+  const augment = (codeIdx: number, visited: boolean[]): boolean => {
+    for (const pkgIdx of adj[codeIdx]) {
+      if (visited[pkgIdx]) continue;
+      visited[pkgIdx] = true;
+      if (pkgToCode[pkgIdx] === -1 || augment(pkgToCode[pkgIdx], visited)) {
+        pkgToCode[pkgIdx] = codeIdx;
+        return true;
+      }
+    }
+    return false;
+  };
+  for (let c = 0; c < codes.length; c++) {
+    augment(c, new Array(packages.length).fill(false));
+  }
+
+  const matched = new Set<string>();
+  packages.forEach((p, i) => { if (pkgToCode[i] !== -1) matched.add(p.id); });
+  return matched;
+};

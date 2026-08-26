@@ -30,7 +30,8 @@ import {
   addManualStopToMission,
   updateMissionStatus,
   updatePackageStatus,
-  recomputeMissionCounters
+  recomputeMissionCounters,
+  getPackagesByIds
 } from '../services/missionService';
 import { uploadAndCreatePOD, uploadFailurePOD, UploadProgress } from '../services/podService';
 import { finalizePickup } from '../services/pickupService';
@@ -40,7 +41,7 @@ import TransferReceiveModal from './TransferReceiveModal';
 import ClaimScanModal from './ClaimScanModal';
 import ScanGateDialog from './ScanGateDialog';
 import StopReorderModal from './StopReorderModal';
-import { packageMatchesCode, packageScanCodes, packageDisplayCode } from '../utils/barcode';
+import { packageMatchesCode, packageScanCodes, packageDisplayCode, matchScansToPackages } from '../utils/barcode';
 import { sameDeliveryPoint } from '../utils/address';
 import { getTourProgress } from '../utils/missionProgress';
 import { getCurrentPosition } from '../utils/geo';
@@ -363,14 +364,26 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
       return;
     }
     const ids = currentStop.packageIds || [];
-    const unsub = subscribeToPackages((pkgs) => {
-      setStopPackages(pkgs.filter(p => ids.includes(p.id)));
+    let cancelled = false;
 
-      // Filet de sécurité (livraison uniquement) : y a-t-il des colis destinés à
-      // CE point de livraison qui ne sont PAS dans l'arrêt ? (colis oublié, parti
-      // chez un autre chauffeur, mal regroupé). On restreint aux colis encore à
-      // livrer et pertinents (à moi, à cette mission, ou du jour) pour éviter le bruit.
-      if (currentStop.type === 'DELIVERY') {
+    // #1 : les colis de l'arrêt sont chargés par leurs IDs EXACTS (getPackagesByIds),
+    // et NON en filtrant les « 500 plus récents » — sinon, sur gros volume ou colis
+    // importés un jour précédent, la liste devenait vide/incomplète (compte faux et
+    // gate de scan neutralisé). Par IDs, le compte est toujours complet.
+    getPackagesByIds(ids)
+      .then(pkgs => { if (!cancelled) setStopPackages(pkgs); })
+      .catch(err => {
+        // Ne PAS laisser stopPackages à [] sur erreur : combiné au gate, « 0 colis »
+        // vaudrait « tout scanné ». On loggue ; le gate reste fermé car il compare
+        // au compte autoritaire currentStop.packageIds (voir expectedStopCount).
+        console.error('Chargement colis de l’arrêt échoué:', err);
+      });
+
+    // Filet de sécurité (livraison uniquement) : colis destinés à CE point mais PAS
+    // dans l'arrêt (oubli / mal regroupé). Requête large volontairement (best-effort).
+    let unsub: () => void = () => {};
+    if (currentStop.type === 'DELIVERY') {
+      unsub = subscribeToPackages((pkgs) => {
         const others = pkgs.filter(p =>
           !ids.includes(p.id) &&
           samePlace(p, currentStop) &&
@@ -382,12 +395,12 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
             localDatePart(p.createdAt || '') === today)
         );
         setOtherAtAddress(others);
-      } else {
-        setOtherAtAddress([]);
-      }
-    });
-    return unsub;
-  }, [currentStop?.id, currentStop?.type, activeMission?.id, currentUser.id, today]);
+      });
+    } else {
+      setOtherAtAddress([]);
+    }
+    return () => { cancelled = true; unsub(); };
+  }, [currentStop?.id, currentStop?.type, (currentStop?.packageIds || []).join(','), activeMission?.id, currentUser.id, today]);
 
   // Reset scan quand on change de stop
   useEffect(() => {
@@ -401,14 +414,20 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
 
   // Scan de contrôle à la livraison : chaque colis du stop doit être scanné
   // (étiquette client BR… ou tracking GFL…) avant de pouvoir valider.
-  const deliveryScannedCount = stopPackages.filter(p =>
-    scannedBarcodes.some(b => packageMatchesCode(p, b))
-  ).length;
-  const allStopScanned = stopPackages.length === 0 || deliveryScannedCount === stopPackages.length;
+  // Assignation 1:1 (matchScansToPackages) : un scan couvre AU PLUS un colis →
+  // pas de sur-comptage quand plusieurs colis partagent un identifiant.
+  const scannedStopIds = matchScansToPackages(stopPackages, scannedBarcodes);
+  const deliveryScannedCount = scannedStopIds.size;
+  // Le gate se base sur le compte AUTORITAIRE des colis de l'arrêt
+  // (currentStop.packageIds, toujours à jour via la mission), et NON sur
+  // stopPackages.length : ainsi, si le chargement des colis échoue/incomplet
+  // (réseau), le gate ne s'auto-valide pas à tort (il reste à scanner ou forcer).
+  const expectedStopCount = currentStop?.packageIds?.length || 0;
+  const allStopScanned = expectedStopCount === 0 || deliveryScannedCount === expectedStopCount;
   const scanRequirementMet = allStopScanned || scanBypass;
   const missingStopCodes = stopPackages
-    .filter(p => !scannedBarcodes.some(b => packageMatchesCode(p, b)))
-    .map(packageDisplayCode);
+    .filter(p => !scannedStopIds.has(p.id))
+    .map(p => packageDisplayCode(p) || 'sans code');
 
   // Charger les colis "À retourner" pour ce chauffeur
   useEffect(() => {
@@ -1503,17 +1522,21 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                             </div>
                             <div className="flex flex-wrap gap-1.5">
                               {stopPackages.map(p => {
-                                const ok = scannedBarcodes.some(b => packageMatchesCode(p, b));
+                                const ok = scannedStopIds.has(p.id);
+                                const noCode = packageScanCodes(p).length === 0;
                                 return (
                                   <span
                                     key={p.id}
+                                    title={noCode ? 'Ce colis n’a pas de code scannable — à valider en « Forcer »' : undefined}
                                     className={`px-2 py-1 rounded-lg text-[11px] font-mono font-bold border ${
                                       ok
                                         ? 'bg-green-50 border-green-300 text-green-700'
-                                        : 'bg-slate-50 border-slate-200 text-slate-500'
+                                        : noCode
+                                          ? 'bg-amber-50 border-amber-300 text-amber-700'
+                                          : 'bg-slate-50 border-slate-200 text-slate-500'
                                     }`}
                                   >
-                                    {ok ? '✓ ' : ''}{packageDisplayCode(p)}
+                                    {ok ? '✓ ' : noCode ? '⚠️ ' : ''}{packageDisplayCode(p) || 'sans code'}
                                   </span>
                                 );
                               })}
