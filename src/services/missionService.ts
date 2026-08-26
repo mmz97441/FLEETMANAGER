@@ -881,6 +881,56 @@ export const updateMissionFields = async (
   }));
 };
 
+/**
+ * Valide l'issue d'UN arrêt (livré / échoué / arrivé) de façon ATOMIQUE.
+ *
+ * Avant, la livraison faisait `updateMission({...activeMission, stops, compteurs})`
+ * = réécriture de TOUT le document depuis un instantané en mémoire potentiellement
+ * périmé. Deux effets de bord graves :
+ *  - un transfert concurrent (qui retire un colis de la tournée par transaction)
+ *    était ÉCRASÉ → le colis « ressuscitait » dans la tournée ;
+ *  - livrer l'arrêt B juste après A, avant le retour du listener, réécrivait les
+ *    compteurs de A (sous-comptage) et pouvait repasser A en attente.
+ *
+ * Ici on relit la mission FRAÎCHE dans une transaction, on ne modifie QUE l'arrêt
+ * ciblé, et on recalcule les compteurs à partir des stops frais. Les compteurs
+ * colis (deliveredPackages/failedPackages) sont incrémentés sur la valeur FRAÎCHE.
+ */
+export const commitStopOutcome = async (params: {
+  missionId: string;
+  stopId: string;
+  stopPatch: Partial<MissionStop>;
+  deliveredDelta?: number;
+  failedDelta?: number;
+}): Promise<{ allDone: boolean; stops: MissionStop[] }> => {
+  const ref = doc(db, MISSIONS_COLLECTION, params.missionId);
+  const now = new Date().toISOString();
+  return await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists()) throw new Error('Tournée introuvable');
+    const m = { id: snap.id, ...snap.data() } as Mission;
+    // On nettoie le patch AVANT le merge : un champ `undefined` (ex. arrivalCoordinates
+    // sans GPS) ne doit PAS écraser/supprimer la valeur existante de l'arrêt.
+    const cleanPatch = cleanUndefined(params.stopPatch) as Partial<MissionStop>;
+    const stops = m.stops.map(s => s.id === params.stopId ? { ...s, ...cleanPatch } : s);
+    const { completedStops, failedStops, totalPackages } = recomputeMissionCounters(stops);
+    const deliveredPackages = Math.max(0, (m.deliveredPackages || 0) + (params.deliveredDelta || 0));
+    const failedPackages = Math.max(0, (m.failedPackages || 0) + (params.failedDelta || 0));
+    const allDone = stops.every(s =>
+      s.status === StopStatus.COMPLETED || s.status === StopStatus.FAILED || s.status === StopStatus.SKIPPED
+    );
+    tx.update(ref, cleanUndefined({
+      stops,
+      completedStops, failedStops, totalPackages,
+      deliveredPackages, failedPackages,
+      status: allDone ? MissionStatus.COMPLETED : MissionStatus.IN_PROGRESS,
+      ...(allDone ? { completedAt: now } : {}),
+      updatedAt: now
+    }));
+    return { allDone, stops };
+  });
+};
+
 export const updateMissionStatus = async (missionId: string, status: MissionStatus): Promise<void> => {
   const updates: any = { status, updatedAt: new Date().toISOString() };
   

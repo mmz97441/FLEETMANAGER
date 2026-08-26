@@ -25,6 +25,7 @@ import {
   subscribeToMissions,
   subscribeToPackages,
   updateMission,
+  commitStopOutcome,
   updateMissionFields,
   optimizeDriverMission,
   addManualStopToMission,
@@ -722,16 +723,17 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
       let coords: { lat: number; lng: number } | undefined;
       try { coords = await getCurrentPosition(); } catch {}
 
-      const updatedStops = activeMission.stops.map(s =>
-        s.id === currentStop.id ? {
-          ...s,
+      // Patch ATOMIQUE du seul arrêt (relecture fraîche) → n'écrase pas un transfert
+      // concurrent ni les compteurs (fix #5).
+      await commitStopOutcome({
+        missionId: activeMission.id,
+        stopId: currentStop.id,
+        stopPatch: {
           status: StopStatus.ARRIVED,
           arrivalTime: new Date().toISOString(),
           arrivalCoordinates: coords
-        } : s
-      );
-
-      await updateMission({ ...activeMission, stops: updatedStops });
+        }
+      });
       showNotif('📍 Arrivée enregistrée');
     } catch (err) {
       reportError('driver.arrival', err, { silent: true });
@@ -845,40 +847,23 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
         return;
       }
 
-      // 3. Toutes les écritures OK → l'arrêt courant devient TERMINÉ et ne référence
-      //    QUE les colis livrés. Les colis non remis sont déjà écrits en ÉCHEC
-      //    (statut terminal) ci-dessus ; on les RETIRE simplement des packageIds de
-      //    l'arrêt. Un arrêt TERMINÉ ne liste donc que des colis livrés → la resync ne
-      //    peut jamais les repasser en « Livré » (sûr même après un re-dispatch), et on
-      //    évite tout arrêt fantôme / n° d'arrêt en double dans l'affichage.
-      const updatedStops = activeMission.stops.map(s =>
-        s.id === currentStop.id ? {
-          ...s,
+      // 3+4. Terminer l'arrêt de façon ATOMIQUE (relecture fraîche de la mission,
+      //      patch du SEUL arrêt courant, compteurs recalculés). L'arrêt terminé ne
+      //      référence QUE les colis livrés (les non remis, déjà écrits en ÉCHEC, en
+      //      sont retirés → resync sûre, pas d'arrêt fantôme). Plus d'écrasement d'un
+      //      transfert concurrent ni de compteurs perdus (fix #5).
+      const { allDone, stops: updatedStops } = await commitStopOutcome({
+        missionId: activeMission.id,
+        stopId: currentStop.id,
+        stopPatch: {
           status: StopStatus.COMPLETED,
           completionTime: now,
-          arrivalCoordinates: coords || s.arrivalCoordinates,
+          arrivalCoordinates: coords,
           packageIds: deliverIds,
           packageCount: deliverIds.length
-        } : s
-      );
-
-      // 4. Compteurs déterministes depuis les écritures RÉELLES (plus depuis l'intention).
-      const { completedStops, failedStops } = recomputeMissionCounters(updatedStops);
-      const deliveredPkgs = (activeMission.deliveredPackages || 0) + okDelivered.length;
-      const failedPkgs = (activeMission.failedPackages || 0) + okFailed.length;
-      const allDone = updatedStops.every(s =>
-        s.status === StopStatus.COMPLETED || s.status === StopStatus.FAILED || s.status === StopStatus.SKIPPED
-      );
-
-      await updateMission({
-        ...activeMission,
-        stops: updatedStops,
-        completedStops,
-        failedStops,
-        deliveredPackages: deliveredPkgs,
-        failedPackages: failedPkgs,
-        status: allDone ? MissionStatus.COMPLETED : MissionStatus.IN_PROGRESS,
-        ...(allDone ? { completedAt: now } : {})
+        },
+        deliveredDelta: okDelivered.length,
+        failedDelta: okFailed.length
       });
 
       // 5. Upload des preuves (POD) — best-effort : NE DOIT JAMAIS annuler la livraison.
@@ -970,30 +955,16 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
 
       const now = new Date().toISOString();
 
-      const updatedStops = activeMission.stops.map(s =>
-        s.id === currentStop.id ? {
-          ...s,
+      // Échec de TOUT l'arrêt, patch ATOMIQUE (relecture fraîche + compteurs).
+      const { allDone, stops: updatedStops } = await commitStopOutcome({
+        missionId: activeMission.id,
+        stopId: currentStop.id,
+        stopPatch: {
           status: StopStatus.FAILED,
           completionTime: now,
-          arrivalCoordinates: coords || s.arrivalCoordinates
-        } : s
-      );
-
-      const { completedStops, failedStops } = recomputeMissionCounters(updatedStops);
-      const failedPkgs = (activeMission.failedPackages || 0) + currentStop.packageCount;
-
-      const allDone = updatedStops.every(s =>
-        s.status === StopStatus.COMPLETED || s.status === StopStatus.FAILED || s.status === StopStatus.SKIPPED
-      );
-
-      await updateMission({
-        ...activeMission,
-        stops: updatedStops,
-        completedStops,
-        failedStops,
-        failedPackages: failedPkgs,
-        status: allDone ? MissionStatus.COMPLETED : MissionStatus.IN_PROGRESS,
-        ...(allDone ? { completedAt: now } : {})
+          arrivalCoordinates: coords
+        },
+        failedDelta: currentStop.packageCount
       });
 
       // Mettre à jour colis en échec — BON format PackageMovement
@@ -1213,31 +1184,16 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
         signatureBase64
       });
 
-      // 2. MAJ du stop
-      const updatedStops = activeMission.stops.map(s =>
-        s.id === currentStop.id ? {
-          ...s,
+      // 2. MAJ du stop — patch ATOMIQUE (relecture fraîche + compteurs).
+      const { allDone, stops: updatedStops } = await commitStopOutcome({
+        missionId: activeMission.id,
+        stopId: currentStop.id,
+        stopPatch: {
           status: StopStatus.COMPLETED,
           completionTime: now,
-          arrivalCoordinates: coords || s.arrivalCoordinates
-        } : s
-      );
-
-      const { completedStops, failedStops } = recomputeMissionCounters(updatedStops);
-      const collectedPkgs = (activeMission.deliveredPackages || 0) + scannedIds.length;
-
-      const allDone = updatedStops.every(s =>
-        s.status === StopStatus.COMPLETED || s.status === StopStatus.FAILED || s.status === StopStatus.SKIPPED
-      );
-
-      await updateMission({
-        ...activeMission,
-        stops: updatedStops,
-        completedStops,
-        failedStops,
-        deliveredPackages: collectedPkgs,
-        status: allDone ? MissionStatus.COMPLETED : MissionStatus.IN_PROGRESS,
-        ...(allDone ? { completedAt: now } : {})
+          arrivalCoordinates: coords
+        },
+        deliveredDelta: scannedIds.length
       });
 
       // 3. Prochain stop
