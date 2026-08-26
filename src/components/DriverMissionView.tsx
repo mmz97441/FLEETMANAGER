@@ -845,34 +845,22 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
         return;
       }
 
-      // 3. Toutes les écritures OK → l'arrêt courant devient TERMINÉ et ne contient
-      //    QUE les colis livrés. Les non remis partent dans un arrêt FRÈRE marqué
-      //    ÉCHEC (même adresse) : un arrêt TERMINÉ ne référence donc JAMAIS un colis
-      //    non livré (resync sûre par construction) et le total mission est préservé.
-      const updatedStops: typeof activeMission.stops = [];
-      for (const s of activeMission.stops) {
-        if (s.id !== currentStop.id) { updatedStops.push(s); continue; }
-        updatedStops.push({
+      // 3. Toutes les écritures OK → l'arrêt courant devient TERMINÉ et ne référence
+      //    QUE les colis livrés. Les colis non remis sont déjà écrits en ÉCHEC
+      //    (statut terminal) ci-dessus ; on les RETIRE simplement des packageIds de
+      //    l'arrêt. Un arrêt TERMINÉ ne liste donc que des colis livrés → la resync ne
+      //    peut jamais les repasser en « Livré » (sûr même après un re-dispatch), et on
+      //    évite tout arrêt fantôme / n° d'arrêt en double dans l'affichage.
+      const updatedStops = activeMission.stops.map(s =>
+        s.id === currentStop.id ? {
           ...s,
           status: StopStatus.COMPLETED,
           completionTime: now,
           arrivalCoordinates: coords || s.arrivalCoordinates,
           packageIds: deliverIds,
           packageCount: deliverIds.length
-        });
-        if (failIds.length > 0) {
-          updatedStops.push({
-            ...s,
-            id: `${s.id}-nonremis`,
-            status: StopStatus.FAILED,
-            completionTime: now,
-            arrivalCoordinates: coords || s.arrivalCoordinates,
-            packageIds: failIds,
-            packageCount: failIds.length,
-            notes: 'Colis non remis (déclarés absents au point de livraison)'
-          });
-        }
-      }
+        } : s
+      );
 
       // 4. Compteurs déterministes depuis les écritures RÉELLES (plus depuis l'intention).
       const { completedStops, failedStops } = recomputeMissionCounters(updatedStops);
@@ -960,7 +948,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
       setMerchandiseGood(true);
       setReservesNote('');
 
-      showNotif(allDone ? '🎉 Tournée terminée !' : `✅ Stop ${currentStop.sequence} livré !`);
+      const nonRemis = okFailed.length > 0 ? ` (${okFailed.length} non remis)` : '';
+      showNotif(allDone ? `🎉 Tournée terminée !${nonRemis}` : `✅ Stop ${currentStop.sequence} livré !${nonRemis}`);
     } catch (err) {
       // Ne PAS conserver une intention partielle après une erreur : elle pourrait
       // « fuiter » sur une prochaine livraison. Le chauffeur repart propre.
