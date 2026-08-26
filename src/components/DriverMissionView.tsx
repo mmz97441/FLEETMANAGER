@@ -16,7 +16,7 @@
 import React, { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import {
   Mission, MissionStatus, MissionType, MissionStop, StopStatus,
-  PackageStatus, FailureReason, Package, DeliveryLocation, TransferReason,
+  PackageStatus, FailureReason, Package, DeliveryLocation,
   User, MISSION_STATUS_COLORS, Issue, IssueStatus
 } from '../types';
 import { addIssueToFirestore } from '../services/firestore';
@@ -32,7 +32,7 @@ import {
   updatePackageStatus,
   recomputeMissionCounters,
   getPackagesByIds,
-  transferPackagesToDriver
+  addPackagesToStop
 } from '../services/missionService';
 import { uploadAndCreatePOD, uploadFailurePOD, UploadProgress } from '../services/podService';
 import { finalizePickup } from '../services/pickupService';
@@ -43,7 +43,7 @@ import ClaimScanModal from './ClaimScanModal';
 import ScanGateDialog from './ScanGateDialog';
 import StopReorderModal from './StopReorderModal';
 import { packageMatchesCode, packageScanCodes, packageDisplayCode, matchScansToPackages } from '../utils/barcode';
-import { sameDeliveryPoint, placeKey } from '../utils/address';
+import { sameDeliveryPoint } from '../utils/address';
 import { getTourProgress } from '../utils/missionProgress';
 import { getCurrentPosition } from '../utils/geo';
 import { formatDistance, formatDuration } from '../utils/format';
@@ -457,34 +457,31 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
     setTimeout(() => setNotification(null), 3000);
   };
 
-  // Rattacher à l'arrêt courant les colis détectés à la MÊME adresse mais absents
-  // de l'arrêt (bandeau rouge). On ne rattache QUE ceux qui sont sûrs :
-  //  - pas affectés à un AUTRE chauffeur (sinon on lui volerait un colis) ;
-  //  - même placeKey que l'arrêt courant (sinon ils ne fusionneraient pas ICI).
-  // On cible la MISSION ACTIVE (pas forcément la tournée-scan DLV) ; grâce à la
-  // fusion par adresse (transferPackagesToDriver), ils atterrissent dans l'arrêt
-  // courant → le chauffeur scanne/livre tout ensemble.
+  // Rattacher à l'arrêt courant les colis détectés au MÊME point de livraison mais
+  // absents de l'arrêt (bandeau rouge). `otherAtAddress` est déjà restreint au même
+  // point (adresse OU téléphone) et aux colis pertinents ; on n'exclut ici que ceux
+  // affectés à un AUTRE chauffeur (sinon on lui volerait un colis). On les ajoute
+  // DIRECTEMENT à cet arrêt via addPackagesToStop (transaction atomique) → plus
+  // aucune dépendance au regroupement placeKey qui bloquait avant.
   const claimableOthers = useMemo(() =>
-    otherAtAddress.filter(p =>
-      (!p.currentDriverId || p.currentDriverId === currentUser.id) &&
-      (!currentStop || placeKey(p) === placeKey(currentStop))
-    ),
-  [otherAtAddress, currentStop, currentUser.id]);
+    otherAtAddress.filter(p => !p.currentDriverId || p.currentDriverId === currentUser.id),
+  [otherAtAddress, currentUser.id]);
 
   const [isClaimingOthers, setIsClaimingOthers] = useState(false);
   const handleClaimOthersToStop = async () => {
-    if (!activeMission || claimableOthers.length === 0 || isClaimingOthers) return;
+    if (!activeMission || !currentStop || claimableOthers.length === 0 || isClaimingOthers) return;
     setIsClaimingOthers(true);
     try {
-      const n = await transferPackagesToDriver({
-        packages: claimableOthers,
-        toMission: activeMission,
-        toDriver: { id: currentUser.id, name: `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() || currentUser.email },
-        reason: TransferReason.OTHER,
-        claimMode: true,
-        newStatus: PackageStatus.IN_DELIVERY,
-      });
-      showNotif(`📦 ${n} colis rattaché${n > 1 ? 's' : ''} à cet arrêt`);
+      let location: { lat: number; lng: number } | undefined;
+      try { location = await getCurrentPosition({ timeout: 5000 }); } catch { /* optionnel au rattachement */ }
+      const n = await addPackagesToStop(
+        activeMission.id,
+        currentStop.id,
+        claimableOthers,
+        { id: currentUser.id, name: `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() || currentUser.email },
+        location,
+      );
+      showNotif(n > 0 ? `📦 ${n} colis rattaché${n > 1 ? 's' : ''} à cet arrêt` : 'Aucun colis à rattacher');
     } catch (err) {
       showNotif(`❌ Rattachement impossible${err instanceof Error ? ` (${err.message})` : ''}`);
     }

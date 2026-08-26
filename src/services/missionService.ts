@@ -1488,6 +1488,83 @@ export const addManualStopToMission = async (
   });
 };
 
+/**
+ * Rattache des colis à UN ARRÊT PRÉCIS d'une mission, DANS UNE SEULE TRANSACTION
+ * (mission + colis écrits atomiquement). Utilisé par « Ajouter N colis à cet
+ * arrêt » côté chauffeur : les colis détectés à la même adresse mais absents de
+ * l'arrêt y sont ajoutés directement (pas de dépendance au regroupement placeKey).
+ *
+ * Compare-and-set : on NE touche PAS un colis déjà DELIVERED/RETURNED (jamais de
+ * résurrection), et on dédoublonne s'il est déjà dans l'arrêt. Renvoie le nombre
+ * réellement rattaché.
+ */
+export const addPackagesToStop = async (
+  missionId: string,
+  stopId: string,
+  packages: Package[],
+  driver: { id: string; name: string },
+  location?: { lat: number; lng: number }
+): Promise<number> => {
+  const now = new Date().toISOString();
+  const ref = doc(db, MISSIONS_COLLECTION, missionId);
+  return await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists()) throw new Error('Tournée introuvable');
+    const mission = { id: snap.id, ...snap.data() } as Mission;
+    const stopIdx = mission.stops.findIndex(s => s.id === stopId);
+    if (stopIdx < 0) throw new Error('Arrêt introuvable');
+
+    // Lectures AVANT écritures (contrainte transaction Firestore).
+    const pkgRefs = packages.map(p => doc(db, PACKAGES_COLLECTION, p.id));
+    const pkgSnaps = await Promise.all(pkgRefs.map(r => tx.get(r)));
+
+    const already = new Set(mission.stops[stopIdx].packageIds || []);
+    const toAttach: { ref: ReturnType<typeof doc>; pkg: Package }[] = [];
+    for (let i = 0; i < packages.length; i++) {
+      const s = pkgSnaps[i];
+      if (!s.exists()) continue;
+      const cur = { id: s.id, ...s.data() } as Package;
+      if (cur.status === PackageStatus.DELIVERED || cur.status === PackageStatus.RETURNED) continue; // pas de résurrection
+      if (already.has(cur.id)) continue;
+      toAttach.push({ ref: pkgRefs[i], pkg: cur });
+      already.add(cur.id);
+    }
+    if (toAttach.length === 0) return 0;
+
+    const stops = mission.stops.map((s, i) => {
+      if (i !== stopIdx) return s;
+      const packageIds = [...(s.packageIds || []), ...toAttach.map(t => t.pkg.id)];
+      return { ...s, packageIds, packageCount: packageIds.length };
+    });
+    tx.update(ref, cleanUndefined({
+      stops,
+      ...recomputeMissionCounters(stops),
+      status: mission.status === MissionStatus.COMPLETED ? MissionStatus.IN_PROGRESS : (mission.status || MissionStatus.IN_PROGRESS),
+      updatedAt: now,
+    }));
+
+    for (const { ref: pRef, pkg } of toAttach) {
+      const movement = cleanUndefined({
+        timestamp: now,
+        action: 'OUT_FOR_DELIVERY' as const,
+        driverId: driver.id, driverName: driver.name,
+        fromDriverName: pkg.currentDriverId && pkg.currentDriverId !== driver.id
+          ? [...(pkg.movements || [])].reverse().find(m => m.driverName)?.driverName : undefined,
+        vehicleId: mission.vehicleId, vehiclePlate: mission.vehiclePlate, location,
+        notes: `Rattaché à l'arrêt (livraison groupée même adresse) par ${driver.name}`,
+      }) as PackageMovement;
+      tx.update(pRef, cleanUndefined({
+        missionId, stopId,
+        currentDriverId: driver.id, currentVehicleId: mission.vehicleId,
+        status: PackageStatus.IN_DELIVERY,
+        movements: [...(pkg.movements || []), movement],
+        updatedAt: now,
+      }));
+    }
+    return toAttach.length;
+  });
+};
+
 // ============================================================================
 // DRIVERS HELPERS
 // ============================================================================
