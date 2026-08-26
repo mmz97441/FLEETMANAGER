@@ -1091,30 +1091,59 @@ export const transferPackagesToDriver = async (input: RoadTransferInput): Promis
       if (!byAddress.has(key)) byAddress.set(key, []);
       byAddress.get(key)!.push(p);
     }
-    const stops: MissionStop[] = [];
-    for (const group of byAddress.values()) {
-      const first = group[0];
-      maxSeq += 1;
-      stops.push(buildDeliveryStop({
-        id: makeStopId('transfer', maxSeq, now),
-        sequence: maxSeq,
-        address: first.address, city: first.city, postalCode: first.postalCode,
-        coordinates: first.coordinates, floor: first.floor, hasElevator: first.hasElevator,
-        contactName: first.contactName, contactPhone: first.contactPhone,
-        packageIds: group.map(p => p.id),
-        timeWindowStart: first.timeWindowStart, timeWindowEnd: first.timeWindowEnd,
-        serviceTime: first.serviceTime || 5,
-        notes: claimMode ? 'Pris en charge par scan' : 'Reçu par transfert en route',
-      }));
+
+    // Clone des arrêts existants + index des arrêts de livraison ENCORE À FAIRE,
+    // par adresse (placeKey). On FUSIONNE les nouveaux colis dans l'arrêt existant
+    // à la même adresse au lieu de créer un arrêt d'1 colis par scan — sinon,
+    // construire la tournée en scannant colis par colis produit N arrêts d'1 colis
+    // au même endroit (bug terrain : « 1 colis au lieu de 4 »).
+    const updatedStops: MissionStop[] = m.stops.map(s => ({ ...s }));
+    const mergeableByKey = new Map<string, MissionStop>();
+    for (const s of updatedStops) {
+      if (s.type === 'DELIVERY' &&
+          s.status !== StopStatus.COMPLETED &&
+          s.status !== StopStatus.FAILED &&
+          s.status !== StopStatus.SKIPPED) {
+        const k = placeKey(s);
+        if (!mergeableByKey.has(k)) mergeableByKey.set(k, s);
+      }
     }
-    const newStops = [...m.stops, ...stops];
+
+    const addedStops: MissionStop[] = [];
+    for (const [key, group] of byAddress) {
+      const existing = mergeableByKey.get(key);
+      if (existing) {
+        existing.packageIds = [...existing.packageIds, ...group.map(p => p.id)];
+        existing.packageCount = existing.packageIds.length;
+        if (!addedStops.includes(existing)) addedStops.push(existing);
+      } else {
+        const first = group[0];
+        maxSeq += 1;
+        const s = buildDeliveryStop({
+          id: makeStopId('transfer', maxSeq, now),
+          sequence: maxSeq,
+          address: first.address, city: first.city, postalCode: first.postalCode,
+          coordinates: first.coordinates, floor: first.floor, hasElevator: first.hasElevator,
+          contactName: first.contactName, contactPhone: first.contactPhone,
+          packageIds: group.map(p => p.id),
+          timeWindowStart: first.timeWindowStart, timeWindowEnd: first.timeWindowEnd,
+          serviceTime: first.serviceTime || 5,
+          notes: claimMode ? 'Pris en charge par scan' : 'Reçu par transfert en route',
+        });
+        updatedStops.push(s);
+        mergeableByKey.set(key, s);
+        addedStops.push(s);
+      }
+    }
+
+    const newStops = updatedStops;
     tx.update(toRef, {
       stops: newStops,
       totalPackages: recomputeMissionCounters(newStops).totalPackages,
       status: m.status === MissionStatus.COMPLETED ? MissionStatus.IN_PROGRESS : (m.status || MissionStatus.IN_PROGRESS),
       updatedAt: now
     });
-    return { addedStops: stops, addedIds: new Set(toAdd.map(p => p.id)) };
+    return { addedStops, addedIds: new Set(toAdd.map(p => p.id)) };
   });
 
   // --- 3. Mettre à jour les colis réellement ajoutés (les doublons sont ignorés) ---

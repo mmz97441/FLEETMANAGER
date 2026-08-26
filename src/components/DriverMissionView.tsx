@@ -16,7 +16,7 @@
 import React, { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import {
   Mission, MissionStatus, MissionType, MissionStop, StopStatus,
-  PackageStatus, FailureReason, Package, DeliveryLocation,
+  PackageStatus, FailureReason, Package, DeliveryLocation, TransferReason,
   User, MISSION_STATUS_COLORS, Issue, IssueStatus
 } from '../types';
 import { addIssueToFirestore } from '../services/firestore';
@@ -31,7 +31,8 @@ import {
   updateMissionStatus,
   updatePackageStatus,
   recomputeMissionCounters,
-  getPackagesByIds
+  getPackagesByIds,
+  transferPackagesToDriver
 } from '../services/missionService';
 import { uploadAndCreatePOD, uploadFailurePOD, UploadProgress } from '../services/podService';
 import { finalizePickup } from '../services/pickupService';
@@ -42,7 +43,7 @@ import ClaimScanModal from './ClaimScanModal';
 import ScanGateDialog from './ScanGateDialog';
 import StopReorderModal from './StopReorderModal';
 import { packageMatchesCode, packageScanCodes, packageDisplayCode, matchScansToPackages } from '../utils/barcode';
-import { sameDeliveryPoint } from '../utils/address';
+import { sameDeliveryPoint, placeKey } from '../utils/address';
 import { getTourProgress } from '../utils/missionProgress';
 import { getCurrentPosition } from '../utils/geo';
 import { formatDistance, formatDuration } from '../utils/format';
@@ -454,6 +455,40 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   const showNotif = (msg: string) => {
     setNotification(msg);
     setTimeout(() => setNotification(null), 3000);
+  };
+
+  // Rattacher à l'arrêt courant les colis détectés à la MÊME adresse mais absents
+  // de l'arrêt (bandeau rouge). On ne rattache QUE ceux qui sont sûrs :
+  //  - pas affectés à un AUTRE chauffeur (sinon on lui volerait un colis) ;
+  //  - même placeKey que l'arrêt courant (sinon ils ne fusionneraient pas ICI).
+  // On cible la MISSION ACTIVE (pas forcément la tournée-scan DLV) ; grâce à la
+  // fusion par adresse (transferPackagesToDriver), ils atterrissent dans l'arrêt
+  // courant → le chauffeur scanne/livre tout ensemble.
+  const claimableOthers = useMemo(() =>
+    otherAtAddress.filter(p =>
+      (!p.currentDriverId || p.currentDriverId === currentUser.id) &&
+      (!currentStop || placeKey(p) === placeKey(currentStop))
+    ),
+  [otherAtAddress, currentStop, currentUser.id]);
+
+  const [isClaimingOthers, setIsClaimingOthers] = useState(false);
+  const handleClaimOthersToStop = async () => {
+    if (!activeMission || claimableOthers.length === 0 || isClaimingOthers) return;
+    setIsClaimingOthers(true);
+    try {
+      const n = await transferPackagesToDriver({
+        packages: claimableOthers,
+        toMission: activeMission,
+        toDriver: { id: currentUser.id, name: `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() || currentUser.email },
+        reason: TransferReason.OTHER,
+        claimMode: true,
+        newStatus: PackageStatus.IN_DELIVERY,
+      });
+      showNotif(`📦 ${n} colis rattaché${n > 1 ? 's' : ''} à cet arrêt`);
+    } catch (err) {
+      showNotif(`❌ Rattachement impossible${err instanceof Error ? ` (${err.message})` : ''}`);
+    }
+    setIsClaimingOthers(false);
   };
 
   // === GPS ===
@@ -1418,6 +1453,16 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                       </span>
                     ))}
                   </div>
+                  {claimableOthers.length > 0 && (
+                    <button
+                      onClick={handleClaimOthersToStop}
+                      disabled={isClaimingOthers}
+                      className="mt-2 w-full flex items-center justify-center gap-2 py-2.5 bg-red-600 text-white rounded-lg font-bold text-xs active:scale-95 transition-transform disabled:opacity-50"
+                    >
+                      {isClaimingOthers ? <Loader2 size={14} className="animate-spin" /> : <PackageIcon size={14} />}
+                      Ajouter {claimableOthers.length} colis à cet arrêt
+                    </button>
+                  )}
                 </div>
               )}
 
