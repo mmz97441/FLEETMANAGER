@@ -475,15 +475,19 @@ export interface StatusResyncResult {
 export const resyncPackageStatusesFromStops = async (): Promise<StatusResyncResult> => {
   const result: StatusResyncResult = { completedStopPackages: 0, fixedDelivered: 0, failed: 0, details: [] };
 
-  // 1. Parcourir toutes les missions → colis dont l'arrêt DELIVERY est TERMINÉ
+  // 1. Parcourir toutes les missions → colis dont l'arrêt DELIVERY est TERMINÉ.
+  //    On restreint à `type === 'DELIVERY'` (et NON `!== 'PICKUP'`) : un arrêt HUB
+  //    (retour dépôt) terminé ne doit pas faire passer ses colis en « Livré » ni
+  //    notifier le client à tort.
   const missionsSnap = await getDocs(collection(db, MISSIONS_COLLECTION));
-  const deliveredStopMeta = new Map<string, { driverId?: string; driverName?: string; vehicleId?: string; vehiclePlate?: string }>();
+  const deliveredStopMeta = new Map<string, { missionId: string; driverId?: string; driverName?: string; vehicleId?: string; vehiclePlate?: string }>();
   for (const mDoc of missionsSnap.docs) {
     const m = mDoc.data() as Mission;
     for (const s of (m.stops || [])) {
-      if (s.type !== 'PICKUP' && s.status === StopStatus.COMPLETED) {
+      if (s.type === 'DELIVERY' && s.status === StopStatus.COMPLETED) {
         for (const id of (s.packageIds || [])) {
           deliveredStopMeta.set(id, {
+            missionId: mDoc.id,
             driverId: m.driverId, driverName: m.driverName,
             vehicleId: m.vehicleId, vehiclePlate: m.vehiclePlate
           });
@@ -503,11 +507,21 @@ export const resyncPackageStatusesFromStops = async (): Promise<StatusResyncResu
     PackageStatus.DELIVERED, PackageStatus.RETURNED, PackageStatus.RETURN_REQUESTED, PackageStatus.FAILED
   ]);
   const pkgs = await getPackagesByIds([...deliveredStopMeta.keys()]);
+  // Nb de colis livrés par mission (colis d'arrêts terminés dont le statut FINAL est
+  // Livré) + missions effectivement réparées → pour réconcilier leurs compteurs.
+  const deliveredByMission = new Map<string, number>();
+  const repairedMissions = new Set<string>();
   for (const pkg of pkgs) {
     const meta = deliveredStopMeta.get(pkg.id);
     if (!meta) continue;
     result.completedStopPackages++;
-    if (NON_RESURRECT.has(pkg.status)) continue;
+    if (NON_RESURRECT.has(pkg.status)) {
+      // Déjà Livré → compte déjà comme livré pour sa mission (les autres états
+      // terminaux — Échec/Retour — ne comptent pas).
+      if (pkg.status === PackageStatus.DELIVERED)
+        deliveredByMission.set(meta.missionId, (deliveredByMission.get(meta.missionId) || 0) + 1);
+      continue;
+    }
 
     try {
       await updatePackageStatus(pkg.id, PackageStatus.DELIVERED, {
@@ -519,11 +533,21 @@ export const resyncPackageStatusesFromStops = async (): Promise<StatusResyncResu
         notes: 'Statut resynchronisé (arrêt marqué terminé par le chauffeur)'
       });
       result.fixedDelivered++;
+      deliveredByMission.set(meta.missionId, (deliveredByMission.get(meta.missionId) || 0) + 1);
+      repairedMissions.add(meta.missionId);
       result.details.push({ packageId: pkg.id, orderNumber: pkg.orderNumber || pkg.externalId || pkg.id, from: String(pkg.status) });
     } catch (e) {
       result.failed++;
       reportError('resync.package', e, { silent: true, extra: { packageId: pkg.id } });
     }
+  }
+
+  // #11 : réconcilier deliveredPackages des missions RÉPARÉES (sinon les widgets par
+  // mission sous-comptent définitivement après un resync). Valeur autoritaire = nombre
+  // de colis livrés dans les arrêts de livraison terminés de la mission.
+  for (const mid of repairedMissions) {
+    try { await updateMissionFields(mid, { deliveredPackages: deliveredByMission.get(mid) || 0 }); }
+    catch (e) { reportError('resync.missionCounter', e, { silent: true, extra: { missionId: mid } }); }
   }
 
   return result;
@@ -996,21 +1020,39 @@ export const getPackagesByIds = async (ids: string[]): Promise<Package[]> => {
 };
 
 /**
- * Manifeste d'enlèvement : tous les colis encore EN ATTENTE (non pris en charge)
- * d'un client. Sert à contrôler à l'enlèvement « X pris / N attendus + lesquels
- * manquent ». Requête par clientId seul (pas d'index composite) + filtre statut.
+ * Manifeste d'enlèvement : colis encore EN ATTENTE (non pris en charge) à contrôler
+ * « X pris / N attendus + lesquels manquent ».
+ *
+ * Quand on connaît le LOT D'IMPORT du colis scanné, on cible CE lot (requête par
+ * `importBatchId` seul → aucun index composite, un lot = un client), puis filtre
+ * client + statut côté client. Sinon d'anciens colis PENDING jamais enlevés (autres
+ * lots) apparaissaient en « manquants » fantômes → le contrôle de complétude
+ * n'aboutissait JAMAIS et le chauffeur apprenait à ignorer l'alerte. Repli : requête
+ * par clientId seul (colis créés à l'unité, sans lot).
  */
-export const getPendingPackagesForClient = async (clientId: string): Promise<Package[]> => {
+export const getPendingPackagesForClient = async (clientId: string, importBatchId?: string): Promise<Package[]> => {
   if (!clientId) return [];
+  const sortPending = (docs: Package[]) => docs
+    .filter(p => p.status === PackageStatus.PENDING)
+    .sort((a, b) => (a.externalId || a.orderNumber || '').localeCompare(b.externalId || b.orderNumber || ''));
+
+  if (importBatchId) {
+    const snap = await getDocs(query(
+      collection(db, PACKAGES_COLLECTION),
+      where('importBatchId', '==', importBatchId),
+      limit(3000)
+    ));
+    return sortPending(snap.docs
+      .map(d => ({ id: d.id, ...d.data() } as Package))
+      .filter(p => p.clientId === clientId));
+  }
+
   const snap = await getDocs(query(
     collection(db, PACKAGES_COLLECTION),
     where('clientId', '==', clientId),
     limit(3000)
   ));
-  return snap.docs
-    .map(d => ({ id: d.id, ...d.data() } as Package))
-    .filter(p => p.status === PackageStatus.PENDING)
-    .sort((a, b) => (a.externalId || a.orderNumber || '').localeCompare(b.externalId || b.orderNumber || ''));
+  return sortPending(snap.docs.map(d => ({ id: d.id, ...d.data() } as Package)));
 };
 
 // ============================================================================
@@ -1167,7 +1209,7 @@ export const transferPackagesToDriver = async (input: RoadTransferInput): Promis
   // (retirés de l'origine mais jamais rajoutés si l'étape 2 échouait) et pointeurs
   // incohérents (colis dans les stops du receveur mais doc pointant encore l'origine)
   // dès que le réseau tombait en cours de route. Un échec annule maintenant TOUT.
-  const { addedIds, movedByOrigin, originMeta } = await runTransaction(db, async (tx) => {
+  const { addedIds, movedByOrigin, originMeta, notify } = await runTransaction(db, async (tx) => {
     // ===== 1. LECTURES (toutes AVANT les écritures — contrainte Firestore) =====
     // 1a. Colis FRAIS → anti-résurrection (on ignore livrés/retournés). Les lectures
     //     dans la transaction servent aussi de détection de conflit : deux chauffeurs
@@ -1302,8 +1344,30 @@ export const transferPackagesToDriver = async (input: RoadTransferInput): Promis
       if (!movedByOrigin.has(p.missionId)) movedByOrigin.set(p.missionId, []);
       movedByOrigin.get(p.missionId)!.push(p.id);
     }
-    return { addedIds: addedIdSet, movedByOrigin, originMeta: originMissions };
+    // Données de notification client « colis en livraison » (déclenchée hors tx :
+    // le tx.update ci-dessus court-circuite updatePackageStatus/triggerNotifications).
+    const notify = toAdd
+      .filter(p => p.clientId)
+      .map(p => ({ clientId: p.clientId as string, barcode: p.barcode || p.orderNumber || 'N/A', recipientName: p.contactName || 'Destinataire' }));
+    return { addedIds: addedIdSet, movedByOrigin, originMeta: originMissions, notify };
   });
+
+  // ===== 4bis. Notifier le client « en livraison » (modèle par SCAN = défaut) =====
+  // Avant, seules les tournées dispatchées par l'admin notifiaient ; les tournées
+  // construites au scan (prise en charge) ne notifiaient jamais le client.
+  if (newStatus === PackageStatus.IN_DELIVERY && notify.length > 0) {
+    import('./notificationService').then(({ notifyPackageInDelivery }) => {
+      // Une notification par colis, mais on dédoublonne (clientId+barcode) pour éviter
+      // les doublons quand le même code revient.
+      const seen = new Set<string>();
+      for (const n of notify) {
+        const k = `${n.clientId}|${n.barcode}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        notifyPackageInDelivery(n.clientId, n.barcode, n.recipientName, toDriver.name).catch(() => {});
+      }
+    }).catch(() => {});
+  }
 
   // ===== 4. Traçabilité : un document de transfert par tournée d'origine =====
   // Hors transaction (non critique) : si ça échoue, les colis sont déjà cohérents.

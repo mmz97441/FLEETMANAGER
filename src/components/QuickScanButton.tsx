@@ -166,7 +166,9 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
       // (liste attendue + complétude) au lieu de la fiche 1 colis.
       if (pkg && pkg.clientId && pkg.status === PackageStatus.PENDING) {
         try {
-          const pending = await getPendingPackagesForClient(pkg.clientId);
+          // Scopé au LOT d'import du colis scanné → le manifeste reflète l'enlèvement
+          // du jour, sans colis fantômes d'anciens lots jamais enlevés.
+          const pending = await getPendingPackagesForClient(pkg.clientId, pkg.importBatchId);
           if (pending.length >= 2) {
             setManifest(pending);
             setManifestClient(pkg.clientName || 'ce client');
