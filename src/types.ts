@@ -630,6 +630,7 @@ export type ViewState =
   | 'client_tracking'
   | 'hub_operations'
   | 'driver_tour'
+  | 'driver_preview'
   | 'fleet_map'
   | 'tours_overview'
   | 'import_export';

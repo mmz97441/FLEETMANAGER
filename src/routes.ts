@@ -37,6 +37,7 @@ export const VIEW_TO_PATH: Record<ViewState, string> = {
   zone_management: '/zone-management',
   hub_operations: '/hub-operations',
   driver_tour: '/driver-tour',
+  driver_preview: '/driver-preview',
   import_export: '/import-export',
   client_dashboard: '/client',
   client_list: '/client/requests',

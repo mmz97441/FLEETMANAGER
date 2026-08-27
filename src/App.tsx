@@ -1011,6 +1011,13 @@ const App: React.FC = () => {
         );
       }
 
+      // Aperçu de la VUE CHAUFFEUR (guide de livraison) pour tester en tant
+      // qu'admin/président. La tournée affichée est celle dont driverId ==
+      // currentUser.id : quand le président scanne (bouton flottant), les colis
+      // sont pris en charge dans SA tournée → il la retrouve ici et teste le guide.
+      case 'driver_preview':
+        return <DriverMissionView currentUser={currentUser} />;
+
       case 'notifications_settings':
         return (
           <div className="p-8">
