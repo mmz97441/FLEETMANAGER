@@ -54,7 +54,7 @@ import {
   CheckCircle, XCircle, Navigation, Play,
   Camera, PenTool, ChevronRight,
   Loader2, ArrowLeft,
-  MapPinned
+  MapPinned, AlertTriangle
 } from 'lucide-react';
 
 // ============================================================================
@@ -277,6 +277,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   const [deliveryStep, setDeliveryStep] = useState(0);
   const [merchandiseGood, setMerchandiseGood] = useState(true);
   const [reservesNote, setReservesNote] = useState('');
+  const [showReserves, setShowReserves] = useState(false); // étape État : saisie de réserve dépliée
   const [gpsBlocked, setGpsBlocked] = useState(false); // action bloquée : GPS obligatoire non activé
   const [gpsErrorMsg, setGpsErrorMsg] = useState(''); // message personnalisé selon la cause
   const [gpsIsPermission, setGpsIsPermission] = useState(false); // true = permission navigateur refusée (vs GPS OS coupé)
@@ -404,7 +405,10 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
     return () => { cancelled = true; unsub(); };
   }, [currentStop?.id, currentStop?.type, (currentStop?.packageIds || []).join(','), activeMission?.id, currentUser.id, today]);
 
-  // Reset scan quand on change de stop
+  // Reset COMPLET quand on change de stop. CRUCIAL avec le mode guidé auto : sans
+  // remise à zéro de la preuve (photo/signature/nom), un arrêt non terminé laissait
+  // ces valeurs en place et l'étape Preuve s'auto-franchissait à l'arrêt SUIVANT avec
+  // la preuve du précédent (faux POD). On repart donc de zéro à chaque arrêt.
   useEffect(() => {
     setScannedBarcodes([]);
     setShowScanner(false);
@@ -412,6 +416,12 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
     setDeliveryStep(0);
     setMerchandiseGood(true);
     setReservesNote('');
+    setShowReserves(false);
+    setSignatureData(null);
+    setShowSignature(false);
+    setCapturedPhotos([]);
+    setRecipientName('');
+    setDeliveryLocation(DeliveryLocation.HAND_DELIVERY);
   }, [currentStop?.id]);
 
   // Scan de contrôle à la livraison : chaque colis du stop doit être scanné
@@ -752,6 +762,35 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   // plus de la garde stopId ci-dessous.
   useEffect(() => { deliverIntentRef.current = null; }, [currentStop?.id]);
 
+  // ===== MODE GUIDÉ (livraison « pris par la main ») =====
+  // Le guide avance TOUT SEUL dès qu'une étape-action est terminée. On mémorise les
+  // étapes déjà auto-franchies (par arrêt) pour NE PAS re-pousser le chauffeur en
+  // avant s'il revient en arrière corriger quelque chose (avancement sur transition,
+  // pas sur état). Réinitialisé à chaque changement d'arrêt.
+  const autoAdvancedRef = useRef<Set<number>>(new Set());
+  useEffect(() => { autoAdvancedRef.current.clear(); }, [currentStop?.id]);
+
+  // Étape 1 (Colis) → dès que TOUS les colis de l'arrêt sont scannés : on referme le
+  // scanner (s'il est ouvert) ET on passe à l'État. Le chauffeur enchaîne sans rien toucher.
+  useEffect(() => {
+    if (isPickupStop || currentStop?.status !== StopStatus.ARRIVED || deliveryStep !== 0) return;
+    if (expectedStopCount > 0 && deliveryScannedCount >= expectedStopCount && !autoAdvancedRef.current.has(0)) {
+      autoAdvancedRef.current.add(0);
+      if (showScanner) setShowScanner(false);
+      setDeliveryStep(1);
+    }
+  }, [deliveryScannedCount, expectedStopCount, deliveryStep, currentStop?.status, isPickupStop, showScanner]);
+
+  // Étape 4 (Preuve) → dès que la photo (1 min) ET la signature sont présentes, on
+  // passe à la Validation.
+  useEffect(() => {
+    if (isPickupStop || currentStop?.status !== StopStatus.ARRIVED || deliveryStep !== 3) return;
+    if (signatureData && capturedPhotos.length >= 1 && !autoAdvancedRef.current.has(3)) {
+      autoAdvancedRef.current.add(3);
+      setDeliveryStep(4);
+    }
+  }, [signatureData, capturedPhotos.length, deliveryStep, currentStop?.status, isPickupStop]);
+
   // Livraison réussie. `deliveredIds` = colis réellement remis (les autres colis
   // de l'arrêt sont marqués « non remis »/échec). Absent = reprendre l'intention
   // en cours pour CET arrêt (retry GPS), sinon tous remis.
@@ -932,6 +971,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
       setDeliveryStep(0);
       setMerchandiseGood(true);
       setReservesNote('');
+      setShowReserves(false);
 
       const nonRemis = okFailed.length > 0 ? ` (${okFailed.length} non remis)` : '';
       showNotif(allDone ? `🎉 Tournée terminée !${nonRemis}` : `✅ Stop ${currentStop.sequence} livré !${nonRemis}`);
@@ -1575,7 +1615,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                     {/* ===== ÉTAPE 1 · COLIS ===== */}
                     {deliveryStep === 0 && (
                       <div className="space-y-2">
-                        <p className="text-sm font-bold text-slate-800 px-1">Étape 1 · Vérifier les colis ({stopPackages.length})</p>
+                        <p className="text-lg font-black text-slate-800 px-1">Scanne {stopPackages.length > 1 ? `les ${stopPackages.length} colis` : 'le colis'}</p>
                         {stopPackages.length > 0 ? (
                           <div className="bg-white border border-slate-200 rounded-xl p-3 space-y-2">
                             <div className="flex items-center justify-between">
@@ -1623,22 +1663,37 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                       </div>
                     )}
 
-                    {/* ===== ÉTAPE 2 · ÉTAT MARCHANDISE ===== */}
+                    {/* ===== ÉTAPE 2 · ÉTAT MARCHANDISE (guidé, avance au tap) ===== */}
                     {deliveryStep === 1 && (
-                      <div className="space-y-2">
-                        <p className="text-sm font-bold text-slate-800 px-1">Étape 2 · État de la marchandise</p>
-                        <button
-                          onClick={() => setMerchandiseGood(g => !g)}
-                          className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-colors ${merchandiseGood ? 'bg-green-50 border-green-400' : 'bg-white border-slate-200'}`}
-                        >
-                          <div className={`w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 ${merchandiseGood ? 'bg-green-500 text-white' : 'border-2 border-slate-300'}`}>
-                            {merchandiseGood && <CheckCircle size={18} />}
+                      <div className="space-y-3">
+                        <p className="text-lg font-black text-slate-800 px-1">La marchandise est-elle en bon état ?</p>
+                        {!showReserves ? (
+                          <div className="grid grid-cols-2 gap-2.5">
+                            <button
+                              onClick={() => { setMerchandiseGood(true); setReservesNote(''); setShowReserves(false); setDeliveryStep(2); }}
+                              className="flex flex-col items-center justify-center gap-1.5 py-5 bg-green-600 text-white rounded-2xl font-black text-base active:scale-95 transition-transform"
+                            >
+                              <CheckCircle size={26} /> Oui, bon état
+                            </button>
+                            <button
+                              onClick={() => { setMerchandiseGood(false); setShowReserves(true); }}
+                              className="flex flex-col items-center justify-center gap-1.5 py-5 bg-white border-2 border-amber-400 text-amber-700 rounded-2xl font-black text-base active:scale-95 transition-transform"
+                            >
+                              <AlertTriangle size={26} /> Non, réserves
+                            </button>
                           </div>
-                          <span className="text-sm font-medium text-slate-800">Marchandises reçues en <b>bon état</b>, sans réserve</span>
-                        </button>
-                        {!merchandiseGood && (
-                          <div className="px-1">
-                            <label className="text-xs font-bold text-amber-700 mb-1 block">⚠️ Réserves — précisez :</label>
+                        ) : (
+                          <div className="space-y-2 px-1">
+                            <div className="flex items-center justify-between">
+                              <label className="text-xs font-bold text-amber-700 block">⚠️ Décris la réserve :</label>
+                              {/* Revenir au choix Oui/Non (corriger un tap « Non » par erreur) */}
+                              <button
+                                onClick={() => { setShowReserves(false); setMerchandiseGood(true); setReservesNote(''); }}
+                                className="text-xs text-slate-500 underline font-medium"
+                              >
+                                ← Changer
+                              </button>
+                            </div>
                             <textarea
                               value={reservesNote}
                               onChange={(e) => setReservesNote(e.target.value)}
@@ -1646,6 +1701,16 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                               rows={3}
                               className="w-full px-3 py-2.5 border border-amber-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-200 outline-none"
                             />
+                            <button
+                              onClick={() => setDeliveryStep(2)}
+                              disabled={!reservesNote.trim()}
+                              className="w-full py-4 bg-amber-600 text-white rounded-2xl font-black text-base active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              Continuer →
+                            </button>
+                            {!reservesNote.trim() && (
+                              <p className="text-[11px] text-amber-600 font-medium text-center">Décris la réserve pour continuer</p>
+                            )}
                           </div>
                         )}
                       </div>
@@ -1654,7 +1719,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                     {/* ===== ÉTAPE 3 · RÉCEPTION ===== */}
                     {deliveryStep === 2 && (
                       <div className="space-y-3">
-                        <p className="text-sm font-bold text-slate-800 px-1">Étape 3 · Réception</p>
+                        <p className="text-lg font-black text-slate-800 px-1">Qui réceptionne le colis ?</p>
                         {/* Nom réceptionnaire */}
                         <div className="px-1">
                           <label className="text-xs font-medium text-slate-500 mb-1 block">
@@ -1697,13 +1762,24 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                             ))}
                           </div>
                         </div>
+                        {/* Avance sur tap explicite (le nom est du texte : pas d'auto) */}
+                        <button
+                          onClick={() => setDeliveryStep(3)}
+                          disabled={!recipientName.trim()}
+                          className="w-full py-4 bg-green-600 text-white rounded-2xl font-black text-base active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          C'est bon →
+                        </button>
+                        {!recipientName.trim() && (
+                          <p className="text-[11px] text-amber-600 font-medium text-center px-2">Saisis le nom pour continuer</p>
+                        )}
                       </div>
                     )}
 
                     {/* ===== ÉTAPE 4 · PREUVE ===== */}
                     {deliveryStep === 3 && (
                       <div className="space-y-3">
-                        <p className="text-sm font-bold text-slate-800 px-1">Étape 4 · Preuve (signature + photos)</p>
+                        <p className="text-lg font-black text-slate-800 px-1">Prends 1 photo, puis fais signer</p>
                         {/* Signature */}
                         {!showSignature && !signatureData && (
                           <button
@@ -1797,7 +1873,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                     {/* ===== ÉTAPE 5 · VALIDATION ===== */}
                     {deliveryStep === 4 && (
                       <div className="space-y-3">
-                        <p className="text-sm font-bold text-slate-800 px-1">Étape 5 · Validation</p>
+                        <p className="text-lg font-black text-slate-800 px-1">Valide la livraison</p>
                         {/* Récapitulatif */}
                         <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm space-y-1.5">
                           <div className="flex justify-between"><span className="text-slate-500">Colis</span><span className="font-bold">{stopPackages.length}</span></div>
@@ -1838,7 +1914,13 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                       </div>
                     )}
 
-                    {/* Navigation entre étapes */}
+                    {/* Navigation. Le guide avance TOUT SEUL (étapes 1 & 4) ou au tap
+                        des boutons propres à chaque étape (Oui/Non, C'est bon, Livré).
+                        On garde « Retour » pour corriger, et un « Continuer » UNIQUEMENT
+                        sur les étapes auto (Colis, Preuve) — sinon revenir en arrière
+                        piégerait le chauffeur (plus de bouton pour repartir en avant).
+                        Étape Colis : « Continuer » reste dispo même si tout n'est pas
+                        scanné (étiquette illisible) → le garde-fou du scan gère à la fin. */}
                     <div className="flex gap-2 pt-1">
                       {deliveryStep > 0 && (
                         <button
@@ -1849,13 +1931,13 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                           ← Retour
                         </button>
                       )}
-                      {deliveryStep < 4 && (
+                      {(deliveryStep === 0 || deliveryStep === 3) && (
                         <button
                           onClick={() => setDeliveryStep(s => Math.min(4, s + 1))}
-                          disabled={(deliveryStep === 2 && !recipientName.trim()) || (deliveryStep === 3 && (!signatureData || capturedPhotos.length === 0))}
+                          disabled={deliveryStep === 3 && (!signatureData || capturedPhotos.length === 0)}
                           className="flex-1 flex items-center justify-center gap-2 py-3 bg-green-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
                         >
-                          Suivant →
+                          Continuer →
                         </button>
                       )}
                     </div>
