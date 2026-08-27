@@ -1733,10 +1733,13 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                           </div>
                         )}
 
-                        {/* Photos — max 5 */}
+                        {/* Photos — 1 minimum, max 5 */}
                         <div className="px-1">
                           <label className="text-xs font-medium text-slate-500 mb-1.5 block">
-                            📸 Photos du colis / lieu de livraison
+                            📸 Photo de la livraison <span className="text-red-500">*</span>
+                            <span className="block text-[11px] text-slate-400 font-normal mt-0.5">
+                              1 photo minimum — une seule photo du lot suffit (pas besoin d'une par colis).
+                            </span>
                           </label>
                           <button
                             onClick={() => photoInputRef.current?.click()}
@@ -1783,6 +1786,11 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                             ⚠️ Signature obligatoire pour valider la livraison
                           </p>
                         )}
+                        {capturedPhotos.length === 0 && (
+                          <p className="text-[11px] text-amber-600 font-medium text-center px-2">
+                            ⚠️ Au moins 1 photo obligatoire (une seule photo du lot suffit)
+                          </p>
+                        )}
                       </div>
                     )}
 
@@ -1821,7 +1829,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
 
                         <button
                           onClick={() => { if (allStopScanned) { handleDeliverySuccess(); } else { setShowScanGate(true); } }}
-                          disabled={isProcessing || !signatureData || !recipientName.trim()}
+                          disabled={isProcessing || !signatureData || !recipientName.trim() || capturedPhotos.length === 0}
                           className="w-full flex items-center justify-center gap-2 py-4 bg-green-600 text-white rounded-xl font-bold text-base active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           {isProcessing ? <Loader2 size={18} className="animate-spin" /> : <CheckCircle size={18} />}
@@ -1844,7 +1852,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                       {deliveryStep < 4 && (
                         <button
                           onClick={() => setDeliveryStep(s => Math.min(4, s + 1))}
-                          disabled={(deliveryStep === 2 && !recipientName.trim()) || (deliveryStep === 3 && !signatureData)}
+                          disabled={(deliveryStep === 2 && !recipientName.trim()) || (deliveryStep === 3 && (!signatureData || capturedPhotos.length === 0))}
                           className="flex-1 flex items-center justify-center gap-2 py-3 bg-green-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           Suivant →
