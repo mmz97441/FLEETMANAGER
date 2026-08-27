@@ -257,8 +257,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
             expectedBarcodes={(manifest || []).flatMap(p => packageScanCodes(p))}
             alreadyScanned={manifestScannedCodes}
             isMatch={(code) => (manifest || []).some(p => packageMatchesCode(p, code))}
-            title={`Enlèvement ${manifestClient} — scanne tous les cartons`}
-            hint="Chaque scan prend le colis en charge automatiquement"
+            title={`Enlèvement — ${manifestClient}`}
             progress={{ done: manifestClaimedIds.size, total: manifest?.length || 0 }}
           />
         </Suspense>
@@ -283,8 +282,12 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
         </div>
       )}
 
-      {/* MANIFESTE D'ENLÈVEMENT — complétude vs colis attendus du client */}
-      {manifest && (
+      {/* MANIFESTE D'ENLÈVEMENT — complétude vs colis attendus du client.
+          MASQUÉ pendant le scan (manifestScanning) : ce panneau est `fixed inset-0`
+          et, rendu après le scanner, il le recouvrait → le chauffeur ne voyait plus
+          la caméra. Pendant le scan, seul le compteur X/N compact du scanner s'affiche ;
+          le panneau complet réapparaît dès qu'on ferme la caméra. */}
+      {manifest && !manifestScanning && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center sm:p-4" onClick={reset}>
           <div className="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto animate-slide-up" onClick={e => e.stopPropagation()}>
             {/* En-tête */}
