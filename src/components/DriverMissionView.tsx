@@ -367,6 +367,13 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   const allStopsDone = sortedStops.length > 0 && sortedStops.every(s =>
     s.status === StopStatus.COMPLETED || s.status === StopStatus.FAILED || s.status === StopStatus.SKIPPED
   );
+  // L'arrêt courant est-il DÉJÀ traité ? → on masque tout le « bruit » de livraison
+  // (colis à remettre, Naviguer, note, boutons de gestion) et on ne montre qu'un résumé.
+  const currentStopDone = !!currentStop && (
+    currentStop.status === StopStatus.COMPLETED ||
+    currentStop.status === StopStatus.FAILED ||
+    currentStop.status === StopStatus.SKIPPED
+  );
 
   // Charger les colis du stop courant (PICKUP : pour le scan ; DELIVERY : pour
   // afficher au chauffeur les N° de colis à remettre)
@@ -1594,8 +1601,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                 )}
               </div>
 
-              {/* Liste des colis à remettre à ce point de livraison */}
-              {!isPickupStop && stopPackages.length > 0 && (
+              {/* Liste des colis à remettre — MASQUÉE quand l'arrêt est déjà livré/traité. */}
+              {!isPickupStop && !currentStopDone && stopPackages.length > 0 && (
                 <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded-lg">
                   <p className="text-[10px] font-bold text-blue-700 uppercase tracking-wide mb-1.5">
                     {stopPackages.length > 1 ? `${stopPackages.length} colis à remettre` : 'Colis à remettre'}
@@ -1647,14 +1654,15 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                 </div>
               )}
 
-              {currentStop.notes && (
+              {!currentStopDone && currentStop.notes && (
                 <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
                   📝 {currentStop.notes}
                 </div>
               )}
             </div>
 
-            {/* Actions rapides */}
+            {/* Actions rapides (Naviguer + Appeler) — MASQUÉES sur un arrêt déjà traité. */}
+            {!currentStopDone && (
             <div className="p-3 border-t border-slate-100 flex gap-2">
               {/* Naviguer — utile seulement AVANT d'arriver. Une fois « Arrivé » (en
                   livraison), on le masque : le chauffeur est sur place, ça n'a plus de sens. */}
@@ -1678,6 +1686,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                 </button>
               )}
             </div>
+            )}
 
             {/* === ACTIONS DE LIVRAISON === */}
             {currentStop.status !== StopStatus.COMPLETED && currentStop.status !== StopStatus.FAILED && currentStop.status !== StopStatus.SKIPPED && (
@@ -2090,7 +2099,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
             {(currentStop.status === StopStatus.COMPLETED || currentStop.status === StopStatus.FAILED) && (
               <div className={`p-4 border-t ${currentStop.status === StopStatus.COMPLETED ? 'bg-green-50' : 'bg-red-50'}`}>
                 <p className="text-sm font-bold text-center">
-                  {currentStop.status === StopStatus.COMPLETED ? '✅ Ce stop a été livré' : '❌ Échec enregistré'}
+                  {currentStop.status === StopStatus.COMPLETED
+                    ? `✅ Livré${currentStop.packageCount > 0 ? ` · ${currentStop.packageCount} colis remis` : ''}`
+                    : '❌ Échec enregistré'}
                 </p>
                 {currentStop.completionTime && (
                   <p className="text-xs text-center text-slate-500 mt-1">
@@ -2102,11 +2113,11 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
           </div>
         )}
 
-        {/* PENDANT LA LIVRAISON GUIDÉE (arrêt « Arrivé »), on MASQUE tout ce bloc de
-            gestion (navigation entre arrêts, Scanner, Optimiser, Réorganiser, Ajouter,
-            Signaler, retour liste) : le chauffeur ne doit voir QUE le guide, une chose à
-            la fois. Ces actions ne réapparaissent qu'entre les arrêts (arrêt en attente). */}
-        {currentStop?.status !== StopStatus.ARRIVED && (
+        {/* Bloc de gestion (nav entre arrêts, Scanner, Optimiser, Réorganiser, Ajouter,
+            Signaler, retour liste) : visible UNIQUEMENT quand l'arrêt courant est EN
+            ATTENTE. Masqué pendant la livraison guidée (Arrivé) ET sur un arrêt déjà
+            traité (fin) → le chauffeur ne voit que le guide, puis le résumé + « Terminer ». */}
+        {currentStop?.status === StopStatus.PENDING && (
         <>
         {/* Navigation entre stops */}
         <div className="flex gap-2">
