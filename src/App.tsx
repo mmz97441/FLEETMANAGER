@@ -1245,8 +1245,10 @@ const App: React.FC = () => {
           </Suspense>
         )}
 
-        {/* Mobile Nav n'est affiché que si on n'est pas Client (car menu différent) */}
-        {currentUser.role !== UserRole.CLIENT && (
+        {/* Sur la VUE CHAUFFEUR (« Ma Tournée »), on masque la barre admin du bas et le
+            scan flottant → un directeur/président qui teste la tournée voit un écran
+            chauffeur PROPRE, plein écran, sans le chrome admin qui parasitait. */}
+        {currentUser.role !== UserRole.CLIENT && currentView !== 'driver_tour' && currentView !== 'driver_preview' && (
             <MobileNavBar
               currentView={currentView}
               onChangeView={handleViewChange}
@@ -1254,10 +1256,9 @@ const App: React.FC = () => {
             />
         )}
 
-        {/* Raccourci scan rapide (usage interne dispatch/admin). RETIRÉ pour les CHAUFFEURS :
-            il les perdait (pas de choix enlèvement/livraison, ne menait nulle part). Le scan
-            chauffeur se fait dans « Ma tournée » via le bouton « Scanner des colis ». */}
-        {currentUser.role !== UserRole.CLIENT && currentUser.role !== UserRole.DRIVER && <QuickScanButton currentUser={currentUser} clients={users.filter(u => u.role === UserRole.CLIENT || String(u.role).toLowerCase().includes('client'))} />}
+        {/* Raccourci scan rapide (usage interne dispatch/admin). RETIRÉ pour les CHAUFFEURS
+            et sur la vue chauffeur (le scan s'y fait via « Scanner des colis »). */}
+        {currentUser.role !== UserRole.CLIENT && currentUser.role !== UserRole.DRIVER && currentView !== 'driver_tour' && currentView !== 'driver_preview' && <QuickScanButton currentUser={currentUser} clients={users.filter(u => u.role === UserRole.CLIENT || String(u.role).toLowerCase().includes('client'))} />}
 
         {/* GATE DOCUMENTS OBLIGATOIRES — BLOQUANT : tant qu'il reste des documents
             à lire/signer, impossible d'utiliser le reste de l'app. Le modal
