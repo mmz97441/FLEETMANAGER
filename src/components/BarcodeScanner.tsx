@@ -28,6 +28,10 @@ interface BarcodeScannerProps {
   // parent), au lieu d'une simple égalité de chaîne sur expectedBarcodes — qui
   // affichait « non prévu » sur un DataMatrix/code à rang pourtant valide.
   isMatch?: (code: string) => boolean;
+  // Checklist VIVANTE affichée par-dessus la caméra : la liste des colis à scanner,
+  // chacun coché (✓) en direct dès qu'il est scanné. Le chauffeur voit en permanence
+  // combien il en reste ET lesquels (numéros), sans quitter la caméra.
+  checklist?: { code: string; done: boolean }[];
 }
 
 const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
@@ -38,7 +42,8 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   title = 'Scanner un code-barres',
   progress,
   hint,
-  isMatch
+  isMatch,
+  checklist
 }) => {
   const [isScanning, setIsScanning] = useState(false);
   const [manualMode, setManualMode] = useState(false);
@@ -358,6 +363,33 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
                 <p className="mt-4 px-3 py-1.5 rounded-full bg-black/60 text-white text-xs font-semibold">
                   Visez le code — n'importe où dans l'image
                 </p>
+              </div>
+            )}
+
+            {/* Checklist vivante : liste des colis à scanner, cochés en direct.
+                Bandeau bas semi-transparent → ne masque pas la cible (centrée). */}
+            {checklist && checklist.length > 0 && (
+              <div className="absolute bottom-0 left-0 right-0 z-20 bg-black/80 backdrop-blur-sm px-3 pt-2.5 pb-3 max-h-[38vh] overflow-y-auto">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-white text-sm font-black">Colis à scanner</span>
+                  <span className="text-white text-sm font-black tabular-nums">
+                    {checklist.filter(c => c.done).length} / {checklist.length}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {checklist.map((it, i) => (
+                    <span
+                      key={`${it.code}-${i}`}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-mono font-bold ${
+                        it.done
+                          ? 'bg-green-500 text-white'
+                          : 'bg-white/15 text-white border border-white/30'
+                      }`}
+                    >
+                      {it.done ? '✓ ' : '○ '}{it.code}
+                    </span>
+                  ))}
+                </div>
               </div>
             )}
           </>

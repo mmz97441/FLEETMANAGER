@@ -2387,6 +2387,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
               hint={isPickupStop ? undefined : 'Scannez le code DELIVREX — le petit carré (DataMatrix) en bas à gauche'}
               progress={stopPackages.length > 0 ? { done: deliveryScannedCount, total: stopPackages.length } : undefined}
               isMatch={(code) => stopPackages.some(p => packageMatchesCode(p, code))}
+              checklist={stopPackages.map(p => ({ code: packageDisplayCode(p) || 'sans code', done: scannedStopIds.has(p.id) }))}
             />
           </Suspense>
         )}
