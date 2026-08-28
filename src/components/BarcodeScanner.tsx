@@ -296,15 +296,16 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
         </div>
       </div>
 
-      {/* Aide permanente : quel code viser */}
-      {!manualMode && hint && (
+      {/* Aide permanente : quel code viser. Masquée quand une checklist est affichée
+          (elle dit déjà quoi scanner) → on ne mange pas la place de la caméra. */}
+      {!manualMode && hint && !checklist && (
         <div className="px-4 py-2 bg-amber-500/90 text-white text-xs font-semibold text-center">
           {hint}
         </div>
       )}
 
-      {/* Compteur permanent — scan en rafale (enlèvement de plusieurs colis) */}
-      {!manualMode && progress && progress.total > 0 && (
+      {/* Compteur permanent (rafale). Masqué si checklist (elle porte déjà le X/N). */}
+      {!manualMode && progress && progress.total > 0 && !checklist && (
         <div className={`px-4 py-2.5 ${progress.done >= progress.total ? 'bg-green-600' : 'bg-brand-600'} text-white`}>
           <div className="flex items-center justify-between text-sm font-bold">
             <span>{progress.done >= progress.total ? '✅ Tous les colis scannés' : '📦 Scan en cours'}</span>
@@ -366,29 +367,28 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
               </div>
             )}
 
-            {/* Checklist vivante : liste des colis à scanner, cochés en direct.
-                Bandeau bas semi-transparent → ne masque pas la cible (centrée). */}
+            {/* Checklist vivante COMPACTE : une seule rangée en bas, défilement horizontal.
+                Volontairement basse et fine → la caméra reste GRANDE et libre pour viser. */}
             {checklist && checklist.length > 0 && (
-              <div className="absolute bottom-0 left-0 right-0 z-20 bg-black/80 backdrop-blur-sm px-3 pt-2.5 pb-3 max-h-[38vh] overflow-y-auto">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-white text-sm font-black">Colis à scanner</span>
-                  <span className="text-white text-sm font-black tabular-nums">
-                    {checklist.filter(c => c.done).length} / {checklist.length}
+              <div className="absolute bottom-0 left-0 right-0 z-20 bg-black/75 backdrop-blur-sm px-3 py-2">
+                <div className="flex items-center gap-3">
+                  <span className="text-white text-lg font-black tabular-nums shrink-0">
+                    {checklist.filter(c => c.done).length}/{checklist.length}
                   </span>
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {checklist.map((it, i) => (
-                    <span
-                      key={`${it.code}-${i}`}
-                      className={`px-2.5 py-1.5 rounded-lg text-xs font-mono font-bold ${
-                        it.done
-                          ? 'bg-green-500 text-white'
-                          : 'bg-white/15 text-white border border-white/30'
-                      }`}
-                    >
-                      {it.done ? '✓ ' : '○ '}{it.code}
-                    </span>
-                  ))}
+                  <div className="flex gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+                    {checklist.map((it, i) => (
+                      <span
+                        key={`${it.code}-${i}`}
+                        className={`px-2 py-1 rounded-md text-[11px] font-mono font-bold whitespace-nowrap ${
+                          it.done
+                            ? 'bg-green-500 text-white'
+                            : 'bg-white/15 text-white border border-white/30'
+                        }`}
+                      >
+                        {it.done ? '✓' : '○'} {it.code}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}
