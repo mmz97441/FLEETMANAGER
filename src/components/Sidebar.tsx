@@ -65,8 +65,30 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
   // =====================================================
   // STRUCTURE DE MENU BASÉE SUR LES PERMISSIONS
   // =====================================================
-  const menuStructure: (NavItem | NavGroup)[] = [
-    
+  // MENU CHAUFFEUR SIMPLIFIÉ : un livreur n'a pas besoin du menu admin complet.
+  // 3 blocs clairs : sa tournée, son véhicule, ses démarches (RH/docs) + aide.
+  const driverMenuStructure: (NavItem | NavGroup)[] = [
+    { id: 'driver_tour', label: 'Ma Tournée', icon: Navigation },
+    {
+      id: 'vehicule', label: 'Véhicule', icon: Truck,
+      items: [
+        { id: 'vehicles', label: 'Mon véhicule', icon: Truck },
+        { id: 'fuel', label: 'Carburant', icon: Droplet },
+        { id: 'issues', label: 'Signaler un incident', icon: AlertCircle, badgeKey: 'issues' },
+      ],
+    },
+    {
+      id: 'demarches', label: 'Mes démarches', icon: FileCheck,
+      items: [
+        { id: 'leaves', label: 'Congés / Absences', icon: Palmtree, badgeKey: 'leaves' },
+        { id: 'documents', label: 'Mes documents', icon: FileCheck, badgeKey: 'docs' },
+      ],
+    },
+    { id: 'help', label: 'Aide', icon: HelpCircle },
+  ];
+
+  const fullMenuStructure: (NavItem | NavGroup)[] = [
+
     // ─────────────────────────────────────────────────────
     // 📊 PILOTAGE — vues de situation
     // ─────────────────────────────────────────────────────
@@ -197,6 +219,10 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
       // Pas de permission = accessible à tous
     },
   ];
+
+  // Les CHAUFFEURS voient le menu simplifié ; tous les autres rôles gardent le menu complet.
+  const menuStructure: (NavItem | NavGroup)[] =
+    currentUser.role === UserRole.DRIVER ? driverMenuStructure : fullMenuStructure;
 
   // =====================================================
   // VÉRIFICATION D'ACCÈS BASÉE SUR LES PERMISSIONS

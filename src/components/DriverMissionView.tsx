@@ -362,6 +362,12 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   const currentStop = sortedStops[activeStopIndex] || null;
   const isPickupStop = currentStop?.type === 'PICKUP';
 
+  // Tous les arrêts sont traités (livrés / échoués / passés) → on peut proposer de
+  // clôturer la tournée. La mission ne se termine plus toute seule (choix chauffeur).
+  const allStopsDone = sortedStops.length > 0 && sortedStops.every(s =>
+    s.status === StopStatus.COMPLETED || s.status === StopStatus.FAILED || s.status === StopStatus.SKIPPED
+  );
+
   // Charger les colis du stop courant (PICKUP : pour le scan ; DELIVERY : pour
   // afficher au chauffeur les N° de colis à remettre)
   useEffect(() => {
@@ -805,6 +811,21 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
     setIsProcessing(false);
   };
 
+  // Clôturer la tournée (choix explicite du chauffeur quand tous les arrêts sont faits).
+  const handleFinishTour = async () => {
+    if (!activeMission || isProcessing) return;
+    setIsProcessing(true);
+    try {
+      await updateMissionStatus(activeMission.id, MissionStatus.COMPLETED);
+      showNotif('🏁 Tournée terminée — bravo !');
+      setActiveMissionId(null); // repart sur la liste (la tournée n'est plus « en cours »)
+    } catch (err) {
+      reportError('driver.finishTour', err, { silent: true });
+      showNotif('❌ Impossible de terminer la tournée');
+    }
+    setIsProcessing(false);
+  };
+
   // Intention de livraison PAR COLIS : ensemble des IDs réellement remis, ESTAMPILLÉ
   // avec l'arrêt concerné. null = tous remis. Mémorisé dans un ref pour survivre au
   // retry GPS (qui rappelle handleDeliverySuccess sans argument). L'estampille
@@ -1027,7 +1048,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
       setShowReserves(false);
 
       const nonRemis = okFailed.length > 0 ? ` (${okFailed.length} non remis)` : '';
-      showNotif(allDone ? `🎉 Tournée terminée !${nonRemis}` : `✅ Stop ${currentStop.sequence} livré !${nonRemis}`);
+      showNotif(allDone ? `✅ Dernier arrêt livré${nonRemis} — clôture ta tournée` : `✅ Stop ${currentStop.sequence} livré !${nonRemis}`);
     } catch (err) {
       // Ne PAS conserver une intention partielle après une erreur : elle pourrait
       // « fuiter » sur une prochaine livraison. Le chauffeur repart propre.
@@ -1117,7 +1138,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
       setFailurePhotos([]);
       setUploadProgress(null);
 
-      showNotif(allDone ? '🏁 Tournée terminée' : `⚠️ Stop ${currentStop.sequence} — échec enregistré`);
+      showNotif(allDone ? '✅ Dernier arrêt traité — clôture ta tournée' : `⚠️ Stop ${currentStop.sequence} — échec enregistré`);
     } catch (err) {
       reportError('driver.markFailed', err, { silent: true });
       showNotif(`❌ Erreur${err instanceof Error ? ` — ${err.message}` : ''}`);
@@ -1403,6 +1424,21 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
           </div>
         )}
 
+        {/* === FIN DE TOURNÉE : tous les arrêts sont faits → clôturer explicitement === */}
+        {allStopsDone && (
+          <div className="bg-green-600 rounded-2xl p-4 text-white shadow-sm text-center space-y-3">
+            <p className="text-lg font-black">🎉 Tous tes arrêts sont faits !</p>
+            <p className="text-sm text-white/90">Clôture ta tournée pour la passer en « Terminé ».</p>
+            <button
+              onClick={handleFinishTour}
+              disabled={isProcessing}
+              className="w-full py-4 bg-white text-green-700 rounded-xl font-black text-base active:scale-95 transition-transform disabled:opacity-60"
+            >
+              {isProcessing ? <Loader2 size={18} className="animate-spin inline" /> : '🏁 Terminer ma tournée'}
+            </button>
+          </div>
+        )}
+
         {/* === ALERTE COLIS À RETOURNER === */}
         {returnPackages.length > 0 && (
           <div className="bg-yellow-50 border-2 border-yellow-400 rounded-2xl p-4 shadow-sm">
@@ -1620,14 +1656,17 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
 
             {/* Actions rapides */}
             <div className="p-3 border-t border-slate-100 flex gap-2">
-              {/* Naviguer */}
-              <button
-                onClick={() => openNavigation(currentStop)}
-                className="flex-1 flex items-center justify-center gap-2 py-3 bg-blue-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform"
-              >
-                <Navigation size={18} />
-                Naviguer
-              </button>
+              {/* Naviguer — utile seulement AVANT d'arriver. Une fois « Arrivé » (en
+                  livraison), on le masque : le chauffeur est sur place, ça n'a plus de sens. */}
+              {currentStop.status !== StopStatus.ARRIVED && (
+                <button
+                  onClick={() => openNavigation(currentStop)}
+                  className="flex-1 flex items-center justify-center gap-2 py-3 bg-blue-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform"
+                >
+                  <Navigation size={18} />
+                  Naviguer
+                </button>
+              )}
 
               {/* Appeler */}
               {currentStop.contactPhone && (

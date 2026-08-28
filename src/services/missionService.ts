@@ -948,12 +948,14 @@ export const commitStopOutcome = async (params: {
     const allDone = stops.every(s =>
       s.status === StopStatus.COMPLETED || s.status === StopStatus.FAILED || s.status === StopStatus.SKIPPED
     );
+    // La mission ne se termine PLUS toute seule au dernier arrêt : le chauffeur garde
+    // la main et clôture explicitement via « Terminer ma tournée » (finishMission).
+    // Ici on maintient donc IN_PROGRESS ; `allDone` sert juste à proposer le bouton.
     tx.update(ref, cleanUndefined({
       stops,
       completedStops, failedStops, totalPackages,
       deliveredPackages, failedPackages,
-      status: allDone ? MissionStatus.COMPLETED : MissionStatus.IN_PROGRESS,
-      ...(allDone ? { completedAt: now } : {}),
+      status: MissionStatus.IN_PROGRESS,
       updatedAt: now
     }));
     return { allDone, stops };
