@@ -302,6 +302,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   const [scanGateFrom, setScanGateFrom] = useState<'scan' | 'final'>('scan');
   const [showTransferModal, setShowTransferModal] = useState(false); // réception de colis en route
   const [showClaimModal, setShowClaimModal] = useState(false); // prise en charge par scan
+  const [showScanChoice, setShowScanChoice] = useState(false); // choix Enlèvement / Livraison au scan
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [showReorder, setShowReorder] = useState(false);
   const [showManualStop, setShowManualStop] = useState(false);
@@ -470,6 +471,55 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
     setNotification(msg);
     setTimeout(() => setNotification(null), 3000);
   };
+
+  // « Livraison » : aller livrer — sélectionne la tournée du jour et se place sur le
+  // premier arrêt à faire. Si aucune tournée n'existe encore, on renvoie vers l'enlèvement.
+  const goToDelivery = () => {
+    const dlvId = `DLV-${currentUser.id}-${today}`;
+    const tour = missions.find(m => (m.id === activeMissionId || m.id === dlvId) && m.status === MissionStatus.IN_PROGRESS)
+      || missions.find(m => m.status === MissionStatus.IN_PROGRESS);
+    if (tour) {
+      setActiveMissionId(tour.id);
+      const sorted = [...(tour.stops || [])].sort((a, b) => a.sequence - b.sequence);
+      const idx = sorted.findIndex(s => s.status === StopStatus.PENDING || s.status === StopStatus.ARRIVED);
+      setActiveStopIndex(idx >= 0 ? idx : 0);
+      return;
+    }
+    // Pas de tournée EN COURS : une tournée dispatchée existe ? → la démarrer via sa carte.
+    if (missions.some(m => m.status === MissionStatus.DISPATCHED)) {
+      showNotif('Ta tournée est prête — appuie sur « Commencer le chargement »');
+    } else {
+      showNotif('Aucune tournée à livrer — fais d’abord l’enlèvement');
+    }
+  };
+
+  // Modale de choix au scan : Enlèvement (charger, transfert auto) ou Livraison (livrer).
+  const renderScanChoice = () => showScanChoice && (
+    <div className="fixed inset-0 z-[55] bg-black/60 flex items-end sm:items-center justify-center sm:p-4" onClick={() => setShowScanChoice(false)}>
+      <div className="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-md animate-slide-up" onClick={e => e.stopPropagation()}>
+        <div className="p-4 border-b border-slate-100">
+          <h3 className="font-black text-lg text-slate-800">Tu fais quoi ?</h3>
+        </div>
+        <div className="p-4 grid grid-cols-1 gap-3">
+          <button
+            onClick={() => { setShowScanChoice(false); setShowClaimModal(true); }}
+            className="w-full text-left p-4 rounded-2xl bg-green-600 text-white active:scale-95 transition-transform"
+          >
+            <div className="font-black text-base flex items-center gap-2">📥 Enlèvement — charger des colis</div>
+            <div className="text-xs text-white/90 mt-1">Scanne les colis pour les prendre dans ta tournée. Un colis déjà chez un collègue = transfert automatique.</div>
+          </button>
+          <button
+            onClick={() => { setShowScanChoice(false); goToDelivery(); }}
+            className="w-full text-left p-4 rounded-2xl bg-blue-600 text-white active:scale-95 transition-transform"
+          >
+            <div className="font-black text-base flex items-center gap-2">📤 Livraison — remettre au client</div>
+            <div className="text-xs text-white/90 mt-1">Va livrer ta tournée, arrêt par arrêt (scan, photo, signature).</div>
+          </button>
+          <button onClick={() => setShowScanChoice(false)} className="w-full py-3 text-slate-500 font-medium text-sm">Annuler</button>
+        </div>
+      </div>
+    </div>
+  );
 
   // Rattacher à l'arrêt courant les colis détectés au MÊME point de livraison mais
   // absents de l'arrêt (bandeau rouge). `otherAtAddress` est déjà restreint au même
@@ -1298,16 +1348,43 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
 
   if (missions.length === 0) {
     return (
-      <div className="flex items-center justify-center h-[60vh]">
-        <div className="text-center px-6">
-          <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <Truck size={36} className="text-slate-400" />
-          </div>
+      <div className="max-w-lg mx-auto px-6 pt-10 pb-6 text-center space-y-5">
+        {notification && (
+          <div className="fixed top-4 left-4 right-4 z-50 bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg text-center text-sm font-medium animate-fade-in">{notification}</div>
+        )}
+        <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mx-auto">
+          <Truck size={36} className="text-slate-400" />
+        </div>
+        <div>
           <h2 className="text-xl font-bold text-slate-700 mb-2">Aucune tournée aujourd'hui</h2>
           <p className="text-slate-500 text-sm">
-            Vos missions du {new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })} apparaîtront ici quand le dispatch les enverra.
+            Scanne des colis pour démarrer ta tournée, ou attends que le dispatch t'en envoie une.
           </p>
         </div>
+        {/* Le chauffeur peut charger des colis même sans tournée pré-dispatchée */}
+        <button
+          onClick={() => setShowScanChoice(true)}
+          className="w-full flex items-center justify-center gap-2 py-4 bg-green-600 text-white rounded-2xl text-base font-black active:scale-95 transition-transform"
+        >
+          📷 Scanner des colis
+        </button>
+
+        {renderScanChoice()}
+        {showClaimModal && (
+          <ClaimScanModal
+            currentUser={currentUser}
+            confirmLabel="Commencer ma tournée"
+            onClose={() => setShowClaimModal(false)}
+            onDone={(count) => {
+              setShowClaimModal(false);
+              if (count > 0) {
+                setActiveMissionId(`DLV-${currentUser.id}-${today}`);
+                setActiveStopIndex(0);
+                showNotif(`🚚 ${count} colis chargé${count > 1 ? 's' : ''} — en route !`);
+              }
+            }}
+          />
+        )}
       </div>
     );
   }
@@ -2012,20 +2089,13 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
           </button>
         </div>
 
-        {/* Recevoir des colis d'un autre chauffeur (transfert en route) */}
+        {/* UN seul point d'entrée scan : Enlèvement (charger, transfert auto) ou Livraison.
+            Remplace les 2 boutons séparés (transfert / prise en charge) qui perdaient le chauffeur. */}
         <button
-          onClick={() => setShowTransferModal(true)}
-          className="w-full flex items-center justify-center gap-2 py-3 bg-white border border-blue-200 rounded-xl text-sm font-medium text-blue-700 active:scale-95 transition-transform"
+          onClick={() => setShowScanChoice(true)}
+          className="w-full flex items-center justify-center gap-2 py-3.5 bg-green-600 text-white rounded-xl text-base font-black active:scale-95 transition-transform"
         >
-          🔁 Recevoir des colis (transfert)
-        </button>
-
-        {/* Prendre en charge des colis par scan (importés non affectés) */}
-        <button
-          onClick={() => setShowClaimModal(true)}
-          className="w-full flex items-center justify-center gap-2 py-3 bg-green-600 text-white rounded-xl text-sm font-bold active:scale-95 transition-transform"
-        >
-          📦 Prendre en charge des colis (scan)
+          📷 Scanner des colis
         </button>
 
         {/* Organisation de la tournée : optimiser / réorganiser / ajouter un arrêt */}
@@ -2153,13 +2223,16 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
         {showClaimModal && (
           <ClaimScanModal
             currentUser={currentUser}
+            confirmLabel="Ajouter à ma tournée"
             onClose={() => setShowClaimModal(false)}
             onDone={(count) => {
               setShowClaimModal(false);
-              showNotif(`📦 ${count} colis pris en charge dans votre tournée`);
+              if (count > 0) showNotif(`📦 ${count} colis ajouté${count > 1 ? 's' : ''} à ta tournée`);
             }}
           />
         )}
+
+        {renderScanChoice()}
 
         {/* === MODAL RÉORGANISER (drag & drop) === */}
         {showReorder && activeMission && (
@@ -2571,25 +2644,35 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
         </p>
       </div>
 
-      {/* Prendre en charge des colis par scan (même sans tournée active) */}
+      {/* Point d'entrée scan unique : Enlèvement / Livraison */}
       <button
-        onClick={() => setShowClaimModal(true)}
-        className="w-full flex items-center justify-center gap-2 py-3.5 bg-green-600 text-white rounded-xl text-sm font-bold active:scale-95 transition-transform shadow-sm"
+        onClick={() => setShowScanChoice(true)}
+        className="w-full flex items-center justify-center gap-2 py-3.5 bg-green-600 text-white rounded-xl text-base font-black active:scale-95 transition-transform shadow-sm"
       >
-        📦 Prendre en charge des colis (scan)
+        📷 Scanner des colis
       </button>
 
-      {/* Modal prise en charge (vue liste) */}
+      {/* Modal prise en charge (vue liste / sans tournée active) → « Commencer ma tournée » :
+          après le chargement, on SÉLECTIONNE la tournée du jour et on bascule sur la vue
+          active (corrige « je ne vois pas où commencer ma tournée » : la tournée créée par
+          scan n'était pas auto-sélectionnée). */}
       {showClaimModal && (
         <ClaimScanModal
           currentUser={currentUser}
+          confirmLabel="Commencer ma tournée"
           onClose={() => setShowClaimModal(false)}
           onDone={(count) => {
             setShowClaimModal(false);
-            showNotif(`📦 ${count} colis pris en charge dans votre tournée`);
+            if (count > 0) {
+              setActiveMissionId(`DLV-${currentUser.id}-${today}`);
+              setActiveStopIndex(0);
+              showNotif(`🚚 ${count} colis chargé${count > 1 ? 's' : ''} — en route !`);
+            }
           }}
         />
       )}
+
+      {renderScanChoice()}
 
       {/* Liste des missions */}
       {missions.map(mission => {

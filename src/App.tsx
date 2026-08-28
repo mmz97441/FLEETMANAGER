@@ -1257,8 +1257,10 @@ const App: React.FC = () => {
             />
         )}
 
-        {/* Raccourci scan rapide — disponible sur tous les écrans (usage interne) */}
-        {currentUser.role !== UserRole.CLIENT && <QuickScanButton currentUser={currentUser} clients={users.filter(u => u.role === UserRole.CLIENT || String(u.role).toLowerCase().includes('client'))} />}
+        {/* Raccourci scan rapide (usage interne dispatch/admin). RETIRÉ pour les CHAUFFEURS :
+            il les perdait (pas de choix enlèvement/livraison, ne menait nulle part). Le scan
+            chauffeur se fait dans « Ma tournée » via le bouton « Scanner des colis ». */}
+        {currentUser.role !== UserRole.CLIENT && currentUser.role !== UserRole.DRIVER && <QuickScanButton currentUser={currentUser} clients={users.filter(u => u.role === UserRole.CLIENT || String(u.role).toLowerCase().includes('client'))} />}
 
         {/* GATE DOCUMENTS OBLIGATOIRES — BLOQUANT : tant qu'il reste des documents
             à lire/signer, impossible d'utiliser le reste de l'app. Le modal

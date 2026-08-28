@@ -19,9 +19,10 @@ interface ClaimScanModalProps {
   currentUser: User;
   onClose: () => void;
   onDone: (count: number) => void;
+  confirmLabel?: string; // ex. "Commencer ma tournée" (démarrage) vs "Ajouter à ma tournée"
 }
 
-const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, onDone }) => {
+const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, onDone, confirmLabel = 'Prendre en charge dans ma tournée' }) => {
   const [scannedPkgs, setScannedPkgs] = useState<Package[]>([]);
   const [showScanner, setShowScanner] = useState(false);
   const [manualCode, setManualCode] = useState('');
@@ -121,7 +122,7 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
                 Prendre en charge des colis
               </h3>
               <p className="text-xs text-green-700 mt-0.5">
-                Scannez les colis : ils passent dans votre tournée de livraison du jour
+                Scannez vos colis (un colis déjà chez un collègue = transfert automatique), puis « {confirmLabel} »
               </p>
             </div>
             <button onClick={onClose} className="p-2 rounded-full hover:bg-green-100" disabled={isClaiming}>
@@ -188,7 +189,7 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
             disabled={scannedPkgs.length === 0 || isClaiming}
             className="w-full flex items-center justify-center gap-2 py-3.5 bg-green-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-40"
           >
-            {isClaiming ? (<><Loader2 size={18} className="animate-spin" /> Prise en charge…</>) : (<><PackageCheck size={18} /> Prendre en charge dans ma tournée</>)}
+            {isClaiming ? (<><Loader2 size={18} className="animate-spin" /> Chargement…</>) : (<><PackageCheck size={18} /> {confirmLabel}{scannedPkgs.length > 0 ? ` (${scannedPkgs.length})` : ''}</>)}
           </button>
         </div>
       </div>
