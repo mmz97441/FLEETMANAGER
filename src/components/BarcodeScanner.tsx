@@ -109,6 +109,20 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   const feedbackScanRef = useRef(feedbackScan);
   useEffect(() => { feedbackScanRef.current = feedbackScan; }, [feedbackScan]);
 
+  // AUTO-FERMETURE : dès que TOUS les colis de la checklist sont scannés (livraison),
+  // le scanner se referme tout seul après un court instant (le temps de voir la
+  // dernière coche verte). Le chauffeur n'a plus à fermer manuellement.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; });
+  const autoClosedRef = useRef(false);
+  useEffect(() => {
+    if (!checklist || checklist.length === 0 || autoClosedRef.current) return;
+    if (checklist.every(c => c.done)) {
+      autoClosedRef.current = true;
+      setTimeout(() => onCloseRef.current(), 700);
+    }
+  }, [checklist]);
+
   // Arrêt propre : clear() UNIQUEMENT après que stop() soit terminé, sinon
   // html5-qrcode lève "Cannot clear while scan is ongoing, close it first".
   const stopAndClear = useCallback(async () => {
