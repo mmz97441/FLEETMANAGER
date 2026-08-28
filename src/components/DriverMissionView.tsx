@@ -2063,6 +2063,12 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
           </div>
         )}
 
+        {/* PENDANT LA LIVRAISON GUIDÉE (arrêt « Arrivé »), on MASQUE tout ce bloc de
+            gestion (navigation entre arrêts, Scanner, Optimiser, Réorganiser, Ajouter,
+            Signaler, retour liste) : le chauffeur ne doit voir QUE le guide, une chose à
+            la fois. Ces actions ne réapparaissent qu'entre les arrêts (arrêt en attente). */}
+        {currentStop?.status !== StopStatus.ARRIVED && (
+        <>
         {/* Navigation entre stops */}
         <div className="flex gap-2">
           <button
@@ -2136,6 +2142,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
         >
           <ArrowLeft size={14} /> Voir toutes mes tournées
         </button>
+        </>
+        )}
 
         {/* === GARDE-FOU : colis manquants avant validation livraison === */}
         {showScanGate && currentStop && (
