@@ -12,6 +12,7 @@
  */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { Camera, Keyboard, X, Loader2, AlertTriangle, Flashlight, FlashlightOff } from 'lucide-react';
 
@@ -264,8 +265,12 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
     onClose();
   };
 
-  return (
-    <div className="fixed inset-0 z-50 bg-black flex flex-col">
+  // PORTAIL vers document.body : sinon un conteneur parent transformé (animate-fade-in,
+  // etc.) « emprisonne » le position:fixed → le scanner ne couvrait pas tout l'écran et
+  // son bas (checklist/infos) passait sous la barre de navigation. En portail, il est
+  // VRAIMENT plein écran, quel que soit l'écran d'où on l'ouvre.
+  return createPortal(
+    <div className="fixed inset-0 z-[100] bg-black flex flex-col">
       {/* La caméra html5-qrcode remplit tout le conteneur (sinon bandes noires
           et viseur désaligné). object-fit: cover → aperçu plein écran, centré. */}
       <style>{`
@@ -451,7 +456,8 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
           </button>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 
