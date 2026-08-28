@@ -297,6 +297,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   const [scannedBarcodes, setScannedBarcodes] = useState<string[]>([]);
   const [scanBypass, setScanBypass] = useState(false); // validation sans scan complet (tracée)
   const [showScanGate, setShowScanGate] = useState(false); // garde-fou "colis manquants"
+  // D'où le garde-fou scan est ouvert : à l'ÉTAPE SCAN (on résout puis on avance) ou à
+  // la VALIDATION finale (on résout puis on livre). Le scan se décide au DÉBUT, plus à la fin.
+  const [scanGateFrom, setScanGateFrom] = useState<'scan' | 'final'>('scan');
   const [showTransferModal, setShowTransferModal] = useState(false); // réception de colis en route
   const [showClaimModal, setShowClaimModal] = useState(false); // prise en charge par scan
   const [isOptimizing, setIsOptimizing] = useState(false);
@@ -1653,7 +1656,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                             </div>
                             {!allStopScanned && (
                               <p className="text-[11px] text-amber-600 font-medium">
-                                ⚠️ {missingStopCodes.length} colis non scanné{missingStopCodes.length > 1 ? 's' : ''} — le compte sera demandé à la validation
+                                ⚠️ {missingStopCodes.length} colis non scanné{missingStopCodes.length > 1 ? 's' : ''} — scanne-les, ou « Continuer » proposera de forcer / déclarer absents
                               </p>
                             )}
                           </div>
@@ -1904,7 +1907,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                         )}
 
                         <button
-                          onClick={() => { if (allStopScanned) { handleDeliverySuccess(); } else { setShowScanGate(true); } }}
+                          onClick={() => { if (scanRequirementMet) { handleDeliverySuccess(); } else { setScanGateFrom('final'); setShowScanGate(true); } }}
                           disabled={isProcessing || !signatureData || !recipientName.trim() || capturedPhotos.length === 0}
                           className="w-full flex items-center justify-center gap-2 py-4 bg-green-600 text-white rounded-xl font-bold text-base active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
                         >
@@ -1919,8 +1922,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                         On garde « Retour » pour corriger, et un « Continuer » UNIQUEMENT
                         sur les étapes auto (Colis, Preuve) — sinon revenir en arrière
                         piégerait le chauffeur (plus de bouton pour repartir en avant).
-                        Étape Colis : « Continuer » reste dispo même si tout n'est pas
-                        scanné (étiquette illisible) → le garde-fou du scan gère à la fin. */}
+                        Étape Colis : « Continuer » ouvre le garde-fou scan ICI si tout
+                        n'est pas scanné (scanner plus / forcer / déclarer absents) → la
+                        décision se prend au DÉBUT, plus de blocage surprise à la fin. */}
                     <div className="flex gap-2 pt-1">
                       {deliveryStep > 0 && (
                         <button
@@ -1933,7 +1937,17 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                       )}
                       {(deliveryStep === 0 || deliveryStep === 3) && (
                         <button
-                          onClick={() => setDeliveryStep(s => Math.min(4, s + 1))}
+                          onClick={() => {
+                            // À l'étape SCAN : si tout n'est pas scanné, on ouvre le
+                            // garde-fou ICI (scanner plus, ou déclarer absents / forcer)
+                            // au lieu de laisser filer jusqu'à la fin puis bloquer.
+                            if (deliveryStep === 0 && !scanRequirementMet) {
+                              setScanGateFrom('scan');
+                              setShowScanGate(true);
+                            } else {
+                              setDeliveryStep(s => Math.min(4, s + 1));
+                            }
+                          }}
                           disabled={deliveryStep === 3 && (!signatureData || capturedPhotos.length === 0)}
                           className="flex-1 flex items-center justify-center gap-2 py-3 bg-green-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
                         >
@@ -2061,9 +2075,22 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
             total={stopPackages.length}
             actionLabel="Forcer : tout est remis"
             scannedCount={deliveryScannedCount}
-            onDeliverScannedOnly={() => { setShowScanGate(false); setScanBypass(true); handleDeliverySuccess(new Set(scannedStopIds)); }}
+            onDeliverScannedOnly={() => {
+              setShowScanGate(false); setScanBypass(true);
+              if (scanGateFrom === 'scan') {
+                // Décision prise à l'étape scan : on mémorise les colis remis (les
+                // autres = non remis) et on avance ; la livraison réelle se fera au bout.
+                deliverIntentRef.current = { stopId: currentStop.id, ids: new Set(scannedStopIds) };
+                setDeliveryStep(1);
+              } else {
+                handleDeliverySuccess(new Set(scannedStopIds));
+              }
+            }}
             onCancel={() => setShowScanGate(false)}
-            onForce={() => { setShowScanGate(false); setScanBypass(true); deliverIntentRef.current = null; handleDeliverySuccess(); }}
+            onForce={() => {
+              setShowScanGate(false); setScanBypass(true); deliverIntentRef.current = null;
+              if (scanGateFrom === 'scan') setDeliveryStep(1); else handleDeliverySuccess();
+            }}
           />
         )}
 
