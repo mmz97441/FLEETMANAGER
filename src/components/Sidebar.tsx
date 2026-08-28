@@ -97,7 +97,6 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
         { id: 'hub_operations', label: 'Opérations Hub', icon: Package, permission: Permission.MISSIONS_VIEW },
         { id: 'quotes', label: 'Demandes & Devis', icon: FileCheck, permission: Permission.QUOTES_VIEW, badgeKey: 'quotes' },
         { id: 'driver_tour', label: 'Ma Tournée', icon: Navigation, permission: Permission.MISSIONS_VIEW_OWN },
-        { id: 'driver_preview', label: 'Vue chauffeur (test)', icon: Package, permission: Permission.MISSIONS_VIEW },
       ]
     },
 

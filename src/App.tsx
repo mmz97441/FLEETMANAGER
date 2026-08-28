@@ -1058,14 +1058,11 @@ const App: React.FC = () => {
         );
 
       case 'driver_tour':
-        return (
-          <div className="p-4 md:p-8 max-w-lg mx-auto">
-            <DriverTourView
-              currentUser={currentUser}
-              vehicles={vehicles}
-            />
-          </div>
-        );
+        // « Ma Tournée » = l'écran ACTIONNABLE (guide de livraison), pas la feuille de
+        // route en lecture seule. Le chauffeur y voit son arrêt, navigue (Maps/Waze) ET
+        // livre (« Je suis arrivé » → guide). Avant, il tombait sur une vue consultation
+        // sans aucun bouton pour commencer → « je vois pas où appuyer ».
+        return <DriverMissionView currentUser={currentUser} />;
 
       case 'api_diagnostic':
         return (
