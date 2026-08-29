@@ -2216,7 +2216,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                 handleDeliverySuccess(new Set(scannedStopIds));
               }
             }}
-            onCancel={() => setShowScanGate(false)}
+            onCancel={() => { setShowScanGate(false); setShowScanner(true); }}
             onForce={() => {
               setShowScanGate(false); setScanBypass(true); deliverIntentRef.current = null;
               if (scanGateFrom === 'scan') setDeliveryStep(1); else handleDeliverySuccess();
