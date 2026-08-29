@@ -801,12 +801,51 @@ const Dashboard: React.FC<DashboardProps> = ({
     const dangerAlerts = alerts.filter(a => a.type === 'danger');
     const warningAlerts = alerts.filter(a => a.type === 'warning');
 
+    // Ma tournée du jour (si affectée) — la carte la plus importante pour un livreur.
+    const fullName = `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim();
+    const myTour = missionStats.activeMissions.find(m => m.driverId === currentUser.id || m.driverName === fullName);
+
     return (
       <div className="space-y-6 animate-fade-in pb-10">
         <div className="mb-4">
           <h2 className="text-2xl font-bold text-slate-800">Mon Espace Chauffeur</h2>
           <p className="text-slate-500">Bonne route, {currentUser.firstName}.</p>
         </div>
+
+        {/* MA TOURNÉE DU JOUR — carte cliquable en premier (le cœur du métier livreur) */}
+        <button
+          onClick={() => onNavigate('driver_tour')}
+          className="w-full text-left bg-gradient-to-r from-brand-600 to-brand-700 rounded-2xl p-5 shadow-lg active:scale-[0.99] transition-transform"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-white/80 text-[11px] font-bold uppercase tracking-wider">Ma tournée du jour</p>
+              {myTour ? (
+                <>
+                  <p className="text-white text-2xl font-black mt-1 tabular-nums">
+                    {myTour.completedStops}/{myTour.totalStops} <span className="text-base font-bold">arrêts</span>
+                  </p>
+                  <p className="text-white/85 text-sm mt-0.5">
+                    Zone {myTour.zone} · {myTour.deliveredPackages}/{myTour.totalPackages} colis livrés
+                  </p>
+                </>
+              ) : (
+                <p className="text-white text-2xl font-black mt-1">Aucune tournée active</p>
+              )}
+            </div>
+            <div className="w-14 h-14 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+              <Route className="text-white" size={26} />
+            </div>
+          </div>
+          {myTour && myTour.totalStops > 0 && (
+            <div className="mt-4 h-2.5 bg-white/20 rounded-full overflow-hidden">
+              <div className="h-full bg-white rounded-full transition-all" style={{ width: `${Math.round(myTour.progress)}%` }} />
+            </div>
+          )}
+          <p className="text-white font-black text-sm mt-4 flex items-center gap-1">
+            {myTour ? 'Continuer ma tournée' : 'Ouvrir ma tournée'} <ChevronRight size={16} />
+          </p>
+        </button>
 
         {/* Alertes critiques chauffeur */}
         {dangerAlerts.length > 0 && (

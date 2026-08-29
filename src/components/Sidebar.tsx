@@ -68,6 +68,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
   // MENU CHAUFFEUR SIMPLIFIÉ : un livreur n'a pas besoin du menu admin complet.
   // 3 blocs clairs : sa tournée, son véhicule, ses démarches (RH/docs) + aide.
   const driverMenuStructure: (NavItem | NavGroup)[] = [
+    { id: 'dashboard', label: 'Accueil', icon: LayoutDashboard },
     { id: 'driver_tour', label: 'Ma Tournée', icon: Navigation },
     {
       id: 'vehicule', label: 'Véhicule', icon: Truck,

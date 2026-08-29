@@ -53,6 +53,7 @@ export interface ZoneStat {
 
 export interface ActiveMission {
   id: string;
+  driverId: string;
   driverName: string;
   vehiclePlate: string;
   zone: Zone;
@@ -194,6 +195,7 @@ function computeStats(
 
       return {
         id: m.id,
+        driverId: m.driverId || '',
         driverName: m.driverName || 'Non assigné',
         vehiclePlate: m.vehiclePlate || '-',
         zone: m.zone,
