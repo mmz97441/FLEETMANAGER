@@ -10,7 +10,7 @@ import { X, Camera, Loader2, CheckCircle, AlertTriangle, Trash2, PackageCheck } 
 import { Package, User, PackageStatus } from '../types';
 import { todayISO } from '../utils/date';
 import { findPackageByCode, claimPackagesForDelivery } from '../services/missionService';
-import { packageDisplayCode } from '../utils/barcode';
+import { packageDisplayCode, packageScanCodes } from '../utils/barcode';
 import { getCurrentPosition } from '../utils/geo';
 
 const BarcodeScanner = lazy(() => import('./BarcodeScanner'));
@@ -200,7 +200,12 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
             onScan={(code: string) => lookupCode(code)}
             onClose={() => setShowScanner(false)}
             expectedBarcodes={[]}
-            alreadyScanned={[]}
+            // Codes déjà pris → re-scan affiche « ⚠️ déjà scanné » (clair).
+            alreadyScanned={scannedPkgs.flatMap(p => packageScanCodes(p))}
+            // Tout scan valide = pris en charge → flash VERT « ✅ code » à chaque colis.
+            isMatch={() => true}
+            // Compteur permanent visible PAR-DESSUS la caméra (le vrai feedback terrain).
+            countLabel={scannedPkgs.length > 0 ? `${scannedPkgs.length} colis pris en charge` : undefined}
             title="Scan — prise en charge"
           />
         </Suspense>

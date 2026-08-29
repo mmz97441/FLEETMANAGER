@@ -33,6 +33,9 @@ interface BarcodeScannerProps {
   // chacun coché (✓) en direct dès qu'il est scanné. Le chauffeur voit en permanence
   // combien il en reste ET lesquels (numéros), sans quitter la caméra.
   checklist?: { code: string; done: boolean }[];
+  // Compteur texte permanent (ex. enlèvement : « 3 colis pris en charge ») affiché en
+  // clair PAR-DESSUS la caméra, quand il n'y a pas de liste fixe attendue.
+  countLabel?: string;
 }
 
 const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
@@ -44,7 +47,8 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   progress,
   hint,
   isMatch,
-  checklist
+  checklist,
+  countLabel
 }) => {
   const [isScanning, setIsScanning] = useState(false);
   const [manualMode, setManualMode] = useState(false);
@@ -320,6 +324,13 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
       {!manualMode && hint && !checklist && (
         <div className="px-4 py-2 bg-amber-500/90 text-white text-xs font-semibold text-center">
           {hint}
+        </div>
+      )}
+
+      {/* Compteur texte permanent (enlèvement : pas de total connu, on compte les pris). */}
+      {!manualMode && countLabel && (
+        <div className="px-4 py-2.5 bg-green-600 text-white text-base font-black text-center">
+          ✅ {countLabel}
         </div>
       )}
 

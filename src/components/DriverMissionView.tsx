@@ -794,22 +794,24 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   // Marquer arrivée au stop
   const handleArriveAtStop = async () => {
     if (!activeMission || !currentStop) return;
+    const missionId = activeMission.id;
+    const stopId = currentStop.id;
     setIsProcessing(true);
     try {
-      let coords: { lat: number; lng: number } | undefined;
-      try { coords = await getCurrentPosition(); } catch {}
-
-      // Patch ATOMIQUE du seul arrêt (relecture fraîche) → n'écrase pas un transfert
-      // concurrent ni les compteurs (fix #5).
+      // ARRIVÉE IMMÉDIATE : on NE bloque PLUS sur le GPS. Le guide s'ouvre tout de
+      // suite (avant, le bouton attendait la position jusqu'à ~10 s → « rien ne se
+      // passe »). Le point GPS d'arrivée est capté en arrière-plan (best-effort).
       await commitStopOutcome({
-        missionId: activeMission.id,
-        stopId: currentStop.id,
+        missionId,
+        stopId,
         stopPatch: {
           status: StopStatus.ARRIVED,
-          arrivalTime: new Date().toISOString(),
-          arrivalCoordinates: coords
+          arrivalTime: new Date().toISOString()
         }
       });
+      getCurrentPosition({ timeout: 5000 })
+        .then(coords => commitStopOutcome({ missionId, stopId, stopPatch: { arrivalCoordinates: coords } }))
+        .catch(() => { /* GPS indispo : l'arrivée est déjà enregistrée */ });
       showNotif('📍 Arrivée enregistrée');
     } catch (err) {
       reportError('driver.arrival', err, { silent: true });
