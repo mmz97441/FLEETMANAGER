@@ -879,15 +879,10 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
     }
   }, [deliveryScannedCount, expectedStopCount, deliveryStep, currentStop?.status, isPickupStop, showScanner]);
 
-  // Étape 4 (Preuve) → dès que la photo (1 min) ET la signature sont présentes, on
-  // passe à la Validation.
-  useEffect(() => {
-    if (isPickupStop || currentStop?.status !== StopStatus.ARRIVED || deliveryStep !== 3) return;
-    if (signatureData && capturedPhotos.length >= 1 && !autoAdvancedRef.current.has(3)) {
-      autoAdvancedRef.current.add(3);
-      setDeliveryStep(4);
-    }
-  }, [signatureData, capturedPhotos.length, deliveryStep, currentStop?.status, isPickupStop]);
+  // Étape Preuve : PAS d'auto-avance. Le nombre de photos est variable (le chauffeur
+  // peut en vouloir plusieurs) → on le laisse ajouter photo(s) + signature, puis
+  // avancer lui-même via « Continuer ». Avancer dès la 1re photo l'empêchait d'en
+  // ajouter une 2ᵉ (le guide passait à la validation avant).
 
   // Livraison réussie. `deliveredIds` = colis réellement remis (les autres colis
   // de l'arrêt sont marqués « non remis »/échec). Absent = reprendre l'intention
@@ -1959,20 +1954,26 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
                         {/* Photos — 1 minimum, max 5 */}
                         <div className="px-1">
                           <label className="text-xs font-medium text-slate-500 mb-1.5 block">
-                            📸 Photo de la livraison <span className="text-red-500">*</span>
+                            📸 Photos de la livraison <span className="text-red-500">*</span>
                             <span className="block text-[11px] text-slate-400 font-normal mt-0.5">
-                              1 photo minimum — une seule photo du lot suffit (pas besoin d'une par colis).
+                              1 photo minimum. Tu peux en ajouter d'autres (jusqu'à {MAX_PHOTOS}) en réappuyant sur le bouton.
                             </span>
                           </label>
                           <button
                             onClick={() => photoInputRef.current?.click()}
                             disabled={capturedPhotos.length >= MAX_PHOTOS}
-                            className="w-full flex items-center justify-center gap-2 py-3 bg-slate-50 border border-slate-200 text-slate-700 rounded-xl font-medium text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                            className={`w-full flex items-center justify-center gap-2 py-3.5 rounded-xl font-bold text-sm disabled:opacity-40 disabled:cursor-not-allowed ${
+                              capturedPhotos.length === 0
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-white border-2 border-blue-500 text-blue-700'
+                            }`}
                           >
-                            <Camera size={16} />
+                            <Camera size={18} />
                             {capturedPhotos.length >= MAX_PHOTOS
                               ? `Maximum atteint (${MAX_PHOTOS}/${MAX_PHOTOS})`
-                              : `Prendre une photo (${capturedPhotos.length}/${MAX_PHOTOS})`
+                              : capturedPhotos.length === 0
+                                ? 'Prendre une photo'
+                                : `➕ Ajouter une autre photo (${capturedPhotos.length}/${MAX_PHOTOS})`
                             }
                           </button>
                           <input
