@@ -36,6 +36,10 @@ interface BarcodeScannerProps {
   // Compteur texte permanent (ex. enlèvement : « 3 colis pris en charge ») affiché en
   // clair PAR-DESSUS la caméra, quand il n'y a pas de liste fixe attendue.
   countLabel?: string;
+  // Message d'issue AUTORITAIRE piloté par le parent (résultat réel après recherche
+  // async : « pris », « introuvable », « passation »…), affiché PAR-DESSUS la caméra.
+  // Sans lui, le flash interne (synchrone) ne connaît pas encore le vrai résultat.
+  flashMessage?: { type: 'ok' | 'warn'; text: string } | null;
 }
 
 const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
@@ -48,7 +52,8 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   hint,
   isMatch,
   checklist,
-  countLabel
+  countLabel,
+  flashMessage
 }) => {
   const [isScanning, setIsScanning] = useState(false);
   const [manualMode, setManualMode] = useState(false);
@@ -331,6 +336,13 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
       {!manualMode && countLabel && (
         <div className="px-4 py-2.5 bg-green-600 text-white text-base font-black text-center">
           ✅ {countLabel}
+        </div>
+      )}
+
+      {/* Issue AUTORITAIRE du parent (résultat réel après recherche) — par-dessus la caméra. */}
+      {!manualMode && flashMessage && (
+        <div className={`px-4 py-3 text-white text-center text-sm font-black ${flashMessage.type === 'ok' ? 'bg-green-700' : 'bg-amber-600'}`}>
+          {flashMessage.type === 'ok' ? '✅' : '⚠️'} {flashMessage.text}
         </div>
       )}
 

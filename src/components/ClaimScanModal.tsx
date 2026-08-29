@@ -202,8 +202,9 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
             expectedBarcodes={[]}
             // Codes déjà pris → re-scan affiche « ⚠️ déjà scanné » (clair).
             alreadyScanned={scannedPkgs.flatMap(p => packageScanCodes(p))}
-            // Tout scan valide = pris en charge → flash VERT « ✅ code » à chaque colis.
-            isMatch={() => true}
+            // PAS de isMatch={()=>true} : sinon un colis introuvable flashait VERT à tort.
+            // Le vrai résultat (pris / introuvable / passation) est poussé via flashMessage.
+            flashMessage={feedback ? { type: feedback.type, text: feedback.message } : null}
             // Compteur permanent visible PAR-DESSUS la caméra (le vrai feedback terrain).
             countLabel={scannedPkgs.length > 0 ? `${scannedPkgs.length} colis pris en charge` : undefined}
             title="Scan — prise en charge"

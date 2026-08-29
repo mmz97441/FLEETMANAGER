@@ -625,11 +625,13 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
 
   // Phase 2 : Chargement terminé → packages IN_DELIVERY + mission IN_PROGRESS + recalcul ETA
   const handleLoadingComplete = async (mission: Mission) => {
+    // Spinner IMMÉDIAT (avant l'attente GPS) → le bouton réagit tout de suite au tap.
+    // Sans ça, ensureGps() pouvait attendre ~10 s avant tout retour visuel (« bouton mort »).
+    setIsProcessing(true);
     // GPS obligatoire DÈS LE DÉPART : on bloque ici (au hub) plutôt qu'au 1er client,
     // pour que le chauffeur active sa localisation en début de tournée.
     const startPos = await ensureGps(() => handleLoadingComplete(mission));
-    if (!startPos) return;
-    setIsProcessing(true);
+    if (!startPos) { setIsProcessing(false); return; }
     try {
       const now = new Date();
       const nowISO = now.toISOString();
@@ -852,6 +854,19 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   // pas sur état). Réinitialisé à chaque changement d'arrêt.
   const autoAdvancedRef = useRef<Set<number>>(new Set());
   useEffect(() => { autoAdvancedRef.current.clear(); }, [currentStop?.id]);
+
+  // Dès qu'on est (ou revient) à l'étape SCAN, on efface toute décision de scan
+  // précédente (intention « colis absents » + bypass) et on ré-arme l'auto-avance :
+  // si le chauffeur revient scanner les colis « absents » et les scanne pour de vrai,
+  // ils ne doivent PLUS être marqués en échec, et le passage à l'étape suivante doit
+  // pouvoir se refaire automatiquement.
+  useEffect(() => {
+    if (deliveryStep === 0) {
+      deliverIntentRef.current = null;
+      setScanBypass(false);
+      autoAdvancedRef.current.delete(0);
+    }
+  }, [deliveryStep]);
 
   // Étape 1 (Colis) → dès que TOUS les colis de l'arrêt sont scannés : on referme le
   // scanner (s'il est ouvert) ET on passe à l'État. Le chauffeur enchaîne sans rien toucher.
@@ -1223,11 +1238,12 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
 
   // Ajouter un arrêt manuel (adresse hors import)
   const handleAddManualStop = async () => {
-    if (!activeMission) return;
+    if (!activeMission || isProcessing) return; // garde anti double-tap
     if (!manualStop.address.trim() || !manualStop.city.trim()) {
       showNotif('⚠️ Adresse et ville obligatoires');
       return;
     }
+    setIsProcessing(true);
     try {
       await addManualStopToMission(activeMission.id, {
         contactName: manualStop.contactName.trim() || 'Arrêt manuel',
@@ -1243,6 +1259,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
       reportError('driver.addManualStop', e, { silent: true });
       showNotif(`❌ Erreur lors de l'ajout de l'arrêt${e instanceof Error ? ` — ${e.message}` : ''}`);
     }
+    setIsProcessing(false);
   };
 
   // Signaler un problème depuis la tournée (crée un incident vu par le bureau)
@@ -2115,13 +2132,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
           </div>
         )}
 
-        {/* Bloc de gestion (nav entre arrêts, Scanner, Optimiser, Réorganiser, Ajouter,
-            Signaler, retour liste) : visible UNIQUEMENT quand l'arrêt courant est EN
-            ATTENTE. Masqué pendant la livraison guidée (Arrivé) ET sur un arrêt déjà
-            traité (fin) → le chauffeur ne voit que le guide, puis le résumé + « Terminer ». */}
-        {currentStop?.status === StopStatus.PENDING && (
-        <>
-        {/* Navigation entre stops */}
+        {/* Navigation entre arrêts : visible SAUF pendant la livraison guidée (Arrivé),
+            pour qu'un arrêt déjà fait garde Précédent/Suivant (sinon le chauffeur est coincé). */}
+        {currentStop?.status !== StopStatus.ARRIVED && (
         <div className="flex gap-2">
           <button
             onClick={() => setActiveStopIndex(Math.max(0, activeStopIndex - 1))}
@@ -2146,7 +2159,12 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
             Suivant <ChevronRight size={16} />
           </button>
         </div>
+        )}
 
+        {/* Actions de GESTION (charger, optimiser, réorganiser, ajouter, signaler) :
+            seulement sur un arrêt EN ATTENTE (ni pendant le guide, ni sur un arrêt fait). */}
+        {currentStop?.status === StopStatus.PENDING && (
+        <>
         {/* UN seul point d'entrée scan : Enlèvement (charger, transfert auto) ou Livraison.
             Remplace les 2 boutons séparés (transfert / prise en charge) qui perdaient le chauffeur. */}
         <button
@@ -2186,15 +2204,17 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
         >
           🛠️ Signaler un problème
         </button>
+        </>
+        )}
 
-        {/* Bouton retour liste */}
+        {/* Retour liste : visible sauf pendant la livraison guidée. */}
+        {currentStop?.status !== StopStatus.ARRIVED && (
         <button
           onClick={() => setActiveMissionId(null)}
           className="w-full flex items-center justify-center gap-2 py-3 text-slate-500 text-sm"
         >
           <ArrowLeft size={14} /> Voir toutes mes tournées
         </button>
-        </>
         )}
 
         {/* === GARDE-FOU : colis manquants avant validation livraison === */}
