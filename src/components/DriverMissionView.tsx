@@ -303,6 +303,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
   const [showTransferModal, setShowTransferModal] = useState(false); // réception de colis en route
   const [showClaimModal, setShowClaimModal] = useState(false); // prise en charge par scan
   const [showScanChoice, setShowScanChoice] = useState(false); // choix Enlèvement / Livraison au scan
+  const [driverTab, setDriverTab] = useState<'encours' | 'historique'>('encours'); // liste tournées : en cours vs historique
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [showReorder, setShowReorder] = useState(false);
   const [showManualStop, setShowManualStop] = useState(false);
@@ -2755,8 +2756,48 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
 
       {renderScanChoice()}
 
-      {/* Liste des missions */}
-      {missions.map(mission => {
+      {/* Onglets : En cours (actives / à démarrer) vs Historique (terminées / annulées).
+          Sépare le quotidien de l'archive → plus de confusion, historique consultable. */}
+      {(() => {
+        const isHistorique = (m: Mission) => m.status === MissionStatus.COMPLETED || m.status === MissionStatus.CANCELLED;
+        const enCours = missions.filter(m => !isHistorique(m));
+        const historique = [...missions.filter(isHistorique)].sort((a, b) =>
+          (b.completedAt || b.date || '').localeCompare(a.completedAt || a.date || ''));
+        const list = driverTab === 'encours' ? enCours : historique;
+        return (
+          <>
+            <div className="flex gap-1 bg-slate-100 rounded-xl p-1">
+              <button
+                onClick={() => setDriverTab('encours')}
+                className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-colors ${driverTab === 'encours' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}
+              >
+                En cours{enCours.length > 0 ? ` (${enCours.length})` : ''}
+              </button>
+              <button
+                onClick={() => setDriverTab('historique')}
+                className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-colors ${driverTab === 'historique' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}
+              >
+                Historique{historique.length > 0 ? ` (${historique.length})` : ''}
+              </button>
+            </div>
+            {list.length === 0 && (
+              <div className="text-center text-slate-400 text-sm py-8">
+                {driverTab === 'encours' ? 'Aucune tournée en cours. Scanne des colis pour démarrer.' : 'Aucune tournée terminée pour l’instant.'}
+              </div>
+            )}
+          </>
+        );
+      })()}
+
+      {/* Liste des missions (filtrée selon l'onglet) */}
+      {missions
+        .filter(m => driverTab === 'historique'
+          ? (m.status === MissionStatus.COMPLETED || m.status === MissionStatus.CANCELLED)
+          : (m.status !== MissionStatus.COMPLETED && m.status !== MissionStatus.CANCELLED))
+        .sort((a, b) => driverTab === 'historique'
+          ? (b.completedAt || b.date || '').localeCompare(a.completedAt || a.date || '')
+          : 0)
+        .map(mission => {
         const progress = mission.totalPackages > 0
           ? Math.round(((mission.deliveredPackages || 0) / mission.totalPackages) * 100) : 0;
         const statusColors = MISSION_STATUS_COLORS[mission.status];
