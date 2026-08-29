@@ -86,26 +86,26 @@ const VehicleCard: React.FC<VehicleCardProps> = ({
 
       {/* Header */}
       <div className="flex justify-between items-start mb-4 pl-3">
-        <div className="flex items-center gap-3">
-          <div className={`p-2.5 rounded-xl border ${
-            isImmobilized 
-              ? 'bg-red-50 text-red-600 border-red-200' 
+        <div className="flex items-center gap-3 min-w-0">
+          <div className={`p-2.5 rounded-xl border flex-shrink-0 ${
+            isImmobilized
+              ? 'bg-red-50 text-red-600 border-red-200'
               : isReplacement
                 ? 'bg-amber-50 text-amber-600 border-amber-200'
                 : 'bg-slate-50 text-slate-600 border-slate-100'
           }`}>
             <Truck size={24} />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="font-mono font-bold text-lg text-slate-900">{vehicle.plate}</h3>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <h3 className="font-mono font-bold text-lg text-slate-900 truncate">{vehicle.plate}</h3>
               {isReplacement && (
-                <span className="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded text-[10px] font-bold border border-amber-200">
+                <span className="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded text-[10px] font-bold border border-amber-200 flex-shrink-0">
                   REMPLACEMENT
                 </span>
               )}
             </div>
-            <p className="text-xs text-slate-500 font-medium">{vehicle.model}</p>
+            <p className="text-xs text-slate-500 font-medium truncate">{vehicle.model}</p>
             
             {/* Indicateurs de remplacement */}
             {isImmobilized && replacementVehicle && (
@@ -130,9 +130,9 @@ const VehicleCard: React.FC<VehicleCardProps> = ({
               </div>
             )}
             {vehicle.immobilizedLocation && isImmobilized && (
-              <div className="mt-1 flex items-center gap-1 text-[10px] text-red-500">
-                <MapPin size={10} />
-                {vehicle.immobilizedLocation}
+              <div className="mt-1 flex items-center gap-1 text-[10px] text-red-500 min-w-0">
+                <MapPin size={10} className="flex-shrink-0" />
+                <span className="truncate">{vehicle.immobilizedLocation}</span>
               </div>
             )}
             

@@ -836,10 +836,10 @@ const Dashboard: React.FC<DashboardProps> = ({
               {myTour ? (
                 <>
                   <p className="text-white text-2xl font-black mt-1 tabular-nums">
-                    {myTour.completedStops}/{myTour.totalStops} <span className="text-base font-bold">arrêts</span>
+                    {myTour.totalStops > 0 ? `${myTour.completedStops}/${myTour.totalStops}` : '—'} <span className="text-base font-bold">arrêts</span>
                   </p>
                   <p className="text-white/85 text-sm mt-0.5">
-                    Zone {myTour.zone} · {myTour.deliveredPackages}/{myTour.totalPackages} colis livrés
+                    Zone {myTour.zone}{myTour.totalPackages > 0 ? ` · ${myTour.deliveredPackages}/${myTour.totalPackages} colis livrés` : ''}
                   </p>
                 </>
               ) : (
@@ -914,8 +914,8 @@ const Dashboard: React.FC<DashboardProps> = ({
           />
           <KpiCard
             title="Ma distance (ce mois)"
-            value={myVehicleKpis.hasData ? myVehicleKpis.distance.toLocaleString() : '—'}
-            subtitle={myVehicleKpis.hasData ? 'km — mon véhicule' : 'km — mon véhicule'}
+            value={myVehicleKpis.hasData ? `${myVehicleKpis.distance.toLocaleString()} km` : '—'}
+            subtitle={myVehicleKpis.hasData ? 'mon véhicule' : (assignedVehicle ? 'aucun trajet ce mois' : 'aucun véhicule assigné')}
             icon={<Activity size={24} />}
             color="orange"
             onClick={() => onNavigate('vehicles')}
@@ -1202,8 +1202,8 @@ const Dashboard: React.FC<DashboardProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <KpiCard
             title="Disponibilité Flotte"
-            value={`${commonKpis.availabilityRate.toFixed(0)}%`}
-            subtitle={`${commonKpis.activeVehicles}/${commonKpis.totalVehicles} véhicules`}
+            value={commonKpis.totalVehicles > 0 ? `${commonKpis.availabilityRate.toFixed(0)}%` : '—'}
+            subtitle={commonKpis.totalVehicles > 0 ? `${commonKpis.activeVehicles}/${commonKpis.totalVehicles} véhicules` : 'aucun véhicule'}
             icon={<Truck size={24} />}
             color={commonKpis.availabilityRate >= 85 ? 'green' : 'orange'}
             onClick={() => onNavigate('vehicles')}
@@ -1432,20 +1432,20 @@ const Dashboard: React.FC<DashboardProps> = ({
                     className="p-3 hover:bg-slate-50 cursor-pointer transition-colors flex items-center justify-between"
                     onClick={() => onNavigate('vehicles')}
                   >
-                    <div className="flex items-center gap-3">
-                      <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                        idx === 0 ? 'bg-red-100 text-red-700' : 
-                        idx === 1 ? 'bg-orange-100 text-orange-700' : 
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                        idx === 0 ? 'bg-red-100 text-red-700' :
+                        idx === 1 ? 'bg-orange-100 text-orange-700' :
                         'bg-slate-100 text-slate-600'
                       }`}>
                         {idx + 1}
                       </span>
-                      <div>
-                        <div className="font-semibold text-slate-800">{v.plate}</div>
-                        <div className="text-xs text-slate-500">{v.model}</div>
+                      <div className="min-w-0">
+                        <div className="font-semibold text-slate-800 truncate">{v.plate}</div>
+                        <div className="text-xs text-slate-500 truncate">{v.model}</div>
                       </div>
                     </div>
-                    <div className="text-right">
+                    <div className="text-right flex-shrink-0">
                       <div className="font-bold text-red-600">{formatEuro(v.totalCost)}</div>
                       <div className="text-xs text-slate-500">
                         {v.costPerKm > 0 ? `${v.costPerKm.toFixed(2)} €/km` : '—'}
@@ -1478,21 +1478,21 @@ const Dashboard: React.FC<DashboardProps> = ({
                     className="p-3 hover:bg-slate-50 cursor-pointer transition-colors flex items-center justify-between"
                     onClick={() => onNavigate('drivers')}
                   >
-                    <div className="flex items-center gap-3">
-                      <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                        idx === 0 ? 'bg-yellow-100 text-yellow-700' : 
-                        idx === 1 ? 'bg-slate-200 text-slate-700' : 
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                        idx === 0 ? 'bg-yellow-100 text-yellow-700' :
+                        idx === 1 ? 'bg-slate-200 text-slate-700' :
                         idx === 2 ? 'bg-orange-100 text-orange-700' :
                         'bg-slate-100 text-slate-600'
                       }`}>
                         {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : idx + 1}
                       </span>
-                      <div>
-                        <div className="font-semibold text-slate-800">{d.driver.firstName} {d.driver.lastName}</div>
-                        <div className="text-xs text-slate-500">{d.vehicle?.plate || '—'}</div>
+                      <div className="min-w-0">
+                        <div className="font-semibold text-slate-800 truncate">{d.driver.firstName} {d.driver.lastName}</div>
+                        <div className="text-xs text-slate-500 truncate">{d.vehicle?.plate || '—'}</div>
                       </div>
                     </div>
-                    <div className="text-right">
+                    <div className="text-right flex-shrink-0">
                       <div className="font-bold text-green-600">{d.consumption?.toFixed(1)} L/100km</div>
                       <div className="text-xs text-slate-500">{formatDistance(d.distance)}</div>
                     </div>
@@ -1694,8 +1694,8 @@ const Dashboard: React.FC<DashboardProps> = ({
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard
           title="Véhicules disponibles"
-          value={`${commonKpis.activeVehicles}/${commonKpis.totalVehicles}`}
-          subtitle={`${commonKpis.availabilityRate.toFixed(0)}% disponibilité`}
+          value={commonKpis.totalVehicles > 0 ? `${commonKpis.activeVehicles}/${commonKpis.totalVehicles}` : '—'}
+          subtitle={commonKpis.totalVehicles > 0 ? `${commonKpis.availabilityRate.toFixed(0)}% disponibilité` : 'aucun véhicule'}
           icon={<Truck size={24} />}
           color={commonKpis.availabilityRate >= 85 ? 'green' : 'orange'}
           onClick={() => onNavigate('vehicles')}
@@ -1710,7 +1710,7 @@ const Dashboard: React.FC<DashboardProps> = ({
         />
         <KpiCard
           title="Chauffeurs disponibles"
-          value={`${commonKpis.activeDrivers}/${commonKpis.totalDrivers}`}
+          value={commonKpis.totalDrivers > 0 ? `${commonKpis.activeDrivers}/${commonKpis.totalDrivers}` : '—'}
           subtitle={`${commonKpis.driversOnLeaveToday.length} en congés`}
           icon={<Users size={24} />}
           color="purple"

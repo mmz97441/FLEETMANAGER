@@ -1389,7 +1389,7 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
             </div>
 
             {/* Header jours */}
-            <div className="grid grid-cols-[200px_repeat(7,1fr)] gap-1 mb-2">
+            <div className="grid grid-cols-[140px_repeat(7,minmax(0,1fr))] gap-1 mb-2">
               <div className="text-xs font-bold text-slate-500 uppercase p-2">Employé</div>
               {weekDays.map((day, idx) => {
                 const isToday = day.toDateString() === new Date().toDateString();
@@ -1448,7 +1448,7 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
                       return (
                         <div 
                           key={absence.id}
-                          className={`grid grid-cols-[200px_repeat(7,1fr)] gap-1 ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'} hover:bg-slate-100 transition-colors`}
+                          className={`grid grid-cols-[140px_repeat(7,minmax(0,1fr))] gap-1 ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'} hover:bg-slate-100 transition-colors`}
                         >
                           {/* Nom */}
                           <div 

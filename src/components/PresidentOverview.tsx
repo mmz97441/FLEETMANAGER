@@ -93,8 +93,8 @@ const PresidentOverview: React.FC = () => {
           <div className="space-y-1 max-h-48 overflow-y-auto">
             {kpi.stuck.slice(0, 15).map(p => (
               <div key={p.id} className="text-xs text-red-800 flex justify-between gap-2 bg-white/60 rounded-lg px-2 py-1">
-                <span className="truncate">{p.orderNumber} · {p.contactName} · {p.city}</span>
-                <span className="font-bold whitespace-nowrap">{Math.round(hoursSince(p.updatedAt))} h</span>
+                <span className="truncate min-w-0">{p.orderNumber} · {p.contactName} · {p.city}</span>
+                <span className="font-bold whitespace-nowrap flex-shrink-0">{Math.round(hoursSince(p.updatedAt))} h</span>
               </div>
             ))}
           </div>

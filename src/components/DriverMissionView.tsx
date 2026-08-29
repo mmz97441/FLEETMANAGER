@@ -1582,10 +1582,10 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
               </div>
 
               {/* Contact + type badge */}
-              <div className="flex items-center gap-2 mb-1">
-                <h3 className="text-xl font-bold text-slate-800">{currentStop.contactName || 'Sans contact'}</h3>
+              <div className="flex items-center gap-2 mb-1 min-w-0">
+                <h3 className="text-xl font-bold text-slate-800 truncate min-w-0">{currentStop.contactName || 'Sans contact'}</h3>
                 {isPickupStop && (
-                  <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-[10px] font-bold uppercase tracking-wide">
+                  <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-[10px] font-bold uppercase tracking-wide flex-shrink-0 whitespace-nowrap">
                     📦 Enlèvement
                   </span>
                 )}

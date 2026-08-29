@@ -350,20 +350,13 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
                       isActiveGroup ? 'text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'
                     }`}
                   >
-                    <div className="flex items-center gap-3">
-                      <div className="relative">
-                        <item.icon size={20} />
-                        {/* Badge sur l'icône du groupe (quand fermé) */}
-                        {!isOpen && groupBadge > 0 && (
-                          <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold min-w-[16px] h-4 flex items-center justify-center rounded-full px-1 animate-pulse">
-                            {groupBadge}
-                          </span>
-                        )}
-                      </div>
-                      <span className="font-semibold text-sm">{item.label}</span>
+                    <div className="flex items-center gap-3 min-w-0">
+                      <item.icon size={20} className="flex-shrink-0" />
+                      <span className="font-semibold text-sm truncate">{item.label}</span>
                     </div>
-                    <div className="flex items-center gap-2">
-                      {/* Badge à côté de la flèche (quand fermé) */}
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {/* Badge UNIQUE à côté de la flèche (quand le groupe est fermé).
+                          Auparavant un 2ᵉ badge était aussi collé sur l'icône → doublon. */}
                       {!isOpen && groupBadge > 0 && (
                         <span className="bg-red-500 text-white text-[10px] font-bold min-w-[18px] h-[18px] flex items-center justify-center rounded-full px-1">
                           {groupBadge}
@@ -403,7 +396,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
                           }
                         `}
                       >
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
                           {isCollapsed ? (
                             <div className="relative">
                               <subItem.icon size={20} className={isActive ? 'text-white' : 'text-slate-400 group-hover:text-white'} />
@@ -415,13 +408,13 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
                               )}
                             </div>
                           ) : (
-                            <div className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-white' : 'bg-slate-600 group-hover:bg-slate-400'}`}></div>
+                            <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isActive ? 'bg-white' : 'bg-slate-600 group-hover:bg-slate-400'}`}></div>
                           )}
-                          {!isCollapsed && <span className="font-medium text-sm">{subItem.label}</span>}
+                          {!isCollapsed && <span className="font-medium text-sm truncate">{subItem.label}</span>}
                         </div>
                         {/* Badge à droite de l'item */}
                         {!isCollapsed && itemBadge > 0 && (
-                          <span className={`text-[10px] font-bold min-w-[18px] h-[18px] flex items-center justify-center rounded-full px-1 ${
+                          <span className={`text-[10px] font-bold min-w-[18px] h-[18px] flex-shrink-0 flex items-center justify-center rounded-full px-1 ${
                             isActive ? 'bg-white text-brand-600' : 'bg-red-500 text-white animate-pulse'
                           }`}>
                             {itemBadge}

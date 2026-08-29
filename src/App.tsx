@@ -1156,7 +1156,7 @@ const App: React.FC = () => {
   return (
     <ErrorBoundary>
       <PermissionsProvider currentUser={currentUser}>
-      <div className="flex h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden">
+      <div className={`flex h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden ${isOffline ? 'pt-6' : ''}`}>
 
         {/* VERROU GPS — chauffeurs : app inutilisable sans localisation active */}
         <DriverGpsGate currentUser={currentUser} />
@@ -1183,7 +1183,7 @@ const App: React.FC = () => {
 
         {isMobileMenuOpen && (
           <div 
-            className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+            className="fixed inset-0 bg-black/50 z-[45] lg:hidden"
             onClick={() => setIsMobileMenuOpen(false)}
           ></div>
         )}
@@ -1194,9 +1194,9 @@ const App: React.FC = () => {
               <button onClick={() => setIsMobileMenuOpen(true)} className="text-slate-600">
                   <Menu size={24} />
               </button>
-              <div className="flex flex-col items-center">
-                  <span className="font-bold text-lg text-slate-800">FleetGenius</span>
-                  <span className="text-[10px] font-bold text-brand-600 uppercase tracking-wide">{currentUser.role} · v{__APP_VERSION__}</span>
+              <div className="flex flex-col items-center min-w-0 px-2">
+                  <span className="font-bold text-lg text-slate-800 truncate max-w-full">FleetGenius</span>
+                  <span className="text-[10px] font-bold text-brand-600 uppercase tracking-wide truncate max-w-full">{currentUser.role} · v{__APP_VERSION__}</span>
               </div>
               <div className="flex items-center gap-2">
                 {canViewAs && <ViewAsSwitcher currentUser={currentUser} users={users} quotes={quotes} />}
@@ -1225,7 +1225,7 @@ const App: React.FC = () => {
               </div>
           </div>
 
-          <main className="flex-1 overflow-y-auto p-4 lg:p-8 custom-scrollbar pt-14 lg:pt-20 pb-20 lg:pb-8">
+          <main className={`flex-1 overflow-y-auto p-4 lg:p-8 custom-scrollbar pt-4 lg:pt-20 lg:pb-8 ${(currentView === 'driver_tour' || currentView === 'driver_preview') ? 'pb-4' : 'pb-20'}`}>
               <div className="max-w-7xl mx-auto h-full">
                 <Suspense fallback={<PageLoader />}>
                   {renderContent()}

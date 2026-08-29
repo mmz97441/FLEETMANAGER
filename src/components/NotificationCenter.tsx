@@ -152,7 +152,7 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({ currentUser, on
 
       {/* === PANNEAU === */}
       {isOpen && (
-        <div className="absolute right-0 top-12 w-96 max-h-[70vh] bg-white rounded-2xl shadow-2xl border border-slate-200 z-50 flex flex-col overflow-hidden">
+        <div className="absolute right-0 top-12 w-[calc(100vw-1.5rem)] sm:w-96 max-h-[70vh] bg-white rounded-2xl shadow-2xl border border-slate-200 z-50 flex flex-col overflow-hidden">
           
           {/* Header */}
           <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between flex-shrink-0">

@@ -120,14 +120,20 @@ const DriverList: React.FC<DriverListProps> = ({ users, vehicles, leaves, curren
                 {/* Header Card */}
                 <div className={`p-6 border-b ${isOnLeave ? 'bg-orange-50 border-orange-100' : 'bg-white border-slate-100'} rounded-t-2xl relative`}>
                     <div className="flex items-start justify-between">
-                        <div className="flex items-center gap-4">
-                            <div className="relative">
-                                <img src={driver.avatarUrl} alt={driver.firstName} className="w-16 h-16 rounded-full border-4 border-white shadow-sm object-cover" />
+                        <div className="flex items-center gap-4 min-w-0 pr-8">
+                            <div className="relative flex-shrink-0">
+                                {driver.avatarUrl ? (
+                                    <img src={driver.avatarUrl} alt={driver.firstName} className="w-16 h-16 rounded-full border-4 border-white shadow-sm object-cover" />
+                                ) : (
+                                    <div className="w-16 h-16 rounded-full border-4 border-white shadow-sm bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-xl">
+                                        {driver.firstName?.[0]}{driver.lastName?.[0]}
+                                    </div>
+                                )}
                                 <div className={`absolute bottom-0 right-0 w-4 h-4 rounded-full border-2 border-white ${isOnLeave ? 'bg-orange-500' : 'bg-green-500'}`}></div>
                             </div>
-                            <div>
-                                <h3 className="text-lg font-bold text-slate-800">{driver.firstName} {driver.lastName}</h3>
-                                <p className="text-xs text-slate-600 font-bold">{driver.email}</p>
+                            <div className="min-w-0">
+                                <h3 className="text-lg font-bold text-slate-800 truncate">{driver.firstName} {driver.lastName}</h3>
+                                <p className="text-xs text-slate-600 font-bold truncate">{driver.email}</p>
                                 <div className="flex items-center gap-2 mt-1">
                                     <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
                                         isOnLeave ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'
@@ -216,8 +222,8 @@ const DriverList: React.FC<DriverListProps> = ({ users, vehicles, leaves, curren
                                         </span>
                                     </div>
                                 </div>
-                                <div className="flex items-center gap-1 text-xs text-slate-500 font-medium">
-                                    <MapPin size={12} /> {vehicle.location?.address || 'En déplacement'}
+                                <div className="flex items-center gap-1 text-xs text-slate-500 font-medium min-w-0">
+                                    <MapPin size={12} className="flex-shrink-0" /> <span className="truncate">{vehicle.location?.address || 'En déplacement'}</span>
                                 </div>
                                 {canEdit && (
                                     <div className="mt-2 pt-2 border-t border-brand-200 text-center">

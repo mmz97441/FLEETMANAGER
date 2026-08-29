@@ -306,9 +306,9 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
         #${scannerContainerId} img { display: none !important; }
       `}</style>
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 bg-black/80">
-        <h3 className="text-white font-bold text-sm">{title}</h3>
-        <div className="flex items-center gap-1">
+      <div className="flex items-center justify-between px-4 py-3 bg-black/80 gap-2">
+        <h3 className="text-white font-bold text-sm truncate min-w-0">{title}</h3>
+        <div className="flex items-center gap-1 flex-shrink-0">
           {!manualMode && torchAvailable && (
             <button
               onClick={toggleTorch}

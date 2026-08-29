@@ -434,7 +434,7 @@ const ParcelRow: React.FC<ParcelRowProps> = ({ parcel, onClick }) => {
     >
       {/* Ligne principale : destinataire + ville */}
       <div className="flex items-start justify-between gap-2">
-        <span className="text-base font-semibold text-slate-800">
+        <span className="text-base font-semibold text-slate-800 min-w-0 flex-1 truncate">
           {parcel.contactName || 'Destinataire'}
           {parcel.city && <span className="text-slate-500"> · {parcel.city}</span>}
         </span>

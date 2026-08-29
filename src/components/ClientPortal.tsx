@@ -869,8 +869,8 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                             <Building2 size={14} />
                         </div>
                     </div>
-                    <div>
-                        <h2 className="text-2xl font-bold text-slate-900 leading-tight">{currentUser.companyName}</h2>
+                    <div className="min-w-0">
+                        <h2 className="text-2xl font-bold text-slate-900 leading-tight truncate">{currentUser.companyName}</h2>
                         <div className="flex flex-wrap items-center gap-3 text-slate-500 text-sm font-medium mt-1">
                             <div className="flex items-center gap-1.5">
                                 <UserIcon size={14} className="text-indigo-500" />
@@ -1271,12 +1271,12 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                             }`}
                         >
                             <div className="p-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-50">
-                                <div className="flex items-center gap-4">
-                                    <div className={`p-3 rounded-xl ${quote.status === QuoteStatus.OFFER_SENT ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-500'}`}>
+                                <div className="flex items-center gap-4 min-w-0">
+                                    <div className={`p-3 rounded-xl flex-shrink-0 ${quote.status === QuoteStatus.OFFER_SENT ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-500'}`}>
                                         <Package size={24} />
                                     </div>
-                                    <div>
-                                        <h3 className="font-bold text-slate-900 text-lg">{quote.goodsDescription}</h3>
+                                    <div className="min-w-0">
+                                        <h3 className="font-bold text-slate-900 text-lg truncate">{quote.goodsDescription}</h3>
                                         <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
                                             <span>Réf: {quote.id}</span>
                                             {/* DISPLAY REQUESTER IF DIFFERENT */}
@@ -1465,7 +1465,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                 {clientPackages.length} colis au total — Suivez vos envois et téléchargez vos étiquettes
                             </p>
                         </div>
-                        <div className="flex gap-2">
+                        <div className="flex gap-2 flex-wrap">
                             <button
                                 onClick={() => setShowImportRecipients(true)}
                                 className="flex items-center gap-2 px-4 py-2.5 bg-white/15 hover:bg-white/25 text-white rounded-xl font-bold text-sm transition-colors"
@@ -1653,7 +1653,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                                                     <div className="flex items-center gap-2">
                                                                         <div className="min-w-0 flex-1">
                                                                             <p className="font-mono text-xs font-bold text-slate-800 truncate">{pkg.externalId || pkg.barcode || pkg.orderNumber}</p>
-                                                                            <p className="text-[10px] text-slate-400">Cmd: {pkg.orderNumber}{pkg.clientReference ? ` · Réf: ${pkg.clientReference}` : ''}</p>
+                                                                            <p className="text-[10px] text-slate-400 truncate">Cmd: {pkg.orderNumber}{pkg.clientReference ? ` · Réf: ${pkg.clientReference}` : ''}</p>
                                                                         </div>
                                                                         <HintTooltip label={STATUS_TOOLTIP[pkg.status] || pkg.status}><span className={`inline-flex items-center px-2 py-1 rounded-lg text-[11px] font-bold cursor-help ${sc.bg} ${sc.text}`}>{pkg.status}</span></HintTooltip>
                                                                         <HintTooltip label="Étiquette de ce colis"><button onClick={() => { const html = generateBatchLabelsHTML([pkg as PackageType], currentUser.companyName || 'Expéditeur'); const win=window.open('','_blank'); if(win){win.document.write(html);win.document.close();} }} className="p-1.5 bg-slate-100 hover:bg-indigo-100 text-slate-600 rounded-lg"><QrCode size={13} /></button></HintTooltip>

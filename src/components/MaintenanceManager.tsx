@@ -294,7 +294,7 @@ const MaintenanceManager: React.FC<MaintenanceManagerProps> = ({ logs, vehicles,
                           </div>
                           
                           <div className="flex justify-between text-[10px] text-slate-500 font-medium mt-1">
-                              <span>Dernière: {item.lastKm.toLocaleString()} km ({new Date(item.lastMaintenanceDate || '').toLocaleDateString()})</span>
+                              <span>Dernière: {item.lastKm.toLocaleString()} km ({item.lastMaintenanceDate ? new Date(item.lastMaintenanceDate).toLocaleDateString() : 'Jamais'})</span>
                               <span>Prochaine: {(item.lastKm + item.interval).toLocaleString()} km</span>
                           </div>
                       </div>

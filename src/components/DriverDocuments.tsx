@@ -76,7 +76,7 @@ const DriverDocuments: React.FC<DriverDocumentsProps> = ({ currentUser }) => {
                              <p className="text-sm text-slate-500 mt-1">
                                  Vous devez déposer une preuve de détention de permis valide tous les 6 mois.
                              </p>
-                             <div className="mt-2 flex items-center gap-2 text-sm font-medium text-slate-600 bg-slate-50 inline-block px-3 py-1 rounded">
+                             <div className="mt-2 inline-flex items-center gap-2 text-sm font-medium text-slate-600 bg-slate-50 px-3 py-1 rounded">
                                  <Clock size={16} /> Dernier scan : {new Date(lastScanDate).toLocaleDateString()}
                              </div>
                          </div>

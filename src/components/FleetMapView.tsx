@@ -639,7 +639,7 @@ const DriverDetail: React.FC<{ driver: ParsedDriver }> = ({ driver }) => {
                       key={s.id}
                       className="flex items-center justify-between text-sm gap-2"
                     >
-                      <span className="text-slate-700 truncate">
+                      <span className="text-slate-700 truncate min-w-0 flex-1">
                         <span className="text-slate-400">{s.sequence}.</span>{' '}
                         {s.contactName || 'Destinataire'}
                         <span className="text-slate-400"> — {s.city}</span>

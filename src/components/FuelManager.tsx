@@ -641,7 +641,7 @@ export const FuelManager: React.FC<FuelManagerProps> = ({ logs, vehicles, users,
             { label: 'Volume Total', value: `${stats.totalVolume.toFixed(0)} L`, icon: Droplet, color: 'text-sky-600', bg: 'bg-sky-50' },
             canViewCosts && { label: 'Prix Moyen/L', value: `${stats.avgPrice.toFixed(3)} €`, icon: TrendingUp, color: 'text-indigo-600', bg: 'bg-indigo-50' },
             { label: 'Distance', value: formatDistance(stats.periodDistance), icon: Route, color: 'text-orange-600', bg: 'bg-orange-50' },
-            { label: 'Conso. Moyenne', value: `${stats.avgConsumption > 0 ? stats.avgConsumption.toFixed(1) : '-'} L/100`, icon: Gauge, color: 'text-emerald-600', bg: 'bg-emerald-50' }
+            { label: 'Conso. Moyenne', value: stats.avgConsumption > 0 ? `${stats.avgConsumption.toFixed(1)} L/100` : '—', icon: Gauge, color: 'text-emerald-600', bg: 'bg-emerald-50' }
         ].filter((s): s is { label: string; value: string; icon: typeof DollarSign; color: string; bg: string } => Boolean(s)).map((stat, idx) => (
             <div key={idx} className="bg-white p-6 rounded-2xl shadow-[0_2px_10px_-3px_rgba(6,81,237,0.1)] border border-slate-100 flex flex-col justify-between hover:-translate-y-1 transition-transform duration-300">
                 <div className="flex justify-between items-start mb-3">

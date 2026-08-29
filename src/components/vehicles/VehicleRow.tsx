@@ -139,9 +139,9 @@ const VehicleRow: React.FC<VehicleRowProps> = ({
               </div>
             )}
             {vehicle.immobilizedLocation && isImmobilized && (
-              <div className="mt-1 flex items-center gap-1 text-[10px] text-red-500">
-                <MapPin size={10} />
-                {vehicle.immobilizedLocation}
+              <div className="mt-1 flex items-center gap-1 text-[10px] text-red-500 min-w-0">
+                <MapPin size={10} className="flex-shrink-0" />
+                <span className="truncate">{vehicle.immobilizedLocation}</span>
               </div>
             )}
             
