@@ -805,6 +805,19 @@ const Dashboard: React.FC<DashboardProps> = ({
     const fullName = `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim();
     const myTour = missionStats.activeMissions.find(m => m.driverId === currentUser.id || m.driverName === fullName);
 
+    // Conso + distance de SON véhicule (calculées sur les pleins de SON véhicule
+    // uniquement — plus les chiffres FLOTTE de commonKpis qui n'ont rien à faire ici).
+    const myVehicleKpis = (() => {
+      const v = assignedVehicle;
+      if (!v) return { conso: 0, distance: 0, hasData: false };
+      const month = currentDate.getMonth(), year = currentDate.getFullYear();
+      const myLogs = logs.filter(l => l.vehicleId === v.id);
+      const monthly = myLogs.filter(l => { const d = new Date(l.date); return d.getMonth() === month && d.getFullYear() === year; });
+      const volume = monthly.reduce((a, l) => a + l.volume, 0);
+      const distance = calculateRealDistance(myLogs, month, year);
+      return { conso: distance > 0 ? (volume / distance) * 100 : 0, distance, hasData: distance > 0 };
+    })();
+
     return (
       <div className="space-y-6 animate-fade-in pb-10">
         <div className="mb-4">
@@ -892,17 +905,17 @@ const Dashboard: React.FC<DashboardProps> = ({
         {/* KPIs */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <KpiCard
-            title="Ma Conso. Moyenne"
-            value={`${commonKpis.avgConsumption.toFixed(1)} L`}
-            subtitle="/ 100km"
+            title="Ma conso (mon véhicule)"
+            value={myVehicleKpis.hasData ? `${myVehicleKpis.conso.toFixed(1)} L` : '—'}
+            subtitle={myVehicleKpis.hasData ? '/ 100km' : (assignedVehicle ? 'pas encore de plein ce mois' : 'aucun véhicule assigné')}
             icon={<Droplet size={24} />}
             color="blue"
             onClick={() => onNavigate('fuel')}
           />
           <KpiCard
-            title="Distance (Ce mois)"
-            value={commonKpis.totalDistance.toLocaleString()}
-            subtitle="km parcourus"
+            title="Ma distance (ce mois)"
+            value={myVehicleKpis.hasData ? myVehicleKpis.distance.toLocaleString() : '—'}
+            subtitle={myVehicleKpis.hasData ? 'km — mon véhicule' : 'km — mon véhicule'}
             icon={<Activity size={24} />}
             color="orange"
             onClick={() => onNavigate('vehicles')}
