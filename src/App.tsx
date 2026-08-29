@@ -341,14 +341,29 @@ const App: React.FC = () => {
     }).length;
   }, [companyDocuments, documentAcknowledgments, currentUser]);
 
-  // Badges de comptage pour la navigation
-  const pendingCounts = useMemo(() => ({
-    leaves: leaves.filter(l => l.status === LeaveStatus.PENDING).length,
-    absences: absences.filter(a => a.status === AbsenceStatus.PENDING).length,
-    issues: issues.filter(i => i.status === IssueStatus.NEW).length,
-    maintenance: maintenanceLogs.filter(m => m.status === MaintenanceStatus.PENDING).length,
-    quotes: quotes.filter(q => q.status === QuoteStatus.REQUESTED).length,
-  }), [leaves, absences, issues, maintenanceLogs, quotes]);
+  // Badges de comptage pour la navigation.
+  // Un CHAUFFEUR ne doit voir QUE ses propres compteurs (ses congés/absences en
+  // attente, ses incidents ouverts) — pas les totaux flotte destinés au bureau.
+  const pendingCounts = useMemo(() => {
+    const isDriver = normalizeRole(currentUser?.role) === UserRole.DRIVER;
+    if (isDriver && currentUser) {
+      const uid = currentUser.id;
+      return {
+        leaves: leaves.filter(l => l.status === LeaveStatus.PENDING && l.userId === uid).length,
+        absences: absences.filter(a => a.status === AbsenceStatus.PENDING && a.userId === uid).length,
+        issues: issues.filter(i => i.status === IssueStatus.NEW && (i.reportedByUserId === uid || i.reportedBy === uid)).length,
+        maintenance: 0,
+        quotes: 0,
+      };
+    }
+    return {
+      leaves: leaves.filter(l => l.status === LeaveStatus.PENDING).length,
+      absences: absences.filter(a => a.status === AbsenceStatus.PENDING).length,
+      issues: issues.filter(i => i.status === IssueStatus.NEW).length,
+      maintenance: maintenanceLogs.filter(m => m.status === MaintenanceStatus.PENDING).length,
+      quotes: quotes.filter(q => q.status === QuoteStatus.REQUESTED).length,
+    };
+  }, [leaves, absences, issues, maintenanceLogs, quotes, currentUser]);
 
   // Liste complète des documents en attente (pour le modal d'alerte)
   const pendingDocumentsList = useMemo(() => {
