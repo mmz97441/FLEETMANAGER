@@ -335,7 +335,11 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
       setMissions(myMissions);
       setLoading(false);
 
-      // Auto-sélectionner la mission active — UNE SEULE FOIS
+      // Auto-sélectionner la mission active. On ne VERROUILLE qu'une fois une
+      // mission RÉELLEMENT sélectionnée : sinon, quand le chauffeur ouvre l'app
+      // sans tournée puis récupère des colis, la mission créée juste après n'était
+      // jamais auto-sélectionnée (verrou posé au 1er callback vide) → écran sans
+      // tournée. Ici, tant qu'aucune tournée EN COURS n'existe, on reste à l'écoute.
       if (!hasAutoSelectedRef.current) {
         const active = myMissions.find(m => m.status === MissionStatus.IN_PROGRESS);
         if (active) {
@@ -344,8 +348,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
           const sorted = [...active.stops].sort((a, b) => a.sequence - b.sequence);
           const pendingIdx = sorted.findIndex(s => s.status === StopStatus.PENDING || s.status === StopStatus.ARRIVED);
           setActiveStopIndex(pendingIdx >= 0 ? pendingIdx : 0);
+          hasAutoSelectedRef.current = true;
         }
-        hasAutoSelectedRef.current = true;
       }
     }, { date: today, driverId: currentUser.id });
     return unsub;
@@ -503,7 +507,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
     if (missions.some(m => m.status === MissionStatus.DISPATCHED)) {
       showNotif('Ta tournée est prête — appuie sur « Commencer le chargement »');
     } else {
-      showNotif('Aucune tournée à livrer — fais d’abord l’enlèvement');
+      showNotif('Aucune tournée à livrer — récupère d’abord des colis');
     }
   };
 
@@ -519,8 +523,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
             onClick={() => { setShowScanChoice(false); setShowClaimModal(true); }}
             className="w-full text-left p-4 rounded-2xl bg-green-600 text-white active:scale-95 transition-transform"
           >
-            <div className="font-black text-base flex items-center gap-2">📥 Enlèvement — charger des colis</div>
-            <div className="text-xs text-white/90 mt-1">Scanne les colis pour les prendre dans ta tournée. Un colis déjà chez un collègue = transfert automatique.</div>
+            <div className="font-black text-base flex items-center gap-2">📥 Récupérer des colis</div>
+            <div className="text-xs text-white/90 mt-1">Scanne les colis à récupérer (les tiens ou chez un client) — ils rejoignent ta tournée. Un colis déjà chez un collègue = transfert automatique.</div>
           </button>
           <button
             onClick={() => { setShowScanChoice(false); goToDelivery(); }}
@@ -2306,6 +2310,10 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
           <ClaimScanModal
             currentUser={currentUser}
             confirmLabel="Ajouter à ma tournée"
+            // Récupération PENDANT une tournée en cours → on alimente CETTE tournée
+            // (et pas une 2ᵉ mission « DLV-… » séparée), sinon les colis récupérés
+            // n'apparaissent jamais dans la tournée livrée.
+            targetMissionId={activeMission?.id}
             onClose={() => setShowClaimModal(false)}
             onDone={(count) => {
               setShowClaimModal(false);

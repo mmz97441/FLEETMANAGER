@@ -20,9 +20,12 @@ interface ClaimScanModalProps {
   onClose: () => void;
   onDone: (count: number) => void;
   confirmLabel?: string; // ex. "Commencer ma tournée" (démarrage) vs "Ajouter à ma tournée"
+  // Mission active à alimenter (récupération pendant une tournée en cours). Sans
+  // elle, les colis rejoignent la tournée de récupération du jour (DLV-…).
+  targetMissionId?: string;
 }
 
-const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, onDone, confirmLabel = 'Prendre en charge dans ma tournée' }) => {
+const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, onDone, confirmLabel = 'Prendre en charge dans ma tournée', targetMissionId }) => {
   const [scannedPkgs, setScannedPkgs] = useState<Package[]>([]);
   const [showScanner, setShowScanner] = useState(false);
   const [manualCode, setManualCode] = useState('');
@@ -102,7 +105,8 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
         packages: scannedPkgs,
         driver: { id: currentUser.id, name: `${currentUser.firstName} ${currentUser.lastName}` },
         date: today,
-        location
+        location,
+        targetMissionId
       });
       onDone(count);
     } catch (e) {
@@ -119,10 +123,10 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
             <div>
               <h3 className="font-bold text-slate-800 flex items-center gap-2">
                 <PackageCheck size={18} className="text-green-600" />
-                Prendre en charge des colis
+                Récupérer des colis
               </h3>
               <p className="text-xs text-green-700 mt-0.5">
-                Scannez vos colis (un colis déjà chez un collègue = transfert automatique), puis « {confirmLabel} »
+                Scannez les colis à récupérer (un colis déjà chez un collègue = transfert automatique), puis « {confirmLabel} »
               </p>
             </div>
             <button onClick={onClose} className="p-2 rounded-full hover:bg-green-100" disabled={isClaiming}>
@@ -207,7 +211,7 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
             flashMessage={feedback ? { type: feedback.type, text: feedback.message } : null}
             // Compteur permanent visible PAR-DESSUS la caméra (le vrai feedback terrain).
             countLabel={scannedPkgs.length > 0 ? `${scannedPkgs.length} colis pris en charge` : undefined}
-            title="Scan — prise en charge"
+            title="Scan — récupération"
           />
         </Suspense>
       )}

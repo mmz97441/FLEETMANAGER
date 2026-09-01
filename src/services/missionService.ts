@@ -1512,10 +1512,21 @@ export const claimPackagesForDelivery = async (params: {
   vehicle?: { id?: string; plate?: string };
   date: string;
   location?: { lat: number; lng: number };
+  // Mission cible : quand le chauffeur RÉCUPÈRE des colis alors qu'une tournée est
+  // déjà EN COURS (dispatchée ou de scan), on ajoute à CETTE tournée — sinon les
+  // colis partaient dans une 2ᵉ mission « DLV-… » séparée et n'apparaissaient jamais
+  // dans la tournée qu'il livre (« j'ai pris le colis mais il n'est pas là »).
+  targetMissionId?: string;
 }): Promise<number> => {
-  const { packages: pkgs, driver, vehicle, date, location } = params;
+  const { packages: pkgs, driver, vehicle, date, location, targetMissionId } = params;
   if (pkgs.length === 0) throw new Error('Aucun colis à prendre en charge');
-  const mission = await getOrCreateDriverDeliveryMission(driver, date, vehicle);
+  let mission: Mission | null = null;
+  if (targetMissionId) {
+    const snap = await getDoc(doc(db, MISSIONS_COLLECTION, targetMissionId));
+    if (snap.exists()) mission = { id: snap.id, ...snap.data() } as Mission;
+  }
+  // Pas de mission active fournie (ou introuvable) → tournée de récupération du jour.
+  if (!mission) mission = await getOrCreateDriverDeliveryMission(driver, date, vehicle);
   return transferPackagesToDriver({
     packages: pkgs,
     toMission: mission,
