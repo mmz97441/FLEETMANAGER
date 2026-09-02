@@ -73,6 +73,10 @@ const samePlace = sameDeliveryPoint;
 
 interface DriverMissionViewProps {
   currentUser: User;
+  // Clients expéditeurs — pour créer un colis hors-import à la récupération
+  // (le chauffeur choisit l'expéditeur). Optionnel : sans, la création propose
+  // la saisie libre du nom du client.
+  clients?: User[];
 }
 
 // ============================================================================
@@ -256,7 +260,7 @@ const SignaturePad: React.FC<{
 // COMPOSANT PRINCIPAL
 // ============================================================================
 
-const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) => {
+const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clients = [] }) => {
   // === State ===
   const [missions, setMissions] = useState<Mission[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1420,6 +1424,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
         {showClaimModal && (
           <ClaimScanModal
             currentUser={currentUser}
+            clients={clients}
             confirmLabel="Commencer ma tournée"
             onClose={() => setShowClaimModal(false)}
             onDone={(count) => {
@@ -2309,6 +2314,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
         {showClaimModal && (
           <ClaimScanModal
             currentUser={currentUser}
+            clients={clients}
             confirmLabel="Ajouter à ma tournée"
             // Récupération PENDANT une tournée en cours → on alimente CETTE tournée
             // (et pas une 2ᵉ mission « DLV-… » séparée), sinon les colis récupérés
@@ -2749,6 +2755,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser }) =>
       {showClaimModal && (
         <ClaimScanModal
           currentUser={currentUser}
+          clients={clients}
           confirmLabel="Commencer ma tournée"
           onClose={() => setShowClaimModal(false)}
           onDone={(count) => {

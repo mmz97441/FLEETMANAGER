@@ -1012,6 +1012,7 @@ const App: React.FC = () => {
           return (
             <DriverMissionView
               currentUser={currentUser}
+              clients={users.filter(u => u.role === UserRole.CLIENT || String(u.role).toLowerCase().includes('client'))}
             />
           );
         }
@@ -1031,7 +1032,7 @@ const App: React.FC = () => {
       // currentUser.id : quand le président scanne (bouton flottant), les colis
       // sont pris en charge dans SA tournée → il la retrouve ici et teste le guide.
       case 'driver_preview':
-        return <DriverMissionView currentUser={currentUser} />;
+        return <DriverMissionView currentUser={currentUser} clients={users.filter(u => u.role === UserRole.CLIENT || String(u.role).toLowerCase().includes('client'))} />;
 
       case 'notifications_settings':
         return (
@@ -1077,7 +1078,7 @@ const App: React.FC = () => {
         // route en lecture seule. Le chauffeur y voit son arrêt, navigue (Maps/Waze) ET
         // livre (« Je suis arrivé » → guide). Avant, il tombait sur une vue consultation
         // sans aucun bouton pour commencer → « je vois pas où appuyer ».
-        return <DriverMissionView currentUser={currentUser} />;
+        return <DriverMissionView currentUser={currentUser} clients={users.filter(u => u.role === UserRole.CLIENT || String(u.role).toLowerCase().includes('client'))} />;
 
       case 'api_diagnostic':
         return (

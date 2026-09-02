@@ -1555,6 +1555,9 @@ export const createAndClaimPackage = async (params: {
   driver: { id: string; name: string };
   date: string;
   location?: { lat: number; lng: number };
+  // Comme pour la récupération : rejoint la tournée EN COURS si fournie, sinon
+  // la tournée de récupération du jour.
+  targetMissionId?: string;
 }): Promise<Package> => {
   const now = new Date().toISOString();
   const code = params.code.trim();
@@ -1590,12 +1593,13 @@ export const createAndClaimPackage = async (params: {
   const ref = await addDoc(collection(db, PACKAGES_COLLECTION), pkgData);
   const created = { id: ref.id, ...pkgData } as Package;
 
-  // Prise en charge immédiate dans la tournée de livraison du jour
+  // Prise en charge immédiate dans la tournée en cours (ou celle du jour).
   await claimPackagesForDelivery({
     packages: [created],
     driver: params.driver,
     date: params.date,
-    location: params.location
+    location: params.location,
+    targetMissionId: params.targetMissionId
   });
   return created;
 };

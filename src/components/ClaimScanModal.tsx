@@ -6,10 +6,10 @@
  * "scan = prise en charge en livraison".
  */
 import React, { useState, useRef, lazy, Suspense } from 'react';
-import { X, Camera, Loader2, CheckCircle, AlertTriangle, Trash2, PackageCheck } from 'lucide-react';
+import { X, Camera, Loader2, CheckCircle, AlertTriangle, Trash2, PackageCheck, Plus } from 'lucide-react';
 import { Package, User, PackageStatus } from '../types';
 import { todayISO } from '../utils/date';
-import { findPackageByCode, claimPackagesForDelivery } from '../services/missionService';
+import { findPackageByCode, claimPackagesForDelivery, createAndClaimPackage } from '../services/missionService';
 import { packageDisplayCode, packageScanCodes } from '../utils/barcode';
 import { getCurrentPosition } from '../utils/geo';
 
@@ -23,15 +23,29 @@ interface ClaimScanModalProps {
   // Mission active à alimenter (récupération pendant une tournée en cours). Sans
   // elle, les colis rejoignent la tournée de récupération du jour (DLV-…).
   targetMissionId?: string;
+  // Clients expéditeurs — pour créer un colis hors-import (code introuvable).
+  clients?: User[];
 }
 
-const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, onDone, confirmLabel = 'Prendre en charge dans ma tournée', targetMissionId }) => {
+const clientLabel = (c: User) => c.companyName || `${c.firstName} ${c.lastName}`.trim() || 'Client';
+
+const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, onDone, confirmLabel = 'Prendre en charge dans ma tournée', targetMissionId, clients = [] }) => {
   const [scannedPkgs, setScannedPkgs] = useState<Package[]>([]);
   const [showScanner, setShowScanner] = useState(false);
   const [manualCode, setManualCode] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [isClaiming, setIsClaiming] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'warn'; message: string } | null>(null);
+
+  // Colis HORS-IMPORT : codes scannés introuvables en base. On ne les perd plus
+  // (avant : simple toast « introuvable » de 4 s) → ils s'accumulent ici et le
+  // chauffeur peut les CRÉER (client + destinataire) pour les intégrer à sa tournée.
+  const [unknownCodes, setUnknownCodes] = useState<string[]>([]);
+  const unknownSeenRef = useRef<Set<string>>(new Set());
+  const [createFor, setCreateFor] = useState<string | null>(null); // code en cours de création
+  const [creating, setCreating] = useState(false);
+  const [createdCount, setCreatedCount] = useState(0);
+  const [createForm, setCreateForm] = useState({ clientId: '', contactName: '', address: '', postalCode: '', city: '', contactPhone: '' });
 
   // File d'attente : en scan rafale, les codes sont traités en série SANS être
   // perdus (contrairement à un simple "ignore si occupé" qui droppait des colis).
@@ -61,7 +75,12 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
         try {
           const pkg = await findPackageByCode(cleaned);
           if (!pkg) {
-            notify('warn', `${cleaned} — colis introuvable (importé ?)`);
+            // Colis hors-import : on le mémorise pour création (au lieu de le perdre).
+            if (!unknownSeenRef.current.has(cleaned)) {
+              unknownSeenRef.current.add(cleaned);
+              setUnknownCodes(prev => [...prev, cleaned]);
+            }
+            notify('warn', `${cleaned} — hors import : à créer`);
           } else if (addedIdsRef.current.has(pkg.id)) {
             notify('warn', `${packageDisplayCode(pkg)} — déjà scanné`);
           } else if (pkg.status === PackageStatus.DELIVERED) {
@@ -92,7 +111,9 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
   };
 
   const handleConfirm = async () => {
-    if (scannedPkgs.length === 0 || isClaiming) return;
+    // Les colis créés hors-import sont DÉJÀ pris en charge (createdCount) ; on peut
+    // valider même si la liste des scannés « connus » est vide.
+    if ((scannedPkgs.length === 0 && createdCount === 0) || isClaiming) return;
     setIsClaiming(true);
     try {
       let location: { lat: number; lng: number } | undefined;
@@ -101,18 +122,62 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
       } catch { /* géoloc optionnelle */ }
 
       const today = todayISO();
-      const count = await claimPackagesForDelivery({
-        packages: scannedPkgs,
-        driver: { id: currentUser.id, name: `${currentUser.firstName} ${currentUser.lastName}` },
-        date: today,
-        location,
-        targetMissionId
-      });
-      onDone(count);
+      let count = 0;
+      if (scannedPkgs.length > 0) {
+        count = await claimPackagesForDelivery({
+          packages: scannedPkgs,
+          driver: { id: currentUser.id, name: `${currentUser.firstName} ${currentUser.lastName}` },
+          date: today,
+          location,
+          targetMissionId
+        });
+      }
+      onDone(count + createdCount);
     } catch (e) {
       notify('warn', e instanceof Error ? e.message : 'Erreur lors de la prise en charge');
       setIsClaiming(false);
     }
+  };
+
+  // Ouvre le formulaire de création pour un code hors-import.
+  const startCreate = (code: string) => {
+    setCreateFor(code);
+    setCreateForm({ clientId: '', contactName: '', address: '', postalCode: '', city: '', contactPhone: '' });
+  };
+
+  // Crée le colis hors-import et le prend en charge dans la tournée (active si fournie).
+  const handleCreate = async () => {
+    if (!createFor || creating) return;
+    if (!createForm.clientId) { notify('warn', 'Choisis le client expéditeur'); return; }
+    if (!createForm.address.trim() || !createForm.city.trim()) { notify('warn', 'Adresse et ville obligatoires'); return; }
+    setCreating(true);
+    try {
+      let location: { lat: number; lng: number } | undefined;
+      try { location = await getCurrentPosition({ timeout: 5000 }); } catch { /* optionnel */ }
+      const client = clients.find(c => c.id === createForm.clientId);
+      await createAndClaimPackage({
+        code: createFor,
+        clientId: createForm.clientId,
+        clientName: client ? clientLabel(client) : 'Client',
+        contactName: createForm.contactName,
+        address: createForm.address,
+        postalCode: createForm.postalCode,
+        city: createForm.city,
+        contactPhone: createForm.contactPhone,
+        driver: { id: currentUser.id, name: `${currentUser.firstName} ${currentUser.lastName}` },
+        date: todayISO(),
+        location,
+        targetMissionId
+      });
+      // Retirer le code de la liste « à créer » + compter.
+      setUnknownCodes(prev => prev.filter(c => c !== createFor));
+      setCreatedCount(n => n + 1);
+      setCreateFor(null);
+      notify('ok', `${createFor} — colis créé et pris en charge ✓`);
+    } catch (e) {
+      notify('warn', e instanceof Error ? e.message : 'Échec de la création');
+    }
+    setCreating(false);
   };
 
   return (
@@ -188,12 +253,39 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
             </div>
           )}
 
+          {createdCount > 0 && (
+            <div className="rounded-xl border border-green-300 bg-green-50 p-2.5 text-xs font-bold text-green-800">
+              ✅ {createdCount} colis hors-import créé{createdCount > 1 ? 's' : ''} et pris en charge
+            </div>
+          )}
+
+          {/* COLIS HORS-IMPORT : codes scannés introuvables → à créer (rien n'est perdu) */}
+          {unknownCodes.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-bold text-amber-700 flex items-center gap-1">
+                <AlertTriangle size={14} /> {unknownCodes.length} colis hors import — à créer
+              </p>
+              {unknownCodes.map(code => (
+                <div key={code} className="flex items-center justify-between gap-2 p-2.5 bg-amber-50 border border-amber-200 rounded-xl">
+                  <p className="font-mono text-xs font-bold text-amber-800 truncate min-w-0">{code}</p>
+                  <button
+                    onClick={() => startCreate(code)}
+                    disabled={isClaiming}
+                    className="flex-shrink-0 flex items-center gap-1 px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-bold active:scale-95 transition-transform disabled:opacity-40"
+                  >
+                    <Plus size={14} /> Créer
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           <button
             onClick={handleConfirm}
-            disabled={scannedPkgs.length === 0 || isClaiming}
+            disabled={(scannedPkgs.length === 0 && createdCount === 0) || isClaiming}
             className="w-full flex items-center justify-center gap-2 py-3.5 bg-green-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-40"
           >
-            {isClaiming ? (<><Loader2 size={18} className="animate-spin" /> Chargement…</>) : (<><PackageCheck size={18} /> {confirmLabel}{scannedPkgs.length > 0 ? ` (${scannedPkgs.length})` : ''}</>)}
+            {isClaiming ? (<><Loader2 size={18} className="animate-spin" /> Chargement…</>) : (<><PackageCheck size={18} /> {confirmLabel}{(scannedPkgs.length + createdCount) > 0 ? ` (${scannedPkgs.length + createdCount})` : ''}</>)}
           </button>
         </div>
       </div>
@@ -214,6 +306,68 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
             title="Scan — récupération"
           />
         </Suspense>
+      )}
+
+      {/* FORMULAIRE DE CRÉATION — colis hors import (au-dessus de tout) */}
+      {createFor && (
+        <div className="fixed inset-0 z-[70] bg-black/60 flex items-end sm:items-center justify-center sm:p-4" onClick={() => !creating && setCreateFor(null)}>
+          <div className="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto animate-slide-up" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between sticky top-0 bg-white z-10">
+              <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                <Plus size={18} className="text-amber-600" /> Créer un colis hors import
+              </h3>
+              <button onClick={() => !creating && setCreateFor(null)} className="p-2 rounded-full hover:bg-slate-100" disabled={creating}>
+                <X size={20} className="text-slate-400" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3">
+              <div className="flex items-start gap-2 p-2.5 bg-amber-50 border border-amber-200 rounded-xl">
+                <span>⚠️</span>
+                <p className="text-[11px] text-amber-800">Colis <b>hors import</b>. Il rejoint ta tournée et sera signalé au bureau pour réconciliation avec le fichier client.</p>
+              </div>
+              <p className="text-xs text-slate-500">N° colis : <b className="font-mono">{createFor}</b></p>
+
+              <div>
+                <label className="text-xs font-bold text-slate-500 block mb-1">Client expéditeur *</label>
+                <select
+                  value={createForm.clientId}
+                  onChange={e => setCreateForm(f => ({ ...f, clientId: e.target.value }))}
+                  className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-green-500 outline-none"
+                >
+                  <option value="">— Choisir —</option>
+                  {clients.map(c => <option key={c.id} value={c.id}>{clientLabel(c)}</option>)}
+                </select>
+              </div>
+
+              <input type="text" placeholder="Destinataire" value={createForm.contactName}
+                onChange={e => setCreateForm(f => ({ ...f, contactName: e.target.value }))}
+                className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-green-500 outline-none" />
+              <input type="text" placeholder="Adresse *" value={createForm.address}
+                onChange={e => setCreateForm(f => ({ ...f, address: e.target.value }))}
+                className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-green-500 outline-none" />
+              <div className="flex gap-2">
+                <input type="text" inputMode="numeric" placeholder="Code postal" value={createForm.postalCode}
+                  onChange={e => setCreateForm(f => ({ ...f, postalCode: e.target.value }))}
+                  className="w-1/3 px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-green-500 outline-none" />
+                <input type="text" placeholder="Ville *" value={createForm.city}
+                  onChange={e => setCreateForm(f => ({ ...f, city: e.target.value }))}
+                  className="flex-1 px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-green-500 outline-none" />
+              </div>
+              <input type="tel" placeholder="Téléphone (optionnel)" value={createForm.contactPhone}
+                onChange={e => setCreateForm(f => ({ ...f, contactPhone: e.target.value }))}
+                className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-green-500 outline-none" />
+
+              <button
+                onClick={handleCreate}
+                disabled={creating}
+                className="w-full flex items-center justify-center gap-2 py-3.5 bg-green-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-50"
+              >
+                {creating ? <><Loader2 size={18} className="animate-spin" /> Création…</> : <><Plus size={18} /> Créer et prendre en charge</>}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
