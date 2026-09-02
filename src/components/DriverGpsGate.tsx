@@ -13,9 +13,9 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { MapPin, Loader2, RefreshCw } from 'lucide-react';
 import { User } from '../types';
-import { getCurrentPosition } from '../utils/geo';
+import { getPositionRobust, isInAppBrowser } from '../utils/geo';
 
-type GpsState = 'checking' | 'ok' | 'need_permission' | 'denied' | 'unavailable';
+type GpsState = 'checking' | 'ok' | 'need_permission' | 'denied' | 'unavailable' | 'timeout';
 
 interface DriverGpsGateProps {
   currentUser: User | null;
@@ -23,7 +23,9 @@ interface DriverGpsGateProps {
 
 const DriverGpsGate: React.FC<DriverGpsGateProps> = ({ currentUser }) => {
   const [state, setState] = useState<GpsState>('checking');
+  const [failCount, setFailCount] = useState(0); // échecs de localisation → porte de sortie après 2
   const passedRef = useRef(false); // une fois débloqué, on ne re-bloque plus la session
+  const inApp = isInAppBrowser();
 
   const isDriver = (() => {
     const r = String(currentUser?.role || '').toLowerCase();
@@ -33,13 +35,25 @@ const DriverGpsGate: React.FC<DriverGpsGateProps> = ({ currentUser }) => {
   const tryGetPosition = useCallback(() => {
     if (!('geolocation' in navigator)) { setState('unavailable'); return; }
     setState('checking');
-    getCurrentPosition({ enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 })
+    // getPositionRobust : haute précision PUIS repli basse précision (réseau) —
+    // évite le faux « GPS coupé » quand le satellite met trop longtemps à accrocher.
+    getPositionRobust()
       .then(() => { passedRef.current = true; setState('ok'); })
       .catch((err: any) => {
-        if (err && err.code === err.PERMISSION_DENIED) setState('denied');
-        else setState('unavailable'); // position indispo / timeout → GPS OS coupé ou pas de signal
+        setFailCount(n => n + 1);
+        if (err && typeof err.code === 'number' && err.code === 1 /* PERMISSION_DENIED */) {
+          setState('denied');
+        } else if (err && typeof err.code === 'number' && err.code === 3 /* TIMEOUT */) {
+          setState('timeout'); // GPS actif mais signal qui n'accroche pas (≠ GPS coupé)
+        } else {
+          setState('unavailable'); // position indisponible → GPS OS coupé / pas de signal
+        }
       });
   }, []);
+
+  // Porte de sortie : après 2 échecs, le chauffeur peut entrer quand même. La
+  // livraison et le départ de tournée restent protégés par leurs propres contrôles GPS.
+  const forceContinue = useCallback(() => { passedRef.current = true; setState('ok'); }, []);
 
   const check = useCallback(() => {
     if (passedRef.current) { setState('ok'); return; }
@@ -113,6 +127,19 @@ const DriverGpsGate: React.FC<DriverGpsGateProps> = ({ currentUser }) => {
           </>
         )}
 
+        {state === 'timeout' && (
+          <>
+            <p className="text-white/80 mb-4">
+              {hi}ton GPS est activé mais le <b>signal met du temps à accrocher</b>. Place-toi près
+              d'une fenêtre ou à l'air libre quelques secondes, puis réessaye.
+            </p>
+            <button onClick={tryGetPosition}
+              className="w-full py-4 bg-amber-500 hover:bg-amber-600 rounded-2xl font-bold text-lg flex items-center justify-center gap-2">
+              <RefreshCw size={18} /> Réessayer
+            </button>
+          </>
+        )}
+
         {state === 'unavailable' && (
           <>
             <p className="text-white/80 mb-4">
@@ -124,6 +151,25 @@ const DriverGpsGate: React.FC<DriverGpsGateProps> = ({ currentUser }) => {
               <RefreshCw size={18} /> Réessayer
             </button>
           </>
+        )}
+
+        {/* Navigateur intégré (WhatsApp/Gmail/Facebook…) : la géoloc y est souvent
+            bloquée → on conseille d'ouvrir dans le vrai navigateur. */}
+        {inApp && state !== 'checking' && (
+          <p className="text-amber-200/90 text-sm mt-4 bg-amber-500/10 border border-amber-400/20 rounded-xl p-3">
+            📱 Tu as ouvert le lien depuis une messagerie. Ouvre plutôt l'app dans <b>Chrome</b> (Android)
+            ou <b>Safari</b> (iPhone) : « ⋯ → Ouvrir dans le navigateur ».
+          </p>
+        )}
+
+        {/* Porte de sortie après 2 échecs : ne jamais bloquer totalement un chauffeur
+            à cause d'un 1er fix capricieux. Les moments critiques (livraison, départ
+            de tournée) revérifient le GPS de leur côté. */}
+        {failCount >= 2 && (state === 'timeout' || state === 'unavailable') && (
+          <button onClick={forceContinue}
+            className="w-full py-3 mt-3 bg-white/10 hover:bg-white/20 rounded-2xl font-semibold text-sm text-white/80">
+            Continuer quand même →
+          </button>
         )}
 
         <p className="text-white/40 text-xs mt-6">
