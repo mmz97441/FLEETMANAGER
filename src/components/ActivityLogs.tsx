@@ -11,11 +11,19 @@ import {
 import { normalizeRole } from '../utils/role';
 import { todayISO, localDatePart } from '../utils/date';
 import {
-  getActivityLogs, 
-  subscribeToActivityLogs, 
+  getActivityLogs,
+  subscribeToActivityLogs,
   exportLogsToCSV,
-  ActivityLogFilters 
+  ActivityLogFilters
 } from '../services/activityLogService';
+import { subscribeToPackages } from '../services/missionService';
+import { Package, PackageStatus } from '../types';
+
+// Ancienneté en heures depuis un ISO (pour détecter les colis « bloqués »).
+const hoursSince = (iso?: string): number => {
+  if (!iso) return 0;
+  return (Date.now() - new Date(iso).getTime()) / 3_600_000;
+};
 import {
   Activity, Search, Filter, Download, RefreshCw, Calendar,
   User as UserIcon, Car, Droplet, Wrench, AlertTriangle, FileText,
@@ -54,14 +62,24 @@ const ActivityLogs: React.FC<ActivityLogsProps> = ({ users, currentUser, initial
   const [selectedLog, setSelectedLog] = useState<ActivityLog | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
 
+  // Colis (pour l'onglet Anomalies : détecter les colis bloqués trop longtemps).
+  const [packages, setPackages] = useState<Package[]>([]);
+
   // Charger les logs au montage
   useEffect(() => {
     const unsubscribe = subscribeToActivityLogs((newLogs) => {
       setLogs(newLogs);
       setIsLoading(false);
     }, 200);
-    
+
     return () => unsubscribe();
+  }, []);
+
+  // S'abonner aux colis (président-only : cet écran est déjà réservé). Sert au
+  // repérage des colis « bloqués » (en livraison / en attente depuis trop longtemps).
+  useEffect(() => {
+    const unsub = subscribeToPackages(setPackages);
+    return () => unsub();
   }, []);
 
   // Logs filtrés
@@ -225,14 +243,30 @@ const ActivityLogs: React.FC<ActivityLogsProps> = ({ users, currentUser, initial
     const noGps = deliveries.filter(l => l.details?.metadata?.gps === false);
     const adhoc = logs.filter(l => String(l.action) === 'PACKAGE_CREATED_ADHOC');
 
+    // COLIS BLOQUÉS — non terminaux (ni livré/retourné/échec) immobiles trop longtemps.
+    // Deux seuils : « En livraison » > 6 h (devrait être remis le jour même) ;
+    // « En attente / Collecté » > 48 h (jamais parti). Trié du plus vieux au plus récent.
+    const TERMINAL = [PackageStatus.DELIVERED, PackageStatus.RETURNED, PackageStatus.FAILED];
+    const stuck = packages
+      .filter(p => !TERMINAL.includes(p.status))
+      .map(p => {
+        const h = hoursSince(p.updatedAt);
+        const inDelivery = p.status === PackageStatus.IN_DELIVERY;
+        const isStuck = inDelivery ? h > 6 : h > 48;
+        return { p, h, isStuck };
+      })
+      .filter(s => s.isStuck)
+      .sort((a, b) => b.h - a.h);
+
     return {
       failures,
       driverRates,
       noGps,
       adhoc,
-      hasAny: failures.length > 0 || noGps.length > 0 || adhoc.length > 0 || driverRates.some(d => d.rate >= 20),
+      stuck,
+      hasAny: failures.length > 0 || noGps.length > 0 || adhoc.length > 0 || stuck.length > 0 || driverRates.some(d => d.rate >= 20),
     };
-  }, [logs]);
+  }, [logs, packages]);
 
   // VERROU PRÉSIDENT — ce journal est confidentiel (qui fait quoi + erreurs +
   // anomalies). Réservé au président. Défense en profondeur : le menu le masque,
@@ -339,7 +373,7 @@ const ActivityLogs: React.FC<ActivityLogsProps> = ({ users, currentUser, initial
           )}
 
           {/* Cartes de synthèse */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="bg-white rounded-xl border border-slate-200 p-4">
               <p className="text-xs font-medium text-slate-500 uppercase">Échecs de livraison</p>
               <p className="text-2xl font-bold text-red-600 tabular-nums">{anomalies.failures.length}</p>
@@ -352,7 +386,34 @@ const ActivityLogs: React.FC<ActivityLogsProps> = ({ users, currentUser, initial
               <p className="text-xs font-medium text-slate-500 uppercase">Hors-import à réconcilier</p>
               <p className="text-2xl font-bold text-blue-600 tabular-nums">{anomalies.adhoc.length}</p>
             </div>
+            <div className="bg-white rounded-xl border border-slate-200 p-4">
+              <p className="text-xs font-medium text-slate-500 uppercase">Colis bloqués</p>
+              <p className="text-2xl font-bold text-red-600 tabular-nums">{anomalies.stuck.length}</p>
+            </div>
           </div>
+
+          {/* Colis bloqués trop longtemps — non livrés/retournés, immobiles. */}
+          {anomalies.stuck.length > 0 && (
+            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-100 font-bold text-slate-800 text-sm flex items-center gap-2">
+                <AlertTriangle size={16} className="text-red-500" /> Colis bloqués ({anomalies.stuck.length})
+                <span className="font-normal text-slate-400 text-xs">— « En livraison » &gt; 6 h ou « En attente/Collecté » &gt; 48 h</span>
+              </div>
+              <div className="divide-y divide-slate-100 max-h-80 overflow-y-auto">
+                {anomalies.stuck.slice(0, 40).map(({ p, h }) => (
+                  <div key={p.id} className="px-4 py-2.5 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-mono font-bold text-slate-700 truncate">{p.barcode || p.orderNumber || p.id}</p>
+                      <p className="text-[11px] text-slate-500 truncate">{p.status} · {p.contactName || '—'} · {p.city || ''}</p>
+                    </div>
+                    <span className={`text-sm font-bold tabular-nums flex-shrink-0 px-2 py-0.5 rounded-lg ${h > 48 ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                      {h >= 48 ? `${Math.round(h / 24)} j` : `${Math.round(h)} h`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Détail des échecs récents */}
           {anomalies.failures.length > 0 && (
