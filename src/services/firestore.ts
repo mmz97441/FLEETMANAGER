@@ -134,9 +134,15 @@ export const linkAuthToProfile = async (email: string, authUid: string) => {
         await deleteDoc(doc(db, "users", oldDoc.id));
         console.log(`Profil migré de ${oldDoc.id} vers ${authUid}`);
     } catch (delErr) {
-        reportError('auth.linkProfile.deleteOld', delErr, {
+        // ATTENDU pour un chauffeur/client qui migre son propre profil : la
+        // suppression d'un user est réservée aux admins → refus. Le nouveau profil
+        // est déjà en place, la connexion aboutit. On journalise en AVERTISSEMENT
+        // (pas en erreur rouge) avec un message explicite : ce n'est pas un bug,
+        // juste un ancien doublon à nettoyer côté admin.
+        reportError('auth.linkProfile.deleteOld', new Error(`Doublon de profil à nettoyer (ancien id ${oldDoc.id}) — suppression réservée admin, connexion OK`), {
+            level: 'warning',
             silent: true,
-            extra: { oldId: oldDoc.id, authUid, email: normalizedEmail }
+            extra: { oldId: oldDoc.id, authUid, email: normalizedEmail, original: delErr instanceof Error ? delErr.message : String(delErr) }
         });
     }
 };
