@@ -726,6 +726,13 @@ export enum ActivityAction {
   ITEM_DELETED = 'ITEM_DELETED',
   STATUS_CHANGED = 'STATUS_CHANGED',
 
+  // Terrain chauffeur (livraison / colis)
+  PACKAGE_DELIVERED = 'PACKAGE_DELIVERED',
+  PACKAGE_DELIVERY_FAILED = 'PACKAGE_DELIVERY_FAILED',
+  PACKAGE_PICKED_UP = 'PACKAGE_PICKED_UP',
+  PACKAGE_TRANSFERRED = 'PACKAGE_TRANSFERRED',
+  PACKAGE_CREATED_ADHOC = 'PACKAGE_CREATED_ADHOC',
+
   // Système
   SYSTEM_SETTINGS_UPDATED = 'SYSTEM_SETTINGS_UPDATED',
   PERMISSIONS_UPDATED = 'PERMISSIONS_UPDATED',
@@ -743,6 +750,7 @@ export enum ActivityCategory {
   ABSENCES = 'Absences',
   QUOTES = 'Devis',
   MISSIONS = 'Missions',
+  DELIVERY = 'Livraison',
   SYSTEM = 'Système'
 }
 
@@ -764,6 +772,11 @@ export interface ActivityLog {
   targetId?: string;
   targetName?: string;         // Ex: "AB-123-CD" pour un véhicule
   
+  // Résultat métier : permet de distinguer « ce qui va bien » de « ce qui cloche »
+  // dans le journal (livraison réussie vs échec, etc.). 'neutral' = action sans
+  // notion de succès/échec (création, modif…).
+  outcome?: 'success' | 'failure' | 'neutral';
+
   // Détails (données avant/après pour les modifications)
   details?: {
     before?: Record<string, any>;
@@ -771,7 +784,7 @@ export interface ActivityLog {
     changes?: string[];        // Liste des champs modifiés
     metadata?: Record<string, any>;
   };
-  
+
   // Contexte
   ipAddress?: string;
   userAgent?: string;

@@ -5,9 +5,10 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  ActivityLog, ActivityCategory, ActivityAction, User 
+import {
+  ActivityLog, ActivityCategory, ActivityAction, User, UserRole
 } from '../types';
+import { normalizeRole } from '../utils/role';
 import { todayISO, localDatePart } from '../utils/date';
 import {
   getActivityLogs, 
@@ -28,12 +29,12 @@ import ErrorLogsPanel from './ErrorLogsPanel';
 interface ActivityLogsProps {
   users: User[];
   currentUser: User;
-  initialTab?: 'activity' | 'errors';
+  initialTab?: 'activity' | 'errors' | 'anomalies';
 }
 
 const ActivityLogs: React.FC<ActivityLogsProps> = ({ users, currentUser, initialTab = 'activity' }) => {
-  // Onglet : activité (audit) ou erreurs techniques
-  const [tab, setTab] = useState<'activity' | 'errors'>(initialTab);
+  // Onglet : activité (audit), erreurs techniques ou anomalies (bon/mauvais)
+  const [tab, setTab] = useState<'activity' | 'errors' | 'anomalies'>(initialTab);
   // États
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -200,6 +201,54 @@ const ActivityLogs: React.FC<ActivityLogsProps> = ({ users, currentUser, initial
     };
   }, [logs]);
 
+  // ANOMALIES — « ce qui cloche », calculé depuis les logs d'activité déjà chargés.
+  // Se concentre sur le terrain : échecs de livraison, taux d'échec par chauffeur,
+  // livraisons sans GPS, colis créés hors import (à réconcilier par le bureau).
+  const anomalies = useMemo(() => {
+    const isDelivery = (a: string) => a === 'PACKAGE_DELIVERED';
+    const isFailure = (a: string) => a === 'PACKAGE_DELIVERY_FAILED';
+    const failures = logs.filter(l => isFailure(String(l.action)));
+    const deliveries = logs.filter(l => isDelivery(String(l.action)));
+
+    // Taux d'échec par chauffeur (échecs / (livraisons + échecs)).
+    const byDriver = new Map<string, { name: string; ok: number; ko: number }>();
+    for (const l of [...deliveries, ...failures]) {
+      const e = byDriver.get(l.userId) || { name: l.userName, ok: 0, ko: 0 };
+      if (isFailure(String(l.action))) e.ko += 1; else e.ok += 1;
+      byDriver.set(l.userId, e);
+    }
+    const driverRates = [...byDriver.values()]
+      .map(d => ({ ...d, total: d.ok + d.ko, rate: d.ok + d.ko > 0 ? Math.round((d.ko / (d.ok + d.ko)) * 100) : 0 }))
+      .filter(d => d.total >= 3) // significatif seulement
+      .sort((a, b) => b.rate - a.rate);
+
+    const noGps = deliveries.filter(l => l.details?.metadata?.gps === false);
+    const adhoc = logs.filter(l => String(l.action) === 'PACKAGE_CREATED_ADHOC');
+
+    return {
+      failures,
+      driverRates,
+      noGps,
+      adhoc,
+      hasAny: failures.length > 0 || noGps.length > 0 || adhoc.length > 0 || driverRates.some(d => d.rate >= 20),
+    };
+  }, [logs]);
+
+  // VERROU PRÉSIDENT — ce journal est confidentiel (qui fait quoi + erreurs +
+  // anomalies). Réservé au président. Défense en profondeur : le menu le masque,
+  // la route le garde, les règles Firestore le bloquent, et ici on refuse aussi
+  // l'affichage plutôt que de montrer un tableau (double sécurité).
+  const isPresident = normalizeRole(currentUser.role) === UserRole.PRESIDENT;
+  if (!isPresident) {
+    return (
+      <div className="flex flex-col items-center justify-center h-96 text-center p-6">
+        <Shield size={48} className="text-slate-300 mb-3" />
+        <p className="font-bold text-slate-700">Accès réservé</p>
+        <p className="text-sm text-slate-500 mt-1">Ce journal est confidentiel et réservé à la présidence.</p>
+      </div>
+    );
+  }
+
   if (isLoading && tab === 'activity') {
     return (
       <div className="flex items-center justify-center h-96">
@@ -253,9 +302,74 @@ const ActivityLogs: React.FC<ActivityLogsProps> = ({ users, currentUser, initial
         >
           <span className="flex items-center gap-2"><AlertTriangle size={16} /> Journal d'erreurs</span>
         </button>
+        <button
+          onClick={() => setTab('anomalies')}
+          className={`px-4 py-2 text-sm font-bold border-b-2 -mb-px transition-colors ${
+            tab === 'anomalies' ? 'border-amber-500 text-amber-600' : 'border-transparent text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          <span className="flex items-center gap-2">⚠️ Anomalies{anomalies.hasAny ? <span className="ml-1 px-1.5 py-0.5 bg-amber-500 text-white rounded-full text-[10px]">!</span> : null}</span>
+        </button>
       </div>
 
-      {tab === 'errors' ? <ErrorLogsPanel /> : (
+      {tab === 'errors' ? <ErrorLogsPanel /> : tab === 'anomalies' ? (
+        <div className="space-y-4">
+          {!anomalies.hasAny && (
+            <div className="bg-green-50 border border-green-200 rounded-xl p-6 text-center text-green-800 font-semibold">
+              ✅ Aucune anomalie détectée sur la période chargée.
+            </div>
+          )}
+
+          {/* Taux d'échec par chauffeur */}
+          {anomalies.driverRates.length > 0 && (
+            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-100 font-bold text-slate-800 text-sm">Taux d'échec par chauffeur</div>
+              <div className="divide-y divide-slate-100">
+                {anomalies.driverRates.map(d => (
+                  <div key={d.name} className="px-4 py-2.5 flex items-center justify-between gap-2">
+                    <span className="text-sm text-slate-700 truncate min-w-0">{d.name}</span>
+                    <span className="flex items-center gap-3 flex-shrink-0">
+                      <span className="text-xs text-slate-500 tabular-nums">{d.ok} livrés · {d.ko} échecs</span>
+                      <span className={`text-sm font-bold tabular-nums px-2 py-0.5 rounded-lg ${d.rate >= 20 ? 'bg-red-100 text-red-700' : d.rate >= 10 ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>{d.rate}%</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Cartes de synthèse */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="bg-white rounded-xl border border-slate-200 p-4">
+              <p className="text-xs font-medium text-slate-500 uppercase">Échecs de livraison</p>
+              <p className="text-2xl font-bold text-red-600 tabular-nums">{anomalies.failures.length}</p>
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 p-4">
+              <p className="text-xs font-medium text-slate-500 uppercase">Livraisons sans GPS</p>
+              <p className="text-2xl font-bold text-amber-600 tabular-nums">{anomalies.noGps.length}</p>
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 p-4">
+              <p className="text-xs font-medium text-slate-500 uppercase">Hors-import à réconcilier</p>
+              <p className="text-2xl font-bold text-blue-600 tabular-nums">{anomalies.adhoc.length}</p>
+            </div>
+          </div>
+
+          {/* Détail des échecs récents */}
+          {anomalies.failures.length > 0 && (
+            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-100 font-bold text-slate-800 text-sm">Échecs de livraison récents</div>
+              <div className="divide-y divide-slate-100 max-h-80 overflow-y-auto">
+                {anomalies.failures.slice(0, 30).map(l => (
+                  <div key={l.id} className="px-4 py-2.5">
+                    <p className="text-sm text-slate-700">{l.description}</p>
+                    <p className="text-[11px] text-slate-400">{formatRelativeTime(l.createdAt)}{l.details?.metadata?.motif ? ` · ${l.details.metadata.motif}` : ''}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
       <>
       {/* Stats rapides */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -424,6 +538,8 @@ const ActivityLogs: React.FC<ActivityLogsProps> = ({ users, currentUser, initial
                           {getActionIcon(log.action)}
                           {log.category}
                         </span>
+                        {log.outcome === 'success' && <span title="Réussi" className="text-green-600 font-bold">✅</span>}
+                        {log.outcome === 'failure' && <span title="Échec" className="text-red-600 font-bold">❌</span>}
                       </div>
                     </td>
                     <td className="px-4 py-3 hidden md:table-cell">

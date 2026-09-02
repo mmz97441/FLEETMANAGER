@@ -33,6 +33,11 @@ service cloud.firestore {
       return request.auth != null && getUserRole().matches('(?i)^(admin|pr[eé]siden.*|directeur.*|directrice.*|direction)$');
     }
 
+    // PRÉSIDENT uniquement — journal confidentiel (qui fait quoi + erreurs + anomalies).
+    function isPresident() {
+      return request.auth != null && getUserRole().matches('(?i)^(pr[eé]siden.*)$');
+    }
+
     // Rôles internes (tous sauf Client)
     function isInternalUser() {
       return request.auth != null && getUserRole().matches('(?i)^(admin|pr[eé]siden.*|directeur.*|directrice.*|direction|secr[eé]ta.*|chauffeu.*|m[eé]canicien.*|stagiaire)$');
@@ -433,8 +438,12 @@ service cloud.firestore {
     // Création : tout connecté MAIS le log doit être à SON nom (pas de falsification)
     // Lecture : tous les connectés
     // Modification/suppression : interdite (immuable)
+    // --- Journal d'activité (audit « qui fait quoi ») ---
+    // Lecture PRÉSIDENT UNIQUEMENT (journal confidentiel). Création : tout
+    // connecté pour SES propres entrées (les chauffeurs journalisent leur
+    // terrain). Jamais modifiable ni supprimable (audit immuable).
     match /activity_logs/{logId} {
-      allow read: if isAuthenticated();
+      allow read: if isPresident();
       allow create: if isAuthenticated()
         && request.resource.data.userId == request.auth.uid;
       allow update, delete: if false;
@@ -442,10 +451,10 @@ service cloud.firestore {
 
     // --- Journal d'erreurs technique ---
     // Création : tout utilisateur connecté (les erreurs surviennent partout,
-    // pour tous les rôles). Lecture réservée à la direction (contient stack
-    // technique + contexte). Jamais modifiable ni supprimable.
+    // pour tous les rôles). Lecture PRÉSIDENT UNIQUEMENT (journal confidentiel,
+    // contient stack technique + contexte). Jamais modifiable ni supprimable.
     match /error_logs/{logId} {
-      allow read: if isAdminRole();
+      allow read: if isPresident();
       allow create: if isAuthenticated();
       allow update, delete: if false;
     }

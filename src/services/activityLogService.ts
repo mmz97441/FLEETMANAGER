@@ -36,8 +36,16 @@ const getCategory = (action: ActivityAction): ActivityCategory => {
   if (action.startsWith('DOCUMENT_')) return ActivityCategory.DOCUMENTS;
   if (action.startsWith('ABSENCE_')) return ActivityCategory.ABSENCES;
   if (action.startsWith('QUOTE_')) return ActivityCategory.QUOTES;
+  if (action.startsWith('PACKAGE_')) return ActivityCategory.DELIVERY;
   if (action.startsWith('MISSION_') || action.startsWith('ITEM_')) return ActivityCategory.MISSIONS;
   return ActivityCategory.SYSTEM;
+};
+
+// Résultat métier par défaut selon l'action (surchargé par options.outcome).
+const defaultOutcome = (action: ActivityAction): 'success' | 'failure' | 'neutral' => {
+  if (action === ActivityAction.PACKAGE_DELIVERED || action === ActivityAction.MISSION_COMPLETED) return 'success';
+  if (action === ActivityAction.PACKAGE_DELIVERY_FAILED) return 'failure';
+  return 'neutral';
 };
 
 // Mapper action -> description lisible
@@ -106,6 +114,13 @@ const getActionLabel = (action: ActivityAction): string => {
     [ActivityAction.ITEM_UPDATED]: 'a modifié un élément',
     [ActivityAction.ITEM_DELETED]: 'a supprimé un élément',
     [ActivityAction.STATUS_CHANGED]: 'a changé le statut',
+
+    // Terrain chauffeur
+    [ActivityAction.PACKAGE_DELIVERED]: 'a livré un colis',
+    [ActivityAction.PACKAGE_DELIVERY_FAILED]: 'a échoué la livraison',
+    [ActivityAction.PACKAGE_PICKED_UP]: 'a récupéré des colis',
+    [ActivityAction.PACKAGE_TRANSFERRED]: 'a transféré des colis',
+    [ActivityAction.PACKAGE_CREATED_ADHOC]: 'a créé un colis hors import',
     
     // Système
     [ActivityAction.SYSTEM_SETTINGS_UPDATED]: 'a modifié les paramètres',
@@ -129,6 +144,7 @@ export const logActivity = async (
     targetName?: string;
     details?: ActivityLog['details'];
     description?: string; // Override la description auto
+    outcome?: 'success' | 'failure' | 'neutral'; // Surcharge le résultat par défaut
   }
 ): Promise<void> => {
   try {
@@ -151,6 +167,7 @@ export const logActivity = async (
       action,
       category,
       description,
+      outcome: options?.outcome || defaultOutcome(action),
       targetType: options?.targetType,
       targetId: options?.targetId,
       targetName: options?.targetName,

@@ -7,9 +7,10 @@
  */
 import React, { useState, useRef, lazy, Suspense } from 'react';
 import { X, Camera, Loader2, CheckCircle, AlertTriangle, Trash2, PackageCheck, Plus } from 'lucide-react';
-import { Package, User, PackageStatus } from '../types';
+import { Package, User, PackageStatus, ActivityAction } from '../types';
 import { todayISO } from '../utils/date';
 import { findPackageByCode, claimPackagesForDelivery, createAndClaimPackage } from '../services/missionService';
+import { logActivity } from '../services/activityLogService';
 import { packageDisplayCode, packageScanCodes } from '../utils/barcode';
 import { getCurrentPosition } from '../utils/geo';
 
@@ -131,6 +132,13 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
           location,
           targetMissionId
         });
+        // JOURNAL — récupération. Un colis déjà porté par un autre chauffeur = transfert.
+        const transfers = scannedPkgs.filter(p => !!p.currentDriverId && p.currentDriverId !== currentUser.id && !!p.missionId).length;
+        void logActivity(currentUser, transfers > 0 ? ActivityAction.PACKAGE_TRANSFERRED : ActivityAction.PACKAGE_PICKED_UP, {
+          targetType: 'package',
+          description: `${currentUser.firstName} ${currentUser.lastName} a récupéré ${count} colis${transfers > 0 ? ` (dont ${transfers} en transfert d'un collègue)` : ''}`,
+          details: { metadata: { récupérés: count, transferts: transfers } }
+        });
       }
       onDone(count + createdCount);
     } catch (e) {
@@ -168,6 +176,12 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
         date: todayISO(),
         location,
         targetMissionId
+      });
+      // JOURNAL — création hors import (à réconcilier par le bureau).
+      void logActivity(currentUser, ActivityAction.PACKAGE_CREATED_ADHOC, {
+        targetType: 'package', targetName: createFor,
+        description: `${currentUser.firstName} ${currentUser.lastName} a créé le colis hors import ${createFor} (${client ? clientLabel(client) : 'client'})`,
+        details: { metadata: { code: createFor, client: client ? clientLabel(client) : undefined, ville: createForm.city } }
       });
       // Retirer le code de la liste « à créer » + compter.
       setUnknownCodes(prev => prev.filter(c => c !== createFor));

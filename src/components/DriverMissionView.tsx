@@ -17,7 +17,7 @@ import React, { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'rea
 import {
   Mission, MissionStatus, MissionType, MissionStop, StopStatus,
   PackageStatus, FailureReason, Package, DeliveryLocation,
-  User, MISSION_STATUS_COLORS, Issue, IssueStatus
+  User, MISSION_STATUS_COLORS, Issue, IssueStatus, ActivityAction
 } from '../types';
 import { addIssueToFirestore } from '../services/firestore';
 import { todayISO, localDatePart } from '../utils/date';
@@ -38,6 +38,7 @@ import {
 import { uploadAndCreatePOD, uploadFailurePOD, UploadProgress } from '../services/podService';
 import { finalizePickup } from '../services/pickupService';
 import { reportError } from '../services/logService';
+import { logActivity } from '../services/activityLogService';
 import PickupScanView from './PickupScanView';
 import TransferReceiveModal from './TransferReceiveModal';
 import ClaimScanModal from './ClaimScanModal';
@@ -680,6 +681,13 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
         stops: updatedStops
       });
 
+      // JOURNAL — départ de tournée.
+      void logActivity(currentUser, ActivityAction.MISSION_STARTED, {
+        targetType: 'mission', targetId: mission.id, targetName: `Tournée ${mission.zone || ''}`.trim(),
+        description: `${currentUser.firstName} ${currentUser.lastName} a démarré sa tournée (${updatedStops.length} arrêts)`,
+        details: { metadata: { arrêts: updatedStops.length, zone: mission.zone } }
+      });
+
       setIsLoadingPhase(false);
       setActiveStopIndex(0);
       showNotif('🚀 Chargement terminé — Bonne tournée !');
@@ -837,6 +845,13 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
     setIsProcessing(true);
     try {
       await updateMissionStatus(activeMission.id, MissionStatus.COMPLETED);
+      // JOURNAL — fin de tournée (avec bilan livrés/échecs pour le président).
+      void logActivity(currentUser, ActivityAction.MISSION_COMPLETED, {
+        targetType: 'mission', targetId: activeMission.id, targetName: `Tournée ${activeMission.zone || ''}`.trim(),
+        outcome: 'success',
+        description: `${currentUser.firstName} ${currentUser.lastName} a terminé sa tournée — ${activeMission.deliveredPackages || 0} livrés, ${activeMission.failedPackages || 0} échecs`,
+        details: { metadata: { livrés: activeMission.deliveredPackages || 0, échecs: activeMission.failedPackages || 0, arrêts: activeMission.stops.length } }
+      });
       showNotif('🏁 Tournée terminée — bravo !');
       setActiveMissionId(null); // repart sur la liste (la tournée n'est plus « en cours »)
     } catch (err) {
@@ -1007,6 +1022,15 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
         failedDelta: okFailed.length
       });
 
+      // 4bis. JOURNAL — livraison (succès + éventuels non remis). Trace « qui a livré
+      //       quoi » visible par le président. Best-effort, n'interrompt jamais.
+      void logActivity(currentUser, ActivityAction.PACKAGE_DELIVERED, {
+        targetType: 'package', targetId: currentStop.id, targetName: currentStop.contactName || currentStop.address,
+        outcome: 'success',
+        description: `${currentUser.firstName} ${currentUser.lastName} a livré ${okDelivered.length} colis à ${currentStop.contactName || currentStop.city}${okFailed.length > 0 ? ` (${okFailed.length} non remis)` : ''}`,
+        details: { metadata: { livrés: okDelivered.length, nonRemis: okFailed.length, ville: currentStop.city, gps: !!coords } }
+      });
+
       // 5. Upload des preuves (POD) — best-effort : NE DOIT JAMAIS annuler la livraison.
       try {
         setUploadProgress({ step: 'compressing', current: 0, total: 1, message: 'Préparation...' });
@@ -1107,6 +1131,14 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
           arrivalCoordinates: coords
         },
         failedDelta: currentStop.packageCount
+      });
+
+      // JOURNAL — échec de livraison (⚠️ ressort en « pas bon » côté président).
+      void logActivity(currentUser, ActivityAction.PACKAGE_DELIVERY_FAILED, {
+        targetType: 'package', targetId: currentStop.id, targetName: currentStop.contactName || currentStop.address,
+        outcome: 'failure',
+        description: `${currentUser.firstName} ${currentUser.lastName} — échec livraison ${currentStop.packageCount} colis à ${currentStop.contactName || currentStop.city} : ${failureReason}`,
+        details: { metadata: { motif: failureReason, note: failureNotes || undefined, colis: currentStop.packageCount, ville: currentStop.city } }
       });
 
       // Mettre à jour colis en échec — BON format PackageMovement

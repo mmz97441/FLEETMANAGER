@@ -214,6 +214,16 @@ const App: React.FC = () => {
                 // Enregistrer la dernière connexion (non bloquant)
                 recordUserLogin(firebaseUser.uid);
 
+                // JOURNAL — connexion, UNE SEULE FOIS par session navigateur
+                // (onAuthStateChanged refire à chaque rechargement → sinon spam).
+                try {
+                  const sk = `logged_login_${firebaseUser.uid}`;
+                  if (!sessionStorage.getItem(sk)) {
+                    sessionStorage.setItem(sk, '1');
+                    void logActivity(existingProfile, ActivityAction.USER_LOGIN, { targetType: 'user', targetId: existingProfile.id });
+                  }
+                } catch { /* sessionStorage indispo : on ignore */ }
+
                 // REDIRECTION SÉCURITÉ CLIENT
                 // Si l'utilisateur est un client, on le force vers le tableau de bord client
                 const role = String(existingProfile.role || '').toLowerCase();

@@ -174,8 +174,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
         { id: 'import_export', label: 'Imports / Exports', icon: Download, permission: Permission.IMPORT_EXPORT_ACCESS },
         { id: 'notifications_settings', label: 'Notifications', icon: Bell, permission: Permission.SETTINGS_ACCESS },
         { id: 'settings', label: 'Préférences', icon: SettingsIcon, permission: Permission.SETTINGS_ACCESS },
-        { id: 'activity_logs', label: "Logs d'activité", icon: ClipboardList, permission: Permission.LOGS_VIEW },
-        { id: 'error_logs', label: "Journal d'erreurs", icon: AlertTriangle, permission: Permission.LOGS_VIEW },
+        { id: 'activity_logs', label: 'Journal (président)', icon: ClipboardList },
         { id: 'api_diagnostic', label: 'Diagnostic API', icon: Activity, permission: Permission.SETTINGS_COMPANY },
       ]
     },
@@ -236,6 +235,11 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
     const isClientRole = String(currentUser.role || '').toLowerCase().includes('client');
     if (itemId === 'client_space' || itemId.startsWith('client_')) {
       return isClientRole;
+    }
+
+    // JOURNAL confidentiel (activité + erreurs + anomalies) : président UNIQUEMENT.
+    if (itemId === 'activity_logs' || itemId === 'error_logs') {
+      return roleKey(currentUser.role).includes('presiden');
     }
 
     // Si pas de permission définie = accessible à tous
