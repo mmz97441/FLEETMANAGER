@@ -316,6 +316,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   const [showIssue, setShowIssue] = useState(false);
   const [issueForm, setIssueForm] = useState<{ category: string; description: string; priority: 'Low' | 'Medium' | 'High' }>({ category: 'Véhicule / panne', description: '', priority: 'Medium' });
   const [issueSubmitting, setIssueSubmitting] = useState(false);
+  const [showFinishConfirm, setShowFinishConfirm] = useState(false); // confirmation « terminer avec arrêts restants »
   const [stopPackages, setStopPackages] = useState<Package[]>([]);
   // Filet de sécurité : colis à la même adresse NON inclus dans l'arrêt courant
   const [otherAtAddress, setOtherAtAddress] = useState<Package[]>([]);
@@ -840,8 +841,22 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   };
 
   // Clôturer la tournée (choix explicite du chauffeur quand tous les arrêts sont faits).
+  // Nombre d'arrêts encore à traiter (ni terminés/échoués/passés).
+  const remainingStops = sortedStops.filter(s =>
+    s.status !== StopStatus.COMPLETED && s.status !== StopStatus.FAILED && s.status !== StopStatus.SKIPPED
+  ).length;
+
+  // Demande de clôture : si tout est fait → clôture directe ; sinon → confirmation
+  // (le chauffeur peut avoir un arrêt bloqué en « Arrivé » ou vouloir finir plus tôt).
+  const requestFinishTour = () => {
+    if (isProcessing) return;
+    if (remainingStops > 0) { setShowFinishConfirm(true); return; }
+    void handleFinishTour();
+  };
+
   const handleFinishTour = async () => {
     if (!activeMission || isProcessing) return;
+    setShowFinishConfirm(false);
     setIsProcessing(true);
     try {
       await updateMissionStatus(activeMission.id, MissionStatus.COMPLETED);
@@ -1487,6 +1502,32 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
           </div>
         )}
 
+        {/* === CONFIRMATION : terminer alors qu'il reste des arrêts === */}
+        {showFinishConfirm && (
+          <div className="fixed inset-0 z-[60] bg-black/60 flex items-end sm:items-center justify-center sm:p-4" onClick={() => setShowFinishConfirm(false)}>
+            <div className="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-md p-5 animate-slide-up" onClick={e => e.stopPropagation()}>
+              <h3 className="font-black text-lg text-slate-800">Terminer la tournée ?</h3>
+              <p className="text-sm text-slate-600 mt-2">
+                Il te reste <b>{remainingStops} arrêt{remainingStops > 1 ? 's' : ''}</b> non terminé{remainingStops > 1 ? 's' : ''}.
+                Les colis non livrés resteront à traiter (ils ne seront pas marqués livrés).
+              </p>
+              <p className="text-xs text-slate-400 mt-1">À ne faire que si ta tournée est réellement finie (ex. arrêt impossible à valider).</p>
+              <div className="mt-4 flex flex-col gap-2">
+                <button
+                  onClick={handleFinishTour}
+                  disabled={isProcessing}
+                  className="w-full py-3.5 bg-slate-800 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-60"
+                >
+                  {isProcessing ? <Loader2 size={18} className="animate-spin inline" /> : '🏁 Oui, terminer ma tournée'}
+                </button>
+                <button onClick={() => setShowFinishConfirm(false)} className="w-full py-3 text-slate-500 font-medium text-sm">
+                  Continuer ma tournée
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* === FIN DE TOURNÉE : tous les arrêts sont faits → clôturer explicitement === */}
         {allStopsDone && (
           <div className="bg-green-600 rounded-2xl p-4 text-white shadow-sm text-center space-y-3">
@@ -1597,6 +1638,21 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
             ))}
           </div>
         </div>
+
+        {/* === TERMINER MA TOURNÉE — toujours accessible === */}
+        {/* Quand tout est fait, la grande bannière verte s'affiche déjà (en haut).
+            Ici on garantit un accès PERMANENT à la clôture même s'il reste des
+            arrêts (ex. un arrêt coincé en « Arrivé » qui empêchait de finir) :
+            le chauffeur n'est jamais bloqué « en tournée » sans pouvoir la clore. */}
+        {!allStopsDone && deliveryStep === 0 && (
+          <button
+            onClick={requestFinishTour}
+            disabled={isProcessing}
+            className="w-full py-3.5 bg-slate-800 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-60 flex items-center justify-center gap-2"
+          >
+            🏁 Terminer ma tournée{remainingStops > 0 ? ` (${remainingStops} arrêt${remainingStops > 1 ? 's' : ''} restant${remainingStops > 1 ? 's' : ''})` : ''}
+          </button>
+        )}
 
         {/* === STOP ACTIF === */}
         {currentStop && (
