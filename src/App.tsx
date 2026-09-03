@@ -15,7 +15,7 @@ import DriverGpsGate from './components/DriverGpsGate';
 import Login from './components/Login';
 import { useDriverLocationPublisher } from './hooks/useDriverLocationPublisher';
 import { useAutoUpdate } from './hooks/useAutoUpdate';
-import { Menu, Loader2, WifiOff, LogOut } from 'lucide-react';
+import { Menu, Loader2, WifiOff, LogOut, ScanLine } from 'lucide-react';
 
 // === CODE SPLITTING : Lazy loading de tous les composants lourds ===
 const Dashboard = lazy(() => import('./components/Dashboard'));
@@ -124,6 +124,9 @@ const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewState>(() => pathToView(window.location.pathname));
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  // Raccourci scan chauffeur : depuis n'importe quel écran, ouvre le choix
+  // Récupérer/Livraison dans « Ma Tournée » (le scan qui alimente la BONNE tournée).
+  const [driverScanIntent, setDriverScanIntent] = useState(false);
 
   // Network State
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
@@ -1088,7 +1091,7 @@ const App: React.FC = () => {
         // route en lecture seule. Le chauffeur y voit son arrêt, navigue (Maps/Waze) ET
         // livre (« Je suis arrivé » → guide). Avant, il tombait sur une vue consultation
         // sans aucun bouton pour commencer → « je vois pas où appuyer ».
-        return <DriverMissionView currentUser={currentUser} clients={users.filter(u => u.role === UserRole.CLIENT || String(u.role).toLowerCase().includes('client'))} />;
+        return <DriverMissionView currentUser={currentUser} clients={users.filter(u => u.role === UserRole.CLIENT || String(u.role).toLowerCase().includes('client'))} scanIntent={driverScanIntent} onScanIntentHandled={() => setDriverScanIntent(false)} />;
 
       case 'api_diagnostic':
         return (
@@ -1285,6 +1288,21 @@ const App: React.FC = () => {
         {/* Raccourci scan rapide (usage interne dispatch/admin). RETIRÉ pour les CHAUFFEURS
             et sur la vue chauffeur (le scan s'y fait via « Scanner des colis »). */}
         {currentUser.role !== UserRole.CLIENT && currentUser.role !== UserRole.DRIVER && currentView !== 'driver_tour' && currentView !== 'driver_preview' && <QuickScanButton currentUser={currentUser} clients={users.filter(u => u.role === UserRole.CLIENT || String(u.role).toLowerCase().includes('client'))} />}
+
+        {/* RACCOURCI SCAN CHAUFFEUR — bouton flottant présent sur TOUS ses écrans
+            (Accueil, Véhicule, Démarches…). Un tap → « Ma Tournée » + ouverture du
+            choix Récupérer/Livraison. Sur driver_tour le scan est déjà dans la vue,
+            on ne double pas. Le scan alimente ainsi toujours la BONNE tournée. */}
+        {currentUser.role === UserRole.DRIVER && currentView !== 'driver_tour' && currentView !== 'driver_preview' && (
+          <button
+            onClick={() => { setDriverScanIntent(true); handleViewChange('driver_tour'); }}
+            title="Scanner un colis"
+            aria-label="Scanner un colis"
+            className="fixed z-40 bottom-20 right-4 lg:bottom-6 lg:right-6 flex items-center gap-2 pl-4 pr-5 h-14 rounded-full bg-brand-600 hover:bg-brand-700 text-white shadow-lg shadow-brand-600/30 active:scale-95 transition-transform font-bold"
+          >
+            <ScanLine size={22} /> Scanner
+          </button>
+        )}
 
         {/* GATE DOCUMENTS OBLIGATOIRES — BLOQUANT : tant qu'il reste des documents
             à lire/signer, impossible d'utiliser le reste de l'app. Le modal

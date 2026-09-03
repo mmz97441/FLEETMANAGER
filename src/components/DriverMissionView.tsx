@@ -78,6 +78,10 @@ interface DriverMissionViewProps {
   // (le chauffeur choisit l'expéditeur). Optionnel : sans, la création propose
   // la saisie libre du nom du client.
   clients?: User[];
+  // Raccourci scan depuis un autre écran : ouvre le choix Récupérer/Livraison
+  // dès l'arrivée sur la vue tournée.
+  scanIntent?: boolean;
+  onScanIntentHandled?: () => void;
 }
 
 // ============================================================================
@@ -261,7 +265,7 @@ const SignaturePad: React.FC<{
 // COMPOSANT PRINCIPAL
 // ============================================================================
 
-const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clients = [] }) => {
+const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clients = [], scanIntent = false, onScanIntentHandled }) => {
   // === State ===
   const [missions, setMissions] = useState<Mission[]>([]);
   const [loading, setLoading] = useState(true);
@@ -331,6 +335,14 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   const returnPhotoInputRef = useRef<HTMLInputElement>(null);
 
   const today = todayISO();
+
+  // Raccourci scan venu d'un autre écran → ouvre le choix Récupérer/Livraison.
+  useEffect(() => {
+    if (scanIntent) {
+      setShowScanChoice(true);
+      onScanIntentHandled?.();
+    }
+  }, [scanIntent]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // === Abonnement missions du chauffeur ===
   useEffect(() => {
