@@ -4,7 +4,7 @@ import {
   getFirestore,
   initializeFirestore,
   persistentLocalCache,
-  persistentMultipleTabManager
+  persistentSingleTabManager
 } from "firebase/firestore";
 // @ts-ignore
 import { getAuth } from "firebase/auth";
@@ -32,10 +32,22 @@ const app = initializeApp(firebaseConfig);
 // automatiquement au retour du réseau. Essentiel pour les chauffeurs en zone
 // blanche (les hauts, Cilaos, Salazie…). Repli sur getFirestore si IndexedDB
 // est indisponible (mode privé strict, très vieux navigateur).
+//
+// MONO-ONGLET (persistentSingleTabManager) et NON multi-onglets : le gestionnaire
+// multi-onglets déclenche « FIRESTORE INTERNAL ASSERTION FAILED: Unexpected state »
+// sur Safari/iPhone (coordination inter-onglets via IndexedDB buggée sur WebKit) —
+// observé en prod : un chauffeur en boucle de crash/reconnexion, incapable de
+// travailler. Les livreurs utilisent un seul onglet mobile → aucun intérêt au
+// multi-onglets. On garde tout le hors-ligne.
+//
+// experimentalAutoDetectLongPolling : bascule automatiquement sur le long-polling
+// quand le canal temps-réel (WebChannel) ne passe pas (Safari mobile, proxys,
+// réseaux capricieux) — autre cause fréquente de la même assertion.
 let _db;
 try {
   _db = initializeFirestore(app, {
-    localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+    localCache: persistentLocalCache({ tabManager: persistentSingleTabManager(undefined) }),
+    experimentalAutoDetectLongPolling: true
   });
 } catch (e) {
   console.warn("Persistance Firestore indisponible, mode en ligne uniquement:", e);
