@@ -718,6 +718,7 @@ export const createClientShipment = async (params: {
  */
 export const createClientShipmentsBatch = async (params: {
   client: { id: string; companyName: string };
+  deliveryDate?: string;   // Jour de livraison souhaité (YYYY-MM-DD) — daté sur chaque colis
   rows: Array<{
     colisNumber: string;   // ex. BR-000123
     contactName: string;
@@ -732,7 +733,7 @@ export const createClientShipmentsBatch = async (params: {
     zone?: Zone;           // estimée en amont (défaut Nord, ajustée par le transporteur)
   }>;
 }): Promise<Package[]> => {
-  const { client, rows } = params;
+  const { client, rows, deliveryDate } = params;
   const now = new Date().toISOString();
   const batchId = `client-import-${now}`;
 
@@ -760,13 +761,14 @@ export const createClientShipmentsBatch = async (params: {
       weight: r.weight,
       clientReference: r.clientReference,
       createdByClient: true,
+      requestedDeliveryDate: deliveryDate || undefined,
       packageIndex: 1,
       packageTotal: 1,
       status: PackageStatus.PENDING,
       movements: [{
         timestamp: now,
         action: 'IMPORTED' as const,
-        notes: `Importé par l'expéditeur ${client.companyName} — colis ${code}`
+        notes: `Importé par l'expéditeur ${client.companyName} — colis ${code}${deliveryDate ? ` — à livrer le ${deliveryDate}` : ''}`
       }]
     } as Omit<Package, 'id' | 'createdAt' | 'updatedAt'>);
   }

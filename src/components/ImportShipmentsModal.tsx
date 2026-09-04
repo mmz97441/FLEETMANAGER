@@ -14,7 +14,20 @@ import { createClientShipmentsBatch } from '../services/missionService';
 import { estimateZoneFromAddress } from '../services/deliveryService';
 import { generateBatchLabelsHTML, LabelFormat } from '../services/pickupService';
 import { User, Package, Zone } from '../types';
-import { Upload, FileSpreadsheet, X, AlertTriangle, CheckCircle, Download, Printer } from 'lucide-react';
+import { Upload, FileSpreadsheet, X, AlertTriangle, CheckCircle, Download, Printer, CalendarDays } from 'lucide-react';
+
+// Date locale YYYY-MM-DD (évite le décalage UTC de toISOString).
+const localISO = (d: Date) => {
+  const off = d.getTimezoneOffset() * 60000;
+  return new Date(d.getTime() - off).toISOString().slice(0, 10);
+};
+// Prochain jour ouvré (demain, en sautant le dimanche) — défaut de livraison.
+const nextWorkingDayISO = () => {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  if (d.getDay() === 0) d.setDate(d.getDate() + 1); // dimanche → lundi
+  return localISO(d);
+};
 
 interface ImportShipmentsModalProps {
   currentUser: User;
@@ -92,7 +105,9 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
   const [printLabels, setPrintLabels] = useState(true); // impression dissociée de l'import
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');       // erreur de lecture / d'import
+  const [deliveryDate, setDeliveryDate] = useState<string>(nextWorkingDayISO()); // jour de livraison souhaité
   const inputRef = useRef<HTMLInputElement>(null);
+  const todayISOLocal = localISO(new Date());
 
   const resetFile = () => {
     setRows(null);
@@ -214,6 +229,8 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
 
   const handleImport = async () => {
     if (validCount === 0 || busy) return;
+    if (!deliveryDate) { setError('Choisissez la date de livraison souhaitée.'); return; }
+    if (deliveryDate < todayISOLocal) { setError('La date de livraison ne peut pas être dans le passé.'); return; }
     setBusy(true);
     setError('');
     try {
@@ -247,6 +264,7 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
           id: currentUser.id,
           companyName: currentUser.companyName || `${currentUser.firstName} ${currentUser.lastName}`,
         },
+        deliveryDate,
         rows: rowsWithZone,
       });
 
@@ -332,6 +350,22 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
             >
               {errorCount === 0 ? <CheckCircle size={18} className="shrink-0" /> : <AlertTriangle size={18} className="shrink-0" />}
               <span>{totalCount} ligne(s) lue(s) · {validCount} valide(s) · {errorCount} avec erreur(s)</span>
+            </div>
+
+            {/* DATE DE LIVRAISON SOUHAITÉE — chaque colis est daté pour CE jour
+                (et non le jour du dépôt) → la tournée sera planifiée le bon jour. */}
+            <div className="rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 mb-3">
+              <label className="flex items-center gap-2 text-sm font-bold text-brand-800 mb-1">
+                <CalendarDays size={16} /> Date de livraison souhaitée
+              </label>
+              <input
+                type="date"
+                value={deliveryDate}
+                min={todayISOLocal}
+                onChange={(e) => setDeliveryDate(e.target.value)}
+                className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 outline-none"
+              />
+              <p className="text-[11px] text-slate-500 mt-1">Ces colis seront livrés ce jour-là, pas le jour du dépôt.</p>
             </div>
 
             {/* Liste détaillée : erreurs d'abord, puis lignes valides */}

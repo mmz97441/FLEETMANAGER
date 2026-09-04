@@ -892,6 +892,7 @@ export interface Package {
   // Origine self-service client
   createdByClient?: boolean;       // Colis créé par l'expéditeur depuis son espace
   clientReference?: string;        // Référence propre du client (affichée en second)
+  requestedDeliveryDate?: string;  // Jour de livraison SOUHAITÉ (YYYY-MM-DD) choisi au dépôt client — sert à dater la tournée le bon jour (≠ jour de dépôt)
 
   // Contraintes
   timeWindowStart?: string;        // "08:00"

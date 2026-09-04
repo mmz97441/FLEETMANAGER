@@ -1654,6 +1654,9 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                                                         <div className="min-w-0 flex-1">
                                                                             <p className="font-mono text-xs font-bold text-slate-800 truncate">{pkg.externalId || pkg.barcode || pkg.orderNumber}</p>
                                                                             <p className="text-[10px] text-slate-400 truncate">Cmd: {pkg.orderNumber}{pkg.clientReference ? ` · Réf: ${pkg.clientReference}` : ''}</p>
+                                                                            {pkg.requestedDeliveryDate && pkg.status !== PackageStatus.DELIVERED && (
+                                                                              <p className="text-[10px] text-indigo-600 font-semibold truncate">📅 Livraison souhaitée : {new Date(pkg.requestedDeliveryDate + 'T00:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })}</p>
+                                                                            )}
                                                                         </div>
                                                                         <HintTooltip label={STATUS_TOOLTIP[pkg.status] || pkg.status}><span className={`inline-flex items-center px-2 py-1 rounded-lg text-[11px] font-bold cursor-help ${sc.bg} ${sc.text}`}>{pkg.status}</span></HintTooltip>
                                                                         <HintTooltip label="Étiquette de ce colis"><button onClick={() => { const html = generateBatchLabelsHTML([pkg as PackageType], currentUser.companyName || 'Expéditeur'); const win=window.open('','_blank'); if(win){win.document.write(html);win.document.close();} }} className="p-1.5 bg-slate-100 hover:bg-indigo-100 text-slate-600 rounded-lg"><QrCode size={13} /></button></HintTooltip>

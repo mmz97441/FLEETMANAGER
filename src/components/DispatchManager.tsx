@@ -726,6 +726,12 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-slate-800 truncate">{pkg.contactName}</p>
                       <p className="text-xs text-slate-500 truncate">{pkg.address}, {pkg.postalCode}</p>
+                      {pkg.requestedDeliveryDate && (
+                        <p className={`text-[11px] font-bold mt-0.5 ${pkg.requestedDeliveryDate !== selectedDate ? 'text-red-600' : 'text-green-600'}`}>
+                          📅 à livrer le {new Date(pkg.requestedDeliveryDate + 'T00:00:00').toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: '2-digit' })}
+                          {pkg.requestedDeliveryDate !== selectedDate ? ' ⚠️ autre jour' : ''}
+                        </p>
+                      )}
                     </div>
                     <div className="flex items-center gap-1.5">
                       <input
