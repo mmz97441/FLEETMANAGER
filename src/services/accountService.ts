@@ -1,3 +1,5 @@
+import { getFunctions, httpsCallable } from "firebase/functions";
+import app from "../firebaseConfig";
 import { auth } from '../firebaseConfig';
 import {
   EmailAuthProvider,
@@ -66,13 +68,8 @@ export async function changePassword(
   }
 }
 
-/**
- * Signs the client out.
- *
- * Note: the Firebase Web SDK cannot revoke sessions on other devices from the
- * client side (that requires the Admin SDK / server-side token revocation).
- * This only signs out the current session/device.
- */
+/** Revoke every refresh token on the server, then end the local session. */
 export async function signOutAllDevices(): Promise<void> {
+  await httpsCallable(getFunctions(app,'europe-west1'),'revokeOwnSessions')({});
   await signOut(auth);
 }

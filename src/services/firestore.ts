@@ -1,3 +1,5 @@
+import { getFunctions, httpsCallable } from "firebase/functions";
+import app from "../firebaseConfig";
 
 import { db, storage } from "../firebaseConfig";
 import { 
@@ -101,54 +103,25 @@ export const checkUserEmailAuthorized = async (email: string): Promise<boolean> 
 
 // Lie le compte Auth (nouvellement créé) au profil existant (créé par l'admin)
 export const linkAuthToProfile = async (email: string, authUid: string) => {
-    // Normaliser l'email
-    const normalizedEmail = email.toLowerCase().trim();
-    const q = query(collection(db, "users"), where("email", "==", normalizedEmail));
-    const querySnapshot = await getDocs(q);
-
-    if (querySnapshot.empty) return;
-
-    const oldDoc = querySnapshot.docs[0];
-    const userData = oldDoc.data();
-
-    // Si le profil a déjà le bon ID (cas rare ou déjà migré), on arrête
-    if (oldDoc.id === authUid) return;
-
-    // 1. Créer le nouveau document avec le bon UID (Auth ID).
-    //    Autorisé par les règles (users create: request.auth.uid == userId).
-    //    Si CETTE étape échoue, on propage : sans profil à son UID, les règles
-    //    Firestore ne pourront jamais reconnaître le rôle → connexion inutile.
-    await setDoc(doc(db, "users", authUid), {
-        ...userData as any, // Spread here. userData is DocumentData.
-        id: authUid, // On s'assure que l'ID interne matche
-        email: normalizedEmail // S'assurer que l'email est normalisé
-    });
-
-    // 2. Supprimer l'ancien document (ID temporaire). ATTENTION : la suppression
-    //    d'un profil est réservée aux admins (règles). Pour un chauffeur/client
-    //    qui migre le sien, ce delete est REFUSÉ. Ce n'est PAS bloquant : le
-    //    nouveau doc est déjà en place, la connexion DOIT aboutir. On loggue le
-    //    doublon pour nettoyage admin ultérieur — mais on ne fait plus planter
-    //    la connexion (ancien bug : le chauffeur était éjecté à sa 1re connexion).
-    try {
-        await deleteDoc(doc(db, "users", oldDoc.id));
-        console.log(`Profil migré de ${oldDoc.id} vers ${authUid}`);
-    } catch (delErr) {
-        // ATTENDU pour un chauffeur/client qui migre son propre profil : la
-        // suppression d'un user est réservée aux admins → refus. Le nouveau profil
-        // est déjà en place, la connexion aboutit. On journalise en AVERTISSEMENT
-        // (pas en erreur rouge) avec un message explicite : ce n'est pas un bug,
-        // juste un ancien doublon à nettoyer côté admin.
-        reportError('auth.linkProfile.deleteOld', new Error(`Doublon de profil à nettoyer (ancien id ${oldDoc.id}) — suppression réservée admin, connexion OK`), {
-            level: 'warning',
-            silent: true,
-            extra: { oldId: oldDoc.id, authUid, email: normalizedEmail, original: delErr instanceof Error ? delErr.message : String(delErr) }
-        });
-    }
+    await httpsCallable(getFunctions(app,'europe-west1'),'linkAuthToProfile')({});
 };
 
 // --- USERS ---
 export const subscribeToUsers = (currentUser: User, callback: (data: User[]) => void) => {
+  if (![UserRole.CLIENT, UserRole.ADMIN, UserRole.PRESIDENT, UserRole.DIRECTOR, UserRole.SECRETARY].includes(currentUser.role)) {
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const result = await httpsCallable<unknown, {users: User[]}>(getFunctions(app, 'europe-west1'), 'getTeamDirectory')({});
+        if (!cancelled) callback(result.data.users.map(user => user.id === currentUser.id ? currentUser : user));
+      } catch (error) {
+        if (!cancelled) reportError('directory.load', error, {silent: true});
+      }
+    };
+    void refresh();
+    const interval = window.setInterval(refresh, 60000);
+    return () => {cancelled = true; window.clearInterval(interval);};
+  }
   let q: Query<DocumentData, DocumentData>;
   
   // SECURITY: Si Client, ne voir que les membres de SA société
@@ -390,32 +363,29 @@ export const addVehicleToFirestore = async (vehicle: Vehicle) => {
     maintenanceInterval: Number(vehicle.maintenanceInterval),
     year: vehicle.year || new Date().getFullYear(),
     acquisitionType: vehicle.acquisitionType || "Achat",
-    driverId: vehicle.assignedDriverId || null,
+    driverId: null,
+    assignedDriverId: null,
     technicalControlDate: vehicle.technicalControlDate || null,
     customDeadlines: vehicle.customDeadlines || []
   };
   const created = await addDoc(collection(db, "vehicles"), cleanFirestoreData(dataToSave));
-  // Lien bidirectionnel : renseigne aussi le côté utilisateur.
   if (vehicle.assignedDriverId) {
-    updateDoc(doc(db, "users", vehicle.assignedDriverId), { assignedVehicleId: created.id }).catch(() => {});
+    await httpsCallable(getFunctions(app, 'europe-west1'), 'assignVehicle')({vehicleId: created.id, driverId: vehicle.assignedDriverId});
   }
+  return created.id;
 };
 
 export const updateVehicleInFirestore = async (vehicle: Vehicle) => {
   const ref = doc(db, "vehicles", vehicle.id);
 
-  // Lien bidirectionnel : on lit l'ancien chauffeur pour le nettoyer si besoin.
-  let prevDriverId: string | null = null;
-  try {
-    const prev = await getDoc(ref);
-    prevDriverId = prev.exists() ? ((prev.data() as any).driverId || null) : null;
-  } catch { /* best-effort */ }
+  const previous = await getDoc(ref);
+  if (!previous.exists()) throw new Error('Véhicule introuvable.');
+  const prevDriverId = previous.data().driverId || previous.data().assignedDriverId || null;
   const newDriverId = vehicle.assignedDriverId || null;
 
   const updateData: any = {
     currentMileage: Number(vehicle.currentMileage),
     licensePlate: vehicle.plate,
-    driverId: newDriverId,
     status: vehicle.status,
     customDeadlines: vehicle.customDeadlines || []
   };
@@ -430,18 +400,13 @@ export const updateVehicleInFirestore = async (vehicle: Vehicle) => {
 
   await updateDoc(ref, cleanFirestoreData(updateData));
 
-  // Synchronise le côté utilisateur (assignedVehicleId) — best-effort, non bloquant.
-  if (newDriverId && newDriverId !== prevDriverId) {
-    updateDoc(doc(db, "users", newDriverId), { assignedVehicleId: vehicle.id }).catch(() => {});
-  }
-  if (prevDriverId && prevDriverId !== newDriverId) {
-    updateDoc(doc(db, "users", prevDriverId), { assignedVehicleId: "" }).catch(() => {});
+  if (newDriverId !== prevDriverId) {
+    await httpsCallable(getFunctions(app, 'europe-west1'), 'assignVehicle')({vehicleId: vehicle.id, driverId: newDriverId});
   }
 };
 
 export const deleteVehicleFromFirestore = async (id: string) => {
-  const ref = doc(db, "vehicles", id);
-  await deleteDoc(ref);
+  await httpsCallable(getFunctions(app, 'europe-west1'), 'deleteVehicle')({vehicleId: id});
 };
 
 // --- FUEL LOGS ---
@@ -611,8 +576,8 @@ export const subscribeToMaintenance = (callback: (data: MaintenanceLog[]) => voi
 };
 
 // --- LEAVES (CONGÉS) ---
-export const subscribeToLeaves = (callback: (data: LeaveRequest[]) => void) => {
-  const q = collection(db, "leaves");
+export const subscribeToLeaves = (currentUser: User, callback: (data: LeaveRequest[]) => void) => {
+  const q = [UserRole.ADMIN,UserRole.PRESIDENT,UserRole.DIRECTOR,UserRole.SECRETARY].includes(currentUser.role) ? collection(db,"leaves") : query(collection(db,"leaves"), where("userId","==",currentUser.id));
   return onSnapshot(q, (snapshot: QuerySnapshot<DocumentData>) => {
     const leaves = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LeaveRequest));
     callback(leaves);
@@ -696,8 +661,8 @@ export const deleteCompanyDocumentFromFirestore = async (id: string) => {
 };
 
 // --- DOCUMENT ACKNOWLEDGMENTS (Signatures/Lectures) ---
-export const subscribeToDocumentAcknowledgments = (callback: (data: DocumentAcknowledgment[]) => void) => {
-  return onSnapshot(collection(db, "documentAcknowledgments"), (snapshot: QuerySnapshot<DocumentData>) => {
+export const subscribeToDocumentAcknowledgments = (currentUser: User, callback: (data: DocumentAcknowledgment[]) => void) => {
+  return onSnapshot([UserRole.ADMIN,UserRole.PRESIDENT,UserRole.DIRECTOR,UserRole.SECRETARY].includes(currentUser.role) ? collection(db,"documentAcknowledgments") : query(collection(db,"documentAcknowledgments"),where("userId","==",currentUser.id)), (snapshot: QuerySnapshot<DocumentData>) => {
     const acks = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DocumentAcknowledgment));
     callback(acks);
   }, (error) => {
@@ -713,8 +678,8 @@ export const addDocumentAcknowledgmentToFirestore = async (ack: DocumentAcknowle
 // --- ABSENCES (NOUVEAU SYSTÈME) ---
 import { Absence, AbsenceDocument } from "../types";
 
-export const subscribeToAbsences = (callback: (data: Absence[]) => void) => {
-  const q = collection(db, "absences");
+export const subscribeToAbsences = (currentUser: User, callback: (data: Absence[]) => void) => {
+  const q = [UserRole.ADMIN,UserRole.PRESIDENT,UserRole.DIRECTOR,UserRole.SECRETARY].includes(currentUser.role) ? collection(db,"absences") : query(collection(db,"absences"), where("userId","==",currentUser.id));
   return onSnapshot(q, (snapshot: QuerySnapshot<DocumentData>) => {
     const absences = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Absence));
     callback(absences);
@@ -724,17 +689,15 @@ export const subscribeToAbsences = (callback: (data: Absence[]) => void) => {
 };
 
 export const addAbsenceToFirestore = async (absence: Absence) => {
-  const { id, ...data } = absence;
-  await setDoc(doc(db, "absences", id), cleanFirestoreData(data));
+  await httpsCallable(getFunctions(app,'europe-west1'),'saveAbsence')({absence:cleanFirestoreData(absence)});
 };
 
 export const updateAbsenceInFirestore = async (absence: Absence) => {
-  const { id, ...data } = absence;
-  await setDoc(doc(db, "absences", id), cleanFirestoreData(data), { merge: true });
+  await httpsCallable(getFunctions(app,'europe-west1'),'saveAbsence')({absence:cleanFirestoreData(absence)});
 };
 
 export const deleteAbsenceFromFirestore = async (id: string) => {
-  await deleteDoc(doc(db, "absences", id));
+  await httpsCallable(getFunctions(app, 'europe-west1'), 'deleteAbsence')({id});
 };
 
 // Upload document justificatif
@@ -852,4 +815,8 @@ export const toggleAddressFavorite = async (addressId: string, isFavorite: boole
     isFavorite,
     updatedAt: new Date().toISOString()
   });
+};
+
+export const addMaintenanceToFirestore = async (log: MaintenanceLog): Promise<void> => {
+  await setDoc(doc(db, 'maintenance_logs', log.id), cleanFirestoreData(log));
 };

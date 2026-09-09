@@ -1,3 +1,4 @@
+import { escapeHtml } from '../utils/html';
 /**
  * MISSION MANAGER
  * 
@@ -337,16 +338,16 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
     const stopsHtml = sortedStops.map((stop, i) => `
       <tr>
-        <td style="padding:8px;border:1px solid #ddd;text-align:center;font-weight:bold;">${stop.sequence}</td>
+        <td style="padding:8px;border:1px solid #ddd;text-align:center;font-weight:bold;">${escapeHtml(stop.sequence)}</td>
         <td style="padding:8px;border:1px solid #ddd;">
-          <strong>${stop.contactName || '-'}</strong><br/>
-          <span style="color:#555;">${stop.address}, ${stop.postalCode} ${stop.city}</span>
-          ${stop.floor != null ? `<br/><small>Étage ${stop.floor}${stop.hasElevator ? ' (ascenseur)' : ' (sans asc.)'}</small>` : ''}
+          <strong>${escapeHtml(stop.contactName || '-')}</strong><br/>
+          <span style="color:#555;">${escapeHtml(stop.address)}, ${escapeHtml(stop.postalCode)} ${escapeHtml(stop.city)}</span>
+          ${stop.floor != null ? `<br/><small>Étage ${escapeHtml(stop.floor)}${stop.hasElevator ? ' (ascenseur)' : ' (sans asc.)'}</small>` : ''}
         </td>
-        <td style="padding:8px;border:1px solid #ddd;text-align:center;">${stop.contactPhone || '-'}</td>
-        <td style="padding:8px;border:1px solid #ddd;text-align:center;font-weight:bold;">${stop.packageCount}</td>
-        <td style="padding:8px;border:1px solid #ddd;text-align:center;">${stop.timeWindowStart && stop.timeWindowEnd ? `${stop.timeWindowStart} - ${stop.timeWindowEnd}` : '-'}</td>
-        <td style="padding:8px;border:1px solid #ddd;font-size:11px;">${stop.notes || ''}</td>
+        <td style="padding:8px;border:1px solid #ddd;text-align:center;">${escapeHtml(stop.contactPhone || '-')}</td>
+        <td style="padding:8px;border:1px solid #ddd;text-align:center;font-weight:bold;">${escapeHtml(stop.packageCount)}</td>
+        <td style="padding:8px;border:1px solid #ddd;text-align:center;">${stop.timeWindowStart && stop.timeWindowEnd ? `${escapeHtml(stop.timeWindowStart)} - ${escapeHtml(stop.timeWindowEnd)}` : '-'}</td>
+        <td style="padding:8px;border:1px solid #ddd;font-size:11px;">${escapeHtml(stop.notes || '')}</td>
         <td style="padding:8px;border:1px solid #ddd;width:60px;"></td>
       </tr>
     `).join('');
@@ -355,7 +356,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
       <!DOCTYPE html>
       <html>
       <head>
-        <title>Tournée - ${mission.driverName} - ${mission.date}</title>
+        <title>Tournée - ${escapeHtml(mission.driverName)} - ${escapeHtml(mission.date)}</title>
         <style>
           * { margin:0; padding:0; box-sizing:border-box; }
           body { font-family: Arial, sans-serif; padding: 20px; color: #333; }
@@ -383,7 +384,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
         <div class="header">
           <div>
             <h1>🚛 Feuille de Route</h1>
-            <p style="color:#666;">Tournée ${mission.zone} — ${new Date(mission.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
+            <p style="color:#666;">Tournée ${escapeHtml(mission.zone)} — ${new Date(mission.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
           </div>
           <div style="text-align:right;">
             <p style="font-size:12px;color:#888;">Imprimé le ${new Date().toLocaleString('fr-FR')}</p>
@@ -396,15 +397,15 @@ const MissionManager: React.FC<MissionManagerProps> = ({
         <div class="meta">
           <div class="meta-item">
             <div class="meta-label">Chauffeur</div>
-            <div class="meta-value">${mission.driverName || 'Non assigné'}</div>
+            <div class="meta-value">${escapeHtml(mission.driverName || 'Non assigné')}</div>
           </div>
           <div class="meta-item">
             <div class="meta-label">Véhicule</div>
-            <div class="meta-value">${mission.vehiclePlate || '-'}</div>
+            <div class="meta-value">${escapeHtml(mission.vehiclePlate || '-')}</div>
           </div>
           <div class="meta-item">
             <div class="meta-label">Hub de départ</div>
-            <div class="meta-value">${mission.hubName || '-'}</div>
+            <div class="meta-value">${escapeHtml(mission.hubName || '-')}</div>
           </div>
           <div class="meta-item">
             <div class="meta-label">Nombre de stops</div>
@@ -412,7 +413,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           </div>
           <div class="meta-item">
             <div class="meta-label">Total colis</div>
-            <div class="meta-value">${mission.totalPackages}</div>
+            <div class="meta-value">${escapeHtml(mission.totalPackages)}</div>
           </div>
           <div class="meta-item">
             <div class="meta-label">Distance / Durée estimée</div>
@@ -435,12 +436,12 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           <tbody>
             <tr class="hub-row">
               <td style="padding:8px;border:1px solid #ddd;text-align:center;">🏁</td>
-              <td colspan="6" style="padding:8px;border:1px solid #ddd;">DÉPART — ${mission.hubName}</td>
+              <td colspan="6" style="padding:8px;border:1px solid #ddd;">DÉPART — ${escapeHtml(mission.hubName)}</td>
             </tr>
             ${stopsHtml}
             <tr class="hub-row">
               <td style="padding:8px;border:1px solid #ddd;text-align:center;">🏁</td>
-              <td colspan="6" style="padding:8px;border:1px solid #ddd;">RETOUR — ${mission.hubName}</td>
+              <td colspan="6" style="padding:8px;border:1px solid #ddd;">RETOUR — ${escapeHtml(mission.hubName)}</td>
             </tr>
           </tbody>
         </table>

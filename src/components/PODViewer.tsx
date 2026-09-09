@@ -1,3 +1,4 @@
+import { escapeHtml, safeImageUrl } from '../utils/html';
 /**
  * POD VIEWER — Visualisation Preuve de Livraison
  * 
@@ -70,12 +71,12 @@ const PODViewer: React.FC<PODViewerProps> = ({
     if (!printWindow) return;
 
     const photosHtml = pod.photoUrls.map(url =>
-      `<div style="text-align:center;margin:10px 0;"><img src="${url}" style="max-width:100%;max-height:300px;border:1px solid #ccc;border-radius:8px;" /></div>`
+      `<div style="text-align:center;margin:10px 0;"><img src="${safeImageUrl(url)}" style="max-width:100%;max-height:300px;border:1px solid #ccc;border-radius:8px;" /></div>`
     ).join('');
 
     printWindow.document.write(`
       <!DOCTYPE html>
-      <html><head><title>POD - ${packageInfo?.orderNumber || pod.packageId}</title>
+      <html><head><title>POD - ${escapeHtml(packageInfo?.orderNumber || pod.packageId)}</title>
       <style>
         body { font-family: Arial, sans-serif; padding: 20px; max-width: 700px; margin: 0 auto; }
         h1 { font-size: 18pt; border-bottom: 2px solid #000; padding-bottom: 10px; }
@@ -90,22 +91,22 @@ const PODViewer: React.FC<PODViewerProps> = ({
       </style></head><body>
         <h1>Preuve de Livraison</h1>
         ${packageInfo ? `
-          <div class="row"><span class="label">Commande :</span><span class="value">${packageInfo.orderNumber}</span></div>
-          <div class="row"><span class="label">Destinataire :</span><span class="value">${packageInfo.contactName}</span></div>
-          <div class="row"><span class="label">Adresse :</span><span class="value">${packageInfo.address}, ${packageInfo.city}</span></div>
+          <div class="row"><span class="label">Commande :</span><span class="value">${escapeHtml(packageInfo.orderNumber)}</span></div>
+          <div class="row"><span class="label">Destinataire :</span><span class="value">${escapeHtml(packageInfo.contactName)}</span></div>
+          <div class="row"><span class="label">Adresse :</span><span class="value">${escapeHtml(packageInfo.address)}, ${escapeHtml(packageInfo.city)}</span></div>
         ` : ''}
         <hr />
-        <div class="row"><span class="label">Réceptionné par :</span><span class="value">${pod.recipientName || 'Non renseigné'}</span></div>
-        ${pod.deliveryLocation ? `<div class="row"><span class="label">Lieu de remise :</span><span class="value">${pod.deliveryLocation}</span></div>` : ''}
+        <div class="row"><span class="label">Réceptionné par :</span><span class="value">${escapeHtml(pod.recipientName || 'Non renseigné')}</span></div>
+        ${pod.deliveryLocation ? `<div class="row"><span class="label">Lieu de remise :</span><span class="value">${escapeHtml(pod.deliveryLocation)}</span></div>` : ''}
         <div class="row"><span class="label">Date / Heure :</span><span class="value">${formatDate(pod.timestamp)}</span></div>
-        <div class="row"><span class="label">Chauffeur :</span><span class="value">${pod.driverName}</span></div>
-        <div class="row"><span class="label">Véhicule :</span><span class="value">${pod.vehiclePlate}</span></div>
+        <div class="row"><span class="label">Chauffeur :</span><span class="value">${escapeHtml(pod.driverName)}</span></div>
+        <div class="row"><span class="label">Véhicule :</span><span class="value">${escapeHtml(pod.vehiclePlate)}</span></div>
         <div class="row"><span class="label">Coordonnées GPS :</span><span class="value">${pod.coordinates.lat.toFixed(6)}, ${pod.coordinates.lng.toFixed(6)}</span></div>
-        ${pod.notes ? `<div class="row"><span class="label">Notes :</span><span class="value">${pod.notes}</span></div>` : ''}
+        ${pod.notes ? `<div class="row"><span class="label">Notes :</span><span class="value">${escapeHtml(pod.notes)}</span></div>` : ''}
         <hr />
         ${pod.signatureUrl ? `
           <div class="signature-block">
-            <img src="${pod.signatureUrl}" />
+            <img src="${safeImageUrl(pod.signatureUrl)}" />
             <p class="signature-label">Signature du réceptionnaire</p>
           </div>
         ` : '<p style="color:#999;text-align:center;">Pas de signature</p>'}

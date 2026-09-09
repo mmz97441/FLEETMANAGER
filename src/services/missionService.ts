@@ -1,3 +1,5 @@
+import { getFunctions, httpsCallable } from "firebase/functions";
+import app from "../firebaseConfig";
 /**
  * SERVICE DE GESTION DES MISSIONS
  * 
@@ -290,12 +292,12 @@ export const extractPostalCodeFromAddress = (address: string): string | null => 
 
 export const subscribeToPackages = (
   callback: (packages: Package[]) => void,
-  filters?: { date?: string; zone?: Zone; status?: PackageStatus; clientId?: string; missionId?: string }
+  filters?: { date?: string; zone?: Zone; status?: PackageStatus; clientId?: string; missionId?: string; driverId?: string }
 ) => {
-  let q = query(collection(db, PACKAGES_COLLECTION), orderBy('createdAt', 'desc'), limit(500));
-  
-  // Note: Firestore ne permet pas plusieurs where avec orderBy sur des champs différents
-  // On filtre côté client pour plus de flexibilité
+  const source = collection(db, PACKAGES_COLLECTION);
+  const filter = filters?.driverId ? ['currentDriverId',filters.driverId] : filters?.missionId ? ['missionId',filters.missionId] : filters?.clientId ? ['clientId',filters.clientId] : filters?.status ? ['status',filters.status] : null;
+  const q = filter ? query(source,where(filter[0],'==',filter[1])) : query(source,orderBy('createdAt','desc'));
+  // Apply the most selective scope on the server before any local filtering.
   
   return onSnapshot(q, (snapshot) => {
     let packages = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Package));
@@ -312,6 +314,7 @@ export const subscribeToPackages = (
     if (filters?.clientId) {
       packages = packages.filter(p => p.clientId === filters.clientId);
     }
+    if (filters?.driverId) packages = packages.filter(p=>p.currentDriverId === filters.driverId);
     if (filters?.missionId) {
       packages = packages.filter(p => p.missionId === filters.missionId);
     }
@@ -356,6 +359,7 @@ export const subscribeToClientPackages = (
   client: { id: string; companyName?: string },
   callback: (packages: Package[]) => void
 ) => {
+  const trackingById = new Map<string, any[]>();
   let byId: Package[] = [];
   let byName: Package[] = [];
   const emit = () => {
@@ -363,10 +367,15 @@ export const subscribeToClientPackages = (
     [...byId, ...byName].forEach(p => map.set(p.id, p));
     const merged = Array.from(map.values())
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    callback(merged);
+    const tracks = Array.from(trackingById.values()).flat();
+    callback(merged.map(pkg => {
+      if (pkg.status !== PackageStatus.IN_DELIVERY) return pkg;
+      const track = tracks.find(t=>t.missionId===pkg.missionId && t.ranks?.[pkg.id]!==undefined);
+      return track ? {...pkg,liveDriver:track.liveDriver,remainingBeforeMine:track.ranks[pkg.id]} : pkg;
+    }));
   };
 
-  const qId = query(collection(db, PACKAGES_COLLECTION), where('clientId', '==', client.id), limit(3000));
+  const qId = query(collection(db, PACKAGES_COLLECTION), where('clientId', '==', client.id));
   const unsub1 = onSnapshot(qId, snap => {
     byId = snap.docs.map(d => ({ id: d.id, ...d.data() } as Package));
     emit();
@@ -375,14 +384,19 @@ export const subscribeToClientPackages = (
   let unsub2: () => void = () => {};
   const company = (client.companyName || '').trim();
   if (company) {
-    const qName = query(collection(db, PACKAGES_COLLECTION), where('clientName', '==', company), limit(3000));
+    const qName = query(collection(db, PACKAGES_COLLECTION), where('clientName', '==', company));
     unsub2 = onSnapshot(qName, snap => {
       byName = snap.docs.map(d => ({ id: d.id, ...d.data() } as Package));
       emit();
     });
   }
 
-  return () => { unsub1(); unsub2(); };
+  const trackingQueries = [query(collection(db,'client_tracking'),where('clientId','==',client.id))];
+  if (company) trackingQueries.push(query(collection(db,'client_tracking'),where('clientName','==',company)));
+  const trackingUnsubs = trackingQueries.map((q,i)=>onSnapshot(q,snap=>{
+    trackingById.set(String(i),snap.docs.map(d=>d.data())); emit();
+  },error=>reportError('tracking.subscribe',error,{silent:true})));
+  return () => { unsub1(); unsub2(); trackingUnsubs.forEach(unsub=>unsub()); };
 };
 
 export const getPackagesByMission = async (missionId: string): Promise<Package[]> => {
@@ -429,29 +443,22 @@ export const updatePackageStatus = async (
   movement: Omit<PackageMovement, 'timestamp'>,
   extraFields?: Partial<Pick<Package, 'missionId' | 'stopId' | 'currentDriverId' | 'currentVehicleId' | 'currentHubId' | 'estimatedDeliveryAt'>>
 ): Promise<void> => {
-  const pkgDoc = await getDoc(doc(db, PACKAGES_COLLECTION, packageId));
-  if (!pkgDoc.exists()) throw new Error('Package not found');
-  
-  const pkg = pkgDoc.data() as Package;
-  const now = new Date().toISOString();
-
-  // CRUCIAL : nettoyer les undefined avant écriture. Firestore rejette toute
-  // valeur `undefined` ("Unsupported field value: undefined") — c'est ce qui
-  // faisait échouer la mise à jour du statut à la livraison (vehicleId/plate/
-  // location absents sur une tournée créée par scan ou sans GPS) et laissait
-  // les colis bloqués "En livraison".
-  const cleanedMovement = cleanUndefined({ ...movement, timestamp: now });
-  const cleanedExtra = cleanUndefined(extraFields || {});
-
-  await updateDoc(doc(db, PACKAGES_COLLECTION, packageId), {
-    status,
-    movements: [...(pkg.movements || []), cleanedMovement],
-    ...cleanedExtra,
-    updatedAt: now
+  const pkg = await runTransaction(db, async tx => {
+    const ref = doc(db, PACKAGES_COLLECTION, packageId);
+    const snap = await tx.get(ref);
+    if (!snap.exists()) throw new Error('Colis introuvable');
+    const current = snap.data() as Package;
+    if (current.status === status) return null; // replay: no duplicate movement/notification
+    const now = new Date().toISOString();
+    tx.update(ref, cleanUndefined({
+      status, movements: [...(current.movements || []), { ...movement, timestamp: now }],
+      ...(extraFields || {}), updatedAt: now
+    }));
+    return current;
   });
+  if (!pkg) return;
 
-  // === AUTO-NOTIFICATIONS (fire-and-forget) ===
-  triggerPackageNotifications(pkg, status, movement).catch(() => {});
+
 };
 
 /**
@@ -554,92 +561,14 @@ export const resyncPackageStatusesFromStops = async (): Promise<StatusResyncResu
 };
 
 /**
- * Déclenche les notifications automatiques selon le changement de statut.
- * Exécuté en background (fire-and-forget) pour ne pas ralentir le workflow.
+ * Imports par lots de 150, identifiés côté serveur pour permettre une reprise sans doublon.
  */
-const triggerPackageNotifications = async (
-  pkg: Package,
-  newStatus: PackageStatus,
-  movement: Omit<PackageMovement, 'timestamp'>
-) => {
-  // Import dynamique pour ne pas alourdir le bundle si les notifs ne sont pas utilisées
-  const { 
-    notifyPackageDelivered, 
-    notifyPackageFailed, 
-    notifyPackageInDelivery,
-    notifyAdminDeliveryFailure 
-  } = await import('./notificationService');
-  
-  const barcode = pkg.barcode || pkg.orderNumber || 'N/A';
-  const recipientName = pkg.contactName || 'Destinataire';
-  const driverName = movement.driverName || 'Chauffeur';
-
-  // === CLIENT : colis livré ===
-  if (newStatus === PackageStatus.DELIVERED && pkg.clientId) {
-    await notifyPackageDelivered(pkg.clientId, barcode, recipientName);
-  }
-  
-  // === CLIENT + ADMINS : échec livraison ===
-  if (newStatus === PackageStatus.FAILED && pkg.clientId) {
-    const reason = movement.notes || 'Motif non précisé';
-    
-    // Notifier le client
-    await notifyPackageFailed(pkg.clientId, barcode, recipientName, reason);
-    
-    // Notifier les admins
-    const adminIds = await getAdminUserIds();
-    if (adminIds.length > 0) {
-      await notifyAdminDeliveryFailure(adminIds, driverName, barcode, recipientName, reason);
-    }
-  }
-  
-  // === CLIENT : colis en livraison ===
-  if (newStatus === PackageStatus.IN_DELIVERY && pkg.clientId) {
-    await notifyPackageInDelivery(pkg.clientId, barcode, recipientName, driverName);
-  }
-};
-
-/**
- * Récupère les IDs des utilisateurs admin/directeur pour les notifications broadcast
- */
-const getAdminUserIds = async (): Promise<string[]> => {
-  try {
-    const q = query(
-      collection(db, 'users'),
-      // ⚠️ 'in' Firestore : max 10 valeurs, AUCUNE ne doit être undefined
-      // (UserRole.SUPER_ADMIN n'existe pas → cassait la requête → admins sans notif).
-      where('role', 'in', [
-        UserRole.ADMIN, UserRole.PRESIDENT, UserRole.DIRECTOR,
-        'admin', 'Admin', 'Super Admin',
-        'Directeur', 'directeur', 'Exploitant', 'exploitant'
-      ])
-    );
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map(d => d.id);
-  } catch (e) {
-    return [];
-  }
-};
-
 export const addPackagesBatch = async (packages: Omit<Package, 'id' | 'createdAt' | 'updatedAt'>[]): Promise<string[]> => {
-  // Firestore plafonne un writeBatch à 500 écritures : un fichier client de >500
-  // colis faisait échouer TOUT l'import en silence (aucun colis créé). On découpe
-  // en lots de 450 et on committe lot par lot.
-  const ids: string[] = [];
-  const now = new Date().toISOString();
-  const CHUNK = 450;
-  for (let i = 0; i < packages.length; i += CHUNK) {
-    const batch = writeBatch(db);
-    for (const pkg of packages.slice(i, i + CHUNK)) {
-      const docRef = doc(collection(db, PACKAGES_COLLECTION));
-      ids.push(docRef.id);
-      batch.set(docRef, cleanUndefined({
-        ...pkg,
-        createdAt: now,
-        updatedAt: now
-      }));
-    }
-    await batch.commit();
+  const call=httpsCallable<any,{ids:string[]}>(getFunctions(app,'europe-west1'),'importPackages');
+  const ids:string[]=[];
+  for(let offset=0;offset<packages.length;offset+=150){
+    try{ids.push(...(await call({packages:cleanUndefined(packages.slice(offset,offset+150))})).data.ids);}
+    catch(error){throw new Error(`${ids.length} ligne(s) déjà enregistrée(s). Relancez l’import : les colis existants ne seront pas recréés. ${error instanceof Error?error.message:''}`);}
   }
   return ids;
 };
@@ -783,44 +712,43 @@ export const createClientShipmentsBatch = async (params: {
 
 /**
  * Suivi live côté expéditeur : dénormalise la position du livreur + le nombre de
- * colis restants avant chacun, DIRECTEMENT sur les colis de la tournée en cours.
+ * colis restants avant chacun, dans un document de suivi propre à chaque client.
  * Le client ne lit que ses propres colis (règles Firestore) → aucune fuite entre
  * clients. Appelé ~toutes les 30s par le téléphone du chauffeur.
  */
+let trackingCache: {key: string; packages: Package[]} | null = null;
 export const publishLiveTrackingForMission = async (
   mission: Mission,
   driverPos: { lat: number; lng: number },
   driverName: string
 ): Promise<void> => {
-  const now = new Date().toISOString();
-  const deliveryStops = (mission.stops || [])
-    .filter(s => s.type === 'DELIVERY')
-    .sort((a, b) => a.sequence - b.sequence);
-
-  const batch = writeBatch(db);
-  let running = 0; // colis dans les arrêts NON terminés déjà rencontrés
-  let ops = 0;
-
-  for (const stop of deliveryStops) {
-    if (stop.status === StopStatus.COMPLETED) continue; // déjà livré → pas de suivi live
-    const before = running; // colis restants avant CET arrêt
-    for (const pid of (stop.packageIds || [])) {
-      batch.set(
-        doc(db, PACKAGES_COLLECTION, pid),
-        {
-          liveDriver: { lat: driverPos.lat, lng: driverPos.lng, updatedAt: now, driverName },
-          remainingBeforeMine: before,
-        },
-        { merge: true }
-      );
-      ops++;
-      if (ops >= 450) break; // garde-fou limite d'un batch Firestore
+  if (mission.status !== MissionStatus.IN_PROGRESS) return;
+  const activeStops = (mission.stops || []).filter(s => s.type === 'DELIVERY' && ![StopStatus.COMPLETED, StopStatus.FAILED, StopStatus.SKIPPED].includes(s.status)).sort((a,b)=>a.sequence-b.sequence);
+  const key = JSON.stringify([mission.id, activeStops.map(s=>[s.id,s.packageIds])]);
+  // Package ownership is read again whenever the active stops change.
+  if (trackingCache?.key !== key) trackingCache = {key, packages: await getPackagesByIds(activeStops.flatMap(s=>s.packageIds))};
+  const packages = new Map(trackingCache.packages.map(p=>[p.id,p]));
+  const groups = new Map<string, {clientId:string;clientName:string;ranks:Record<string,number>}>();
+  let before = 0;
+  for (const stop of activeStops) {
+    for (const id of stop.packageIds) {
+      const pkg = packages.get(id);
+      if (!pkg?.clientId || pkg.currentDriverId !== mission.driverId || pkg.missionId !== mission.id) continue;
+      const group = groups.get(pkg.clientId) || {clientId:pkg.clientId,clientName:pkg.clientName || '',ranks:{}};
+      group.ranks[id] = before; groups.set(pkg.clientId,group);
     }
-    running += (stop.packageCount || (stop.packageIds ? stop.packageIds.length : 0));
-    if (ops >= 450) break;
+    before += stop.packageIds.length;
   }
-
-  if (ops > 0) await batch.commit();
+  const now = new Date().toISOString();
+  const entries = Array.from(groups.values());
+  for (let offset=0; offset<entries.length; offset+=400) {
+    const batch = writeBatch(db);
+    for (const group of entries.slice(offset,offset+400)) batch.set(doc(db,'client_tracking',`${mission.id}_${group.clientId}`),{
+      ...group,missionId:mission.id,driverId:mission.driverId,
+      liveDriver:{...driverPos,driverName,updatedAt:now}
+    });
+    await batch.commit();
+  }
 };
 
 export const subscribeToMissions = (
@@ -834,7 +762,7 @@ export const subscribeToMissions = (
   // à ses tournées) au lieu de récupérer les 100 dernières puis filtrer côté client.
   const q = filters?.driverId
     ? query(collection(db, MISSIONS_COLLECTION), where('driverId', '==', filters.driverId))
-    : query(collection(db, MISSIONS_COLLECTION), orderBy('date', 'desc'), limit(100));
+    : query(collection(db, MISSIONS_COLLECTION), orderBy('date', 'desc'));
 
   return onSnapshot(q, (snapshot) => {
     let missions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Mission));
@@ -928,39 +856,62 @@ export const commitStopOutcome = async (params: {
   stopPatch: Partial<MissionStop>;
   deliveredDelta?: number;
   failedDelta?: number;
+  packageOutcomes?: Array<{ packageId: string; status: PackageStatus; movement: Omit<PackageMovement, 'timestamp'> }>;
 }): Promise<{ allDone: boolean; stops: MissionStop[] }> => {
   const ref = doc(db, MISSIONS_COLLECTION, params.missionId);
   const now = new Date().toISOString();
-  return await runTransaction(db, async (tx) => {
+  const terminal = (s: StopStatus) => [StopStatus.COMPLETED, StopStatus.FAILED, StopStatus.SKIPPED].includes(s);
+  return runTransaction(db, async tx => {
     const snap = await tx.get(ref);
     if (!snap.exists()) throw new Error('Tournée introuvable');
-    const m = { id: snap.id, ...snap.data() } as Mission;
-    // IDEMPOTENCE : si l'arrêt ciblé est DÉJÀ dans un état terminal (Livré/Échec),
-    // c'est un ré-envoi (double-tap, rejeu) — on NE réincrémente PAS les compteurs
-    // colis (sinon deliveredPackages/failedPackages pourraient dépasser le total).
+    const m = snap.data() as Mission;
     const prev = m.stops.find(s => s.id === params.stopId);
-    const wasTerminal = !!prev && (prev.status === StopStatus.COMPLETED || prev.status === StopStatus.FAILED);
-    // On nettoie le patch AVANT le merge : un champ `undefined` (ex. arrivalCoordinates
-    // sans GPS) ne doit PAS écraser/supprimer la valeur existante de l'arrêt.
+    if (!prev) throw new Error('Cet arrêt a été déplacé ou supprimé. Actualisez la tournée.');
+    if (terminal(prev.status)) {
+      if (params.stopPatch.status && params.stopPatch.status !== prev.status) {
+        throw new Error('Cet arrêt est déjà terminé. Sa décision ne peut plus être modifiée.');
+      }
+      // A replay or a delayed GPS callback cannot reopen or rewrite a completed delivery.
+      return { allDone: m.stops.every(s => terminal(s.status)), stops: m.stops };
+    }
+    if ([MissionStatus.COMPLETED, MissionStatus.CANCELLED].includes(m.status)) {
+      throw new Error('Cette tournée est clôturée.');
+    }
+    const outcomes = params.packageOutcomes || [];
+    if (new Set(outcomes.map(o => o.packageId)).size !== outcomes.length || outcomes.length > 450) {
+      throw new Error('Liste de colis invalide ou trop volumineuse.');
+    }
+    const pkgSnaps = await Promise.all(outcomes.map(o => tx.get(doc(db, PACKAGES_COLLECTION, o.packageId))));
+    for (let i=0; i<outcomes.length; i++) {
+      const p = pkgSnaps[i];
+      if (!p.exists() || !prev.packageIds.includes(p.id)) throw new Error('Un colis ne fait plus partie de cet arrêt.');
+      const data = p.data() as Package;
+      if ((data.missionId && data.missionId !== params.missionId) ||
+          (data.currentDriverId && m.driverId && data.currentDriverId !== m.driverId)) {
+        throw new Error('Un colis a été transféré à un autre chauffeur. Actualisez la tournée.');
+      }
+    }
+    const delivered = outcomes.length ? outcomes.filter(o => o.status === PackageStatus.DELIVERED).length : (params.deliveredDelta || 0);
+    const failed = outcomes.length ? outcomes.filter(o => o.status === PackageStatus.FAILED).length : (params.failedDelta || 0);
+    if (delivered < 0 || failed < 0 || delivered + failed > prev.packageIds.length) throw new Error('Comptage des colis incohérent.');
     const cleanPatch = cleanUndefined(params.stopPatch) as Partial<MissionStop>;
     const stops = m.stops.map(s => s.id === params.stopId ? { ...s, ...cleanPatch } : s);
-    const { completedStops, failedStops, totalPackages } = recomputeMissionCounters(stops);
-    const deliveredPackages = Math.max(0, (m.deliveredPackages || 0) + (wasTerminal ? 0 : (params.deliveredDelta || 0)));
-    const failedPackages = Math.max(0, (m.failedPackages || 0) + (wasTerminal ? 0 : (params.failedDelta || 0)));
-    const allDone = stops.every(s =>
-      s.status === StopStatus.COMPLETED || s.status === StopStatus.FAILED || s.status === StopStatus.SKIPPED
-    );
-    // La mission ne se termine PLUS toute seule au dernier arrêt : le chauffeur garde
-    // la main et clôture explicitement via « Terminer ma tournée » (finishMission).
-    // Ici on maintient donc IN_PROGRESS ; `allDone` sert juste à proposer le bouton.
-    tx.update(ref, cleanUndefined({
-      stops,
-      completedStops, failedStops, totalPackages,
-      deliveredPackages, failedPackages,
-      status: MissionStatus.IN_PROGRESS,
-      updatedAt: now
-    }));
-    return { allDone, stops };
+    for (let i=0; i<outcomes.length; i++) {
+      const outcome=outcomes[i], p=pkgSnaps[i].data() as Package;
+      tx.update(pkgSnaps[i].ref, cleanUndefined({status:outcome.status,
+        missionId:params.missionId,stopId:params.stopId,currentDriverId:m.driverId,currentVehicleId:m.vehicleId,
+        movements:[...(p.movements || []),{...outcome.movement,timestamp:now}],updatedAt:now}));
+    }
+    const counters = recomputeMissionCounters(stops);
+    tx.update(ref, {
+      stops, ...counters,
+      // A non-delivered parcel remains part of the original mission's total.
+      totalPackages: Math.max(m.totalPackages || 0, counters.totalPackages),
+      deliveredPackages:(m.deliveredPackages || 0)+delivered,
+      failedPackages:(m.failedPackages || 0)+failed,
+      status:MissionStatus.IN_PROGRESS,updatedAt:now
+    });
+    return { allDone: stops.every(s => terminal(s.status)), stops };
   });
 };
 
@@ -977,6 +928,8 @@ export const updateMissionStatus = async (missionId: string, status: MissionStat
 };
 
 export const deleteMission = async (id: string): Promise<void> => {
+  const packages = await getDocs(query(collection(db, PACKAGES_COLLECTION), where('missionId', '==', id), limit(1)));
+  if (!packages.empty) throw new Error('Cette tournée contient des colis. Annulez-la et réaffectez les colis avant suppression.');
   await deleteDoc(doc(db, MISSIONS_COLLECTION, id));
 };
 
@@ -1126,7 +1079,7 @@ export const confirmTransfer = async (transferId: string, toSignatureUrl?: strin
   const now = new Date().toISOString();
   await updateDoc(doc(db, TRANSFERS_COLLECTION, transferId), {
     status: TransferStatus.CONFIRMED,
-    toSignatureUrl,
+    toSignatureUrl: toSignatureUrl || null,
     confirmedAt: now,
     updatedAt: now
   });
@@ -1228,196 +1181,8 @@ export const recomputeMissionCounters = (stops: MissionStop[]) => ({
 });
 
 export const transferPackagesToDriver = async (input: RoadTransferInput): Promise<number> => {
-  const { packages: raw, toMission, toDriver, reason, location, notes, newStatus, claimMode } = input;
-  const now = new Date().toISOString();
-  const ids = [...new Set(raw.map(p => p.id).filter(Boolean))];
-  if (ids.length === 0) throw new Error('Aucun colis à traiter');
-  const toRef = doc(db, MISSIONS_COLLECTION, toMission.id);
-
-  // TOUT EN UNE SEULE TRANSACTION : retrait des tournées d'origine, ajout à la
-  // tournée receveuse ET réécriture des pointeurs colis sont désormais atomiques.
-  // Avant, ces 3 phases étaient committées séparément → colis « orphelins »
-  // (retirés de l'origine mais jamais rajoutés si l'étape 2 échouait) et pointeurs
-  // incohérents (colis dans les stops du receveur mais doc pointant encore l'origine)
-  // dès que le réseau tombait en cours de route. Un échec annule maintenant TOUT.
-  const { addedIds, movedByOrigin, originMeta, notify } = await runTransaction(db, async (tx) => {
-    // ===== 1. LECTURES (toutes AVANT les écritures — contrainte Firestore) =====
-    // 1a. Colis FRAIS → anti-résurrection (on ignore livrés/retournés). Les lectures
-    //     dans la transaction servent aussi de détection de conflit : deux chauffeurs
-    //     qui scannent le même colis n'aboutiront jamais à un doublon (le perdant
-    //     rejoue et voit le colis déjà réaffecté).
-    const pkgSnaps = await Promise.all(ids.map(id => tx.get(doc(db, PACKAGES_COLLECTION, id))));
-    const pkgs = pkgSnaps
-      .filter(s => s.exists())
-      .map(s => ({ id: s.id, ...s.data() } as Package))
-      .filter(p => p.status !== PackageStatus.DELIVERED && p.status !== PackageStatus.RETURNED);
-    if (pkgs.length === 0) throw new Error('Aucun colis à traiter (déjà livrés/retournés ou introuvables)');
-    if (pkgs.length > 400) throw new Error('Trop de colis en une fois (>400) — divisez le transfert');
-
-    // 1b. Tournées d'origine distinctes (hors receveuse).
-    const originIds = [...new Set(pkgs.map(p => p.missionId).filter((m): m is string => !!m && m !== toMission.id))];
-    const originSnaps = await Promise.all(originIds.map(id => tx.get(doc(db, MISSIONS_COLLECTION, id))));
-    const originMissions = new Map<string, Mission>();
-    originSnaps.forEach((snap, i) => {
-      if (snap.exists()) originMissions.set(originIds[i], { id: snap.id, ...snap.data() } as Mission);
-    });
-
-    // 1c. Tournée receveuse (lue DANS la transaction → jamais périmée).
-    const toSnap = await tx.get(toRef);
-    if (!toSnap.exists()) throw new Error('Votre tournée est introuvable');
-    const toM = { id: toSnap.id, ...toSnap.data() } as Mission;
-
-    // ===== 2. CALCULS =====
-    // 2a. Dédup : colis déjà présents dans la tournée receveuse.
-    const already = new Set(toM.stops.flatMap(s => s.packageIds));
-    const toAdd = pkgs.filter(p => !already.has(p.id));
-
-    // 2b. Fusion par adresse (placeKey) dans un arrêt existant ENCORE À FAIRE, sinon
-    //     création d'un arrêt — évite « 1 colis au lieu de 4 » quand on scanne un par un.
-    const updatedToStops: MissionStop[] = toM.stops.map(s => ({ ...s, packageIds: [...s.packageIds] }));
-    const mergeableByKey = new Map<string, MissionStop>();
-    for (const s of updatedToStops) {
-      if (s.type === 'DELIVERY' &&
-          s.status !== StopStatus.COMPLETED &&
-          s.status !== StopStatus.FAILED &&
-          s.status !== StopStatus.SKIPPED) {
-        const k = placeKey(s);
-        if (!mergeableByKey.has(k)) mergeableByKey.set(k, s);
-      }
-    }
-    let maxSeq = updatedToStops.reduce((mx, s) => Math.max(mx, s.sequence), 0);
-    const byAddress = new Map<string, Package[]>();
-    for (const p of toAdd) {
-      const k = placeKey(p);
-      if (!byAddress.has(k)) byAddress.set(k, []);
-      byAddress.get(k)!.push(p);
-    }
-    const stopByPkg = new Map<string, string>(); // pkgId → stopId (receveur)
-    for (const [key, group] of byAddress) {
-      let target = mergeableByKey.get(key);
-      if (!target) {
-        maxSeq += 1;
-        const first = group[0];
-        target = buildDeliveryStop({
-          id: makeStopId('transfer', maxSeq, now),
-          sequence: maxSeq,
-          address: first.address, city: first.city, postalCode: first.postalCode,
-          coordinates: first.coordinates, floor: first.floor, hasElevator: first.hasElevator,
-          contactName: first.contactName, contactPhone: first.contactPhone,
-          packageIds: [],
-          timeWindowStart: first.timeWindowStart, timeWindowEnd: first.timeWindowEnd,
-          serviceTime: first.serviceTime || 5,
-          notes: claimMode ? 'Pris en charge par scan' : 'Reçu par transfert en route',
-        });
-        updatedToStops.push(target);
-        mergeableByKey.set(key, target);
-      }
-      for (const p of group) {
-        target.packageIds.push(p.id);
-        stopByPkg.set(p.id, target.id);
-      }
-      target.packageCount = target.packageIds.length;
-    }
-
-    // 2c. Retrait des colis de leurs tournées d'origine (calcul des nouveaux stops).
-    const addedIdSet = new Set(toAdd.map(p => p.id));
-    const removedByOrigin = new Map<string, MissionStop[]>();
-    for (const [mid, m] of originMissions) {
-      const removed = new Set(pkgs.filter(p => p.missionId === mid && addedIdSet.has(p.id)).map(p => p.id));
-      if (removed.size === 0) continue;
-      const newStops = m.stops
-        .map(s => {
-          const remaining = s.packageIds.filter(id => !removed.has(id));
-          return remaining.length === s.packageIds.length ? s : { ...s, packageIds: remaining, packageCount: remaining.length };
-        })
-        // Retirer les stops vidés SAUF s'ils étaient déjà terminés.
-        .filter(s => s.packageIds.length > 0 || s.status === StopStatus.COMPLETED);
-      removedByOrigin.set(mid, newStops);
-    }
-
-    // ===== 3. ÉCRITURES (toutes après les lectures) =====
-    for (const [mid, newStops] of removedByOrigin) {
-      tx.update(doc(db, MISSIONS_COLLECTION, mid), { stops: newStops, ...recomputeMissionCounters(newStops), updatedAt: now });
-    }
-    tx.update(toRef, {
-      stops: updatedToStops,
-      totalPackages: recomputeMissionCounters(updatedToStops).totalPackages,
-      status: toM.status === MissionStatus.COMPLETED ? MissionStatus.IN_PROGRESS : (toM.status || MissionStatus.IN_PROGRESS),
-      updatedAt: now
-    });
-    for (const p of toAdd) {
-      const stopId = stopByPkg.get(p.id)!;
-      const fromMission = p.missionId ? originMissions.get(p.missionId) : undefined;
-      const movement: PackageMovement = cleanUndefined({
-        timestamp: now,
-        action: claimMode ? 'OUT_FOR_DELIVERY' as const : 'TRANSFERRED' as const,
-        driverId: toDriver.id, driverName: toDriver.name,
-        // « de X » = chauffeur source (transfert OU prise en charge d'un colis d'un collègue).
-        fromDriverName: fromMission?.driverName,
-        vehicleId: toMission.vehicleId, vehiclePlate: toMission.vehiclePlate, location,
-        notes: claimMode
-          ? `Pris en charge pour livraison par ${toDriver.name}${fromMission?.driverName ? ` (récupéré de ${fromMission.driverName})` : ''}`
-          : `Transfert en route${fromMission?.driverName ? ` — de ${fromMission.driverName}` : ''} à ${toDriver.name}${notes ? ` (${notes})` : ''}`
-      }) as PackageMovement;
-      tx.update(doc(db, PACKAGES_COLLECTION, p.id), cleanUndefined({
-        missionId: toMission.id, stopId,
-        currentDriverId: toDriver.id, currentVehicleId: toMission.vehicleId,
-        ...(newStatus ? { status: newStatus } : {}),
-        movements: [...(p.movements || []), movement],
-        updatedAt: now
-      }));
-    }
-
-    // Métadonnées pour la trace de transfert (créée hors transaction, non critique).
-    const movedByOrigin = new Map<string, string[]>();
-    for (const p of toAdd) {
-      if (!p.missionId || !originMissions.has(p.missionId)) continue;
-      if (!movedByOrigin.has(p.missionId)) movedByOrigin.set(p.missionId, []);
-      movedByOrigin.get(p.missionId)!.push(p.id);
-    }
-    // Données de notification client « colis en livraison » (déclenchée hors tx :
-    // le tx.update ci-dessus court-circuite updatePackageStatus/triggerNotifications).
-    const notify = toAdd
-      .filter(p => p.clientId)
-      .map(p => ({ clientId: p.clientId as string, barcode: p.barcode || p.orderNumber || 'N/A', recipientName: p.contactName || 'Destinataire' }));
-    return { addedIds: addedIdSet, movedByOrigin, originMeta: originMissions, notify };
-  });
-
-  // ===== 4bis. Notifier le client « en livraison » (modèle par SCAN = défaut) =====
-  // Avant, seules les tournées dispatchées par l'admin notifiaient ; les tournées
-  // construites au scan (prise en charge) ne notifiaient jamais le client.
-  if (newStatus === PackageStatus.IN_DELIVERY && notify.length > 0) {
-    import('./notificationService').then(({ notifyPackageInDelivery }) => {
-      // Une notification par colis, mais on dédoublonne (clientId+barcode) pour éviter
-      // les doublons quand le même code revient.
-      const seen = new Set<string>();
-      for (const n of notify) {
-        const k = `${n.clientId}|${n.barcode}`;
-        if (seen.has(k)) continue;
-        seen.add(k);
-        notifyPackageInDelivery(n.clientId, n.barcode, n.recipientName, toDriver.name).catch(() => {});
-      }
-    }).catch(() => {});
-  }
-
-  // ===== 4. Traçabilité : un document de transfert par tournée d'origine =====
-  // Hors transaction (non critique) : si ça échoue, les colis sont déjà cohérents.
-  for (const [missionId, movedIds] of movedByOrigin) {
-    const fromMission = originMeta.get(missionId);
-    if (!fromMission || movedIds.length === 0) continue;
-    await addTransfer({
-      packageIds: movedIds, packageCount: movedIds.length,
-      fromDriverId: fromMission.driverId || '', fromDriverName: fromMission.driverName || 'Inconnu',
-      fromVehicleId: fromMission.vehicleId || '', fromVehiclePlate: fromMission.vehiclePlate || '',
-      fromMissionId: missionId,
-      toDriverId: toDriver.id, toDriverName: toDriver.name,
-      toVehicleId: toMission.vehicleId || '', toVehiclePlate: toMission.vehiclePlate || '',
-      toMissionId: toMission.id, location, timestamp: now, reason, notes,
-      status: TransferStatus.CONFIRMED, confirmedAt: now
-    });
-  }
-
-  return addedIds.size;
+  const call=httpsCallable<any,{count:number}>(getFunctions(app,'europe-west1'),'transferPackages');
+  return (await call({packageIds:input.packages.map(p=>p.id),missionId:input.toMission.id,reason:input.reason,claimMode:!!input.claimMode,notes:input.notes || ''})).data.count;
 };
 
 /**
@@ -1929,12 +1694,5 @@ export const detachPackageFromTour = async (
   packageId: string,
   extra: Record<string, any> = {}
 ): Promise<void> => {
-  await updateDoc(doc(db, PACKAGES_COLLECTION, packageId), cleanUndefined({
-    ...extra,
-    missionId: null,
-    stopId: null,
-    currentDriverId: null,
-    currentVehicleId: null,
-    updatedAt: new Date().toISOString()
-  }));
+  await httpsCallable(getFunctions(app, 'europe-west1'), 'returnPackage')({packageId, extra: cleanUndefined(extra)});
 };

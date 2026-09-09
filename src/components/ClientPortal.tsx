@@ -413,13 +413,13 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   const handleSaveCompanyFromHub = async (fields: { companyName: string; companyAddress: string; companyPhone: string; companySiret: string }) => {
     await updateUserProfile({
       ...currentUser,
-      companyName: fields.companyName.trim(),
+      companyName: currentUser.companyName || '',
       companyAddress: fields.companyAddress.trim(),
       companyPhone: fields.companyPhone.trim(),
       companySiret: fields.companySiret.trim(),
     });
     setCompanyForm({
-      companyName: fields.companyName.trim(),
+      companyName: currentUser.companyName || '',
       companyAddress: fields.companyAddress.trim(),
       companySiret: fields.companySiret.trim(),
       companyPhone: fields.companyPhone.trim(),
@@ -600,7 +600,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
           now.setDate(now.getDate() + 1);
           now.setHours(8, 0, 0, 0);
       }
-      return now.toISOString().slice(0, 16);
+      return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0,16);
   };
   const getMinDeliveryDate = () => {
       if (!newRequest.pickupDate) return '';
@@ -610,7 +610,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
           pickup.setDate(pickup.getDate() + 1);
           pickup.setHours(8, 0, 0, 0);
       }
-      return pickup.toISOString().slice(0, 16);
+      return new Date(pickup.getTime() - pickup.getTimezoneOffset() * 60000).toISOString().slice(0,16);
   };
   const minPickup = getMinPickupDate();
   const minDelivery = getMinDeliveryDate();
@@ -619,9 +619,10 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   const executePendingAction = async () => {
       if (!pendingAction) return;
 
+      try {
       switch (pendingAction.type) {
           case 'ADD_QUOTE':
-              onAddQuote(pendingAction.data);
+              await onAddQuote(pendingAction.data);
               
               // 💾 Sauvegarder les adresses si cochées
               if (saveOriginAddress && newRequest.originAddress && newRequest.originCity) {
@@ -659,7 +660,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
               break;
           case 'ADD_MEMBER':
               if (onAddTeamMember) {
-                  onAddTeamMember(pendingAction.data);
+                  await onAddTeamMember(pendingAction.data);
                   setIsTeamModalOpen(false);
                   setMemberForm({ firstName: '', lastName: '', email: '' });
                   
@@ -699,7 +700,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
               break;
           case 'UPDATE_MEMBER':
               if (onUpdateTeamMember) {
-                  onUpdateTeamMember(pendingAction.data);
+                  await onUpdateTeamMember(pendingAction.data);
                   setIsTeamModalOpen(false);
                   setEditingMember(null);
                   setMemberForm({ firstName: '', lastName: '', email: '' });
@@ -707,18 +708,21 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
               break;
           case 'DELETE_MEMBER':
               if (onDeleteTeamMember) {
-                  onDeleteTeamMember(pendingAction.data.id);
+                  await onDeleteTeamMember(pendingAction.data.id);
               }
               break;
           case 'ACCEPT_OFFER':
-              onUpdateQuoteStatus(pendingAction.data.id, QuoteStatus.ACCEPTED);
+              await onUpdateQuoteStatus(pendingAction.data.id, QuoteStatus.ACCEPTED);
               break;
           case 'REJECT_OFFER':
-              onUpdateQuoteStatus(pendingAction.data.id, QuoteStatus.REJECTED);
+              await onUpdateQuoteStatus(pendingAction.data.id, QuoteStatus.REJECTED);
               break;
       }
       setIsConfirmModalOpen(false);
       setPendingAction(null);
+      } catch (error) {
+        alert(error instanceof Error ? error.message : "L’opération n’a pas été enregistrée. Réessayez.");
+      }
   };
 
   // --- SUBMITS (TRIGGER CONFIRMATION) ---
@@ -1000,6 +1004,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                   <input
                     type="text"
                     value={companyForm.companyName}
+                    readOnly title="Le nom de société est géré par votre responsable."
                     onChange={(e) => setCompanyForm(f => ({ ...f, companyName: e.target.value }))}
                     placeholder="Ex : PREM BPA"
                     className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
@@ -2224,6 +2229,8 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                 type="email" required
                                 className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
                                 value={memberForm.email}
+                                readOnly={!!editingMember}
+                                title={editingMember ? "Adresse de connexion gérée par votre responsable" : undefined}
                                 onChange={(e) => setMemberForm({...memberForm, email: e.target.value})}
                             />
                         </div>

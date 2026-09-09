@@ -19,7 +19,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
@@ -28,5 +28,28 @@ jobs:
       - name: Typecheck (tsc --noEmit)
         run: npm run typecheck
 
+      - name: Unit tests
+        run: npm test
+
+      - name: Server dependencies and build
+        run: npm ci --prefix functions && npm run build --prefix functions
+
       - name: Build (vite)
         run: npm run build
+
+      - name: Setup Java for Firebase emulators
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install Firebase CLI
+        run: npm install --global firebase-tools@15.15.0
+
+      - name: Firestore, Storage and server regression tests
+        env:
+          JAVA_TOOL_OPTIONS: -Duser.language=en -Duser.country=US
+        run: firebase emulators:exec --project demo-fleet-production-audit --config firebase.test.json --only firestore,storage "npm run test:emulated"
+
+      - name: Check dependency advisories
+        run: npm audit --audit-level=moderate && npm audit --prefix functions --audit-level=moderate

@@ -1,3 +1,5 @@
+import { getFunctions, httpsCallable } from "firebase/functions";
+import app from "../firebaseConfig";
 /**
  * Service de gestion des invitations avec tokens
  * 
@@ -99,46 +101,8 @@ export const createInvitation = async (
   invitedBy: { id: string; name: string },
   userInfo?: { firstName?: string; lastName?: string; role?: string }
 ): Promise<{ token: string; expiresAt: string }> => {
-  // Normaliser l'email
-  const normalizedEmail = email.toLowerCase().trim();
-  
-  // Vérifier s'il existe déjà une invitation non utilisée pour cet email
-  const existingQ = query(
-    collection(db, "invitations"),
-    where("email", "==", normalizedEmail),
-    where("used", "==", false)
-  );
-  const existingDocs = await getDocs(existingQ);
-  
-  // Supprimer les anciennes invitations non utilisées
-  for (const doc of existingDocs.docs) {
-    await deleteDoc(doc.ref);
-  }
-  
-  // Générer nouveau token
-  const token = generateToken();
-  const expiresAt = getExpirationDate(7);
-  
-  const invitation: Omit<Invitation, 'id'> = {
-    token,
-    email: normalizedEmail,
-    userId,
-    invitedBy: invitedBy.id,
-    invitedByName: invitedBy.name,
-    createdAt: new Date().toISOString(),
-    expiresAt,
-    used: false,
-    // Stocker les infos du profil pour le fallback
-    ...(userInfo && {
-      firstName: userInfo.firstName,
-      lastName: userInfo.lastName,
-      role: userInfo.role
-    })
-  };
-  
-  await addDoc(collection(db, "invitations"), invitation);
-  
-  return { token, expiresAt };
+  const call=httpsCallable<any,{token:string;expiresAt:string}>(getFunctions(app,'europe-west1'),'createInvitation');
+  return (await call({email,userId})).data;
 };
 
 /**
@@ -207,27 +171,8 @@ export const resendInvitation = async (
   email: string,
   invitedBy: { id: string; name: string }
 ): Promise<{ token: string; expiresAt: string } | null> => {
-  try {
-    const normalizedEmail = email.toLowerCase().trim();
-    
-    // Trouver le profil utilisateur existant
-    const userQ = query(collection(db, "users"), where("email", "==", normalizedEmail));
-    const userDocs = await getDocs(userQ);
-    
-    if (userDocs.empty) {
-      console.error(`❌ Utilisateur non trouvé pour: ${normalizedEmail}`);
-      return null;
-    }
-    
-    const userId = userDocs.docs[0].id;
-    
-    // Créer nouvelle invitation
-    return await createInvitation(normalizedEmail, userId, invitedBy);
-    
-  } catch (error) {
-    console.error("Erreur renvoi invitation:", error);
-    return null;
-  }
+  const call=httpsCallable<any,{token:string;expiresAt:string}>(getFunctions(app,'europe-west1'),'createInvitation');
+  return (await call({email})).data;
 };
 
 /**

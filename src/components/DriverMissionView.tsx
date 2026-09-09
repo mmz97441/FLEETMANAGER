@@ -1,3 +1,4 @@
+import { submitDelivery } from '../services/deliveryOutbox';
 /**
  * DRIVER MISSION VIEW — Interface Mobile Chauffeur
  * 
@@ -489,7 +490,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
         p.currentDriverId === currentUser.id
       );
       setReturnPackages(toReturn);
-    });
+    }, {driverId: currentUser.id, status: PackageStatus.RETURN_REQUESTED});
     return unsub;
   }, [currentUser.id]);
 
@@ -763,7 +764,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
           const { uploadProofPhoto } = await import('../services/podService');
           const url = await uploadProofPhoto(photoBase64, returningPackage.id, 'return');
           photoUrls.push(url);
-        } catch (e) { reportError('driver.return.photo', e, { level: 'warning', silent: true, extra: { packageId: returningPackage.id } }); }
+        } catch (e) { throw new Error('La photo du retour n’a pas été envoyée. Réessayez avant de confirmer.'); }
       }
 
       // Uploader la signature si présente
@@ -772,7 +773,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
         try {
           const { uploadProofPhoto } = await import('../services/podService');
           signatureUrl = await uploadProofPhoto(returnSignature, returningPackage.id, 'return-signature');
-        } catch (e) { reportError('driver.return.signature', e, { level: 'warning', silent: true, extra: { packageId: returningPackage.id } }); }
+        } catch (e) { throw new Error('La signature du retour n’a pas été envoyée. Réessayez avant de confirmer.'); }
       }
 
       // Créer la preuve de retour
@@ -793,14 +794,6 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
         timestamp: new Date().toISOString(),
         notes: `Retourné par ${currentUser.firstName} ${currentUser.lastName}`
       };
-
-      // Mettre à jour le colis : RETURNED + enregistrer la preuve
-      await updatePackageStatus(returningPackage.id, PackageStatus.RETURNED, {
-        action: 'RETURNED',
-        driverId: currentUser.id,
-        driverName: `${currentUser.firstName} ${currentUser.lastName}`,
-        notes: `Retour hub confirmé — ${photoUrls.length} photo(s)`
-      });
 
       // Sauvegarder la preuve de retour dans le colis
       const { detachPackageFromTour } = await import('../services/missionService');
@@ -977,76 +970,26 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
       const deliverIds = stopIds.filter(id => !idsToDeliver || idsToDeliver.has(id));
       const failIds = stopIds.filter(id => idsToDeliver && !idsToDeliver.has(id));
 
-      // 1. STATUT DE CHAQUE COLIS D'ABORD = source de vérité. On ne marquera
-      //    l'arrêt « terminé » QUE si TOUTES les écritures colis réussissent :
-      //    sinon un arrêt terminé pourrait contenir un colis resté « en cours »
-      //    que la resync repasserait à tort en « Livré » (faux POD).
-      const okDelivered: string[] = [];
-      const okFailed: string[] = [];
-      let writeErrors = 0;
-      for (const pkgId of deliverIds) {
-        try {
-          await updatePackageStatus(pkgId, PackageStatus.DELIVERED, {
-            action: 'DELIVERED',
-            driverId: currentUser.id, driverName: driverFullName,
-            vehicleId: activeMission.vehicleId, vehiclePlate: activeMission.vehiclePlate,
-            location: coords,
-            notes: [
-              recipientName ? `Réceptionné par: ${recipientName}` : null,
-              scanTrace || null
-            ].filter(Boolean).join(' • ') || undefined
-          }, linkFields);
-          okDelivered.push(pkgId);
-        } catch (e) {
-          writeErrors++;
-          reportError('driver.delivery.item', e, { silent: true, extra: { pkgId, missionId: activeMission.id, stopId: currentStop.id } });
-        }
-      }
-      for (const pkgId of failIds) {
-        try {
-          await updatePackageStatus(pkgId, PackageStatus.FAILED, {
-            action: 'FAILED',
-            driverId: currentUser.id, driverName: driverFullName,
-            vehicleId: activeMission.vehicleId, vehiclePlate: activeMission.vehiclePlate,
-            location: coords,
-            notes: 'Déclaré NON REMIS par le chauffeur (colis absent au point de livraison)'
-          }, linkFields);
-          okFailed.push(pkgId);
-        } catch (e) {
-          writeErrors++;
-          reportError('driver.delivery.item', e, { silent: true, extra: { pkgId, missionId: activeMission.id, stopId: currentStop.id } });
-        }
-      }
-
-      // 2. Une écriture colis a échoué → on NE termine PAS l'arrêt (il reste ouvert),
-      //    on garde l'intention (même stopId) pour un nouvel essai une fois en ligne.
-      if (writeErrors > 0) {
-        reportError('driver.delivery.partial', new Error(`${writeErrors} colis non écrits`), {
-          level: 'warning',
-          userMessage: `⚠️ ${writeErrors} colis sur ${stopIds.length} n'ont pas pu être enregistrés (réseau ?). L'arrêt reste OUVERT — réessayez une fois en ligne.`,
-          extra: { missionId: activeMission.id, stopId: currentStop.id }
-        });
-        setIsProcessing(false);
-        return;
-      }
-
-      // 3+4. Terminer l'arrêt de façon ATOMIQUE (relecture fraîche de la mission,
-      //      patch du SEUL arrêt courant, compteurs recalculés). L'arrêt terminé ne
-      //      référence QUE les colis livrés (les non remis, déjà écrits en ÉCHEC, en
-      //      sont retirés → resync sûre, pas d'arrêt fantôme). Plus d'écrasement d'un
-      //      transfert concurrent ni de compteurs perdus (fix #5).
-      const { allDone, stops: updatedStops } = await commitStopOutcome({
-        missionId: activeMission.id,
-        stopId: currentStop.id,
-        stopPatch: {
-          status: StopStatus.COMPLETED,
-          completionTime: now,
-          arrivalCoordinates: coords,
-          packageIds: deliverIds,
-          packageCount: deliverIds.length
+      if (!deliverIds.length) throw new Error('Aucun colis remis : utilisez la déclaration d’échec de livraison.');
+      const okDelivered = deliverIds, okFailed = failIds;
+      const { allDone, stops: updatedStops } = await submitDelivery({
+        id: `${currentUser.id}/${activeMission.id}/${currentStop.id}`,
+        userId: currentUser.id, kind: 'success', createdAt: now,
+        action: {
+          missionId: activeMission.id, stopId: currentStop.id,
+          stopPatch: { status: StopStatus.COMPLETED, completionTime: now, arrivalCoordinates: coords },
+          packageOutcomes: stopIds.map(packageId => ({
+            packageId, status: deliverIds.includes(packageId) ? PackageStatus.DELIVERED : PackageStatus.FAILED,
+            movement: { action: deliverIds.includes(packageId) ? 'DELIVERED' : 'FAILED',
+              driverId: currentUser.id, driverName: driverFullName,
+              notes: deliverIds.includes(packageId) ? scanTrace : 'Colis déclaré non remis' }
+          }))
         },
-        deliveredDelta: okDelivered.length,
-        failedDelta: okFailed.length
+        proof: { missionId:activeMission.id,stopId:currentStop.id,packageIds:deliverIds,
+          driverId:currentUser.id,driverName:driverFullName,vehicleId:activeMission.vehicleId || '',vehiclePlate:activeMission.vehiclePlate || '',
+          recipientName:recipientName || undefined,deliveryLocation,merchandiseGoodCondition:merchandiseGood,
+          reservesNote:merchandiseGood ? undefined : reservesNote,signatureBase64:signatureData || undefined,
+          photosBase64:capturedPhotos,coordinates:coords,notes:scanTrace }
       });
 
       // 4bis. JOURNAL — livraison (succès + éventuels non remis). Trace « qui a livré
@@ -1057,52 +1000,6 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
         description: `${currentUser.firstName} ${currentUser.lastName} a livré ${okDelivered.length} colis à ${currentStop.contactName || currentStop.city}${okFailed.length > 0 ? ` (${okFailed.length} non remis)` : ''}`,
         details: { metadata: { livrés: okDelivered.length, nonRemis: okFailed.length, ville: currentStop.city, gps: !!coords } }
       });
-
-      // 5. Upload des preuves (POD) — best-effort : NE DOIT JAMAIS annuler la livraison.
-      try {
-        setUploadProgress({ step: 'compressing', current: 0, total: 1, message: 'Préparation...' });
-        const podResult = await uploadAndCreatePOD({
-          missionId: activeMission.id,
-          stopId: currentStop.id,
-          packageIds: deliverIds, // la preuve ne couvre QUE les colis réellement remis
-          driverId: currentUser.id,
-          driverName: `${currentUser.firstName} ${currentUser.lastName}`,
-          vehicleId: activeMission.vehicleId || '',
-          vehiclePlate: activeMission.vehiclePlate || '',
-          recipientName: recipientName || undefined,
-          deliveryLocation,
-          merchandiseGoodCondition: merchandiseGood,
-          reservesNote: merchandiseGood ? undefined : (reservesNote.trim() || undefined),
-          signatureBase64: signatureData || undefined,
-          photosBase64: capturedPhotos,
-          coordinates: coords || { lat: 0, lng: 0 },
-          notes: [
-            recipientName ? `${deliveryLocation} — Réceptionné par: ${recipientName}` : null,
-            merchandiseGood ? null : `⚠️ Réserves: ${reservesNote.trim() || 'oui'}`,
-            scanTrace || null
-          ].filter(Boolean).join(' • ') || undefined
-        }, setUploadProgress);
-        if (podResult) {
-          showNotif('📸 Preuves uploadées ✓');
-        } else {
-          // uploadAndCreatePOD renvoie null (ne throw pas) en cas d'échec réseau :
-          // le catch ci-dessous ne se déclenchait donc jamais et la perte de preuve
-          // passait EN SILENCE. On avertit explicitement et on trace.
-          showNotif('⚠️ Livré, MAIS preuves (photo/signature) NON envoyées — réseau. À renvoyer.');
-          reportError('driver.delivery.pod.null', new Error('uploadAndCreatePOD a renvoyé null'), {
-            level: 'warning',
-            userMessage: "⚠️ Colis livré, mais l'envoi des preuves a échoué (réseau). À renvoyer une fois en ligne.",
-            extra: { missionId: activeMission.id, stopId: currentStop.id }
-          });
-        }
-      } catch (e) {
-        showNotif('⚠️ Livré, MAIS envoi des preuves échoué — à renvoyer.');
-        reportError('driver.delivery.pod', e, {
-          level: 'warning',
-          userMessage: "⚠️ Colis livré, mais l'envoi des preuves (photo/signature) a échoué. Elles pourront être renvoyées.",
-          extra: { missionId: activeMission.id, stopId: currentStop.id }
-        });
-      }
 
       // 6. FIX BUG 2: Trouver le prochain stop en attente dans l'ORDRE TRIÉ (par sequence)
       const updatedSorted = [...updatedStops].sort((a, b) => a.sequence - b.sequence);
@@ -1148,68 +1045,16 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
 
       const now = new Date().toISOString();
 
-      // Échec de TOUT l'arrêt, patch ATOMIQUE (relecture fraîche + compteurs).
-      const { allDone, stops: updatedStops } = await commitStopOutcome({
-        missionId: activeMission.id,
-        stopId: currentStop.id,
-        stopPatch: {
-          status: StopStatus.FAILED,
-          completionTime: now,
-          arrivalCoordinates: coords
-        },
-        failedDelta: currentStop.packageCount
+      const { allDone, stops: updatedStops } = await submitDelivery({
+        id:`${currentUser.id}/${activeMission.id}/${currentStop.id}`,userId:currentUser.id,kind:'failure',createdAt:now,
+        action:{missionId:activeMission.id,stopId:currentStop.id,
+          stopPatch:{status:StopStatus.FAILED,completionTime:now,arrivalCoordinates:coords},
+          packageOutcomes:currentStop.packageIds.map(packageId=>({packageId,status:PackageStatus.FAILED,
+            movement:{action:'FAILED',driverId:currentUser.id,driverName:`${currentUser.firstName} ${currentUser.lastName}`,notes:`${failureReason} ${failureNotes}`}}))},
+        proof:{missionId:activeMission.id,stopId:currentStop.id,packageIds:currentStop.packageIds,
+          driverId:currentUser.id,driverName:`${currentUser.firstName} ${currentUser.lastName}`,vehicleId:activeMission.vehicleId || '',vehiclePlate:activeMission.vehiclePlate || '',
+          failureReason,failureNotes,photosBase64:failurePhotos,coordinates:coords || {lat:0,lng:0}}
       });
-
-      // JOURNAL — échec de livraison (⚠️ ressort en « pas bon » côté président).
-      void logActivity(currentUser, ActivityAction.PACKAGE_DELIVERY_FAILED, {
-        targetType: 'package', targetId: currentStop.id, targetName: currentStop.contactName || currentStop.address,
-        outcome: 'failure',
-        description: `${currentUser.firstName} ${currentUser.lastName} — échec livraison ${currentStop.packageCount} colis à ${currentStop.contactName || currentStop.city} : ${failureReason}`,
-        details: { metadata: { motif: failureReason, note: failureNotes || undefined, colis: currentStop.packageCount, ville: currentStop.city } }
-      });
-
-      // Mettre à jour colis en échec — BON format PackageMovement
-      for (const pkgId of currentStop.packageIds) {
-        try {
-          await updatePackageStatus(
-            pkgId,
-            PackageStatus.FAILED,
-            {
-              action: 'FAILED',
-              driverId: currentUser.id,
-              driverName: `${currentUser.firstName} ${currentUser.lastName}`,
-              vehicleId: activeMission.vehicleId,
-              vehiclePlate: activeMission.vehiclePlate,
-              location: coords,
-              notes: `${failureReason}${failureNotes ? ' - ' + failureNotes : ''}`
-            },
-            {
-              missionId: activeMission.id,
-              stopId: currentStop.id,
-              currentDriverId: currentUser.id,
-              currentVehicleId: activeMission.vehicleId
-            }
-          );
-        } catch (e) { reportError('driver.multiColis.item', e, { silent: true }); }
-      }
-
-      // Upload photos d'échec si présentes (preuve de tentative)
-      if (failurePhotos.length > 0) {
-        setUploadProgress({ step: 'compressing', current: 0, total: 1, message: 'Envoi preuve...' });
-        await uploadFailurePOD({
-          missionId: activeMission.id,
-          stopId: currentStop.id,
-          packageIds: currentStop.packageIds,
-          driverId: currentUser.id,
-          driverName: `${currentUser.firstName} ${currentUser.lastName}`,
-          vehicleId: activeMission.vehicleId || '',
-          vehiclePlate: activeMission.vehiclePlate || '',
-          failureReason,
-          failureNotes,
-          photosBase64: failurePhotos,
-          coordinates: coords || { lat: 0, lng: 0 }
-        }, setUploadProgress);
-      }
 
       // FIX BUG 2: Prochain stop dans l'ORDRE TRIÉ
       const updatedSorted = [...updatedStops].sort((a, b) => a.sequence - b.sequence);
@@ -1369,7 +1214,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
       const now = new Date().toISOString();
 
       // 1. Finaliser l'enlèvement (MAJ colis → COLLECTED + manifeste)
-      await finalizePickup({
+      const manifest = await finalizePickup({
         missionId: activeMission.id,
         stopId: currentStop.id,
         clientId: activeMission.clientId || '',
@@ -1387,6 +1232,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
         signatureBase64
       });
 
+      if (!manifest) throw new Error('Enlèvement non enregistré : vos scans sont conservés.');
       // 2. MAJ du stop — patch ATOMIQUE (relecture fraîche + compteurs).
       const { allDone, stops: updatedStops } = await commitStopOutcome({
         missionId: activeMission.id,
@@ -1412,7 +1258,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
 
       showNotif(
         allDone 
-          ? '🎉 Tournée terminée !'
+          ? '✅ Dernier enlèvement traité — clôture ta tournée'
           : `✅ Enlèvement terminé — ${scannedIds.length}/${currentStop.packageIds.length} colis collectés`
       );
     } catch (err) {

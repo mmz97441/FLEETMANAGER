@@ -24,54 +24,57 @@ service cloud.firestore {
     // "Directeur Exploitation", "Présidence"/"Présidente", "Secrétariat", etc.
     // Sans le .*, un rôle ancré ^directeur$ rejetait "Directeur Exploitation".
     function isAdminRole() {
-      return request.auth != null && getUserRole().matches('(?i)^(admin|pr[eé]siden.*|directeur.*|directrice.*|direction|secr[eé]ta.*)$');
+      return isAuthenticated() && getUserRole().matches('(?i)^(admin|pr[eé]siden.*|directeur.*|directrice.*|direction|secr[eé]ta.*)$');
     }
 
     // ÉQUIPE DE DIRECTION uniquement (SANS secrétariat) — habilitée à déclarer
     // les arrêts maladie / accidents du travail.
     function isDirection() {
-      return request.auth != null && getUserRole().matches('(?i)^(admin|pr[eé]siden.*|directeur.*|directrice.*|direction)$');
+      return isAuthenticated() && getUserRole().matches('(?i)^(admin|pr[eé]siden.*|directeur.*|directrice.*|direction)$');
     }
 
     // PRÉSIDENT uniquement — journal confidentiel (qui fait quoi + erreurs + anomalies).
     function isPresident() {
-      return request.auth != null && getUserRole().matches('(?i)^(pr[eé]siden.*)$');
+      return isAuthenticated() && getUserRole().matches('(?i)^(pr[eé]siden.*)$');
     }
 
     // Rôles internes (tous sauf Client)
     function isInternalUser() {
-      return request.auth != null && getUserRole().matches('(?i)^(admin|pr[eé]siden.*|directeur.*|directrice.*|direction|secr[eé]ta.*|chauffeu.*|m[eé]canicien.*|stagiaire)$');
+      return isAuthenticated() && getUserRole().matches('(?i)^(admin|pr[eé]siden.*|directeur.*|directrice.*|direction|secr[eé]ta.*|chauffeu.*|m[eé]canicien.*|stagiaire)$');
     }
 
     // Rôles opérationnels (chauffeurs, mécaniciens)
     function isOperationalRole() {
-      return request.auth != null && getUserRole().matches('(?i)^(chauffeur|chauffeuse|m[eé]canicien|m[eé]canicienne)$');
+      return isAuthenticated() && getUserRole().matches('(?i)^(chauffeur|chauffeuse|m[eé]canicien|m[eé]canicienne)$');
     }
 
     // Est un chauffeur
     function isDriver() {
-      return request.auth != null && getUserRole().matches('(?i)^(chauffeur|chauffeuse)$');
+      return isAuthenticated() && getUserRole().matches('(?i)^(chauffeur|chauffeuse)$');
     }
 
     // Est un mécanicien
     function isMechanic() {
-      return request.auth != null && getUserRole().matches('(?i)^(m[eé]canicien|m[eé]canicienne)$');
+      return isAuthenticated() && getUserRole().matches('(?i)^(m[eé]canicien|m[eé]canicienne)$');
     }
 
     // Est un client
     function isClient() {
-      return request.auth != null && getUserRole().matches('(?i)^client$');
+      return isAuthenticated() && getUserRole().matches('(?i)^client$');
     }
 
     // Champs sensibles d'un profil utilisateur qu'un user ne doit JAMAIS modifier sur lui-même
     // (escalade de privilèges sinon : un chauffeur ferait updateDoc({ role: 'Admin' }))
     function userImmutableFields() {
-      return ['role', 'customPermissions', 'id', 'createdAt', 'originalUserId', 'email'];
+      return ['role', 'customPermissions', 'id', 'createdAt', 'originalUserId', 'email', 'companyName', 'companyId', 'leaveBalance', 'isDisabled', 'disabledAt', 'disabledBy', 'status', 'activatedAt', 'assignedVehicleId', 'codePrefix', 'sessionsRevokedAt'];
     }
 
     // Vérifie que l'utilisateur est authentifié
     function isAuthenticated() {
-      return request.auth != null;
+      return request.auth != null
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && getUserData().get('isDisabled', false) == false
+        && (getUserData().get('sessionsRevokedAt', 0) == 0 || request.auth.token.auth_time > getUserData().sessionsRevokedAt);
     }
 
     // ============================================================
@@ -89,23 +92,18 @@ service cloud.firestore {
     // Modification : admin ou soi-même (profil)
     // Suppression : admin uniquement (Cloud Function préférée)
     match /users/{userId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && (
-        request.auth.uid == userId
-        || isAdminRole()
-        // Un client peut ajouter un membre à SA PROPRE société, uniquement en rôle client
-        || (isClient()
-            && request.resource.data.role.matches('(?i)client')
-            && request.resource.data.companyName == getUserData().companyName)
+      allow read: if request.auth != null && (
+        request.auth.uid == userId || isAdminRole()
+        || (isClient() && getUserData().get('companyName', '') != '' && resource.data.companyName == getUserData().companyName)
       );
-      // Update : admin = tous les champs. Self-update = OK SAUF champs sensibles
-      // (role, customPermissions, etc.). Sinon escalade de privilèges triviale.
-      allow update: if isAuthenticated() && (
-        isAdminRole() ||
-        (request.auth.uid == userId
-         && !request.resource.data.diff(resource.data).affectedKeys()
-              .hasAny(userImmutableFields()))
-      );
+      allow create: if isAdminRole() || (isClient() && userId != request.auth.uid
+        && request.resource.data.role == 'Client'
+        && getUserData().get('companyName','') != '' && request.resource.data.companyName == getUserData().companyName
+        && !request.resource.data.keys().hasAny(['customPermissions','activatedAt','originalUserId'])
+        && request.resource.data.get('leaveBalance', 0) == 0);
+      allow update: if isAdminRole() || (isAuthenticated()
+        && (request.auth.uid == userId || (isClient() && resource.data.role == 'Client' && resource.data.companyName == getUserData().companyName))
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(userImmutableFields()));
       allow delete: if isAdminRole();
     }
 
@@ -122,12 +120,8 @@ service cloud.firestore {
     match /invitations/{invitationId} {
       // Admin : tout. Client : uniquement SES propres invitations (invitedBy = lui),
       // pour pouvoir inviter/gérer les membres de sa société.
-      allow read: if isAdminRole()
-        || (isClient() && resource.data.invitedBy == request.auth.uid);
-      allow create: if isAdminRole()
-        || (isClient() && request.resource.data.invitedBy == request.auth.uid);
-      allow update, delete: if isAdminRole()
-        || (isClient() && resource.data.invitedBy == request.auth.uid);
+      allow read: if isAdminRole() || (isClient() && resource.data.invitedBy == request.auth.uid);
+      allow write: if false; // Server-only invitation creation and activation.
     }
 
     // ============================================================
@@ -136,7 +130,7 @@ service cloud.firestore {
     // Lecture : tous les connectés internes (chauffeurs voient leur véhicule)
     // Écriture : admin uniquement (CRUD véhicules)
     match /vehicles/{vehicleId} {
-      allow read: if isAuthenticated();
+      allow read: if isInternalUser();
       allow create, update, delete: if isAdminRole();
     }
 
@@ -201,11 +195,8 @@ service cloud.firestore {
     // Modification : admin (valider/refuser) ou le demandeur
     // Suppression : admin uniquement
     match /leaves/{leaveId} {
-      allow read: if isInternalUser();
-      allow create: if isInternalUser();
-      allow update: if isAdminRole()
-        || resource.data.userId == request.auth.uid;
-      allow delete: if isAdminRole();
+      allow read: if isAdminRole() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow create, update, delete: if isAdminRole();
     }
 
     // ============================================================
@@ -216,15 +207,9 @@ service cloud.firestore {
     // Modification : admin (valider/refuser) ou le créateur
     // Suppression : admin ou le créateur (si statut pending)
     match /absences/{absenceId} {
-      allow read: if isInternalUser();
-      // Maladie / Accident du travail : DIRECTION uniquement. Autres types : interne.
-      allow create: if isInternalUser()
-        && (!(request.resource.data.type in ['Arrêt Maladie', 'Accident de Travail']) || isDirection());
-      allow update: if (isAdminRole() || resource.data.userId == request.auth.uid)
-        && (!(request.resource.data.type in ['Arrêt Maladie', 'Accident de Travail']) || isDirection());
-      allow delete: if isAdminRole()
-        || (resource.data.userId == request.auth.uid
-            && resource.data.status == 'pending');
+      allow read: if isAdminRole() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow create, update: if false; // saveAbsence validates and debits balance transactionally.
+      allow delete: if false; // deleteAbsence refunds any debit in the same transaction.
     }
 
     // ============================================================
@@ -241,14 +226,14 @@ service cloud.firestore {
           || resource.data.requesterId == request.auth.uid
           || resource.data.createdBy == request.auth.uid
         ));
-      allow create: if isAdminRole()
-        || (isClient() && (
-          request.resource.data.clientId == request.auth.uid
-          || request.resource.data.requesterId == request.auth.uid
-          || request.resource.data.createdBy == request.auth.uid
-        ));
-      allow update: if isAdminRole()
-        || (isClient() && resource.data.createdBy == request.auth.uid);
+      allow create: if isAdminRole() || (isClient() && request.resource.data.clientId == request.auth.uid
+        && request.resource.data.get('createdBy',request.auth.uid) == request.auth.uid
+        && request.resource.data.status == 'Demande reçue'
+        && !request.resource.data.keys().hasAny(['priceOffer','convertedToPackageId','convertedAt']));
+      allow update: if isAdminRole() || (isClient() && (resource.data.get('createdBy','') == request.auth.uid || resource.data.clientId == request.auth.uid)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['clientId','clientName','createdBy','requesterId','priceOffer','convertedToPackageId','convertedAt'])
+        && ((resource.data.status == 'Demande reçue' && request.resource.data.status == 'Demande reçue')
+          || (resource.data.status == 'Offre envoyée' && request.resource.data.status == 'Refusé' && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','updatedAt']))));
       allow delete: if isAdminRole();
     }
 
@@ -260,14 +245,14 @@ service cloud.firestore {
     // Note: la query frontend filtre déjà par companyName ; on verrouille ici.
     match /savedAddresses/{addressId} {
       allow read: if isAdminRole()
-        || (isClient() && resource.data.companyName == getUserData().companyName);
+        || (isClient() && getUserData().get('companyName','') != '' && resource.data.companyName == getUserData().companyName);
       allow create: if isAdminRole()
-        || (isClient() && request.resource.data.companyName == getUserData().companyName);
+        || (isClient() && getUserData().get('companyName','') != '' && request.resource.data.companyName == getUserData().companyName);
       allow update: if isAdminRole()
-        || (isClient() && resource.data.companyName == getUserData().companyName
+        || (isClient() && getUserData().get('companyName','') != '' && resource.data.companyName == getUserData().companyName
             && request.resource.data.companyName == resource.data.companyName);
       allow delete: if isAdminRole()
-        || (isClient() && resource.data.companyName == getUserData().companyName);
+        || (isClient() && getUserData().get('companyName','') != '' && resource.data.companyName == getUserData().companyName);
     }
 
     // ============================================================
@@ -276,11 +261,11 @@ service cloud.firestore {
     // Lecture : tous les connectés (chaque employé doit voir les docs)
     // Écriture : admin uniquement
     match /documents/{docId} {
-      allow read: if isAuthenticated();
+      allow read: if isInternalUser();
       allow create, update, delete: if isAdminRole();
     }
     match /companyDocuments/{docId} {
-      allow read: if isAuthenticated();
+      allow read: if isInternalUser();
       allow create, update, delete: if isAdminRole();
     }
 
@@ -291,12 +276,8 @@ service cloud.firestore {
     // Création : tout connecté MAIS l'accusé doit être à SON nom (pas de falsification)
     // Modification/suppression : interdite (immuable)
     match /documentAcknowledgments/{ackId} {
-      allow read: if isAuthenticated();
-      // Un utilisateur interne enregistre sa propre lecture/signature. La stricte
-      // égalité userId == auth.uid échouait pour les comptes dont l'id de profil
-      // diffère de l'uid d'authentification (→ « je signe mais ça revient »).
-      allow create: if isInternalUser()
-        || (isAuthenticated() && request.resource.data.userId == request.auth.uid);
+      allow read: if isAdminRole() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow create: if isInternalUser() && request.resource.data.userId == request.auth.uid;
       allow update, delete: if false;
     }
 
@@ -310,7 +291,7 @@ service cloud.firestore {
     match /mail/{mailId} {
       // Internes + clients authentifiés (pour envoyer leurs invitations d'équipe /
       // copies de BL). L'extension Trigger Email traite la file.
-      allow create: if isInternalUser() || isClient();
+      allow create: if false; // Emails are constructed and authorized by Cloud Functions.
       allow read, update, delete: if false;
     }
 
@@ -352,14 +333,25 @@ service cloud.firestore {
       allow read: if isAuthenticated() && (
         !isClient()
         || resource.data.clientId == request.auth.uid
-        || resource.data.clientName == getUserData().companyName
+        || (getUserData().get('companyName','') != '' && resource.data.clientName == getUserData().companyName)
       );
       allow create: if isAdminRole()
         || (isDriver() && request.resource.data.currentDriverId == request.auth.uid)
-        || (isClient()
-            && request.resource.data.clientId == request.auth.uid
-            && request.resource.data.createdByClient == true);
-      allow update: if isAdminRole() || isDriver();
+;
+      allow update: if isAdminRole() || (isDriver()
+        && (resource.data.get('currentDriverId','') == request.auth.uid || (resource.data.get('currentDriverId',null) == null && resource.data.get('missionId','') != '' && get(/databases/$(database)/documents/missions/$(resource.data.missionId)).data.driverId == request.auth.uid))
+        && request.resource.data.currentDriverId == request.auth.uid
+        && (!(resource.data.status in ['Livré','Retourné']) || request.resource.data.status == resource.data.status)
+        && (!resource.data.keys().hasAny(['pod']) || request.resource.data.pod == resource.data.pod)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['clientId','clientName','companyId','externalId','orderNumber','barcode']));
+      allow delete: if isAdminRole();
+    }
+
+    // Each client receives only its own parcel ranks and the assigned driver's location.
+    match /client_tracking/{trackingId} {
+      allow read: if isAdminRole() || (isClient() && (resource.data.clientId == request.auth.uid || (getUserData().get('companyName','') != '' && resource.data.clientName == getUserData().companyName)));
+      allow create, update: if (isAdminRole() || (isDriver() && request.resource.data.driverId == request.auth.uid && get(/databases/$(database)/documents/missions/$(request.resource.data.missionId)).data.driverId == request.auth.uid))
+        && request.resource.data.keys().hasOnly(['clientId','clientName','missionId','driverId','ranks','liveDriver']);
       allow delete: if isAdminRole();
     }
 
@@ -376,7 +368,8 @@ service cloud.firestore {
       // Admin : création libre. Chauffeur : peut créer SA propre tournée
       // (prise en charge par scan) — driverId doit être lui-même.
       allow create: if isAdminRole() || (isDriver() && request.resource.data.driverId == request.auth.uid);
-      allow update: if isAdminRole() || isDriver();
+      allow update: if isAdminRole() || (isDriver() && resource.data.driverId == request.auth.uid && request.resource.data.driverId == request.auth.uid
+        && (!(resource.data.status in ['Terminé','Annulé']) || request.resource.data.status == resource.data.status));
       allow delete: if isAdminRole();
     }
 
@@ -393,8 +386,10 @@ service cloud.firestore {
     // Création : chauffeurs + admin
     // Modification/suppression : interdite (immuable)
     match /proofs_of_delivery/{podId} {
-      allow read: if isAuthenticated();
-      allow create: if isAdminRole() || isDriver();
+      allow get: if isInternalUser() && !exists(/databases/$(database)/documents/proofs_of_delivery/$(podId));
+      allow read: if isAdminRole() || (isDriver() && resource.data.driverId == request.auth.uid) || (isClient() && resource.data.get('clientId','') == request.auth.uid);
+      allow create: if isAdminRole() || (isDriver() && request.resource.data.driverId == request.auth.uid
+        && get(/databases/$(database)/documents/missions/$(request.resource.data.missionId)).data.driverId == request.auth.uid);
       allow update, delete: if false;
     }
 
@@ -403,8 +398,10 @@ service cloud.firestore {
     // Création : chauffeurs + admin (finaliser un enlèvement)
     // Modification/suppression : interdite (immuable)
     match /pickups/{pickupId} {
-      allow read: if isAuthenticated();
-      allow create: if isAdminRole() || isDriver();
+      allow get: if isInternalUser() && !exists(/databases/$(database)/documents/pickups/$(pickupId));
+      allow read: if isAdminRole() || (isDriver() && resource.data.driverId == request.auth.uid) || (isClient() && resource.data.get('clientId','') == request.auth.uid);
+      allow create: if isAdminRole() || (isDriver() && request.resource.data.driverId == request.auth.uid
+        && get(/databases/$(database)/documents/missions/$(request.resource.data.missionId)).data.driverId == request.auth.uid);
       allow update, delete: if false;
     }
 
@@ -423,8 +420,10 @@ service cloud.firestore {
     // Suppression : interdite (traçabilité)
     match /package_transfers/{transferId} {
       allow read: if isInternalUser();
-      allow create: if isAdminRole() || isDriver();
-      allow update: if isAdminRole() || isDriver();
+      allow create: if isAdminRole();
+      allow update: if isAdminRole() || (isDriver() && resource.data.toDriverId == request.auth.uid
+        && request.resource.data.status == 'Confirmé' && resource.data.status == 'En attente'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','toSignatureUrl','confirmedAt','updatedAt']));
       allow delete: if false;
     }
 

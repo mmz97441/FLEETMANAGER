@@ -1,4 +1,4 @@
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { version } from './package.json'
 
@@ -16,12 +16,10 @@ const emitVersionPlugin = () => ({
   },
 });
 
-export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, (process as any).cwd(), '');
+export default defineConfig(() => {
   return {
     plugins: [react(), emitVersionPlugin()],
     define: {
-      'process.env.API_KEY': JSON.stringify(env.VITE_GEMINI_API_KEY),
       __APP_VERSION__: JSON.stringify(version),
       __BUILD_ID__: JSON.stringify(BUILD_ID),
       __BUILD_DATE__: JSON.stringify(new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }))
@@ -31,22 +29,13 @@ export default defineConfig(({ mode }) => {
       chunkSizeWarningLimit: 600,
       rollupOptions: {
         output: {
-          manualChunks: {
-            // === Vendors séparés pour cache navigateur optimal ===
-            'vendor-react': ['react', 'react-dom'],
-            'vendor-firebase': [
-              'firebase/app',
-              'firebase/firestore',
-              'firebase/auth',
-              'firebase/storage',
-              'firebase/functions'
-            ],
-            'vendor-charts': ['recharts'],
-            'vendor-maps': ['leaflet', 'react-leaflet'],
-            'vendor-xlsx': ['xlsx'],
-            'vendor-ui': ['lucide-react'],
-            'vendor-scanner': ['html5-qrcode'],
-            'vendor-barcode': ['jsbarcode'],
+          manualChunks(id: string) {
+            if (!id.includes('/node_modules/')) return;
+            if (/\/(?:@firebase|firebase)\//.test(id)) return 'vendor-firebase';
+            if (/\/(?:react|react-dom|scheduler)\//.test(id)) return 'vendor-react';
+            if (id.includes('/xlsx/')) return 'vendor-xlsx';
+            if (id.includes('/html5-qrcode/')) return 'vendor-scanner';
+            if (/\/(?:leaflet|react-leaflet)\//.test(id)) return 'vendor-maps';
           }
         }
       }

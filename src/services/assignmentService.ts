@@ -1,3 +1,5 @@
+import { getFunctions, httpsCallable } from "firebase/functions";
+import app from "../firebaseConfig";
 /**
  * Service d'assignation Véhicule ↔ Chauffeur
  * 
@@ -184,40 +186,8 @@ export const assignDriverToVehicle = async (
   allVehicles: Vehicle[]
 ): Promise<AssignmentResult> => {
   try {
-    const batch = writeBatch(db);
-    const changes = {
-      vehicleUpdated: false,
-      oldDriverCleared: false,
-      oldVehicleCleared: false
-    };
-
-    // 1. Si on assigne un chauffeur, libérer son ancien véhicule
-    if (driverId) {
-      const oldVehicle = allVehicles.find(v => 
-        (v.assignedDriverId === driverId || v.driverId === driverId) && 
-        v.id !== vehicleId
-      );
-      
-      if (oldVehicle) {
-        const oldVehicleRef = doc(db, "vehicles", oldVehicle.id);
-        batch.update(oldVehicleRef, { driverId: null });
-        changes.oldVehicleCleared = true;
-      }
-    }
-
-    // 2. Mettre à jour le véhicule principal
-    const vehicleRef = doc(db, "vehicles", vehicleId);
-    batch.update(vehicleRef, { driverId: driverId });
-    changes.vehicleUpdated = true;
-
-    // 3. Exécuter
-    await batch.commit();
-
-    const message = driverId 
-      ? "✅ Chauffeur assigné avec succès"
-      : "✅ Véhicule libéré";
-
-    return { success: true, message, changes };
+    const call=httpsCallable<any,AssignmentResult>(getFunctions(app,'europe-west1'),'assignVehicle');
+    return (await call({vehicleId,driverId})).data;
 
   } catch (error: any) {
     console.error("❌ Erreur assignation:", error);

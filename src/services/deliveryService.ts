@@ -1,3 +1,5 @@
+import { getFunctions, httpsCallable } from 'firebase/functions';
+import app from '../firebaseConfig';
 /**
  * DELIVERY SERVICE
  * 
@@ -206,77 +208,8 @@ export const convertQuoteToPackage = async (
   quote: QuoteRequest,
   convertedBy: User
 ): Promise<{ packageId: string; zone: Zone } | null> => {
-  try {
-    // Extraire le code postal de l'adresse de destination
-    const destAddress = quote.destinationAddress || quote.destination;
-    const postalCode = extractPostalCodeFromAddress(destAddress);
-
-    if (!postalCode) {
-      console.error(`[convertQuoteToPackage] Code postal non trouvé dans: ${destAddress}`);
-      return null;
-    }
-
-    // Détecter la zone
-    const zone = await getZoneFromPostalCode(postalCode);
-    if (!zone) {
-      console.error(`[convertQuoteToPackage] Zone non trouvée pour CP: ${postalCode}`);
-      return null;
-    }
-
-    // Parsing adresse
-    const addressParts = destAddress.split(',').map((p: string) => p.trim());
-    const address = addressParts[0] || destAddress;
-    const city = addressParts.length >= 3 ? addressParts[2] : addressParts[1] || '';
-
-    // Créneau horaire
-    const timeWindowStart = quote.deliveryTimeWindow?.start || undefined;
-    const timeWindowEnd = quote.deliveryTimeWindow?.end || undefined;
-
-    // Mouvement initial
-    const initialMovement: PackageMovement = {
-      timestamp: new Date().toISOString(),
-      action: 'IMPORTED',
-      driverId: convertedBy.id,
-      driverName: `${convertedBy.firstName} ${convertedBy.lastName}`,
-      notes: `Créé depuis devis accepté #${quote.id.slice(-6)}`
-    };
-
-    // Construire le colis
-    const pkg: Omit<Package, 'id' | 'createdAt' | 'updatedAt'> = {
-      clientId: quote.clientId,
-      clientName: quote.clientName,
-      importBatchId: `QUOTE-${quote.id}`,
-      externalId: quote.id,
-      orderNumber: `Q${quote.id.slice(-6)}`,
-      barcode: `Q${quote.id.slice(-6)}`,
-      address,
-      city,
-      postalCode,
-      zone,
-      contactName: quote.destinationContact?.name || quote.clientName,
-      contactPhone: quote.destinationContact?.phone || undefined,
-      timeWindowStart,
-      timeWindowEnd,
-      serviceTime: 10,  // 10 min par défaut pour course client
-      comment: [
-        quote.goodsDescription,
-        quote.clientNotes ? `Note client: ${quote.clientNotes}` : '',
-        quote.priceOffer ? `Devis: ${quote.priceOffer}€` : ''
-      ].filter(Boolean).join(' | '),
-      volume: quote.volume || undefined,
-      weight: quote.weight || undefined,
-      status: PackageStatus.PENDING,
-      movements: [initialMovement]
-    };
-
-    // Créer en base
-    const packageId = await addPackage(pkg);
-
-    return { packageId, zone };
-  } catch (err) {
-    console.error('[convertQuoteToPackage] Erreur:', err);
-    return null;
-  }
+  const call = httpsCallable<{quoteId: string}, {packageId: string; zone: Zone}>(getFunctions(app, 'europe-west1'), 'acceptQuote');
+  return (await call({quoteId: quote.id})).data;
 };
 
 /**

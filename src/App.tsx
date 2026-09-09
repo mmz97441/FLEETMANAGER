@@ -1,3 +1,5 @@
+import { addMaintenanceToFirestore } from './services/firestore';
+import PendingSyncBanner from './components/PendingSyncBanner';
 
 import React, { useState, useMemo, useEffect, Suspense, lazy } from 'react';
 // @ts-ignore
@@ -210,7 +212,7 @@ const App: React.FC = () => {
                 }
             }
 
-            if (existingProfile) {
+            if (existingProfile && !existingProfile.isDisabled && (!existingProfile.sessionsRevokedAt || Date.parse(firebaseUser.metadata.lastSignInTime || '') / 1000 > existingProfile.sessionsRevokedAt)) {
                 // ACCÈS AUTORISÉ
                 setCurrentUser(existingProfile);
 
@@ -244,7 +246,7 @@ const App: React.FC = () => {
                 if (unsubscribeProfile) unsubscribeProfile();
                 
                 unsubscribeProfile = subscribeToUserProfile(firebaseUser.uid, (updatedProfile) => {
-                    if (updatedProfile) {
+                    if (updatedProfile && !updatedProfile.isDisabled && (!updatedProfile.sessionsRevokedAt || Date.parse(firebaseUser.metadata.lastSignInTime || '') / 1000 > updatedProfile.sessionsRevokedAt)) {
                         setCurrentUser(prev => {
                             if (JSON.stringify(prev) === JSON.stringify(updatedProfile)) return prev;
                             return updatedProfile;
@@ -296,17 +298,18 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!currentUser) return;
 
+    const internal = currentUser.role !== UserRole.CLIENT;
     // SECURE: We pass currentUser to filter data server-side (for Users and Quotes)
-    const unsubscribeVehicles = subscribeToVehicles(setVehicles);
-    const unsubscribeFuel = subscribeToFuelLogs(setFuelLogs);
-    const unsubscribeMaint = subscribeToMaintenance(setMaintenanceLogs);
-    const unsubscribeIssues = subscribeToIssues(setIssues);
+    const unsubscribeVehicles = internal ? subscribeToVehicles(setVehicles) : () => {};
+    const unsubscribeFuel = internal ? subscribeToFuelLogs(setFuelLogs) : () => {};
+    const unsubscribeMaint = internal ? subscribeToMaintenance(setMaintenanceLogs) : () => {};
+    const unsubscribeIssues = internal ? subscribeToIssues(setIssues) : () => {};
     const unsubscribeUsers = subscribeToUsers(currentUser, setUsers);
-    const unsubscribeLeaves = subscribeToLeaves(setLeaves);
-    const unsubscribeAbsences = subscribeToAbsences(setAbsences);
-    const unsubscribeQuotes = subscribeToQuotes(currentUser, setQuotes);
-    const unsubscribeDocs = subscribeToCompanyDocuments(setCompanyDocuments);
-    const unsubscribeAcks = subscribeToDocumentAcknowledgments(setDocumentAcknowledgments);
+    const unsubscribeLeaves = internal ? subscribeToLeaves(currentUser, setLeaves) : () => {};
+    const unsubscribeAbsences = internal ? subscribeToAbsences(currentUser, setAbsences) : () => {};
+    const unsubscribeQuotes = [UserRole.CLIENT,UserRole.ADMIN,UserRole.PRESIDENT,UserRole.DIRECTOR,UserRole.SECRETARY].includes(currentUser.role) ? subscribeToQuotes(currentUser, setQuotes) : () => {};
+    const unsubscribeDocs = internal ? subscribeToCompanyDocuments(setCompanyDocuments) : () => {};
+    const unsubscribeAcks = internal ? subscribeToDocumentAcknowledgments(currentUser, setDocumentAcknowledgments) : () => {};
 
     return () => {
       unsubscribeVehicles();
@@ -513,7 +516,7 @@ const App: React.FC = () => {
 
   // Maintenance
   const handleAddMaintenance = async (log: MaintenanceLog) => {
-    console.log("Add Maintenance not fully implemented in firestore service yet", log);
+    await addMaintenanceToFirestore(log);
   };
 
   // Issues
@@ -560,8 +563,8 @@ const App: React.FC = () => {
   };
 
   const handleUpdateUser = async (updatedUser: User) => {
-    setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
     await updateUserProfile(updatedUser);
+    setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
     if (currentUser) {
       logActivity(currentUser, ActivityAction.USER_UPDATED, {
         targetType: 'user',
@@ -572,28 +575,12 @@ const App: React.FC = () => {
   };
 
   const handleDeleteUser = async (userId: string, email?: string) => {
-    // Optimistic update
-    setUsers(prev => prev.filter(u => u.id !== userId));
-    
-    // Trouver l'utilisateur avant suppression pour le log
     const userToDelete = users.find(u => u.id === userId);
-    const userEmail = email || userToDelete?.email;
-    
-    try {
-      // Essayer d'utiliser la Cloud Function (suppression complète)
-      const { deleteUserCompletely } = await import('./services/cloudFunctions');
-      const result = await deleteUserCompletely(userId, userEmail || '');
-      
-      if (!result.success) {
-        console.warn('Suppression partielle:', result.message);
-      }
-    } catch (error) {
-      // Fallback: supprimer seulement le profil Firestore
-      // (la Cloud Function n'est peut-être pas encore déployée)
-      console.warn('Cloud Function non disponible, suppression Firestore uniquement');
-      await deleteUserProfile(userId);
-    }
-    
+    const { deleteUserCompletely } = await import('./services/cloudFunctions');
+    const result = await deleteUserCompletely(userId, email || userToDelete?.email || '');
+    if (!result.success) throw new Error(result.message || 'Suppression incomplète. Réessayez.');
+    setUsers(prev => prev.filter(u => u.id !== userId));
+
     // Log après suppression
     if (currentUser && userToDelete) {
       logActivity(currentUser, ActivityAction.USER_DELETED, {
@@ -655,21 +642,13 @@ const App: React.FC = () => {
 
       // Si le devis est ACCEPTÉ → créer automatiquement un colis
       if (status === QuoteStatus.ACCEPTED && currentUser) {
-        try {
-          const result = await convertQuoteToPackage(quote, currentUser);
-          if (result) {
-            updatedQuote.convertedToPackageId = result.packageId;
-            updatedQuote.convertedAt = new Date().toISOString();
-            console.log(`✅ Devis ${id.slice(-6)} converti en colis ${result.packageId} (zone ${result.zone})`);
-          } else {
-            console.warn(`⚠️ Conversion devis ${id.slice(-6)} en colis échouée (adresse non reconnue ?)`);
-          }
-        } catch (err) {
-          console.error('Erreur conversion devis → colis:', err);
-        }
+        const result = await convertQuoteToPackage(quote, currentUser);
+        if (!result) throw new Error('Le devis n’a pas été accepté : sa conversion en colis a échoué.');
+        updatedQuote.convertedToPackageId = result.packageId;
+        updatedQuote.convertedAt = new Date().toISOString();
+      } else {
+        await updateQuoteInFirestore(updatedQuote);
       }
-
-      await updateQuoteInFirestore(updatedQuote);
 
       if (currentUser) {
         const action = status === QuoteStatus.ACCEPTED ? ActivityAction.QUOTE_APPROVED 
@@ -736,20 +715,20 @@ const App: React.FC = () => {
   };
   
   // Client Team
-  const handleAddTeamMember = (user: User) => {
+  const handleAddTeamMember = async (user: User) => {
       // Force le rôle CLIENT et la société du créateur pour la sécurité
       const safeUser = {
           ...user,
           role: UserRole.CLIENT,
           companyName: currentUser?.companyName // Héritage strict
       };
-      handleAddUser(safeUser);
+      await handleAddUser(safeUser);
   };
-  const handleUpdateTeamMember = (user: User) => {
-      handleUpdateUser(user);
+  const handleUpdateTeamMember = async (user: User) => {
+      await handleUpdateUser(user);
   };
-  const handleDeleteTeamMember = (userId: string) => {
-      handleDeleteUser(userId);
+  const handleDeleteTeamMember = async (userId: string) => {
+      await handleDeleteUser(userId);
   };
 
   // --- RENDER ---
@@ -1185,6 +1164,7 @@ const App: React.FC = () => {
   return (
     <ErrorBoundary>
       <PermissionsProvider currentUser={currentUser}>
+      <PendingSyncBanner userId={currentUser.id} />
       <div className={`flex h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden ${isOffline ? 'pt-6' : ''}`}>
 
         {/* VERROU GPS — chauffeurs : app inutilisable sans localisation active */}
@@ -1193,7 +1173,7 @@ const App: React.FC = () => {
         {/* NETWORK STATUS BANNER */}
         {isOffline && (
             <div className="fixed top-0 left-0 right-0 bg-red-600 text-white text-center text-xs font-bold py-1 z-[1000] flex items-center justify-center gap-2 animate-pulse">
-                <WifiOff size={12} /> MODE HORS-LIGNE - Les modifications ne seront pas sauvegardées
+                <WifiOff size={12} /> HORS LIGNE — Les validations de livraison restent en attente sur cet appareil. Les autres opérations nécessitent le réseau.
             </div>
         )}
 

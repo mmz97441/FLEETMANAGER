@@ -1,3 +1,4 @@
+import { escapeHtml } from '../utils/html';
 /**
  * SHIPPING LABEL
  * 
@@ -140,7 +141,7 @@ const ShippingLabel: React.FC<ShippingLabelProps> = ({
       <!DOCTYPE html>
       <html>
       <head>
-        <title>Étiquette - ${data.orderNumber}</title>
+        <title>Étiquette - ${escapeHtml(data.orderNumber)}</title>
         <style>
           @page {
             size: 100mm 150mm;

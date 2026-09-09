@@ -1,3 +1,4 @@
+import { escapeHtml } from '../utils/html';
 /**
  * PICKUP SERVICE — Gestion des enlèvements
  * 
@@ -10,9 +11,9 @@
  */
 
 import { db, storage } from '../firebaseConfig';
-import { doc, updateDoc, setDoc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, runTransaction, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { ref, uploadString, getDownloadURL } from 'firebase/storage';
-import { Package, PackageStatus } from '../types';
+import { Package, PackageStatus, Mission, MissionStatus, StopStatus } from '../types';
 import { compressImage } from './podService';
 import { reportError } from './logService';
 import { cleanUndefined } from '../utils/firestore';
@@ -122,72 +123,25 @@ export const finalizePickup = async (params: {
   try {
     const timestamp = new Date().toISOString();
     const manifestId = `${missionId}_${stopId}`;
+    const existing = await getDoc(doc(db, PICKUPS_COLLECTION, manifestId));
+    const sameManifest = (saved: PickupManifest) => {
+      if (saved.driverId !== driverId || [...saved.scannedPackageIds].sort().join('|') !== [...scannedPackageIds].sort().join('|')) {
+        throw new Error('Un autre enlèvement a déjà été enregistré pour cet arrêt.');
+      }
+      return saved;
+    };
+    if (existing.exists()) return sameManifest(existing.data() as PickupManifest);
+    if (new Set(scannedPackageIds).size !== scannedPackageIds.length || scannedPackageIds.length > 450 || scannedPackageIds.some(id => !expectedPackageIds.includes(id))) {
+      throw new Error('Liste de colis scannés invalide.');
+    }
 
     // 1. Upload signature client
     let clientSignatureUrl: string | undefined;
     if (signatureBase64) {
-      const sigRef = ref(storage, `pickups/${missionId}/${stopId}/client-signature.png`);
+      const sigRef = ref(storage, `pickups/${missionId}/${stopId}/${crypto.randomUUID()}/client-signature.png`);
       const sigData = signatureBase64.includes(',') ? signatureBase64 : `data:image/png;base64,${signatureBase64}`;
       await uploadString(sigRef, sigData, 'data_url');
       clientSignatureUrl = await getDownloadURL(sigRef);
-    }
-
-    // 2. MAJ chaque colis scanné → COLLECTED
-    // On n'avale PLUS les erreurs : chaque colis en échec est collecté et remonté.
-    const failedPackageIds: string[] = [];
-    for (const pkgId of scannedPackageIds) {
-      try {
-        const pkgRef = doc(db, PACKAGES_COLLECTION, pkgId);
-        const pkgSnap = await getDoc(pkgRef);
-        if (!pkgSnap.exists()) {
-          failedPackageIds.push(pkgId);
-          reportError('pickup.finalize.package', new Error(`Colis ${pkgId} introuvable en base`), {
-            silent: true, extra: { pkgId, missionId, stopId }
-          });
-          continue;
-        }
-
-        const pkg = pkgSnap.data() as Package;
-        const movements = [...(pkg.movements || []), cleanUndefined({
-          timestamp,
-          action: 'COLLECTED' as const,
-          driverId,
-          driverName: driverName,
-          vehicleId,
-          vehiclePlate,
-          location: coordinates,
-          notes: `Enlevé chez ${clientName}`
-        })];
-
-        await updateDoc(pkgRef, cleanUndefined({
-          status: PackageStatus.COLLECTED,
-          currentDriverId: driverId,
-          currentVehicleId: vehicleId,
-          movements,
-          updatedAt: timestamp
-        }));
-      } catch (e) {
-        // Un colis n'a pas pu être mis à jour (droits, réseau…) → on le trace
-        // et on continue les autres, mais l'échec ne sera PAS silencieux.
-        failedPackageIds.push(pkgId);
-        reportError('pickup.finalize.package', e, {
-          silent: true, extra: { pkgId, missionId, stopId, clientName }
-        });
-      }
-    }
-
-    // Si des colis scannés n'ont pas pu être enregistrés, on prévient l'utilisateur
-    // (message visible) tout en laissant le manifeste se créer pour ce qui a marché.
-    if (failedPackageIds.length > 0) {
-      reportError(
-        'pickup.finalize',
-        new Error(`${failedPackageIds.length} colis scanné(s) n'ont pas pu être enregistrés`),
-        {
-          level: 'warning',
-          userMessage: `⚠️ ${failedPackageIds.length} colis scanné(s) sur ${scannedPackageIds.length} n'ont pas pu être enregistrés. Vérifiez votre connexion et rescannez-les.`,
-          extra: { failedPackageIds, missionId, stopId, clientName }
-        }
-      );
     }
 
     // 3. Créer le manifeste
@@ -215,16 +169,40 @@ export const finalizePickup = async (params: {
       createdAt: timestamp
     };
 
-    await setDoc(doc(db, PICKUPS_COLLECTION, manifestId), manifest);
-
-    return manifest;
+    return await runTransaction(db, async tx => {
+      const manifestRef = doc(db, PICKUPS_COLLECTION, manifestId);
+      const saved = await tx.get(manifestRef);
+      if (saved.exists()) return sameManifest(saved.data() as PickupManifest);
+      const missionRef = doc(db, 'missions', missionId);
+      const missionSnap = await tx.get(missionRef);
+      if (!missionSnap.exists()) throw new Error('Tournée introuvable.');
+      const mission = missionSnap.data() as Mission;
+      const stop = mission.stops.find(s => s.id === stopId);
+      if (!stop || mission.driverId !== driverId || [MissionStatus.COMPLETED, MissionStatus.CANCELLED].includes(mission.status) || [StopStatus.COMPLETED, StopStatus.FAILED, StopStatus.SKIPPED].includes(stop.status)) throw new Error('Cet enlèvement n’est plus disponible.');
+      const packages = await Promise.all(scannedPackageIds.map(id => tx.get(doc(db, PACKAGES_COLLECTION, id))));
+      for (const snap of packages) {
+        if (!snap.exists() || !stop.packageIds.includes(snap.id)) throw new Error('Un colis ne fait plus partie de cet enlèvement.');
+        const pkg = snap.data() as Package;
+        if ((pkg.missionId && pkg.missionId !== missionId) || (pkg.currentDriverId && pkg.currentDriverId !== driverId) || [PackageStatus.DELIVERED, PackageStatus.RETURNED].includes(pkg.status)) throw new Error('Un colis a été transféré ou clôturé.');
+      }
+      for (const snap of packages) {
+        const pkg = snap.data() as Package;
+        tx.update(snap.ref, cleanUndefined({status: PackageStatus.COLLECTED, currentDriverId: driverId, currentVehicleId: vehicleId,
+          movements: [...(pkg.movements || []), {timestamp, action: 'COLLECTED', driverId, driverName, vehicleId, vehiclePlate, location: coordinates, notes: `Enlevé chez ${clientName}`}], updatedAt: timestamp}));
+      }
+      const stops = mission.stops.map(s => s.id === stopId ? {...s, status: StopStatus.COMPLETED, completionTime: timestamp, ...(coordinates ? {arrivalCoordinates: coordinates} : {})} : s);
+      tx.update(missionRef, {stops, completedStops: stops.filter(s => s.status === StopStatus.COMPLETED).length,
+        collectedPackages: Number((mission as any).collectedPackages || 0) + scannedPackageIds.length, updatedAt: timestamp});
+      tx.set(manifestRef, cleanUndefined(manifest));
+      return manifest;
+    });
 
   } catch (err) {
     reportError('pickup.finalize', err, {
       userMessage: "L'enlèvement n'a pas pu être finalisé. Vos scans ne sont pas perdus, réessayez.",
       extra: { missionId, stopId, clientName, scannedCount: scannedPackageIds.length }
     });
-    return null;
+    throw err;
   }
 };
 
@@ -286,27 +264,27 @@ export const generateBatchLabelsHTML = (
   const labels = packages.map(pkg => `
     <div class="label">
       <div class="label-header">
-        <span class="company">${companyName}</span>
-        ${pkg.packageTotal && pkg.packageTotal > 1 ? `<span class="xn">Colis ${pkg.packageIndex}/${pkg.packageTotal}</span>` : ''}
-        <span class="zone">${pkg.zone || ''}</span>
+        <span class="company">${escapeHtml(companyName)}</span>
+        ${pkg.packageTotal && pkg.packageTotal > 1 ? `<span class="xn">Colis ${escapeHtml(pkg.packageIndex)}/${escapeHtml(pkg.packageTotal)}</span>` : ''}
+        <span class="zone">${escapeHtml(pkg.zone || '')}</span>
       </div>
       <div class="barcode-zone">
-        <img class="barcode-img" src="${barcodeDataUri(pkg.barcode || pkg.orderNumber)}" alt="${pkg.barcode || pkg.orderNumber}" />
+        <img class="barcode-img" src="${barcodeDataUri(pkg.barcode || pkg.orderNumber)}" alt="${escapeHtml(pkg.barcode || pkg.orderNumber)}" />
       </div>
       <div class="dest-zone">
         <div class="dest-label">DESTINATAIRE</div>
-        <div class="dest-name">${pkg.contactName}</div>
-        <div class="dest-addr">${pkg.address}</div>
-        <div class="dest-city">${pkg.postalCode} ${pkg.city}</div>
-        ${pkg.contactPhone ? `<div class="dest-phone">☎ ${pkg.contactPhone}</div>` : ''}
-        ${pkg.floor != null ? `<div class="dest-floor">Étage ${pkg.floor}${pkg.hasElevator ? ' (asc.)' : ''}</div>` : ''}
+        <div class="dest-name">${escapeHtml(pkg.contactName)}</div>
+        <div class="dest-addr">${escapeHtml(pkg.address)}</div>
+        <div class="dest-city">${escapeHtml(pkg.postalCode)} ${escapeHtml(pkg.city)}</div>
+        ${pkg.contactPhone ? `<div class="dest-phone">☎ ${escapeHtml(pkg.contactPhone)}</div>` : ''}
+        ${pkg.floor != null ? `<div class="dest-floor">Étage ${escapeHtml(pkg.floor)}${pkg.hasElevator ? ' (asc.)' : ''}</div>` : ''}
       </div>
       <div class="sender-zone">
-        <span class="sender-label">EXP:</span> ${pkg.clientName}
+        <span class="sender-label">EXP:</span> ${escapeHtml(pkg.clientName)}
       </div>
-      ${pkg.comment ? `<div class="comment">📝 ${pkg.comment}</div>` : ''}
+      ${pkg.comment ? `<div class="comment">📝 ${escapeHtml(pkg.comment)}</div>` : ''}
       <div class="ref-zone">
-        <span>Suivi: ${pkg.orderNumber}${pkg.clientReference ? ` · Réf: ${pkg.clientReference}` : ''}</span>
+        <span>Suivi: ${escapeHtml(pkg.orderNumber)}${pkg.clientReference ? ` · Réf: ${escapeHtml(pkg.clientReference)}` : ''}</span>
         ${pkg.weight ? `<span>${formatWeight(pkg.weight)}</span>` : ''}
       </div>
     </div>

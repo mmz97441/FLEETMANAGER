@@ -135,7 +135,7 @@ export const exportReportExcel = (packages: Package[], clientName: string, perio
 };
 
 const esc = (v: string): string =>
-  String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
 /** Rapport imprimable (→ Enregistrer en PDF via la boîte d'impression). */
 export const printReportPDF = (packages: Package[], clientName: string, periodLabel: string): void => {

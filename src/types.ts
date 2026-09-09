@@ -88,6 +88,7 @@ export interface User {
   medicalVisitDate?: string;
   // Statut du compte
   isDisabled?: boolean;
+  sessionsRevokedAt?: number;
   disabledAt?: string;
   disabledBy?: string;
 

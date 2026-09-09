@@ -107,7 +107,7 @@ const getStatusBadge = (status: AbsenceStatus) => {
 };
 
 // Calcul des jours ouvrables (lun-ven + samedis si configuré)
-const calculateWorkingDays = (start: string, end: string, countSaturdays: boolean = false): { days: number; saturdays: number; details: string } => {
+const calculateWorkingDays = (start: string, end: string, countSaturdays: boolean = false, halfStart?: string, halfEnd?: string): { days: number; saturdays: number; details: string } => {
   const startDate = new Date(start);
   const endDate = new Date(end);
   let days = 0;
@@ -125,6 +125,8 @@ const calculateWorkingDays = (start: string, end: string, countSaturdays: boolea
     current.setDate(current.getDate() + 1);
   }
 
+  if (days > 0 && halfStart === 'afternoon' && ![0,6].includes(startDate.getDay())) days -= .5;
+  if (days > 0 && halfEnd === 'morning' && ![0,6].includes(endDate.getDay())) days -= .5;
   const details = countSaturdays && saturdays > 0 
     ? `${days - saturdays} jours ouvrés + ${saturdays} samedi(s)`
     : `${days} jours ouvrés`;
@@ -490,7 +492,7 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
     
     setIsSubmitting(true);
 
-    const { days, saturdays, details } = calculateWorkingDays(formData.startDate!, formData.endDate!);
+    const { days, saturdays, details } = calculateWorkingDays(formData.startDate!, formData.endDate!, false, formData.halfDayStart, formData.halfDayEnd);
 
     const absenceData: Absence = {
       id: editingAbsence?.id || `abs_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -509,7 +511,7 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
       calculationDetails: details,
       
       // Documents
-      documents: editingAbsence?.documents || [],
+      documents: formData.documents || editingAbsence?.documents || [],
       documentReceived: formData.documentReceived,
       documentReceivedDate: formData.documentReceivedDate,
       documentReceivedBy: formData.documentReceivedBy,
@@ -616,15 +618,6 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
     };
 
     await onUpdateAbsence(updated);
-
-    // Update user balance if CP approved
-    if (status === AbsenceStatus.APPROVED && ABSENCE_IMPACTS_CP_BALANCE.includes(absence.type) && onUpdateUserBalance) {
-      const user = users.find(u => u.id === absence.userId);
-      if (user) {
-        const newBalance = (user.leaveBalance || 0) - (absence.workingDays || 0);
-        await onUpdateUserBalance({ ...user, leaveBalance: Math.max(0, newBalance) });
-      }
-    }
 
     // 📧 ENVOI EMAIL À L'EMPLOYÉ
     const employee = users.find(u => u.id === absence.userId);
@@ -740,15 +733,6 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
       };
       
       await onUpdateAbsence(updated);
-      
-      // Débiter le solde CP si nécessaire
-      if (ABSENCE_IMPACTS_CP_BALANCE.includes(absence.type) && onUpdateUserBalance) {
-        const user = users.find(u => u.id === absence.userId);
-        if (user) {
-          const newBalance = (user.leaveBalance || 0) - days;
-          await onUpdateUserBalance({ ...user, leaveBalance: Math.max(0, newBalance) });
-        }
-      }
       
       // Notification au manager qui a proposé
       const proposer = users.find(u => u.id === absence.modificationProposal?.proposedBy);
@@ -1634,7 +1618,7 @@ const AbsenceManager: React.FC<AbsenceManagerProps> = ({
           {formData.startDate && formData.endDate && (
             <div className="p-3 bg-slate-50 rounded-xl">
               <p className="text-sm text-slate-600">
-                <span className="font-bold">{calculateWorkingDays(formData.startDate, formData.endDate).days}</span> jour(s) ouvré(s)
+                <span className="font-bold">{calculateWorkingDays(formData.startDate, formData.endDate, false, formData.halfDayStart, formData.halfDayEnd).days}</span> jour(s) ouvré(s)
               </p>
             </div>
           )}
