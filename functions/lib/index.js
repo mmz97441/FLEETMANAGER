@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.acceptQuote = exports.getTeamDirectory = exports.notifyPackageStatus = exports.returnPackage = exports.deleteAbsence = exports.deleteVehicle = exports.importPackages = exports.assignVehicle = exports.askFleetGenius = exports.sendBusinessNotification = exports.transferPackages = exports.saveAbsence = exports.revokeOwnSessions = exports.linkAuthToProfile = exports.createInvitation = exports.activateAccount = exports.validateInvitationToken = exports.forcePasswordReset = exports.toggleUserStatus = exports.cleanupExpiredInvitations = exports.deleteUserCompletely = exports.optimizeTours = void 0;
+exports.interpretAnalytics = exports.acceptQuote = exports.getTeamDirectory = exports.notifyPackageStatus = exports.returnPackage = exports.deleteAbsence = exports.deleteVehicle = exports.importPackages = exports.assignVehicle = exports.askFleetGenius = exports.sendBusinessNotification = exports.transferPackages = exports.saveAbsence = exports.revokeOwnSessions = exports.linkAuthToProfile = exports.createInvitation = exports.activateAccount = exports.validateInvitationToken = exports.forcePasswordReset = exports.toggleUserStatus = exports.cleanupExpiredInvitations = exports.deleteUserCompletely = exports.optimizeTours = void 0;
 const firestore_1 = require("firebase-admin/firestore");
 const auth_1 = require("firebase-admin/auth");
 const crypto_1 = require("crypto");
@@ -1879,5 +1879,91 @@ exports.acceptQuote = functions
         });
         return { packageId: packageRef.id, zone };
     });
+});
+exports.interpretAnalytics = functions
+    .region('europe-west1')
+    .runWith({ timeoutSeconds: 60 })
+    .https.onCall(async (data, callableContext) => {
+    const caller = await requireActiveCaller(callableContext);
+    if (!isAdminCaller(caller.role) && normalizeRole(caller.role) !== 'client')
+        throw new functions.https.HttpsError('permission-denied', 'Analyse non autorisée.');
+    const question = String(data?.question || '');
+    if (!question.trim() || question.length > 2000)
+        throw new functions.https.HttpsError('invalid-argument', 'Question invalide.');
+    const key = process.env.GEMINI_API_KEY, model = process.env.GEMINI_MODEL;
+    if (!key || !model || !/^[\w.-]+$/.test(model))
+        throw new functions.https.HttpsError('failed-precondition', 'Analyse IA non configurée.');
+    const context = {
+        pharmacies: (Array.isArray(data?.context?.pharmacies)
+            ? data.context.pharmacies
+            : [])
+            .filter((s) => typeof s === 'string' && s.length <= 150)
+            .slice(0, 100),
+        zones: (Array.isArray(data?.context?.zones) ? data.context.zones : [])
+            .filter((s) => typeof s === 'string' && s.length <= 50)
+            .slice(0, 20),
+    };
+    const quota = db
+        .collection('operation_quotas')
+        .doc('analytics-' + caller.id), now = Date.now();
+    await db.runTransaction(async (tx) => {
+        const snap = await tx.get(quota), q = snap.data(), count = q && now - q.start < 60000 ? q.count : 0;
+        if (count >= 20)
+            throw new functions.https.HttpsError('resource-exhausted', 'Trop de demandes. Réessayez dans une minute.');
+        tx.set(quota, { start: count ? q.start : now, count: count + 1 });
+    });
+    const systemInstruction = `Tu es un interpréteur de requêtes analytiques pour une société de livraison.
+Ta SEULE tâche : convertir la question de l'utilisateur en un objet JSON conforme à la grammaire ci-dessous.
+Tu ne calcules RIEN, tu ne donnes AUCUN chiffre, AUCUNE phrase.
+
+Grammaire (valeurs autorisées UNIQUEMENT) :
+- metric   : "volume" | "deliveryRate" | "punctualityRate" | "avgDelayHours" | "failRate" | "weight"
+- dimension: "none" | "pharmacy" | "zone" | "day" | "status"
+- period   : "7d" | "30d" | "month" | "all"
+- chart    : "kpi" | "line" | "bar" | "donut" | "table"
+- pharmacy : (optionnel) un nom EXACT parmi la liste connue, sinon omets
+- zone     : (optionnel) un nom EXACT parmi la liste connue, sinon omets
+
+Correspondances utiles :
+- "combien de colis", "volume", "nombre" -> metric "volume"
+- "taux de livraison", "livrés" (en %) -> metric "deliveryRate"
+- "ponctualité", "à l'heure", "retard %" -> metric "punctualityRate"
+- "délai moyen", "temps de livraison" -> metric "avgDelayHours"
+- "échecs", "échec", "ratés" -> metric "failRate"
+- "poids", "kg", "tonnage" -> metric "weight"
+- "par pharmacie / client / destinataire" -> dimension "pharmacy"
+- "par zone / secteur / région" -> dimension "zone"
+- "par jour / évolution / tendance" -> dimension "day"
+- "par statut / répartition statut" -> dimension "status"
+- pas de regroupement explicite -> dimension "none"
+- "cette semaine" -> "7d" ; "30 jours" -> "30d" ; "ce mois" -> "month" ; sinon "all"
+- dimension "none" -> chart "kpi" ; "day" -> "line" ; "status" -> "donut" ; "pharmacy"/"zone" -> "bar"
+
+Pharmacies connues : ${JSON.stringify(context.pharmacies.slice(0, 100))}
+Zones connues : ${JSON.stringify(context.zones)}
+
+Réponds UNIQUEMENT en JSON, aucun texte, aucun chiffre.
+Exemple : {"metric":"deliveryRate","dimension":"zone","period":"month","chart":"bar"}`;
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+        body: JSON.stringify({
+            systemInstruction: { parts: [{ text: systemInstruction }] },
+            contents: [{ parts: [{ text: question }] }],
+            generationConfig: {
+                temperature: 0,
+                responseMimeType: 'application/json',
+            },
+        }),
+        signal: AbortSignal.timeout(45000),
+    });
+    if (!response.ok)
+        throw new functions.https.HttpsError('unavailable', 'Analyse temporairement indisponible.');
+    const payload = await response.json();
+    return {
+        text: payload.candidates?.[0]?.content?.parts
+            ?.map((p) => p.text || '')
+            .join('') || '',
+    };
 });
 //# sourceMappingURL=index.js.map

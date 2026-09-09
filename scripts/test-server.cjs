@@ -507,26 +507,20 @@ const check = async (name, fn) => {
     async () => {
       for (const driver of ['claim-a', 'claim-b']) {
         await db.collection('users').doc(driver).set({ role: 'Chauffeur' });
-        await db
-          .collection('missions')
-          .doc(driver)
-          .set({
-            driverId: driver,
-            vehicleId: 'v',
-            status: 'En cours',
-            stops: [],
-          });
-      }
-      await db
-        .collection('packages')
-        .doc('claim-race')
-        .set({
-          status: 'En attente',
-          address: '1 rue fictive',
-          postalCode: '97400',
-          city: 'Test',
-          movements: [],
+        await db.collection('missions').doc(driver).set({
+          driverId: driver,
+          vehicleId: 'v',
+          status: 'En cours',
+          stops: [],
         });
+      }
+      await db.collection('packages').doc('claim-race').set({
+        status: 'En attente',
+        address: '1 rue fictive',
+        postalCode: '97400',
+        city: 'Test',
+        movements: [],
+      });
       await Promise.all(
         ['claim-a', 'claim-b'].map((driver) =>
           service.transferPackages.run(
@@ -563,6 +557,68 @@ const check = async (name, fn) => {
         service.getTeamDirectory.run({}, context('employee')),
         (e) => e.code === 'permission-denied',
       );
+    },
+  );
+  await check('analytics callable denies operational accounts', async () => {
+    await assert.rejects(
+      service.interpretAnalytics.run(
+        { question: 'Combien ?' },
+        context('claim-a'),
+      ),
+      (e) => e.code === 'permission-denied',
+    );
+  });
+  await check(
+    'analytics uses a server template and returns no computed business data',
+    async () => {
+      const previousFetch = global.fetch,
+        previousKey = process.env.GEMINI_API_KEY,
+        previousModel = process.env.GEMINI_MODEL;
+      process.env.GEMINI_API_KEY = 'synthetic-test-key';
+      process.env.GEMINI_MODEL = 'synthetic-test-model';
+      let body;
+      global.fetch = async (url, options) => {
+        body = JSON.parse(options.body);
+        return {
+          ok: true,
+          json: async () => ({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: '{"metric":"volume","dimension":"none","period":"all","chart":"kpi"}',
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+        };
+      };
+      try {
+        const result = await service.interpretAnalytics.run(
+          {
+            question: 'Combien de colis ?',
+            systemInstruction: 'UNTRUSTED_OVERRIDE',
+            context: { pharmacies: ['Test'], zones: ['Nord'] },
+          },
+          context('server-client'),
+        );
+        assert.equal(JSON.parse(result.text).metric, 'volume');
+        assert.equal(
+          body.generationConfig.responseMimeType,
+          'application/json',
+        );
+        assert.ok(body.systemInstruction.parts[0].text.includes('Grammaire'));
+        assert.ok(!JSON.stringify(body).includes('UNTRUSTED_OVERRIDE'));
+      } finally {
+        global.fetch = previousFetch;
+        if (previousKey === undefined) delete process.env.GEMINI_API_KEY;
+        else process.env.GEMINI_API_KEY = previousKey;
+        if (previousModel === undefined) delete process.env.GEMINI_MODEL;
+        else process.env.GEMINI_MODEL = previousModel;
+      }
     },
   );
   console.log('SERVER TESTS PASSED', passed);
