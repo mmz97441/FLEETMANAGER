@@ -15,9 +15,11 @@
  * - Bouton "Valider et créer les colis"
  */
 
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import * as XLSX from 'xlsx';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import {
-  ReviewRow, ReviewResult, revalidateRow, confirmReviewedImport
+  ReviewRow, ReviewResult, ImportResult, revalidateRow, confirmReviewedImport
 } from '../services/importService';
 import { User, Zone, ZONE_COLORS } from '../types';
 import { logActivity } from '../services/activityLogService';
@@ -36,6 +38,7 @@ interface ImportReviewTableProps {
 }
 
 type StatusFilter = 'all' | 'valid' | 'warning' | 'error';
+const fieldLabels: Record<string, string> = { externalId: 'numéro de colis', orderNumber: 'commande', contactName: 'destinataire', address: 'adresse', postalCode: 'code postal', city: 'ville', contactPhone: 'téléphone', floor: 'étage' };
 
 const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
   reviewResult,
@@ -53,6 +56,15 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
   const [showDeletedRows, setShowDeletedRows] = useState(false);
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set()); // par _rowIndex
   const [bulkZone, setBulkZone] = useState<Zone | ''>('');
+  const [operationError, setOperationError] = useState('');
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [validating, setValidating] = useState(false);
+  const [attempted, setAttempted] = useState(false);
+  const confirmingRef = useRef(false);
+  const resultRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => { if (importResult) resultRef.current?.focus({ preventScroll: true }); }, [importResult]);
+  const editingRef = useRef<{ rowIdx: number; field: string } | null>(null);
+  const requestCancel = useUnsavedChanges(!importResult && (JSON.stringify(rows) !== JSON.stringify(reviewResult.rows) || Boolean(editingCell)), isConfirming || validating);
 
   // === Stats dynamiques ===
   const stats = useMemo(() => {
@@ -100,13 +112,17 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
 
   // === Édition inline ===
   const startEdit = (rowIdx: number, field: string, currentValue: string | number) => {
+    if (isConfirming || validating || importResult || attempted) return;
+    editingRef.current = { rowIdx, field };
     setEditingCell({ rowIdx, field });
     setEditValue(String(currentValue));
   };
 
   const commitEdit = useCallback(async () => {
-    if (!editingCell) return;
-    const { rowIdx, field } = editingCell;
+    if (!editingRef.current) return;
+    const { rowIdx, field } = editingRef.current;
+    editingRef.current = null;
+    setValidating(true); setOperationError('');
 
     const newRows = [...rows];
     const row = { ...newRows[rowIdx] };
@@ -139,22 +155,25 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
     }
 
     // Re-valider cette ligne
-    const revalidated = await revalidateRow(row, newRows);
-    newRows[rowIdx] = revalidated;
-    setRows(newRows);
-    setEditingCell(null);
+    try {
+      const revalidated = await revalidateRow(row, newRows);
+      newRows[rowIdx] = revalidated; setRows(newRows); setEditingCell(null);
+    } catch { editingRef.current = { rowIdx, field }; setOperationError('La ligne n’a pas pu être vérifiée. Réessayez la correction.'); }
+    finally { setValidating(false); }
   }, [editingCell, editValue, rows]);
 
-  const cancelEdit = () => setEditingCell(null);
+  const cancelEdit = () => { editingRef.current = null; setEditingCell(null); };
 
   // === Suppression ===
   const deleteRow = (rowIdx: number) => {
+    if (isConfirming || validating || attempted) return;
     const newRows = [...rows];
     newRows[rowIdx] = { ...newRows[rowIdx], _status: 'deleted' };
     setRows(newRows);
   };
 
   const restoreRow = async (rowIdx: number) => {
+    if (isConfirming || validating || attempted) return;
     const newRows = [...rows];
     const restored = await revalidateRow({ ...newRows[rowIdx], _status: 'valid' }, newRows);
     newRows[rowIdx] = restored;
@@ -173,7 +192,7 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
   // Attribuer une zone à toutes les lignes sélectionnées (utile pour les colis
   // dont le code postal n'est pas reconnu → zone "?"). Revalide chaque ligne.
   const applyBulkZone = async () => {
-    if (!bulkZone || selectedRows.size === 0) return;
+    if (!bulkZone || selectedRows.size === 0 || isConfirming || validating || attempted) return;
     let newRows = [...rows];
     for (let i = 0; i < newRows.length; i++) {
       if (selectedRows.has(newRows[i]._rowIndex) && newRows[i]._status !== 'deleted') {
@@ -194,7 +213,9 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
 
   // === Confirmer l'import ===
   const handleConfirm = async () => {
-    setIsConfirming(true);
+    if (confirmingRef.current || validating || importResult || editingCell) return;
+    confirmingRef.current = true; setAttempted(true);
+    setIsConfirming(true); setOperationError('');
     try {
       const result = await confirmReviewedImport(
         rows,
@@ -220,32 +241,34 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
         });
       }
 
-      onConfirm(result);
+      setImportResult(result);
     } catch (err) {
-      console.error('Erreur confirmation import:', err);
+      setOperationError(err instanceof Error ? err.message : 'L’import n’a pas pu être confirmé. Vos corrections sont conservées.');
     }
-    setIsConfirming(false);
+    confirmingRef.current = false; setIsConfirming(false);
   };
 
   // === Rendu cellule éditable ===
-  const EditableCell: React.FC<{
+  const renderEditableCell = ({ rowIdx, field, value, className = '' }: {
     rowIdx: number;
     field: string;
     value: string | number;
     className?: string;
-  }> = ({ rowIdx, field, value, className = '' }) => {
+  }) => {
     const isEditing = editingCell?.rowIdx === rowIdx && editingCell?.field === field;
 
     if (isEditing) {
       return (
         <input
           autoFocus
+          aria-label={`Modifier ${fieldLabels[field] || field}, ligne ${rows[rowIdx]._rowIndex}`}
+          disabled={validating}
           value={editValue}
           onChange={(e) => setEditValue(e.target.value)}
           onBlur={commitEdit}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') commitEdit();
-            if (e.key === 'Escape') cancelEdit();
+            if (e.key === 'Enter') { e.preventDefault(); void commitEdit(); }
+            if (e.key === 'Escape') { e.stopPropagation(); cancelEdit(); }
           }}
           className="w-full px-1.5 py-0.5 border border-blue-400 rounded text-xs bg-blue-50 outline-none focus:ring-1 focus:ring-blue-400"
         />
@@ -253,15 +276,38 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
     }
 
     return (
-      <span
+      <button
+        type="button"
+        disabled={isConfirming || validating || Boolean(importResult) || attempted}
+        aria-label={`Modifier ${fieldLabels[field] || field}, ligne ${rows[rowIdx]._rowIndex} : ${value || 'vide'}`}
         onClick={() => startEdit(rowIdx, field, value)}
         className={`cursor-pointer hover:bg-blue-50 px-1 py-0.5 rounded transition-colors ${className}`}
-        title="Cliquer pour modifier"
+        title="Modifier cette valeur"
       >
-        {value || <span className="text-slate-300 italic">—</span>}
-      </span>
+        {value || <span className="text-slate-600 italic">—</span>}
+      </button>
     );
   };
+
+  const exportRejected = () => {
+    const rejected = importResult ? rows.filter(row => importResult.errors.some(error => error.row === row._rowIndex)) : rows.filter(row => row._status === 'error');
+    const worksheet = XLSX.utils.json_to_sheet(rejected.map(row => ({
+      Id: row.externalId, Order_Number: row.orderNumber, Contact: row.contactName, Address: `${row.address} ${row.postalCode} ${row.city}`.trim(), Telephone: row.contactPhone,
+      Floor: row.floor, Elevator: row.hasElevator ? 1 : 0, Start: row.timeWindowStart, End: row.timeWindowEnd, Service_Time: row.serviceTime, Volume: row.volume, Weight: row.weight, Comment: row.comment,
+      'Ligne source': row._rowIndex, Motif: importResult ? importResult.errors.filter(error => error.row === row._rowIndex).map(error => error.message).join(' ; ') : row._errors.join(' ; '),
+    })));
+    const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, worksheet, 'Lignes à corriger'); XLSX.writeFile(workbook, 'import-lignes-a-corriger.xlsx');
+  };
+
+  if (importResult) {
+    const duplicateLines = new Set(importResult.errors.filter(error => error.row > 0 && /doublon/i.test(error.message)).map(error => error.row));
+    return <div className="rounded-xl border bg-white p-5 space-y-4">
+      <h3 ref={resultRef} tabIndex={-1} className="text-xl font-bold">Bilan de l’import</h3>
+      <p role="status" className="text-sm text-slate-700">{importResult.totalRows} lignes : {importResult.successCount} enregistrées, {importResult.errorCount} rejetées, {duplicateLines.size} doublons ignorés et {stats.deleted} retirées avant import.</p>
+      {importResult.errors.length > 0 && <><ul className="max-h-64 overflow-auto list-disc pl-5 text-sm text-slate-700 space-y-1">{importResult.errors.map((error, index) => <li key={index}>{error.row > 0 ? `Ligne ${error.row} : ` : ''}{error.message}</li>)}</ul><button type="button" onClick={exportRejected} className="min-h-11 rounded-xl border px-4 text-sm font-semibold">Exporter les lignes à corriger ou vérifier</button></>}
+      <button type="button" onClick={() => onConfirm(importResult)} className="min-h-11 px-4 bg-indigo-700 text-white rounded-xl font-semibold">Terminer et consulter les colis</button>
+    </div>;
+  }
 
   // === Status icon ===
   const StatusIcon: React.FC<{ status: string }> = ({ status }) => {
@@ -279,7 +325,9 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
   // ============================================================================
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" aria-busy={isConfirming || validating}>
+      {attempted && !isConfirming && <p className="text-sm text-slate-700">Les données de cet import restent figées après une tentative. Relancez les mêmes références pour vérifier les lignes non confirmées sans recréer les colis existants.</p>}
+      {operationError && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{operationError}</p>}
       {/* === BARRE STATS === */}
       <div className="bg-white rounded-xl border border-slate-200 p-4">
         <div className="flex items-center justify-between mb-3">
@@ -297,6 +345,7 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
         {/* KPI Pills */}
         <div className="flex flex-wrap gap-2">
           <button
+            aria-pressed={statusFilter === 'all'}
             onClick={() => setStatusFilter('all')}
             className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
               statusFilter === 'all' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -305,6 +354,7 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
             Tout ({stats.total})
           </button>
           <button
+            aria-pressed={statusFilter === 'valid'}
             onClick={() => setStatusFilter('valid')}
             className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
               statusFilter === 'valid' ? 'bg-green-600 text-white' : 'bg-green-50 text-green-700 hover:bg-green-100'
@@ -313,6 +363,7 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
             ✓ Valides ({stats.valid})
           </button>
           <button
+            aria-pressed={statusFilter === 'warning'}
             onClick={() => setStatusFilter('warning')}
             className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
               statusFilter === 'warning' ? 'bg-amber-500 text-white' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
@@ -321,6 +372,7 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
             ⚠ Avertissements ({stats.warning})
           </button>
           <button
+            aria-pressed={statusFilter === 'error'}
             onClick={() => setStatusFilter('error')}
             className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
               statusFilter === 'error' ? 'bg-red-600 text-white' : 'bg-red-50 text-red-700 hover:bg-red-100'
@@ -338,6 +390,7 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
           )}
         </div>
 
+        {stats.error > 0 && <button type="button" onClick={exportRejected} className="mt-3 min-h-11 px-3 border rounded-xl text-sm font-semibold text-slate-700">Exporter les lignes en erreur</button>}
         {/* Zone breakdown */}
         <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-slate-100">
           {Object.entries(stats.zones).map(([zone, count]) => count > 0 && (
@@ -355,7 +408,8 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
       <div className="relative">
         <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
         <input
-          type="text"
+          type="search"
+          aria-label="Rechercher dans les lignes de l’import"
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           placeholder="Rechercher par contact, adresse, commande..."
@@ -369,7 +423,7 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
           <span className="text-sm font-bold text-brand-700">{selectedRows.size} ligne{selectedRows.size > 1 ? 's' : ''} sélectionnée{selectedRows.size > 1 ? 's' : ''}</span>
           <div className="flex items-center gap-2 ml-auto flex-wrap">
             <span className="text-xs text-slate-500">Attribuer la zone :</span>
-            <select
+            <select aria-label="Zone à attribuer aux lignes sélectionnées"
               value={bulkZone}
               onChange={e => setBulkZone(e.target.value as Zone)}
               className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none"
@@ -379,7 +433,7 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
             </select>
             <button
               onClick={applyBulkZone}
-              disabled={!bulkZone}
+              disabled={!bulkZone || isConfirming || validating || attempted}
               className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-bold hover:bg-brand-700 disabled:opacity-40"
             >
               Appliquer
@@ -403,7 +457,7 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
                 <th className="px-2 py-2.5 text-center font-bold text-slate-500 w-8">
                   <input
                     type="checkbox"
-                    title="Tout sélectionner (lignes affichées)"
+                    title="Tout sélectionner (lignes affichées)" aria-label="Sélectionner toutes les lignes affichées"
                     checked={filteredRows.length > 0 && filteredRows.every(r => selectedRows.has(r._rowIndex))}
                     onChange={e => {
                       setSelectedRows(prev => {
@@ -451,9 +505,10 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
                     <td className="px-2 py-2 text-center">
                       <input
                         type="checkbox"
+                        aria-label={`Sélectionner la ligne ${row._rowIndex}`}
+                        disabled={isConfirming || validating || isDeleted}
                         checked={selectedRows.has(row._rowIndex)}
                         onChange={() => toggleRowSelect(row._rowIndex)}
-                        disabled={isDeleted}
                         className="w-4 h-4 rounded border-slate-300 text-brand-500 focus:ring-brand-500"
                       />
                     </td>
@@ -481,7 +536,7 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
                     {/* N° colis (identifiant physique sur le carton, ex: BR0513) */}
                     <td className="px-2 py-2 font-mono">
                       <div className="flex items-center gap-1">
-                        <EditableCell rowIdx={realIdx} field="externalId" value={row.externalId} />
+                        {renderEditableCell({ rowIdx: realIdx, field: "externalId", value: row.externalId })}
                         {row._multiColis && (
                           <span
                             className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 whitespace-nowrap"
@@ -495,32 +550,27 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
 
                     {/* N° commande */}
                     <td className="px-2 py-2 font-mono">
-                      <EditableCell rowIdx={realIdx} field="orderNumber" value={row.orderNumber} />
+                      {renderEditableCell({ rowIdx: realIdx, field: "orderNumber", value: row.orderNumber })}
                     </td>
 
                     {/* Contact */}
                     <td className="px-2 py-2 font-medium">
-                      <EditableCell rowIdx={realIdx} field="contactName" value={row.contactName} />
+                      {renderEditableCell({ rowIdx: realIdx, field: "contactName", value: row.contactName })}
                     </td>
 
                     {/* Adresse */}
                     <td className="px-2 py-2">
-                      <EditableCell rowIdx={realIdx} field="address" value={row.address} />
+                      {renderEditableCell({ rowIdx: realIdx, field: "address", value: row.address })}
                     </td>
 
                     {/* Code postal */}
                     <td className="px-2 py-2 font-mono">
-                      <EditableCell
-                        rowIdx={realIdx}
-                        field="postalCode"
-                        value={row.postalCode}
-                        className={!row.postalCode ? 'text-red-500 font-bold' : ''}
-                      />
+                      {renderEditableCell({ rowIdx: realIdx, field: 'postalCode', value: row.postalCode, className: !row.postalCode ? 'text-red-700 font-bold' : '' })}
                     </td>
 
                     {/* Ville */}
                     <td className="px-2 py-2">
-                      <EditableCell rowIdx={realIdx} field="city" value={row.city} />
+                      {renderEditableCell({ rowIdx: realIdx, field: "city", value: row.city })}
                     </td>
 
                     {/* Zone */}
@@ -536,7 +586,7 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
 
                     {/* Téléphone */}
                     <td className="px-2 py-2">
-                      <EditableCell rowIdx={realIdx} field="contactPhone" value={row.contactPhone} />
+                      {renderEditableCell({ rowIdx: realIdx, field: "contactPhone", value: row.contactPhone })}
                     </td>
 
                     {/* Créneau */}
@@ -550,13 +600,14 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
 
                     {/* Étage */}
                     <td className="px-2 py-2 text-center">
-                      <EditableCell rowIdx={realIdx} field="floor" value={row.floor} />
+                      {renderEditableCell({ rowIdx: realIdx, field: "floor", value: row.floor })}
                     </td>
 
                     {/* Actions */}
                     <td className="px-2 py-2 text-center">
                       {isDeleted ? (
                         <button
+                          disabled={isConfirming || validating || attempted}
                           onClick={() => restoreRow(realIdx)}
                           className="text-blue-500 hover:text-blue-700 text-[10px] font-medium"
                           title="Restaurer"
@@ -565,6 +616,7 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
                         </button>
                       ) : (
                         <button
+                          disabled={isConfirming || validating || attempted}
                           onClick={() => deleteRow(realIdx)}
                           className="text-slate-400 hover:text-red-500 transition-colors"
                           title="Supprimer cette ligne"
@@ -589,6 +641,7 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
         </div>
       </div>
 
+      {editingCell && <p role="status" className="text-sm text-slate-700">Validez la cellule en cours avec Entrée, ou cliquez en dehors du champ, avant de créer les colis.</p>}
       {/* === FOOTER ACTIONS === */}
       <div className="bg-white rounded-xl border border-slate-200 p-4">
         <div className="flex items-center justify-between">
@@ -608,14 +661,15 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
 
           <div className="flex gap-3">
             <button
-              onClick={onCancel}
+              disabled={isConfirming || validating}
+              onClick={() => void requestCancel(onCancel)}
               className="px-4 py-2.5 text-slate-700 font-medium hover:bg-slate-100 rounded-xl transition-colors"
             >
               Annuler
             </button>
             <button
               onClick={handleConfirm}
-              disabled={isConfirming || (stats.valid + stats.warning) === 0}
+              disabled={isConfirming || validating || Boolean(editingCell) || (stats.valid + stats.warning) === 0}
               className="flex items-center gap-2 px-6 py-2.5 bg-green-600 text-white rounded-xl font-bold text-sm hover:bg-green-700 disabled:opacity-50 transition-colors"
             >
               {isConfirming ? (
@@ -626,7 +680,7 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
               ) : (
                 <>
                   <PackageIcon size={16} />
-                  Valider et créer {stats.valid + stats.warning} colis
+                  {attempted ? 'Reprendre les mêmes références' : `Valider et créer ${stats.valid + stats.warning} colis`}
                 </>
               )}
             </button>

@@ -112,10 +112,10 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
       <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
         <div className="flex items-center gap-2 mb-1">
           <PackageIcon size={16} className="text-blue-600" />
-          <span className="text-xs font-bold text-blue-700 uppercase">Enlèvement</span>
+          <span className="text-sm font-bold text-blue-700 uppercase">Enlèvement</span>
         </div>
         <p className="font-bold text-slate-800 text-sm">{clientName}</p>
-        <p className="text-xs text-slate-500">{stopAddress}</p>
+        <p className="text-sm text-slate-500">{stopAddress}</p>
       </div>
 
       {/* Compteur principal */}
@@ -137,7 +137,7 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
           />
         </div>
 
-        <div className="flex justify-between text-xs text-slate-500">
+        <div className="flex justify-between text-sm text-slate-500">
           <span>✅ {scannedCount} scannés</span>
           {missing.length > 0 && <span className="text-red-500">❌ {missing.length} restants</span>}
           {unknown.length > 0 && <span className="text-amber-500">⚠️ {unknown.length} imprévus</span>}
@@ -161,7 +161,7 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <button
           onClick={() => setShowManifest(!showManifest)}
-          className="w-full flex items-center justify-between px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50"
+          className="min-h-11 w-full flex items-center justify-between px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50"
         >
           <span>📋 Manifeste ({total} colis)</span>
           {showManifest ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
@@ -173,13 +173,14 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
             {total > 5 && (
               <div className="px-3 pb-2">
                 <div className="relative">
-                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600" />
                   <input
-                    type="text"
+                    type="search"
+                    aria-label="Rechercher un colis de cet enlèvement"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     placeholder="Rechercher..."
-                    className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-xs"
+                    className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-base"
                   />
                 </div>
               </div>
@@ -207,28 +208,28 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
                     {/* Infos colis */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className={`font-mono text-xs font-bold ${scanned ? 'text-green-700' : 'text-slate-800'}`}>
+                        <span className={`font-mono text-sm font-bold ${scanned ? 'text-green-700' : 'text-slate-800'}`}>
                           {packageDisplayCode(pkg)}
                         </span>
                         {scanned && (
-                          <span className="px-1.5 py-0.5 bg-green-100 text-green-700 rounded text-[9px] font-bold">
+                          <span className="px-1.5 py-0.5 bg-green-100 text-green-700 rounded text-sm font-bold">
                             SCANNÉ
                           </span>
                         )}
                         {!scanned && noCode && (
-                          <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-[9px] font-bold" title="Ce colis n’a pas de code scannable — à valider en « Forcer »">
+                          <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-sm font-bold" title="Ce colis n’a pas de code scannable — à valider en « Forcer »">
                             SANS CODE
                           </span>
                         )}
                       </div>
-                      <p className="text-[11px] text-slate-500 truncate">
+                      <p className="text-sm text-slate-500 truncate">
                         → {pkg.contactName} • {pkg.city}
                       </p>
                     </div>
 
                     {/* Poids */}
                     {pkg.weight && (
-                      <span className="text-[10px] text-slate-400 flex-shrink-0">{formatWeight(pkg.weight)}</span>
+                      <span className="text-sm text-slate-600 flex-shrink-0">{formatWeight(pkg.weight)}</span>
                     )}
                   </div>
                 );
@@ -243,11 +244,11 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
           <div className="flex items-center gap-2 mb-1">
             <AlertTriangle size={14} className="text-amber-600" />
-            <span className="text-xs font-bold text-amber-700">Codes non prévus ({unknown.length})</span>
+            <span className="text-sm font-bold text-amber-700">Codes non prévus ({unknown.length})</span>
           </div>
           <div className="space-y-1">
             {unknown.map((code, i) => (
-              <p key={i} className="text-xs font-mono text-amber-600">{code}</p>
+              <p key={i} className="text-sm font-mono text-amber-600">{code}</p>
             ))}
           </div>
         </div>
@@ -257,7 +258,7 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
       {allScanned && missing.length === 0 && (
         <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-center">
           <p className="text-green-700 font-bold text-sm">🎉 Tous les colis ont été scannés !</p>
-          <p className="text-xs text-green-600 mt-1">Faites signer le client pour valider l'enlèvement.</p>
+          <p className="text-sm text-green-600 mt-1">Faites signer le client pour valider l'enlèvement.</p>
         </div>
       )}
 
@@ -266,7 +267,7 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
         {!showSignature && !signatureData && (
           <button
             onClick={() => setShowSignature(true)}
-            className="w-full flex items-center justify-center gap-2 py-3 bg-amber-50 border-2 border-dashed border-amber-300 text-amber-700 rounded-xl font-bold text-sm"
+            className="min-h-11 w-full flex items-center justify-center gap-2 py-3 bg-amber-50 border-2 border-dashed border-amber-300 text-amber-700 rounded-xl font-bold text-sm"
           >
             <PenTool size={16} />
             ✍️ Signature du client (enlèvement)
@@ -283,10 +284,10 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
         {signatureData && (
           <div className="flex items-center gap-2 px-3 py-2.5 bg-green-50 border border-green-200 rounded-xl">
             <CheckCircle size={16} className="text-green-600" />
-            <span className="text-xs text-green-700 font-bold flex-1">Signature client enregistrée ✓</span>
+            <span className="text-sm text-green-700 font-bold flex-1">Signature client enregistrée ✓</span>
             <button
               onClick={() => { setSignatureData(null); setShowSignature(true); }}
-              className="text-xs text-green-600 underline font-medium"
+              className="min-h-11 text-sm text-green-600 underline font-medium"
             >
               Refaire
             </button>
@@ -300,7 +301,7 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
         disabled={isProcessing || total === 0}
         className={`w-full flex items-center justify-center gap-2 py-4 rounded-xl font-bold text-sm active:scale-95 transition-transform ${
           allScanned && signatureData
-            ? 'bg-green-600 text-white shadow-lg shadow-green-200'
+            ? 'bg-green-700 text-white shadow-lg shadow-green-200'
             : 'bg-slate-800 text-white'
         } disabled:opacity-40 disabled:cursor-not-allowed`}
       >
@@ -319,7 +320,7 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
 
       {/* Avertissement si manquants */}
       {!allScanned && scannedCount > 0 && (
-        <p className="text-[11px] text-amber-600 text-center">
+        <p className="text-sm text-amber-600 text-center">
           ⚠️ {missing.length} colis manquants — Ils resteront en "En attente"
         </p>
       )}
@@ -407,11 +408,12 @@ const SignaturePadMini: React.FC<{ onSave: (data: string) => void; onCancel: () 
   return (
     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
       <div className="p-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-        <span className="text-xs font-bold text-slate-700">✍️ Signature client (enlèvement)</span>
-        <button onClick={clear} className="text-[10px] text-slate-500 hover:text-red-500">Effacer</button>
+        <span className="text-sm font-bold text-slate-700">✍️ Signature client (enlèvement)</span>
+        <button onClick={clear} className="min-h-11 text-sm text-slate-500 hover:text-red-500">Effacer</button>
       </div>
       <canvas
         ref={canvasRef}
+        aria-label="Zone de signature manuscrite pour l’enlèvement"
         width={600}
         height={200}
         className="w-full h-[100px] touch-none bg-white cursor-crosshair"
@@ -424,13 +426,13 @@ const SignaturePadMini: React.FC<{ onSave: (data: string) => void; onCancel: () 
         onMouseLeave={stopDrawing}
       />
       <div className="p-2 bg-slate-50 border-t border-slate-200 flex gap-2">
-        <button onClick={onCancel} className="flex-1 py-2 text-xs font-medium text-slate-600 bg-white border border-slate-200 rounded-lg">
+        <button onClick={onCancel} className="min-h-11 flex-1 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-lg">
           Annuler
         </button>
         <button
           onClick={() => hasContent && canvasRef.current && onSave(canvasRef.current.toDataURL('image/png'))}
           disabled={!hasContent}
-          className="flex-1 py-2 text-xs font-bold text-white bg-green-600 rounded-lg disabled:opacity-40"
+          className="min-h-11 flex-1 py-2 text-sm font-bold text-white bg-green-600 rounded-lg disabled:opacity-40"
         >
           Valider
         </button>

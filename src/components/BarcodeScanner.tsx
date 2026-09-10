@@ -12,7 +12,7 @@
  */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { createPortal } from 'react-dom';
+import Modal from './shared/Modal';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { Camera, Keyboard, X, Loader2, AlertTriangle, Flashlight, FlashlightOff } from 'lucide-react';
 
@@ -61,12 +61,23 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   const [lastScanned, setLastScanned] = useState<string | null>(null);
   const [lastScanResult, setLastScanResult] = useState<'success' | 'duplicate' | 'unknown' | 'read' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [scanHistory, setScanHistory] = useState<{ text: string; warning: boolean; time: string }[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [persistentWarning, setPersistentWarning] = useState('');
   const [torchOn, setTorchOn] = useState(false);
   const [torchAvailable, setTorchAvailable] = useState(false);
 
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const lastScanTime = useRef(0);
   const scannerContainerId = 'barcode-scanner-container';
+
+  const recordScan = useCallback((text: string, warning: boolean) => {
+    setScanHistory(previous => [{ text, warning, time: new Date().toLocaleTimeString('fr-FR') }, ...previous].slice(0, 6));
+    if (warning) setPersistentWarning(text);
+  }, []);
+  useEffect(() => {
+    if (flashMessage) recordScan(flashMessage.text, flashMessage.type === 'warn');
+  }, [flashMessage?.type, flashMessage?.text, recordScan]);
 
   // Feedback haptique + visuel
   const feedbackScan = useCallback((barcode: string) => {
@@ -79,6 +90,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
     if (alreadyScanned.includes(barcode)) {
       setLastScanned(barcode);
       setLastScanResult('duplicate');
+      recordScan(`${barcode} · déjà scanné`, true);
       // Vibration courte = doublon
       try { navigator.vibrate?.(100); } catch {}
       setTimeout(() => setLastScanResult(null), 2000);
@@ -100,6 +112,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
     }
     setLastScanned(barcode);
     setLastScanResult(result);
+    recordScan(`${barcode} · ${result === 'success' ? 'code attendu reconnu' : result === 'unknown' ? 'code non prévu pour cet arrêt' : 'code lu, vérification en cours'}`, result === 'unknown');
 
     // Vibration : succès = double pulse, inconnu = long, neutre = court.
     try {
@@ -110,7 +123,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
     onScan(barcode);
 
     setTimeout(() => setLastScanResult(null), 2000);
-  }, [onScan, expectedBarcodes, alreadyScanned, lastScanned, isMatch]);
+  }, [onScan, expectedBarcodes, alreadyScanned, lastScanned, isMatch, recordScan]);
 
   // Référence toujours à jour vers feedbackScan, pour que l'effet caméra ne
   // dépende PAS de feedbackScan (sinon il redémarre la caméra à chaque scan,
@@ -124,11 +137,13 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   const onCloseRef = useRef(onClose);
   useEffect(() => { onCloseRef.current = onClose; });
   const autoClosedRef = useRef(false);
+  const autoCloseTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(autoCloseTimer.current), []);
   useEffect(() => {
     if (!checklist || checklist.length === 0 || autoClosedRef.current) return;
     if (checklist.every(c => c.done)) {
       autoClosedRef.current = true;
-      setTimeout(() => onCloseRef.current(), 700);
+      autoCloseTimer.current = setTimeout(() => onCloseRef.current(), 1200);
     }
   }, [checklist]);
 
@@ -292,8 +307,9 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   // etc.) « emprisonne » le position:fixed → le scanner ne couvrait pas tout l'écran et
   // son bas (checklist/infos) passait sous la barre de navigation. En portail, il est
   // VRAIMENT plein écran, quel que soit l'écran d'où on l'ouvre.
-  return createPortal(
-    <div className="fixed inset-0 z-[100] bg-black flex flex-col">
+  return (
+    <Modal isOpen onClose={() => { void handleClose(); }} ariaLabel={title} size="full" showCloseButton={false} closeOnOverlay={false} bodyClassName="!p-0 bg-black">
+    <div className="bg-black flex flex-col h-[calc(100dvh-3rem)] min-h-[22rem]">
       {/* La caméra html5-qrcode remplit tout le conteneur (sinon bandes noires
           et viseur désaligné). object-fit: cover → aperçu plein écran, centré. */}
       <style>{`
@@ -307,18 +323,19 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
       `}</style>
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 bg-black/80 gap-2">
-        <h3 className="text-white font-bold text-sm truncate min-w-0">{title}</h3>
+        <h3 className="text-white font-bold text-base min-w-0">{title}</h3>
         <div className="flex items-center gap-1 flex-shrink-0">
           {!manualMode && torchAvailable && (
             <button
               onClick={toggleTorch}
               title={torchOn ? 'Éteindre la lampe' : 'Allumer la lampe'}
-              className={`p-1.5 rounded-lg ${torchOn ? 'text-amber-300 bg-white/10' : 'text-white/70 hover:text-white'}`}
+              aria-label={torchOn ? 'Éteindre la lampe' : 'Allumer la lampe'} aria-pressed={torchOn}
+              className={`min-w-11 min-h-11 p-2 rounded-lg ${torchOn ? 'text-amber-300 bg-white/10' : 'text-white/70 hover:text-white'}`}
             >
               {torchOn ? <Flashlight size={20} /> : <FlashlightOff size={20} />}
             </button>
           )}
-          <button onClick={handleClose} className="text-white/70 hover:text-white p-1">
+          <button onClick={handleClose} aria-label="Fermer le scanner" className="min-w-11 min-h-11 text-white/70 hover:text-white p-1">
             <X size={22} />
           </button>
         </div>
@@ -327,14 +344,14 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
       {/* Aide permanente : quel code viser. Masquée quand une checklist est affichée
           (elle dit déjà quoi scanner) → on ne mange pas la place de la caméra. */}
       {!manualMode && hint && !checklist && (
-        <div className="px-4 py-2 bg-amber-500/90 text-white text-xs font-semibold text-center">
+        <div className="px-4 py-2 bg-amber-500/90 text-white text-sm font-semibold text-center">
           {hint}
         </div>
       )}
 
       {/* Compteur texte permanent (enlèvement : pas de total connu, on compte les pris). */}
       {!manualMode && countLabel && (
-        <div className="px-4 py-2.5 bg-green-600 text-white text-base font-black text-center">
+        <div className="px-4 py-2.5 bg-green-700 text-white text-base font-black text-center">
           ✅ {countLabel}
         </div>
       )}
@@ -366,7 +383,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
       {lastScanResult && (
         <div className={`absolute top-14 left-4 right-4 z-20 px-4 py-3 rounded-xl text-sm font-bold text-center animate-fade-in ${
           lastScanResult === 'success' ? 'bg-green-500 text-white' :
-          lastScanResult === 'duplicate' ? 'bg-amber-500 text-white' :
+          lastScanResult === 'duplicate' ? 'bg-amber-700 text-white' :
           lastScanResult === 'read' ? 'bg-slate-700 text-white' :
           'bg-blue-500 text-white'
         }`}>
@@ -378,7 +395,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
       )}
 
       {/* Zone scanner / saisie manuelle */}
-      <div className="flex-1 relative">
+      <div className="flex-1 relative min-h-40">
         {!manualMode ? (
           <>
             {/* Scanner caméra */}
@@ -403,7 +420,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
                   <div className="absolute -bottom-1 -left-1 w-7 h-7 border-b-4 border-l-4 border-green-400 rounded-bl-2xl" />
                   <div className="absolute -bottom-1 -right-1 w-7 h-7 border-b-4 border-r-4 border-green-400 rounded-br-2xl" />
                 </div>
-                <p className="mt-4 px-3 py-1.5 rounded-full bg-black/60 text-white text-xs font-semibold">
+                <p className="mt-4 px-3 py-1.5 rounded-full bg-black/60 text-white text-sm font-semibold">
                   Visez le code — n'importe où dans l'image
                 </p>
               </div>
@@ -421,7 +438,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
                     {checklist.map((it, i) => (
                       <span
                         key={`${it.code}-${i}`}
-                        className={`px-2 py-1 rounded-md text-[11px] font-mono font-bold whitespace-nowrap ${
+                        className={`px-2 py-1 rounded-md text-sm font-mono font-bold whitespace-nowrap ${
                           it.done
                             ? 'bg-green-500 text-white'
                             : 'bg-white/15 text-white border border-white/30'
@@ -442,27 +459,30 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
               {error && (
                 <div className="flex items-start gap-2 bg-amber-900/50 border border-amber-700 rounded-xl p-3">
                   <AlertTriangle size={16} className="text-amber-400 mt-0.5 flex-shrink-0" />
-                  <p className="text-xs text-amber-300">{error}</p>
+                  <p className="text-sm text-amber-300">{error}</p>
                 </div>
               )}
               <div>
-                <label className="text-white/70 text-xs font-medium block mb-1">
+                <label htmlFor="manual-barcode" className="text-white/90 text-sm font-medium block mb-1">
                   Saisir le numéro manuellement
                 </label>
                 <div className="flex gap-2">
                   <input
+                    id="manual-barcode"
                     type="text"
+                    autoComplete="off"
+                    autoCapitalize="characters"
                     value={manualInput}
                     onChange={(e) => setManualInput(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleManualSubmit()}
                     placeholder="N° commande / code-barres"
                     autoFocus
-                    className="flex-1 px-4 py-3 bg-white rounded-xl text-sm font-mono font-bold text-slate-800 focus:ring-2 focus:ring-green-400 outline-none"
+                    className="min-w-0 flex-1 px-4 py-3 bg-white rounded-xl text-base font-mono font-bold text-slate-800 focus:ring-2 focus:ring-green-400 outline-none"
                   />
                   <button
                     onClick={handleManualSubmit}
                     disabled={!manualInput.trim()}
-                    className="px-5 py-3 bg-green-600 text-white rounded-xl font-bold text-sm disabled:opacity-40"
+                    className="min-h-11 px-5 py-3 bg-green-700 text-white rounded-xl font-bold text-sm disabled:opacity-40"
                   >
                     OK
                   </button>
@@ -473,12 +493,21 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
         )}
       </div>
 
+      {persistentWarning && <div role="alert" className="flex items-start gap-2 px-3 py-2 bg-amber-100 text-amber-950 text-sm">
+        <p className="flex-1 break-words">{persistentWarning}</p>
+        <button type="button" aria-label="Masquer cet avertissement de scan" onClick={() => setPersistentWarning('')} className="shrink-0 min-w-11 min-h-11 rounded-lg border border-amber-400"><X size={18} className="mx-auto" /></button>
+      </div>}
+      {scanHistory.length > 0 && <details open={historyOpen} onToggle={event => setHistoryOpen(event.currentTarget.open)} className="bg-slate-900 text-white text-sm px-3">
+        <summary className="min-h-11 py-3 cursor-pointer font-semibold">Derniers scans ({scanHistory.length})</summary>
+        <ol className="max-h-28 overflow-y-auto pb-2 space-y-2">{scanHistory.map((entry, index) => <li key={`${entry.time}-${index}`} className={entry.warning ? 'text-amber-200' : 'text-white'}><time>{entry.time}</time> · {entry.text}</li>)}</ol>
+      </details>}
+      {checklist?.length && checklist.every(item => item.done) ? <p role="status" className="bg-green-800 text-white px-3 py-2 text-sm">Tous les colis sont scannés. Retour à la livraison…</p> : null}
       {/* Footer — Switch mode */}
       <div className="px-4 py-3 bg-black/80 flex gap-2">
         {!manualMode ? (
           <button
             onClick={switchToManual}
-            className="flex-1 flex items-center justify-center gap-2 py-3 bg-white/10 text-white rounded-xl text-sm font-medium"
+            className="min-h-11 flex-1 flex items-center justify-center gap-2 py-3 bg-white/10 text-white rounded-xl text-sm font-medium"
           >
             <Keyboard size={16} />
             Saisie manuelle
@@ -486,15 +515,15 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
         ) : (
           <button
             onClick={switchToCamera}
-            className="flex-1 flex items-center justify-center gap-2 py-3 bg-white/10 text-white rounded-xl text-sm font-medium"
+            className="min-h-11 flex-1 flex items-center justify-center gap-2 py-3 bg-white/10 text-white rounded-xl text-sm font-medium"
           >
             <Camera size={16} />
             Retour caméra
           </button>
         )}
       </div>
-    </div>,
-    document.body
+    </div>
+    </Modal>
   );
 };
 

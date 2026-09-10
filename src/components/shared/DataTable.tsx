@@ -51,7 +51,7 @@ function DataTable<T>({
     return (
       <div className={`bg-white rounded-2xl border border-slate-200 ${className}`}>
         <div className="p-8 flex items-center justify-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600"></div>
+          <div role="status" className="flex items-center gap-3 text-slate-600"><span aria-hidden="true" className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600"/>Chargement des données…</div>
         </div>
       </div>
     );
@@ -73,12 +73,13 @@ function DataTable<T>({
   return (
     <div className={`bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden ${className}`}>
       <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse">
+        <table aria-label="Liste des résultats" className="w-full text-left border-collapse">
           <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
               {columns.map((col) => (
                 <th
                   key={col.key}
+                  scope="col"
                   className={`${headerPadding} text-xs font-bold text-slate-500 uppercase tracking-wider ${alignClasses[col.align || 'left']}`}
                   style={col.width ? { width: col.width } : undefined}
                 >
@@ -91,6 +92,11 @@ function DataTable<T>({
             {data.map((item, index) => (
               <tr
                 key={keyExtractor(item)}
+                tabIndex={onRowClick ? 0 : undefined}
+                aria-label={onRowClick ? `Ouvrir le détail de la ligne ${index + 1}` : undefined}
+                onKeyDown={e => {
+                  if (onRowClick && e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onRowClick(item); }
+                }}
                 onClick={() => onRowClick?.(item)}
                 className={`
                   ${onRowClick ? 'cursor-pointer' : ''}

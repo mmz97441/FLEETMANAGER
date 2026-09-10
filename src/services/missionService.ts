@@ -40,6 +40,7 @@ import { haversineKm } from '../utils/geo';
 import { geocodeAddress, getGoogleMapsApiKey } from './gmproService';
 import { reportError } from './logService';
 import { recalculateStopEtas } from '../utils/routeTiming';
+import { trackingCodeForRequest } from '../utils/shipmentRequest';
 
 // Collections Firestore
 const HUBS_COLLECTION = 'hubs';
@@ -113,12 +114,12 @@ export const buildDeliveryStop = (input: DeliveryStopInput): MissionStop =>
 // HUBS
 // ============================================================================
 
-export const subscribeToHubs = (callback: (hubs: Hub[]) => void) => {
+export const subscribeToHubs = (callback: (hubs: Hub[]) => void, onError?: (error: Error) => void) => {
   const q = query(collection(db, HUBS_COLLECTION), orderBy('zone'));
   return onSnapshot(q, (snapshot) => {
     const hubs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Hub));
     callback(hubs);
-  });
+  }, onError);
 };
 
 export const getHubs = async (): Promise<Hub[]> => {
@@ -293,7 +294,8 @@ export const extractPostalCodeFromAddress = (address: string): string | null => 
 
 export const subscribeToPackages = (
   callback: (packages: Package[]) => void,
-  filters?: { date?: string; zone?: Zone; status?: PackageStatus; clientId?: string; missionId?: string; driverId?: string }
+  filters?: { date?: string; zone?: Zone; status?: PackageStatus; clientId?: string; missionId?: string; driverId?: string },
+  onError?: (error: Error) => void
 ) => {
   const source = collection(db, PACKAGES_COLLECTION);
   const filter = filters?.driverId ? ['currentDriverId',filters.driverId] : filters?.missionId ? ['missionId',filters.missionId] : filters?.clientId ? ['clientId',filters.clientId] : filters?.status ? ['status',filters.status] : null;
@@ -321,13 +323,13 @@ export const subscribeToPackages = (
     }
     
     callback(packages);
-  });
+  }, onError);
 };
 
 /**
  * Abonnement DÉDIÉ aux colis DISPATCHABLES (tableau de dispatch).
  *
- * `subscribeToPackages` ne charge que les 500 colis les plus récents de TOUT le
+ * Historiquement, `subscribeToPackages` ne chargeait que les 500 colis les plus récents de tout le
  * système avant de filtrer côté client : sur une grosse journée (>500 colis créés
  * après les colis en attente), d'anciens colis AT_HUB/SORTED non affectés tombaient
  * hors des 500 → INVISIBLES au dispatch, jamais partis en tournée. Ici on interroge
@@ -350,7 +352,7 @@ export const subscribeToDispatchablePackages = (
 /**
  * Abonnement DÉDIÉ aux colis d'un client (portail expéditeur).
  *
- * Corrige un défaut de `subscribeToPackages` qui ne charge que les 500 colis les
+ * Corrige un ancien défaut de `subscribeToPackages` qui ne chargeait que les 500 colis les
  * plus récents de TOUT le système avant de filtrer côté client : un client à fort
  * volume ne voyait plus ses colis anciens. Ici on interroge Firestore CÔTÉ SERVEUR
  * par `clientId` ET par `clientName` (requêtes d'égalité → index simples, pas de
@@ -634,14 +636,17 @@ export const createClientShipment = async (params: {
   volume?: number;
   comment?: string;
   clientReference?: string;
+  /** Keep the same UUID when retrying an uncertain creation. */
+  requestId?: string;
 }): Promise<Package[]> => {
   const { client, recipient, zone } = params;
   const total = Math.max(1, Math.min(Number(params.packageCount) || 1, 50));
   const now = new Date().toISOString();
+  const requestId = params.requestId || crypto.randomUUID();
 
   const toCreate: Omit<Package, 'id' | 'createdAt' | 'updatedAt'>[] = [];
   for (let i = 1; i <= total; i++) {
-    const code = generateTrackingCode();
+    const code = trackingCodeForRequest(requestId, i);
     toCreate.push({
       clientId: client.id,
       clientName: client.companyName,
@@ -791,7 +796,8 @@ export const publishLiveTrackingForMission = async (
 
 export const subscribeToMissions = (
   callback: (missions: Mission[]) => void,
-  filters?: { date?: string; zone?: Zone; status?: MissionStatus; driverId?: string }
+  filters?: { date?: string; zone?: Zone; status?: MissionStatus; driverId?: string },
+  onError?: (error: Error) => void
 ) => {
   // À l'échelle, un `limit(100)` global trié par date pouvait EXCLURE la tournée
   // d'un chauffeur (>100 tournées récentes le même jour) → le chauffeur ouvre
@@ -819,7 +825,7 @@ export const subscribeToMissions = (
     }
     
     callback(missions);
-  });
+  }, onError);
 };
 
 export const getMissionById = async (id: string): Promise<Mission | null> => {

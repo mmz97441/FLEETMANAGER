@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
+import Modal from './shared/Modal';
 import {
   HelpCircle,
   X,
@@ -93,10 +93,10 @@ const GUIDE_SECTIONS: GuideSection[] = [
     intro: 'Préparez un envoi vers une pharmacie en quelques secondes.',
     steps: [
       'Cliquez sur l\'onglet « Créer une expédition » (ou la tuile du même nom sur l\'accueil).',
-      'Dans le champ « Destinataire », choisissez une pharmacie de votre carnet, ou cliquez sur « Saisir à la main » pour taper l\'adresse.',
+      'Dans « Nom du destinataire », tapez un nom ou utilisez « Choisir dans mon carnet ». Complétez ensuite l’adresse et le téléphone.',
       'Dans « Nombre de colis », indiquez combien de colis vous envoyez.',
       'Appuyez sur « Créer l\'expédition » : un code de suivi est généré automatiquement.',
-      'Choisissez le format d\'étiquette (A4, A5 ou A6), puis cliquez sur « Imprimer l\'étiquette » et collez-la sur le colis.',
+      'Après la confirmation des codes créés, choisissez le format A4, A5 ou A6 puis cliquez sur « Imprimer les étiquettes ». Une impression bloquée ne supprime pas votre expédition.',
     ],
   },
   {
@@ -189,6 +189,26 @@ const FAQ_ITEMS: FaqItem[] = [
       'Allez dans « Mes Colis » et cliquez sur le colis concerné. Vous y trouverez la traçabilité complète ainsi que la preuve de livraison : signature, photo et position GPS du dépôt.',
   },
   {
+    id: 'faq-devis-expedition', question: 'Quelle différence entre un devis et une expédition ?',
+    answer: 'Demander un devis permet de recevoir un prix avant de confirmer le transport. Créer une expédition enregistre directement les colis et leurs codes de suivi, en attente de collecte par le transporteur.',
+  },
+  {
+    id: 'faq-impression-bloquee', question: 'La fenêtre d’impression ne s’ouvre pas : faut-il recréer les colis ?',
+    answer: 'Si les codes apparaissent dans la confirmation, vos colis sont enregistrés. Autorisez les fenêtres de ce site puis utilisez Imprimer les étiquettes, ou réimprimez depuis Mes colis. Ne recréez pas l’expédition.',
+  },
+  {
+    id: 'faq-rejets-import', question: 'Comment corriger un import en erreur ?',
+    answer: 'Utilisez le filtre Erreurs uniquement et exportez les lignes à corriger. Le bilan sépare les références confirmées, les rejets, les doublons du fichier et les lignes non confirmées. Pour les expéditions, Reprendre vérifie les mêmes références sans recréer les colis existants. Pour le carnet, contrôlez les lignes non confirmées dans Mes destinataires avant de les réimporter.',
+  },
+  {
+    id: 'faq-horaires', question: 'Que signifient arrivée estimée et créneau demandé ?',
+    answer: 'Le créneau demandé exprime votre souhait. L’arrivée estimée vient de la planification de la tournée et peut évoluer. L’heure de réception de la position indique la fraîcheur du suivi du livreur ; elle ne garantit pas une livraison à une heure précise.',
+  },
+  {
+    id: 'faq-vocabulaire', question: 'Tournée, arrêt, preuve de livraison : de quoi parle-t-on ?',
+    answer: 'Une tournée regroupe les visites d’un chauffeur. Un arrêt correspond à une collecte ou une livraison à une adresse. La preuve de livraison rassemble les éléments enregistrés lors de la remise, comme la photo et la signature. Le bon de livraison (BL) est le document consultable depuis le colis.',
+  },
+  {
     id: 'faq-bl',
     question: 'Comment télécharger le bon de livraison ?',
     answer:
@@ -228,7 +248,7 @@ const FAQ_ITEMS: FaqItem[] = [
     id: 'faq-fiabilite',
     question: 'Les chiffres des statistiques sont-ils fiables ?',
     answer:
-      'Oui. Tous les chiffres sont calculés par le système à partir de vos données réelles : ils ne sont jamais inventés ni estimés. Vous pouvez vous y fier pour vos décisions et vos comptes rendus.',
+      'Les indicateurs utilisent les données enregistrées dans votre compte. Vérifiez la période affichée et les colis inclus ; une livraison ou une preuve encore en cours de synchronisation peut ne pas être comptabilisée immédiatement.',
   },
 ];
 
@@ -322,7 +342,7 @@ const ClientHelp: React.FC<ClientHelpProps> = ({ onClose, onNavigate, embedded =
       <div
         className={embedded
           ? "max-w-3xl mx-auto w-full rounded-2xl bg-white flex flex-col overflow-hidden border border-slate-200"
-          : "max-w-3xl w-full max-h-[90vh] rounded-2xl bg-white flex flex-col overflow-hidden shadow-2xl"}
+          : "max-w-3xl w-full max-h-[85dvh] rounded-2xl bg-white flex flex-col overflow-hidden shadow-2xl"}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -340,7 +360,7 @@ const ClientHelp: React.FC<ClientHelpProps> = ({ onClose, onNavigate, embedded =
             type="button"
             onClick={onClose}
             aria-label="Fermer l'aide"
-            className="flex items-center justify-center w-10 h-10 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors shrink-0"
+            className="flex items-center justify-center w-11 h-11 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors shrink-0"
           >
             <X className="w-5 h-5" />
           </button>
@@ -419,7 +439,7 @@ const ClientHelp: React.FC<ClientHelpProps> = ({ onClose, onNavigate, embedded =
                       className="rounded-2xl border border-slate-200 bg-white p-4 hover:border-indigo-200 hover:shadow-sm transition-all"
                     >
                       <div className="flex items-center gap-3 mb-3">
-                        <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 shrink-0">
+                        <div className="flex items-center justify-center w-11 h-11 rounded-xl bg-indigo-50 text-indigo-600 shrink-0">
                           <Icon className="w-5 h-5" />
                         </div>
                         <h3 className="font-bold text-slate-900 leading-tight">
@@ -530,18 +550,7 @@ const ClientHelp: React.FC<ClientHelpProps> = ({ onClose, onNavigate, embedded =
   );
 
   if (embedded) return panel;
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[130] bg-black/50 flex items-center justify-center p-4"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Aide et guide"
-    >
-      {panel}
-    </div>,
-    document.body,
-  );
+  return <Modal isOpen onClose={() => onClose?.()} ariaLabel="Aide et guide client" showCloseButton={false} size="3xl" bodyClassName="p-0 sm:p-0">{panel}</Modal>;
 };
 
 // --- État vide (aucun résultat de recherche) ---

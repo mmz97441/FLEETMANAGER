@@ -73,7 +73,8 @@ const formatEta = (iso?: string): string | null => {
   if (!iso) return null;
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return null;
-  return new Date(t).toLocaleTimeString('fr-FR', {
+  return new Date(t).toLocaleString('fr-FR', {
+    day: '2-digit', month: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
   });
@@ -405,9 +406,9 @@ const ClientLiveTracking: React.FC<ClientLiveTrackingProps> = ({ packages }) => 
 
 const Header: React.FC<{ subtitle?: string }> = ({ subtitle }) => (
   <div>
-    <h1 className="text-xl font-bold text-slate-800">🚚 Suivi live de mes livraisons</h1>
+    <h1 className="text-xl font-bold text-slate-800">🚚 Suivi de mes livraisons</h1>
     <p className="mt-0.5 text-sm text-slate-500">
-      {subtitle || 'Suivez en temps réel les livreurs qui transportent vos colis.'}
+      {subtitle || 'Consultez les dernières positions reçues des livreurs qui transportent vos colis.'}
     </p>
   </div>
 );
@@ -466,13 +467,18 @@ const ParcelRow: React.FC<ParcelRowProps> = ({ parcel, onClick }) => {
       {/* ETA */}
       {eta && (
         <div className="mt-2 text-sm font-medium text-indigo-700">
-          Arrivée prévue vers {eta}
+          Arrivée estimée : {eta}
         </div>
       )}
 
+      {eta && <p className="mt-1 text-sm text-slate-600">Heure issue de la planification de la tournée ; elle peut évoluer. Ce n’est pas une heure garantie.</p>}
+      {!eta && <p className="mt-2 text-sm text-slate-600">Heure d’arrivée non disponible.</p>}
+      {(parcel.timeWindowStart || parcel.timeWindowEnd) && <p className="mt-1 text-sm text-slate-700">Créneau demandé : {parcel.timeWindowStart || 'sans heure de début'} – {parcel.timeWindowEnd || 'sans heure de fin'}</p>}
+      {parcel.requestedDeliveryDate && <p className="mt-1 text-sm text-slate-700">Date demandée : {parcel.requestedDeliveryDate.split('-').reverse().join('/')}</p>}
+      {parcel.updatedAt && !Number.isNaN(Date.parse(parcel.updatedAt)) && <p className="mt-1 text-sm text-slate-600">Fiche du colis actualisée le {new Date(parcel.updatedAt).toLocaleString('fr-FR')}</p>}
       {/* Livreur */}
       <div className="mt-1 text-xs text-slate-500">
-        Livreur : {driverName} · position {timeAgo(parcel.liveDriver?.updatedAt)}
+        Livreur : {driverName} · position reçue {timeAgo(parcel.liveDriver?.updatedAt)}
       </div>
     </button>
   );

@@ -1,4 +1,4 @@
-import React, { forwardRef } from 'react';
+import React, { forwardRef, useId } from 'react';
 import { LucideIcon } from 'lucide-react';
 
 // === INPUT ===
@@ -21,14 +21,19 @@ export const FormInput = forwardRef<HTMLInputElement, FormInputProps>(({
   className = '',
   ...props
 }, ref) => {
+  const generatedId = useId();
+  const fieldId = props.id || generatedId;
+  const helpId = `${fieldId}-help`;
+  const describedBy = [props['aria-describedby'], (error || hint) ? helpId : undefined].filter(Boolean).join(' ') || undefined;
+
   const sizeClasses = {
-    sm: { wrapper: 'text-xs', input: 'py-2 px-3 text-sm', icon: 14, label: 'text-xs' },
-    md: { wrapper: 'text-sm', input: 'py-2.5 sm:py-3 px-4 text-sm', icon: 18, label: 'text-xs sm:text-sm' },
+    sm: { wrapper: 'text-xs', input: 'min-h-11 py-2 px-3 text-base sm:text-sm', icon: 14, label: 'text-sm' },
+    md: { wrapper: 'text-sm', input: 'min-h-11 py-2.5 sm:py-3 px-4 text-base sm:text-sm', icon: 18, label: 'text-sm' },
     lg: { wrapper: 'text-base', input: 'py-3.5 px-5 text-base', icon: 20, label: 'text-sm' }
   };
 
   const s = sizeClasses[size];
-  
+
   const variantClasses = {
     default: 'bg-white border border-slate-300 hover:border-slate-400',
     filled: 'bg-slate-100 border border-transparent hover:bg-slate-200'
@@ -37,7 +42,7 @@ export const FormInput = forwardRef<HTMLInputElement, FormInputProps>(({
   return (
     <div className={s.wrapper}>
       {label && (
-        <label className={`block ${s.label} font-bold text-slate-700 mb-1.5 ml-0.5`}>
+        <label htmlFor={fieldId} className={`block ${s.label} font-bold text-slate-700 mb-1.5 ml-0.5`}>
           {label}
           {props.required && <span className="text-red-500 ml-0.5">*</span>}
         </label>
@@ -51,12 +56,15 @@ export const FormInput = forwardRef<HTMLInputElement, FormInputProps>(({
         <input
           ref={ref}
           {...props}
+          id={fieldId}
+          aria-invalid={error ? true : props['aria-invalid']}
+          aria-describedby={describedBy}
           className={`
-            w-full ${s.input} ${Icon ? 'pl-10' : ''} 
+            w-full ${s.input} ${Icon ? 'pl-10' : ''}
             ${variantClasses[variant]}
-            rounded-xl font-medium text-slate-900 
-            placeholder:text-slate-400 
-            focus:ring-2 focus:ring-brand-500 focus:border-brand-500 
+            rounded-xl font-medium text-slate-900
+            placeholder:text-slate-500
+            focus:ring-2 focus:ring-brand-500 focus:border-brand-500
             outline-none transition-all shadow-sm
             disabled:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-70
             ${error ? 'border-red-500 focus:ring-red-500' : ''}
@@ -64,8 +72,8 @@ export const FormInput = forwardRef<HTMLInputElement, FormInputProps>(({
           `}
         />
       </div>
-      {error && <p className="text-red-500 text-xs mt-1 ml-1">{error}</p>}
-      {hint && !error && <p className="text-slate-400 text-xs mt-1 ml-1">{hint}</p>}
+      {error && <p id={helpId} role="alert" className="text-red-700 text-sm mt-1 ml-1">{error}</p>}
+      {hint && !error && <p id={helpId} className="text-slate-600 text-sm mt-1 ml-1">{hint}</p>}
     </div>
   );
 });
@@ -88,9 +96,14 @@ export const FormTextarea = forwardRef<HTMLTextAreaElement, FormTextareaProps>((
   className = '',
   ...props
 }, ref) => {
+  const generatedId = useId();
+  const fieldId = props.id || generatedId;
+  const helpId = `${fieldId}-help`;
+  const describedBy = [props['aria-describedby'], (error || hint) ? helpId : undefined].filter(Boolean).join(' ') || undefined;
+
   const sizeClasses = {
-    sm: { input: 'py-2 px-3 text-sm', label: 'text-xs' },
-    md: { input: 'py-2.5 px-4 text-sm', label: 'text-xs sm:text-sm' },
+    sm: { input: 'min-h-11 py-2 px-3 text-base sm:text-sm', label: 'text-sm' },
+    md: { input: 'min-h-11 py-2.5 px-4 text-base sm:text-sm', label: 'text-sm' },
     lg: { input: 'py-3 px-5 text-base', label: 'text-sm' }
   };
 
@@ -99,7 +112,7 @@ export const FormTextarea = forwardRef<HTMLTextAreaElement, FormTextareaProps>((
   return (
     <div>
       {label && (
-        <label className={`block ${s.label} font-bold text-slate-700 mb-1.5 ml-0.5`}>
+        <label htmlFor={fieldId} className={`block ${s.label} font-bold text-slate-700 mb-1.5 ml-0.5`}>
           {label}
           {props.required && <span className="text-red-500 ml-0.5">*</span>}
         </label>
@@ -107,20 +120,23 @@ export const FormTextarea = forwardRef<HTMLTextAreaElement, FormTextareaProps>((
       <textarea
         ref={ref}
         {...props}
+        id={fieldId}
+        aria-invalid={error ? true : props['aria-invalid']}
+        aria-describedby={describedBy}
         className={`
           w-full ${s.input}
           bg-white border border-slate-300 hover:border-slate-400
-          rounded-xl font-medium text-slate-900 
-          placeholder:text-slate-400 
-          focus:ring-2 focus:ring-brand-500 focus:border-brand-500 
+          rounded-xl font-medium text-slate-900
+          placeholder:text-slate-500
+          focus:ring-2 focus:ring-brand-500 focus:border-brand-500
           outline-none transition-all shadow-sm resize-none
           disabled:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-70
           ${error ? 'border-red-500 focus:ring-red-500' : ''}
           ${className}
         `}
       />
-      {error && <p className="text-red-500 text-xs mt-1 ml-1">{error}</p>}
-      {hint && !error && <p className="text-slate-400 text-xs mt-1 ml-1">{hint}</p>}
+      {error && <p id={helpId} role="alert" className="text-red-700 text-sm mt-1 ml-1">{error}</p>}
+      {hint && !error && <p id={helpId} className="text-slate-600 text-sm mt-1 ml-1">{hint}</p>}
     </div>
   );
 });
@@ -149,9 +165,14 @@ export const FormSelect = forwardRef<HTMLSelectElement, FormSelectProps>(({
   className = '',
   ...props
 }, ref) => {
+  const generatedId = useId();
+  const fieldId = props.id || generatedId;
+  const helpId = `${fieldId}-help`;
+  const describedBy = [props['aria-describedby'], (error || hint) ? helpId : undefined].filter(Boolean).join(' ') || undefined;
+
   const sizeClasses = {
-    sm: { input: 'py-2 px-3 text-sm', icon: 14, label: 'text-xs' },
-    md: { input: 'py-2.5 sm:py-3 px-4 text-sm', icon: 18, label: 'text-xs sm:text-sm' },
+    sm: { input: 'min-h-11 py-2 px-3 text-base sm:text-sm', icon: 14, label: 'text-sm' },
+    md: { input: 'min-h-11 py-2.5 sm:py-3 px-4 text-base sm:text-sm', icon: 18, label: 'text-sm' },
     lg: { input: 'py-3.5 px-5 text-base', icon: 20, label: 'text-sm' }
   };
 
@@ -160,7 +181,7 @@ export const FormSelect = forwardRef<HTMLSelectElement, FormSelectProps>(({
   return (
     <div>
       {label && (
-        <label className={`block ${s.label} font-bold text-slate-700 mb-1.5 ml-0.5`}>
+        <label htmlFor={fieldId} className={`block ${s.label} font-bold text-slate-700 mb-1.5 ml-0.5`}>
           {label}
           {props.required && <span className="text-red-500 ml-0.5">*</span>}
         </label>
@@ -174,11 +195,14 @@ export const FormSelect = forwardRef<HTMLSelectElement, FormSelectProps>(({
         <select
           ref={ref}
           {...props}
+          id={fieldId}
+          aria-invalid={error ? true : props['aria-invalid']}
+          aria-describedby={describedBy}
           className={`
             w-full ${s.input} ${Icon ? 'pl-10' : ''} pr-10
             bg-white border border-slate-300 hover:border-slate-400
-            rounded-xl font-medium text-slate-900 
-            focus:ring-2 focus:ring-brand-500 focus:border-brand-500 
+            rounded-xl font-medium text-slate-900
+            focus:ring-2 focus:ring-brand-500 focus:border-brand-500
             outline-none transition-all shadow-sm appearance-none
             disabled:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-70
             ${error ? 'border-red-500 focus:ring-red-500' : ''}
@@ -197,8 +221,8 @@ export const FormSelect = forwardRef<HTMLSelectElement, FormSelectProps>(({
           </svg>
         </div>
       </div>
-      {error && <p className="text-red-500 text-xs mt-1 ml-1">{error}</p>}
-      {hint && !error && <p className="text-slate-400 text-xs mt-1 ml-1">{hint}</p>}
+      {error && <p id={helpId} role="alert" className="text-red-700 text-sm mt-1 ml-1">{error}</p>}
+      {hint && !error && <p id={helpId} className="text-slate-600 text-sm mt-1 ml-1">{hint}</p>}
     </div>
   );
 });
@@ -265,16 +289,16 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(({
   ...props
 }, ref) => {
   const sizeClasses = {
-    sm: 'py-2 px-3 text-xs gap-1.5',
-    md: 'py-2.5 sm:py-3 px-4 text-sm gap-2',
-    lg: 'py-3.5 px-6 text-base gap-2'
+    sm: 'min-h-11 py-2 px-3 text-sm gap-1.5',
+    md: 'min-h-11 py-2.5 sm:py-3 px-4 text-sm gap-2',
+    lg: 'min-h-12 py-3.5 px-6 text-base gap-2'
   };
 
   const variantClasses = {
     primary: 'bg-brand-600 hover:bg-brand-700 text-white shadow-lg hover:shadow-xl',
     secondary: 'bg-slate-100 hover:bg-slate-200 text-slate-700',
     danger: 'bg-red-600 hover:bg-red-700 text-white shadow-lg',
-    success: 'bg-green-600 hover:bg-green-700 text-white shadow-lg',
+    success: 'bg-green-700 hover:bg-green-800 text-white shadow-lg',
     ghost: 'bg-transparent hover:bg-slate-100 text-slate-600'
   };
 
@@ -284,6 +308,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(({
     <button
       ref={ref}
       {...props}
+      aria-busy={loading || undefined}
       disabled={disabled || loading}
       className={`
         ${sizeClasses[size]}
@@ -295,18 +320,11 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(({
         ${className}
       `}
     >
-      {loading ? (
-        <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
-      ) : (
-        <>
-          {Icon && iconPosition === 'left' && <Icon size={iconSize} />}
-          {children}
-          {Icon && iconPosition === 'right' && <Icon size={iconSize} />}
-        </>
-      )}
+      {loading && <svg aria-hidden="true" className="animate-spin h-5 w-5" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5z"/></svg>}
+      {!loading && Icon && iconPosition === 'left' && <Icon aria-hidden="true" size={iconSize} />}
+      {children}
+      {!loading && Icon && iconPosition === 'right' && <Icon aria-hidden="true" size={iconSize} />}
+
     </button>
   );
 });

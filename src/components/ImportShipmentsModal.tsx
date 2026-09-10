@@ -7,10 +7,12 @@
  * incomplète…). Seules les lignes valides sont importées, puis les étiquettes
  * sont imprimées au format choisi (A4/A5/A6).
  */
-import React, { useState, useRef, useMemo } from 'react';
-import { createPortal } from 'react-dom';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
+import Modal from './shared/Modal';
+import { shipmentImportCounts } from '../utils/clientShipmentForm';
 import * as XLSX from 'xlsx';
-import { createClientShipmentsBatch } from '../services/missionService';
+import { decodeClientCsv } from '../utils/clientImportFile';
+import { createClientShipmentsBatch, getPackagesByIds } from '../services/missionService';
 import { estimateZoneFromAddress } from '../services/deliveryService';
 import { generateBatchLabelsHTML, LabelFormat } from '../services/pickupService';
 import { User, Package, Zone } from '../types';
@@ -33,6 +35,7 @@ interface ImportShipmentsModalProps {
   currentUser: User;
   onClose: () => void;
   onImported: (count: number) => void;
+  onViewPackages?: () => void;
 }
 
 interface ParsedRow {
@@ -98,11 +101,20 @@ const getField = (row: Record<string, any>, field: keyof typeof HEADER_ALIASES):
   return '';
 };
 
-const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser, onClose, onImported }) => {
+const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser, onClose, onImported, onViewPackages }) => {
   const [rows, setRows] = useState<ParsedRow[] | null>(null);
   const [fileName, setFileName] = useState('');
   const [format, setFormat] = useState<LabelFormat>('A6');
-  const [printLabels, setPrintLabels] = useState(true); // impression dissociée de l'import
+  const [onlyErrors, setOnlyErrors] = useState(false);
+  const [displayLimit, setDisplayLimit] = useState(100);
+  const [confirmed, setConfirmed] = useState<Map<number, Package>>(new Map());
+  const confirmedRef = useRef<Map<number, Package>>(new Map());
+  const importingRef = useRef(false);
+  const [attempted, setAttempted] = useState(false);
+  const [complete, setComplete] = useState(false);
+  const [printError, setPrintError] = useState('');
+  const resultRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (complete) resultRef.current?.focus({ preventScroll: true }); }, [complete]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');       // erreur de lecture / d'import
   const [deliveryDate, setDeliveryDate] = useState<string>(nextWorkingDayISO()); // jour de livraison souhaité
@@ -110,21 +122,29 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
   const todayISOLocal = localISO(new Date());
 
   const resetFile = () => {
+    if (busy || attempted) return;
     setRows(null);
+    setOnlyErrors(false);
+    setDisplayLimit(100);
     setFileName('');
     setError('');
     if (inputRef.current) inputRef.current.value = '';
   };
 
   const handleFile = async (file: File) => {
+    if (busy || attempted) return;
+    setRows(null);
+    setDisplayLimit(100);
     setError('');
     if (file.size > 5 * 1024 * 1024) { setError('Fichier trop volumineux (5 Mo maximum).'); return; }
     setFileName(file.name);
     try {
       const buf = await file.arrayBuffer();
-      const wb = XLSX.read(buf, { type: 'array', sheetRows: 10002 });
+      const wb = /\.csv$/i.test(file.name)
+        ? XLSX.read(decodeClientCsv(buf), { type: 'string', raw: true, sheetRows: 10002 })
+        : XLSX.read(buf, { type: 'array', sheetRows: 10002 });
       const ws = wb.Sheets[wb.SheetNames[0]];
-      const raw = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: '' });
+      const raw = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: '', raw: false });
 
       if (raw.length > 10000) { setError('Limite de 10 000 lignes par fichier.'); setRows(null); return; }
       if (raw.length === 0) { setError('Aucune ligne trouvée dans le fichier.'); setRows(null); return; }
@@ -145,7 +165,7 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
           }
         }
         return {
-          line: i + 2,               // ligne 1 = entêtes
+          line: Number.isInteger(r.__rowNum__) ? r.__rowNum__ + 1 : i + 2,               // ligne 1 = entêtes
           colisNumber: getField(r, 'colisNumber'),
           contactName: getField(r, 'contactName'),
           address: street,
@@ -184,11 +204,14 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
         if (!p.address.trim()) p.errors.push('Adresse manquante');
         if (!p.city.trim() && !p.postalCode.trim()) p.errors.push('Ville et code postal manquants');
         if (!p.contactPhone.trim()) p.errors.push('Téléphone manquant');
+        if (p.postalCode && !/^\d{5}$/.test(p.postalCode)) p.errors.push('Code postal invalide (5 chiffres attendus)');
+        if (p.contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.contactEmail)) p.errors.push('Email invalide');
+        if (p.weight && (!Number.isFinite(Number(p.weight.replace(',', '.'))) || Number(p.weight.replace(',', '.')) < 0)) p.errors.push('Poids invalide (kilogrammes positifs ou nuls)');
       }
 
       setRows(parsed);
     } catch (e) {
-      setError("Impossible de lire le fichier. Vérifie que c'est bien un .xlsx, .xls ou .csv.");
+      setError("Impossible de lire le fichier. Vérifiez que c'est bien un .xlsx, .xls ou .csv.");
       setRows(null);
     }
   };
@@ -229,72 +252,80 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
   const validCount = validRows.length;
   const errorCount = invalidRows.length;
 
-  const handleImport = async () => {
-    if (validCount === 0 || busy) return;
-    if (!deliveryDate) { setError('Choisissez la date de livraison souhaitée.'); return; }
-    if (deliveryDate < todayISOLocal) { setError('La date de livraison ne peut pas être dans le passé.'); return; }
-    setBusy(true);
-    setError('');
-    try {
-      // Estimation de la zone depuis l'adresse (best-effort, non bloquant)
-      const rowsWithZone = await Promise.all(
-        validRows.map(async (r) => {
-          let zone: Zone | undefined;
-          try {
-            const est = await estimateZoneFromAddress(`${r.address}, ${r.postalCode} ${r.city}`);
-            zone = est?.zone;
-          } catch { /* zone laissée indéfinie → transporteur ajustera */ }
-          const weight = r.weight ? Number(String(r.weight).replace(',', '.')) : undefined;
-          return {
-            colisNumber: r.colisNumber.trim(),
-            contactName: r.contactName.trim(),
-            address: r.address.trim(),
-            postalCode: r.postalCode.trim(),
-            city: r.city.trim(),
-            contactPhone: r.contactPhone.trim() || undefined,
-            contactEmail: r.contactEmail.trim() || undefined,
-            weight: weight != null && !Number.isNaN(weight) ? weight : undefined,
-            clientReference: r.clientReference.trim() || undefined,
-            comment: r.comment.trim() || undefined,
-            zone,
-          };
-        })
-      );
+  const outcomes = shipmentImportCounts(rows || [], new Set(confirmed.keys()));
+  const orderedRows = onlyErrors ? invalidRows : [...invalidRows, ...validRows];
+  const visibleRows = orderedRows.slice(0, displayLimit);
 
-      const packages: Package[] = await createClientShipmentsBatch({
-        client: {
-          id: currentUser.id,
-          companyName: currentUser.companyName || `${currentUser.firstName} ${currentUser.lastName}`,
-        },
-        deliveryDate,
-        rows: rowsWithZone,
-      });
-
-      // Impression des étiquettes UNIQUEMENT si demandé (sinon : plus tard depuis « Mes Colis »)
-      if (printLabels) {
-        const html = generateBatchLabelsHTML(packages, currentUser.companyName || 'Expéditeur', format);
-        const win = window.open('', '_blank');
-        if (win) { win.document.write(html); win.document.close(); }
-      }
-
-      onImported(packages.length);
-      onClose();
-    } catch (e) {
-      setError('Erreur lors de l\'import. Réessayez.');
-      setBusy(false);
-    }
+  const exportRejected = () => {
+    const rejected = (rows || []).filter(row => row.errors.length || (attempted && !confirmed.has(row.line)));
+    const worksheet = XLSX.utils.json_to_sheet(rejected.map(row => ({
+      'Numéro de colis': row.colisNumber, Destinataire: row.contactName, Adresse: row.address,
+      'Code postal': row.postalCode, Ville: row.city, Téléphone: row.contactPhone, Email: row.contactEmail,
+      'Poids (kg)': row.weight, Référence: row.clientReference, Remarque: row.comment,
+      'Ligne source': row.line, Motif: row.errors.join(' ; ') || 'Import non confirmé : reprendre la même référence pour vérifier sans doublon',
+    })));
+    const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, worksheet, 'Lignes à vérifier');
+    XLSX.writeFile(workbook, 'expeditions-a-corriger.xlsx');
   };
 
-  return createPortal(
-    <div className="fixed inset-0 z-[120] bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-5" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-bold text-slate-800 flex items-center gap-2">
-            <FileSpreadsheet size={18} className="text-indigo-600" /> Importer mes expéditions
-          </h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
-        </div>
+  const printConfirmed = () => {
+    setPrintError('');
+    try {
+      const win = window.open('', '_blank');
+      if (!win) { setPrintError('Fenêtre d’impression bloquée. Autorisez les fenêtres de ce site puis réessayez. Les colis sont enregistrés.'); return; }
+      win.opener = null;
+      win.document.write(generateBatchLabelsHTML([...confirmed.values()], currentUser.companyName || 'Expéditeur', format));
+      win.document.close();
+    } catch { setPrintError('Impression indisponible. Vous pouvez réimprimer les colis depuis Mes colis.'); }
+  };
 
+  const handleImport = async () => {
+    if (validCount === 0 || importingRef.current || complete) return;
+    if (!deliveryDate) { setError('Choisissez la date de livraison souhaitée.'); return; }
+    if (!attempted && deliveryDate < todayISOLocal) { setError('La date de livraison ne peut pas être dans le passé.'); return; }
+    importingRef.current = true; setBusy(true); setAttempted(true); setError('');
+    try {
+      const remaining = validRows.filter(row => !confirmedRef.current.has(row.line));
+      for (let offset = 0; offset < remaining.length; offset += 150) {
+        const batch = remaining.slice(offset, offset + 150);
+        const rowsWithZone = [];
+        // Address estimation is local and may fall back to the transporter's zone review.
+        for (const row of batch) {
+          let zone: Zone | undefined;
+          try { zone = (await estimateZoneFromAddress(`${row.address}, ${row.postalCode} ${row.city}`))?.zone; } catch { /* transporteur ajuste */ }
+          rowsWithZone.push({ ...row, weight: row.weight ? Number(row.weight.replace(',', '.')) : undefined, zone });
+        }
+        const packages = await createClientShipmentsBatch({
+          client: { id: currentUser.id, companyName: currentUser.companyName || `${currentUser.firstName} ${currentUser.lastName}` },
+          deliveryDate, rows: rowsWithZone,
+        });
+        const stored = new Map((await getPackagesByIds(packages.map(parcel => parcel.id))).map(parcel => [parcel.id, parcel]));
+        if (stored.size !== new Set(packages.map(parcel => parcel.id)).size) throw new Error('Certains colis enregistrés n’ont pas pu être relus.');
+        packages.forEach((parcel, index) => confirmedRef.current.set(batch[index].line, stored.get(parcel.id)!));
+        setConfirmed(new Map(confirmedRef.current));
+      }
+      setComplete(true);
+      onImported(confirmedRef.current.size);
+    } catch (cause) {
+      setError(`${confirmedRef.current.size} ligne(s) confirmée(s). Les autres restent à vérifier. ${cause instanceof Error ? cause.message : 'La connexion a été interrompue.'} Reprendre vérifie les mêmes références sans recréer les colis existants.`);
+    } finally { importingRef.current = false; setBusy(false); }
+  };
+
+  return (
+    <Modal isOpen onClose={onClose} title={complete ? 'Bilan de l’import' : 'Importer mes expéditions'} headerIcon={<FileSpreadsheet size={22} />} size="2xl" preventClose={busy} dirty={Boolean(rows) && !complete}>
+        {attempted && <div ref={resultRef} tabIndex={-1} role="status" className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 mb-4 text-sm text-indigo-900">
+          <p className="font-bold">{complete ? 'Import terminé' : busy ? 'Import en cours…' : 'Import interrompu'}</p>
+          <p className="mt-1">{outcomes.total} lignes : {outcomes.confirmed} confirmées · {outcomes.invalid} rejetées · {outcomes.duplicates} doublons dans le fichier · {outcomes.pending} non confirmées.</p>
+          <p className="mt-1">Une référence confirmée est enregistrée, créée maintenant ou déjà présente. Les références existantes ne sont pas recréées.</p>
+        </div>}
+        {confirmed.size > 0 && <div className="space-y-3 mb-4">
+          <details><summary className="cursor-pointer text-sm font-semibold text-slate-700 min-h-11">Voir les {confirmed.size} codes confirmés</summary><ul className="max-h-40 overflow-auto text-sm font-mono break-all">{[...confirmed].map(([line, parcel]) => <li key={line}>Ligne {line} : {parcel.externalId || parcel.barcode || parcel.orderNumber}</li>)}</ul></details>
+          <label htmlFor="import-label-format" className="block text-sm font-semibold">Format d’étiquette</label>
+          <select id="import-label-format" value={format} onChange={event => setFormat(event.target.value as LabelFormat)} className="w-full min-h-11 border rounded-xl px-3">{['A4', 'A5', 'A6'].map(value => <option key={value}>{value}</option>)}</select>
+          <button type="button" disabled={busy} onClick={printConfirmed} className="w-full min-h-11 rounded-xl border text-indigo-800 font-semibold flex items-center justify-center gap-2"><Printer size={18} /> Imprimer les colis confirmés</button>
+          {printError && <p role="alert" className="text-sm text-red-800">{printError}</p>}
+          {complete && <button type="button" onClick={() => { onClose(); onViewPackages?.(); }} className="w-full min-h-11 rounded-xl bg-indigo-700 text-white font-semibold">{onViewPackages ? 'Voir mes colis' : 'Terminer'}</button>}
+        </div>}
         {/* Étape 1 : choisir un fichier */}
         {!rows && (
           <>
@@ -332,7 +363,7 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
         )}
 
         {error && (
-          <div className="mt-3 text-sm bg-red-50 border border-red-200 text-red-700 rounded-lg px-3 py-2 flex items-center gap-2">
+          <div role="alert" className="mt-3 text-sm bg-red-50 border border-red-200 text-red-700 rounded-lg px-3 py-2 flex items-center gap-2">
             <AlertTriangle size={14} className="shrink-0" /> {error}
           </div>
         )}
@@ -357,88 +388,41 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
             {/* DATE DE LIVRAISON SOUHAITÉE — chaque colis est daté pour CE jour
                 (et non le jour du dépôt) → la tournée sera planifiée le bon jour. */}
             <div className="rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 mb-3">
-              <label className="flex items-center gap-2 text-sm font-bold text-brand-800 mb-1">
+              <label htmlFor="import-delivery-date" className="flex items-center gap-2 text-sm font-bold text-brand-800 mb-1">
                 <CalendarDays size={16} /> Date de livraison souhaitée
               </label>
               <input
+                id="import-delivery-date"
+                disabled={busy || attempted}
                 type="date"
                 value={deliveryDate}
                 min={todayISOLocal}
                 onChange={(e) => setDeliveryDate(e.target.value)}
                 className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 outline-none"
               />
-              <p className="text-[11px] text-slate-500 mt-1">Ces colis seront livrés ce jour-là, pas le jour du dépôt.</p>
+              <p className="text-[11px] text-slate-500 mt-1">Date demandée pour préparer la tournée ; elle sera confirmée par le transporteur.</p>
             </div>
 
-            {/* Liste détaillée : erreurs d'abord, puis lignes valides */}
-            <div className="max-h-72 overflow-y-auto border border-slate-100 rounded-xl divide-y divide-slate-100 mb-3">
-              {invalidRows.map((r) => (
-                <div key={`err-${r.line}`} className="bg-red-50/60 px-3 py-2">
-                  <div className="flex items-start gap-2 text-sm font-semibold text-red-800">
-                    <X size={14} className="text-red-500 shrink-0 mt-0.5" />
-                    <span className="min-w-0 break-words">
-                      Ligne {r.line} — {r.colisNumber || '(sans numéro)'} · {r.contactName || '—'}
-                    </span>
-                  </div>
-                  <ul className="mt-1 ml-6 space-y-0.5">
-                    {r.errors.map((msg, i) => (
-                      <li key={i} className="text-xs text-red-600 flex items-start gap-1.5">
-                        <span className="mt-1 w-1 h-1 rounded-full bg-red-400 shrink-0" /> {msg}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-              {validRows.map((r) => (
-                <div key={`ok-${r.line}`} className="flex items-center gap-2 px-3 py-2 text-xs text-slate-600">
-                  <CheckCircle size={14} className="text-green-500 shrink-0" />
-                  <span className="min-w-0 truncate">
-                    Ligne {r.line} — <span className="font-semibold text-slate-800">{r.colisNumber}</span> · {r.contactName} · {r.city}
-                  </span>
-                </div>
-              ))}
+            <div className="flex flex-wrap gap-3 mb-3 items-center">
+              <label className="flex items-center gap-2 text-sm min-h-11"><input type="checkbox" checked={onlyErrors} onChange={event => { setOnlyErrors(event.target.checked); setDisplayLimit(100); }} /> Erreurs uniquement ({errorCount})</label>
+              {(errorCount > 0 || (attempted && outcomes.pending > 0)) && <button type="button" disabled={busy} onClick={exportRejected} className="min-h-11 px-3 rounded-xl border text-sm text-slate-700 flex items-center gap-2"><Download size={16} /> Exporter les lignes à corriger ou vérifier</button>}
             </div>
-
-            {/* Impression des étiquettes : dissociée de l'import */}
-            <label className="flex items-center gap-2 text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 mb-2 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={printLabels}
-                onChange={e => setPrintLabels(e.target.checked)}
-                className="w-4 h-4 accent-indigo-600"
-              />
-              Imprimer les étiquettes tout de suite
-              <span className="text-slate-400">(sinon, à tout moment depuis « Mes Colis »)</span>
-            </label>
-
-            {/* Format d'étiquette (uniquement si on imprime maintenant) */}
-            {printLabels && (
-              <div className="mb-3">
-                <label className="text-[11px] text-slate-500 font-medium">Format d'étiquette</label>
-                <div className="flex gap-2 mt-1">
-                  {(['A4', 'A5', 'A6'] as LabelFormat[]).map(f => (
-                    <button
-                      key={f}
-                      onClick={() => setFormat(f)}
-                      className={`flex-1 py-2 rounded-xl text-sm font-bold border ${
-                        format === f ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200'
-                      }`}
-                    >
-                      {f}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-[11px] text-slate-400 mt-1">A6 = 1 étiquette/page (entrepôt) · A4 = 4/page</p>
-              </div>
-            )}
-
+            <div className="max-h-72 overflow-y-auto border border-slate-200 rounded-xl divide-y mb-3">
+              {visibleRows.map(row => <div key={row.line} className={`p-3 text-sm ${row.errors.length ? 'bg-red-50 text-red-900' : 'text-slate-700'}`}>
+                <p className="font-semibold break-words">Ligne {row.line} · {row.colisNumber || '(sans numéro)'} · {row.contactName || '(sans destinataire)'}</p>
+                {row.errors.length ? <ul className="mt-1 list-disc pl-5">{row.errors.map(message => <li key={message}>{message}</li>)}</ul> : <p>{confirmed.has(row.line) ? 'Confirmé : enregistré' : attempted ? 'Non confirmé' : 'Prêt à importer'} · {row.city}</p>}
+              </div>)}
+              {visibleRows.length === 0 && <p className="p-3 text-sm text-slate-600">Aucune ligne en erreur.</p>}
+              {orderedRows.length > displayLimit && <button type="button" onClick={() => setDisplayLimit(limit => limit + 100)} className="w-full min-h-11 text-indigo-800 text-sm font-semibold">Afficher 100 lignes supplémentaires ({visibleRows.length}/{orderedRows.length})</button>}
+            </div>
             {/* Note : les lignes en erreur ne sont pas importées */}
             <p className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 mb-3">
-              Les lignes en erreur ne sont pas importées. Corrigez votre fichier et réimportez-les.
+              Les lignes rejetées et les doublons du fichier ne sont pas importés. Exportez-les pour corriger uniquement ces lignes ; conservez leurs références.
             </p>
 
-            <div className="flex flex-col sm:flex-row gap-2">
+            {!complete && <div className="flex flex-col sm:flex-row gap-2">
               <button
+                disabled={busy || attempted}
                 onClick={resetFile}
                 className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-xl font-bold text-sm"
               >
@@ -449,17 +433,15 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
                 disabled={validCount === 0 || busy}
                 className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-indigo-600 text-white rounded-xl font-bold text-sm disabled:opacity-40"
               >
-                {printLabels ? <Printer size={16} /> : <CheckCircle size={16} />}
+                <CheckCircle size={16} />
                 {busy
                   ? 'Import en cours…'
-                  : `Importer les ${validCount} expédition(s) valide(s)${printLabels ? ' + imprimer' : ''}`}
+                  : attempted ? `Reprendre les ${outcomes.pending} lignes non confirmées` : `Importer les ${validCount} expédition(s) valide(s)`}
               </button>
-            </div>
+            </div>}
           </>
         )}
-      </div>
-    </div>,
-    document.body
+    </Modal>
   );
 };
 

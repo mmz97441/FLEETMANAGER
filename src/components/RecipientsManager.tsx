@@ -6,7 +6,9 @@
  * Purement présentationnel — toute persistance passe par les props.
  */
 import React, { useState, useMemo } from 'react';
-import { createPortal } from 'react-dom';
+import Modal from './shared/Modal';
+import { FormInput, FormTextarea } from './shared/FormInput';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { SavedAddress } from '../types';
 import {
   Plus,
@@ -118,6 +120,9 @@ const RecipientsManager: React.FC<RecipientsManagerProps> = ({
     setModalOpen(true);
   };
 
+  const baseline: FormState = editingAddress ? { contactName: editingAddress.contactName, address: editingAddress.address, city: editingAddress.city, contactPhone: editingAddress.contactPhone, contactEmail: editingAddress.contactEmail || '', notes: editingAddress.notes || '' } : emptyForm;
+  const requestClose = useUnsavedChanges(modalOpen && JSON.stringify(form) !== JSON.stringify(baseline), saving);
+
   const closeModal = () => {
     if (saving) return;
     setModalOpen(false);
@@ -137,7 +142,14 @@ const RecipientsManager: React.FC<RecipientsManagerProps> = ({
     form.contactPhone.trim() !== '';
 
   const handleSave = async () => {
-    if (!isValid || saving) return;
+    if (saving) return;
+    if (!isValid) {
+      setError('Complétez le nom, l’adresse, la ville et le téléphone du destinataire.');
+      const missing = (['contactName', 'address', 'city', 'contactPhone'] as const).find(key => !form[key].trim());
+      if (missing) document.getElementById(`recipient-${missing}`)?.focus();
+      return;
+    }
+    if (form.contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.contactEmail)) { setError('Corrigez l’adresse email ou laissez le champ vide.'); document.getElementById('recipient-contactEmail')?.focus(); return; }
     setSaving(true);
     setError(null);
 
@@ -218,7 +230,8 @@ const RecipientsManager: React.FC<RecipientsManagerProps> = ({
       <div className="relative">
         <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
         <input
-          type="text"
+          type="search"
+          aria-label="Rechercher dans les destinataires"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Rechercher un nom, une adresse, une ville…"
@@ -370,142 +383,24 @@ const RecipientsManager: React.FC<RecipientsManagerProps> = ({
         </div>
       )}
 
-      {/* Modal Ajouter / Modifier */}
-      {modalOpen &&
-        createPortal(
-          <div
-            className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-[120]"
-            onClick={closeModal}
-          >
-            <div
-              className="bg-white rounded-2xl border border-slate-200 w-full max-w-lg max-h-[90vh] overflow-y-auto"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between p-4 border-b border-slate-100">
-                <h2 className="text-lg font-bold text-slate-900">
-                  {editingAddress ? 'Modifier le destinataire' : 'Ajouter un destinataire'}
-                </h2>
-                <button
-                  type="button"
-                  onClick={closeModal}
-                  disabled={saving}
-                  aria-label="Fermer"
-                  className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              <div className="p-4 space-y-3">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Nom du contact <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={form.contactName}
-                    onChange={(e) => updateField('contactName', e.target.value)}
-                    placeholder="Ex : Pharmacie du Centre"
-                    className={inputClass}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Adresse <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={form.address}
-                    onChange={(e) => updateField('address', e.target.value)}
-                    placeholder="Rue et numéro"
-                    className={inputClass}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Code postal et ville <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={form.city}
-                    onChange={(e) => updateField('city', e.target.value)}
-                    placeholder="Ex : 06000 Nice"
-                    className={inputClass}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Téléphone <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="tel"
-                    value={form.contactPhone}
-                    onChange={(e) => updateField('contactPhone', e.target.value)}
-                    placeholder="Ex : 04 93 00 00 00"
-                    className={inputClass}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Email <span className="text-slate-400 font-normal">(optionnel)</span>
-                  </label>
-                  <input
-                    type="email"
-                    value={form.contactEmail}
-                    onChange={(e) => updateField('contactEmail', e.target.value)}
-                    placeholder="Ex : contact@pharmacie.fr"
-                    className={inputClass}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Notes <span className="text-slate-400 font-normal">(optionnel)</span>
-                  </label>
-                  <textarea
-                    value={form.notes}
-                    onChange={(e) => updateField('notes', e.target.value)}
-                    placeholder="Digicode, horaires, instructions…"
-                    rows={3}
-                    className={`${inputClass} resize-none`}
-                  />
-                </div>
-
-                {error && (
-                  <div className="flex items-start gap-2 p-3 rounded-xl bg-red-50 border border-red-100 text-sm text-red-700">
-                    <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-                    <span>{error}</span>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex items-center justify-end gap-2 p-4 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={closeModal}
-                  disabled={saving}
-                  className="px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 text-sm font-semibold rounded-xl border border-slate-300 transition-colors disabled:opacity-60"
-                >
-                  Annuler
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSave}
-                  disabled={!isValid || saving}
-                  className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-xl transition-colors"
-                >
-                  {saving && <Loader2 className="w-4 h-4 animate-spin" />}
-                  {editingAddress ? 'Enregistrer' : 'Ajouter'}
-                </button>
-              </div>
-            </div>
-          </div>,
-          document.body
-        )}
+      <Modal isOpen={modalOpen} onClose={() => void requestClose(closeModal)} title={editingAddress ? 'Modifier le destinataire' : 'Ajouter un destinataire'} size="lg" preventClose={saving}>
+        <form onSubmit={event => { event.preventDefault(); void handleSave(); }} noValidate aria-busy={saving} className="space-y-4">
+          <p className="text-sm text-slate-600">Les champs marqués * sont obligatoires.</p>
+          <fieldset disabled={saving} className="space-y-3">
+            <FormInput id="recipient-contactName" label="Nom du destinataire" required autoComplete="shipping name" value={form.contactName} onChange={event => updateField('contactName', event.target.value)} />
+            <FormInput id="recipient-address" label="Adresse : rue et numéro" required autoComplete="shipping address-line1" value={form.address} onChange={event => updateField('address', event.target.value)} />
+            <FormInput id="recipient-city" label="Code postal et ville" required autoComplete="shipping address-level2" value={form.city} onChange={event => updateField('city', event.target.value)} placeholder="97400 Saint-Denis" />
+            <FormInput id="recipient-contactPhone" label="Téléphone" required type="tel" autoComplete="shipping tel" value={form.contactPhone} onChange={event => updateField('contactPhone', event.target.value)} />
+            <FormInput id="recipient-contactEmail" label="Email (facultatif)" type="email" autoComplete="shipping email" value={form.contactEmail} onChange={event => updateField('contactEmail', event.target.value)} />
+            <FormTextarea label="Consignes (facultatif)" value={form.notes} onChange={event => updateField('notes', event.target.value)} hint="Digicode, horaires ou instructions utiles au chauffeur." rows={3} />
+          </fieldset>
+          {error && <p role="alert" className="rounded-xl bg-red-50 border border-red-200 p-3 text-sm text-red-800">{error}</p>}
+          <div className="flex gap-3">
+            <button type="button" onClick={() => void requestClose(closeModal)} disabled={saving} className="min-h-11 px-4 rounded-xl border text-slate-700">Annuler</button>
+            <button type="submit" disabled={saving} className="flex-1 min-h-11 bg-indigo-700 text-white rounded-xl font-semibold disabled:opacity-50">{saving ? 'Enregistrement…' : editingAddress ? 'Enregistrer' : 'Ajouter au carnet'}</button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 };

@@ -19,6 +19,8 @@ import { usePermissions, Permission } from '../usePermissions';
 import { useMissionStats } from '../hooks/useMissionStats';
 import { normalizeRole, roleKey } from '../utils/role';
 import { formatEuro, formatDistance } from '../utils/format';
+import { useUrlParam } from '../hooks/useUrlState';
+import { todayISO } from '../utils/date';
 
 // ============================================================================
 // TYPES & INTERFACES
@@ -255,43 +257,16 @@ const Dashboard: React.FC<DashboardProps> = ({
   vehicles, logs, maintenanceLogs, issues, quotes = [], leaves = [], absences = [],
   currentUser, users, pendingDocuments = 0, onNavigate 
 }) => {
-  const [currentDate, setCurrentDate] = useState(() => {
-    // Si on est en début de mois et qu'il n'y a pas encore de données,
-    // on affiche le mois précédent par défaut
-    const now = new Date();
-    if (now.getDate() <= 5) {
-      // On vérifie au premier rendu - sera ajusté par l'effet ci-dessous
-      const prev = new Date(now);
-      prev.setMonth(prev.getMonth() - 1);
-      return prev;
-    }
-    return now;
-  });
-  
-  // Auto-basculer : si le mois affiché n'a aucune donnée, revenir au mois précédent
-  useEffect(() => {
-    const month = currentDate.getMonth();
-    const year = currentDate.getFullYear();
-    const now = new Date();
-    
-    // Seulement si on est sur le mois en cours et en début de mois
-    if (month === now.getMonth() && year === now.getFullYear() && now.getDate() <= 5) {
-      const hasData = logs.some(l => {
-        const d = new Date(l.date);
-        return d.getMonth() === month && d.getFullYear() === year;
-      }) || maintenanceLogs.some(l => {
-        const d = new Date(l.date);
-        return d.getMonth() === month && d.getFullYear() === year;
-      });
-      
-      if (!hasData && logs.length > 0) {
-        const prev = new Date(currentDate);
-        prev.setMonth(prev.getMonth() - 1);
-        setCurrentDate(prev);
-      }
-    }
-  }, [logs, maintenanceLogs]); // Se déclenche quand les données sont chargées
-  
+  const [period, setPeriod] = useUrlParam<string>('month', todayISO().slice(0, 7));
+  const safePeriod = /^\d{4}-(0[1-9]|1[0-2])$/.test(period) ? period : todayISO().slice(0, 7);
+  const currentDate = useMemo(() => new Date(`${safePeriod}-01T12:00:00`), [safePeriod]);
+  const hasPeriodData = [...logs, ...maintenanceLogs].some(log => String(log.date).startsWith(safePeriod));
+  const periodNotice = <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+    <strong>Période des dépenses et consommations : {currentDate.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}.</strong>
+    <p>Parc véhicules et incidents : état actuel. Tournées : aujourd’hui. Les montants reposent sur les saisies disponibles.</p>
+    {!hasPeriodData && <p className="mt-1 font-medium">Aucune saisie de carburant ou de maintenance pour ce mois. La période reste inchangée ; utilisez le mois précédent pour consulter son activité.</p>}
+  </div>;
+
   // Hook des permissions
   const { hasPermission, hasAnyPermission } = usePermissions();
 
@@ -321,9 +296,8 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   // --- Navigation période ---
   const handleNavigateDate = (direction: -1 | 1) => {
-    const newDate = new Date(currentDate);
-    newDate.setMonth(newDate.getMonth() + direction);
-    setCurrentDate(newDate);
+    const newDate = new Date(currentDate.getFullYear(), currentDate.getMonth() + direction, 1);
+    setPeriod(`${newDate.getFullYear()}-${String(newDate.getMonth() + 1).padStart(2, '0')}`);
   };
 
   const getPeriodLabel = () => {
@@ -1187,14 +1161,15 @@ const Dashboard: React.FC<DashboardProps> = ({
             <p className="text-slate-500">Bonjour {currentUser.firstName}, voici la situation de votre flotte.</p>
           </div>
           <div className="flex items-center bg-white rounded-xl border border-slate-200 shadow-sm p-1">
-            <button onClick={() => handleNavigateDate(-1)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500"><ChevronLeft size={18} /></button>
+            <button aria-label="Mois précédent" onClick={() => handleNavigateDate(-1)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500"><ChevronLeft size={18} /></button>
             <div className="px-3 min-w-[140px] text-center">
-              <span className="block text-sm font-bold text-slate-800 capitalize">{getPeriodLabel()}</span>
+              <span className="block text-sm font-bold text-slate-800 capitalize">Période : {getPeriodLabel()}</span>
             </div>
-            <button onClick={() => handleNavigateDate(1)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500"><ChevronRight size={18} /></button>
+            <button aria-label="Mois suivant" onClick={() => handleNavigateDate(1)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500"><ChevronRight size={18} /></button>
           </div>
         </div>
 
+        {periodNotice}
         {/* Alertes critiques */}
         <AlertBanner alerts={criticalAlerts} />
 
@@ -1682,13 +1657,14 @@ const Dashboard: React.FC<DashboardProps> = ({
           <p className="text-slate-500">Bonjour {currentUser.firstName}, voici les actions du jour.</p>
         </div>
         <div className="flex items-center bg-white rounded-xl border border-slate-200 shadow-sm p-1">
-          <button onClick={() => handleNavigateDate(-1)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500"><ChevronLeft size={18} /></button>
+          <button aria-label="Mois précédent" onClick={() => handleNavigateDate(-1)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500"><ChevronLeft size={18} /></button>
           <div className="px-3 min-w-[140px] text-center">
-            <span className="block text-sm font-bold text-slate-800 capitalize">{getPeriodLabel()}</span>
+            <span className="block text-sm font-bold text-slate-800 capitalize">Période : {getPeriodLabel()}</span>
           </div>
-          <button onClick={() => handleNavigateDate(1)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500"><ChevronRight size={18} /></button>
+          <button aria-label="Mois suivant" onClick={() => handleNavigateDate(1)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500"><ChevronRight size={18} /></button>
         </div>
       </div>
+      {periodNotice}
 
       {/* KPIs principaux */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1803,7 +1779,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                       <div className="min-w-0">
                         <p className="text-sm font-bold text-slate-800 truncate">{m.driverName}</p>
                         <p className="text-[11px] text-slate-500">
-                          {m.vehiclePlate} • {m.zone} • {m.completedStops}/{m.totalStops} stops
+                          {m.vehiclePlate} • {m.zone} • {m.completedStops}/{m.totalStops} arrêts
                         </p>
                       </div>
                     </div>

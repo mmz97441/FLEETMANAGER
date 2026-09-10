@@ -1,3 +1,5 @@
+import Modal from './shared/Modal';
+import { notificationDestination } from '../utils/notificationDestination';
 /**
  * NOTIFICATION CENTER
  * 
@@ -28,7 +30,7 @@ import { User, ViewState } from '../types';
 
 interface NotificationCenterProps {
   currentUser: User;
-  onNavigate: (view: ViewState) => void;
+  onNavigate: (view: ViewState, params?: Record<string, string>) => void;
 }
 
 type FilterType = 'all' | 'unread' | 'urgent';
@@ -71,25 +73,17 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({ currentUser, on
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [filter, setFilter] = useState<FilterType>('all');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [marking, setMarking] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
   // Subscription temps réel
   useEffect(() => {
     if (!currentUser?.id) return;
-    const unsub = subscribeToNotifications(currentUser.id, setNotifications, 50);
+    const unsub = subscribeToNotifications(currentUser.id, rows => { setNotifications(rows); setLoading(false); setError(''); }, 50, () => { setLoading(false); setError('Notifications indisponibles. Vérifiez votre connexion.'); });
     return unsub;
   }, [currentUser?.id]);
-
-  // Fermer au clic extérieur
-  useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        setIsOpen(false);
-      }
-    };
-    if (isOpen) document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [isOpen]);
 
   // Compteurs
   const unreadCount = useMemo(() => notifications.filter(n => !n.read).length, [notifications]);
@@ -114,25 +108,32 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({ currentUser, on
 
   // Actions
   const handleNotificationClick = async (notif: AppNotification) => {
+    setError('');
+    const destination = notificationDestination(notif);
+    if (destination) { onNavigate(destination.view, destination.params); setIsOpen(false); }
     if (!notif.read) {
-      await markAsRead(notif.id);
-    }
-    if (notif.actionType === 'navigate' && notif.actionTarget) {
-      onNavigate(notif.actionTarget as ViewState);
-      setIsOpen(false);
+      try { await markAsRead(notif.id); }
+      catch { setError('La notification reste non lue. Vous pouvez consulter son contenu et réessayer après reconnexion.'); }
     }
   };
-
   const handleMarkAllRead = async () => {
-    await markAllAsRead(currentUser.id);
+    if (marking) return;
+    setMarking(true); setError('');
+    try { await markAllAsRead(currentUser.id); }
+    catch { setError('Impossible de marquer les notifications comme lues. Réessayez après reconnexion.'); }
+    finally { setMarking(false); }
   };
 
   return (
     <div className="relative" ref={panelRef}>
       {/* === CLOCHE === */}
       <button
+        type="button"
+        aria-label={`Notifications${unreadCount ? ` : ${unreadCount} non lues` : ''}`}
+        aria-haspopup="dialog"
+        aria-expanded={isOpen}
         onClick={() => setIsOpen(!isOpen)}
-        className={`relative p-2 rounded-xl transition-all ${
+        className={`relative min-h-11 min-w-11 flex items-center justify-center p-2 rounded-xl transition-all ${
           isOpen 
             ? 'bg-indigo-100 text-indigo-700' 
             : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'
@@ -142,7 +143,7 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({ currentUser, on
         
         {/* Badge */}
         {unreadCount > 0 && (
-          <span className={`absolute -top-1 -right-1 min-w-[18px] h-[18px] flex items-center justify-center rounded-full text-[10px] font-black text-white px-1 ${
+          <span className={`absolute -top-1 -right-1 min-w-[18px] h-[18px] flex items-center justify-center rounded-full text-xs font-black text-white px-1 ${
             urgentCount > 0 ? 'bg-red-500 animate-pulse' : 'bg-indigo-600'
           }`}>
             {unreadCount > 99 ? '99+' : unreadCount}
@@ -151,15 +152,14 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({ currentUser, on
       </button>
 
       {/* === PANNEAU === */}
-      {isOpen && (
-        <div className="absolute right-0 top-12 w-[calc(100vw-1.5rem)] sm:w-96 max-h-[70vh] bg-white rounded-2xl shadow-2xl border border-slate-200 z-50 flex flex-col overflow-hidden">
+      <Modal isOpen={isOpen} onClose={() => setIsOpen(false)} title="Notifications" size="lg" bodyClassName="!p-0">
           
           {/* Header */}
           <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between flex-shrink-0">
             <div className="flex items-center gap-2">
-              <h3 className="text-sm font-bold text-slate-800">Notifications</h3>
+              <span className="text-sm font-medium text-slate-700">Votre activité</span>
               {unreadCount > 0 && (
-                <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                <span className="bg-indigo-100 text-indigo-700 text-xs font-bold px-2 py-0.5 rounded-full">
                   {unreadCount} nouvelle{unreadCount > 1 ? 's' : ''}
                 </span>
               )}
@@ -167,19 +167,16 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({ currentUser, on
             <div className="flex items-center gap-1">
               {unreadCount > 0 && (
                 <button
+                  type="button"
+                  disabled={marking}
                   onClick={handleMarkAllRead}
-                  className="text-xs text-indigo-600 hover:text-indigo-800 font-medium px-2 py-1 rounded-lg hover:bg-indigo-50 transition-colors"
+                  className="min-h-11 text-sm text-indigo-700 hover:text-indigo-800 font-medium px-2 py-2 rounded-lg hover:bg-indigo-50 transition-colors"
                 >
                   <CheckCheck size={14} className="inline mr-1" />
                   Tout lire
                 </button>
               )}
-              <button
-                onClick={() => setIsOpen(false)}
-                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100"
-              >
-                <X size={16} />
-              </button>
+
             </div>
           </div>
 
@@ -192,6 +189,7 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({ currentUser, on
             ]).map(f => (
               <button
                 key={f.id}
+                aria-pressed={filter === f.id}
                 onClick={() => setFilter(f.id)}
                 className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
                   filter === f.id
@@ -206,7 +204,8 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({ currentUser, on
 
           {/* Liste */}
           <div className="flex-1 overflow-y-auto">
-            {filteredNotifications.length === 0 ? (
+            {error && <p role="alert" className="m-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">{error}</p>}
+            {loading ? <p role="status" className="p-6 text-slate-600">Chargement des notifications…</p> : filteredNotifications.length === 0 ? (
               <div className="text-center py-12">
                 <Bell size={32} className="mx-auto text-slate-300 mb-2" />
                 <p className="text-sm text-slate-400">
@@ -243,18 +242,18 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({ currentUser, on
                               <span className="w-2 h-2 bg-indigo-500 rounded-full flex-shrink-0" />
                             )}
                             {isUrgent && !notif.read && (
-                              <span className="text-[9px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded flex-shrink-0">
+                              <span className="text-xs font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded flex-shrink-0">
                                 URGENT
                               </span>
                             )}
                           </div>
-                          <p className={`text-xs mt-0.5 line-clamp-2 ${!notif.read ? 'text-slate-600' : 'text-slate-400'}`}>
+                          <p className={`text-xs mt-0.5  ${!notif.read ? 'text-slate-600' : 'text-slate-400'}`}>
                             {notif.message}
                           </p>
                           <div className="flex items-center justify-between mt-1">
-                            <span className="text-[10px] text-slate-400">{timeAgo(notif.createdAt)}</span>
+                            <span className="text-xs text-slate-400">{timeAgo(notif.createdAt)}</span>
                             {notif.actionLabel && (
-                              <span className="text-[10px] text-indigo-500 font-medium flex items-center gap-0.5">
+                              <span className="text-xs text-indigo-500 font-medium flex items-center gap-0.5">
                                 {notif.actionLabel} <ChevronRight size={10} />
                               </span>
                             )}
@@ -271,13 +270,12 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({ currentUser, on
           {/* Footer */}
           {notifications.length > 0 && (
             <div className="px-4 py-2 border-t border-slate-100 text-center flex-shrink-0">
-              <p className="text-[10px] text-slate-400">
+              <p className="text-xs text-slate-400">
                 {notifications.length} notification{notifications.length > 1 ? 's' : ''} • {unreadCount} non lue{unreadCount > 1 ? 's' : ''}
               </p>
             </div>
           )}
-        </div>
-      )}
+        </Modal>
     </div>
   );
 };

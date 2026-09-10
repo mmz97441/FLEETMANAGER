@@ -1,7 +1,10 @@
+import { confirmAction } from './services/confirmationService';
+import WorkspaceSearch from './components/WorkspaceSearch';
+import { useDialogLayer } from './hooks/useDialogLayer';
 import { addMaintenanceToFirestore } from './services/firestore';
 import PendingSyncBanner from './components/PendingSyncBanner';
 
-import React, { useState, useMemo, useEffect, Suspense, lazy } from 'react';
+import React, { useState, useMemo, useEffect, useRef, Suspense, lazy } from 'react';
 // @ts-ignore
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { auth } from "./firebaseConfig";
@@ -126,6 +129,38 @@ const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewState>(() => pathToView(window.location.pathname));
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const menuRef = useDialogLayer(isMobileMenuOpen, () => setIsMobileMenuOpen(false));
+  useEffect(() => {
+    const resize = () => { if (window.innerWidth >= 1024) setIsMobileMenuOpen(false); };
+    window.addEventListener('resize', resize);
+    return () => window.removeEventListener('resize', resize);
+  }, []);
+  const mainRef = useRef<HTMLElement>(null);
+  const savedLocations = useRef(new Map<ViewState, { url: string; scroll: number }>());
+  const restoreScroll = useRef<number | null>(null);
+  useEffect(() => {
+    const main = mainRef.current;
+    const target = restoreScroll.current ?? 0;
+    restoreScroll.current = null;
+    if (!main) return;
+    if (!target) { main.scrollTop = 0; return; }
+    // Revisited lists may receive their rows after mounting. Restore when they
+    // fit, and stop as soon as the user interacts to avoid moving their screen.
+    const observer = new ResizeObserver(() => restore());
+    let timer: ReturnType<typeof setTimeout>;
+    const stop = () => {
+      observer.disconnect();
+      clearTimeout(timer);
+      for (const event of ['wheel', 'touchstart', 'pointerdown', 'keydown']) main.removeEventListener(event, stop);
+    };
+    const restore = () => { main.scrollTop = target; if (Math.abs(main.scrollTop - target) < 1) stop(); };
+    if (main.firstElementChild) observer.observe(main.firstElementChild);
+    for (const event of ['wheel', 'touchstart', 'pointerdown', 'keydown']) main.addEventListener(event, stop, { passive: true });
+    timer = setTimeout(stop, 5000);
+    restore();
+    return stop;
+  }, [currentView]);
+  useEffect(() => { savedLocations.current.clear(); }, [currentUser?.id]);
   // Raccourci scan chauffeur : depuis n'importe quel écran, ouvre le choix
   // Récupérer/Livraison dans « Ma Tournée » (le scan qui alimente la BONNE tournée).
   const [driverScanIntent, setDriverScanIntent] = useState(false);
@@ -141,8 +176,8 @@ const App: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   // Publie la position du chauffeur connecté (~30s) pour la carte dispatch
   useDriverLocationPublisher(currentUser);
-  // Recharge automatiquement l'app quand une nouvelle version est déployée
-  useAutoUpdate();
+  // Propose la nouvelle version sans interrompre une saisie ou un envoi.
+  const updateAvailable = useAutoUpdate();
   const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
   const [absences, setAbsences] = useState<Absence[]>([]);
   const [quotes, setQuotes] = useState<QuoteRequest[]>([]);
@@ -423,11 +458,21 @@ const App: React.FC = () => {
 
   // --- HANDLERS ---
   
-  const handleViewChange = (view: ViewState) => {
+  const handleViewChange = (view: ViewState, params?: Record<string, string>) => {
     if (view !== 'issues') {
         setTargetIssueVehicleId(null);
     }
+    const currentUrl = window.location.pathname + window.location.search;
+    savedLocations.current.set(currentView, { url: currentUrl, scroll: mainRef.current?.scrollTop || 0 });
+    const saved = savedLocations.current.get(view);
+    const target = new URL(params ? viewToPath(view) : saved?.url || viewToPath(view), window.location.origin);
+    if (params) for (const [key, value] of Object.entries(params)) target.searchParams.set(key, value);
+    const nextUrl = target.pathname + target.search;
+    if (nextUrl !== currentUrl) window.history.pushState({}, '', nextUrl);
+    restoreScroll.current = params ? 0 : saved?.scroll || 0;
+    if (view === currentView && params && mainRef.current) mainRef.current.scrollTop = 0;
     setCurrentView(view);
+    window.dispatchEvent(new Event('fleet-url-change'));
     setIsMobileMenuOpen(false);
   };
 
@@ -1164,43 +1209,33 @@ const App: React.FC = () => {
   return (
     <ErrorBoundary>
       <PermissionsProvider currentUser={currentUser}>
-      <PendingSyncBanner userId={currentUser.id} />
-      <div className={`flex h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden ${isOffline ? 'pt-6' : ''}`}>
+      <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[12000] bg-white text-brand-700 rounded-lg p-3">Aller au contenu principal</a>
+      <div className={`flex h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden`}>
 
         {/* VERROU GPS — chauffeurs : app inutilisable sans localisation active */}
-        <DriverGpsGate currentUser={currentUser} />
-
-        {/* NETWORK STATUS BANNER */}
-        {isOffline && (
-            <div className="fixed top-0 left-0 right-0 bg-red-600 text-white text-center text-xs font-bold py-1 z-[1000] flex items-center justify-center gap-2 animate-pulse">
-                <WifiOff size={12} /> HORS LIGNE — Les validations de livraison restent en attente sur cet appareil. Les autres opérations nécessitent le réseau.
-            </div>
-        )}
+        {currentView !== 'help' && <DriverGpsGate currentUser={currentUser} onHelp={() => handleViewChange('help')} />}
 
         {/* Sidebar */}
-        <div className={`fixed inset-y-0 left-0 z-50 transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} lg:relative lg:translate-x-0 transition-transform duration-300 ease-in-out`}>
+        <div ref={menuRef} role={isMobileMenuOpen ? 'dialog' : undefined} aria-modal={isMobileMenuOpen || undefined} aria-label="Menu principal" tabIndex={-1} className={`fixed inset-y-0 left-0 z-50 ${isMobileMenuOpen ? 'right-0' : 'invisible lg:visible'} lg:relative lg:shrink-0`}>
+          {isMobileMenuOpen && <div aria-hidden="true" className="absolute inset-0 bg-black/50 lg:hidden" onClick={() => setIsMobileMenuOpen(false)} />}
+          <div className="relative h-full w-fit">
+          {isMobileMenuOpen && <button type="button" onClick={() => setIsMobileMenuOpen(false)} className="absolute top-4 right-2 z-10 bg-slate-800 text-white min-h-11 px-3 rounded-lg" aria-label="Fermer le menu">Fermer</button>}
           <Sidebar
             currentView={currentView}
             onChangeView={handleViewChange}
-            isCollapsed={isSidebarCollapsed}
+            isCollapsed={isMobileMenuOpen ? false : isSidebarCollapsed}
             currentUser={currentUser}
             onLogout={handleLogout}
             pendingDocsCount={pendingDocumentsCount}
             pendingCounts={pendingCounts}
           />
+          </div>
         </div>
-
-        {isMobileMenuOpen && (
-          <div 
-            className="fixed inset-0 bg-black/50 z-[45] lg:hidden"
-            onClick={() => setIsMobileMenuOpen(false)}
-          ></div>
-        )}
 
         {/* Main Content */}
         <div className="flex-1 flex flex-col h-screen overflow-hidden w-full relative">
           <div className="bg-white border-b border-slate-200 p-4 flex items-center justify-between lg:hidden shrink-0">
-              <button onClick={() => setIsMobileMenuOpen(true)} className="text-slate-600">
+              <button type="button" aria-label="Ouvrir le menu" aria-expanded={isMobileMenuOpen} onClick={() => setIsMobileMenuOpen(true)} className="text-slate-600 min-h-11 min-w-11 flex items-center justify-center">
                   <Menu size={24} />
               </button>
               <div className="flex flex-col items-center min-w-0 px-2">
@@ -1209,11 +1244,12 @@ const App: React.FC = () => {
               </div>
               <div className="flex items-center gap-2">
                 {canViewAs && <ViewAsSwitcher currentUser={currentUser} users={users} quotes={quotes} />}
-                <NotificationCenter currentUser={currentUser} onNavigate={setCurrentView} />
+                <NotificationCenter currentUser={currentUser} onNavigate={handleViewChange} />
                 <button
                   onClick={handleLogout}
                   title="Se déconnecter"
-                  className="flex items-center gap-1 text-slate-500 hover:text-red-600 p-1.5 rounded-lg"
+                  aria-label="Se déconnecter"
+                  className="flex items-center justify-center min-h-11 min-w-11 text-slate-600 hover:text-red-600 rounded-lg"
                 >
                   <LogOut size={20} />
                 </button>
@@ -1222,20 +1258,27 @@ const App: React.FC = () => {
 
           <div className="hidden lg:flex items-center p-4 absolute top-0 left-0 right-0 z-10 justify-between">
               <button 
+                  aria-label={isSidebarCollapsed ? 'Déplier le menu' : 'Réduire le menu'}
+                  aria-expanded={!isSidebarCollapsed}
                   onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
                   className="bg-white p-2 rounded-lg shadow-sm border border-slate-200 text-slate-500 hover:text-brand-600 transition-colors"
               >
                   <Menu size={20} />
               </button>
+              <div className="mx-4 flex-1"><WorkspaceSearch onNavigate={handleViewChange} /></div>
               <div className="flex items-center gap-3 pr-2">
                 <span className="text-[11px] font-medium text-slate-400 select-none">v{__APP_VERSION__}</span>
                 {canViewAs && <ViewAsSwitcher currentUser={currentUser} users={users} quotes={quotes} />}
-                <NotificationCenter currentUser={currentUser} onNavigate={setCurrentView} />
+                <NotificationCenter currentUser={currentUser} onNavigate={handleViewChange} />
               </div>
           </div>
 
-          <main className={`flex-1 overflow-y-auto p-4 lg:p-8 custom-scrollbar pt-4 lg:pt-20 lg:pb-8 ${(currentView === 'driver_tour' || currentView === 'driver_preview') ? 'pb-4' : 'pb-20'}`}>
-              <div className="max-w-7xl mx-auto h-full">
+          <main ref={mainRef} id="main-content" tabIndex={-1} className={`flex-1 overflow-y-auto p-4 lg:p-8 custom-scrollbar pt-4 lg:pt-20 lg:pb-8 pb-[calc(6rem+env(safe-area-inset-bottom))]`}>
+              <div className="max-w-7xl mx-auto min-h-full">
+                <div className="lg:hidden mb-3"><WorkspaceSearch onNavigate={handleViewChange} /></div>
+                {isOffline && <div role="status" className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 flex items-start gap-2"><WifiOff size={18} className="shrink-0 mt-0.5"/><span>Hors connexion : les validations de livraison sont conservées sur ce téléphone. Les autres opérations nécessitent le réseau.</span></div>}
+                {updateAvailable && <div role="status" className="mb-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950 flex flex-wrap items-center gap-3"><span className="flex-1">Une nouvelle version est disponible. Terminez vos saisies et vos envois avant de recharger.</span><button type="button" onClick={async () => { if (await confirmAction({ title: 'Charger la nouvelle version ?', message: 'Vérifiez que vos saisies sont enregistrées. Les preuves en attente restent conservées sur ce téléphone.', confirmLabel: 'Recharger', cancelLabel: 'Continuer mon travail' })) window.location.reload(); }} className="min-h-11 px-3 rounded-lg border border-blue-400 font-semibold">Recharger</button></div>}
+                <PendingSyncBanner userId={currentUser.id} />
                 <Suspense fallback={<PageLoader />}>
                   {renderContent()}
                 </Suspense>
@@ -1257,8 +1300,10 @@ const App: React.FC = () => {
         {/* Sur la VUE CHAUFFEUR (« Ma Tournée »), on masque la barre admin du bas et le
             scan flottant → un directeur/président qui teste la tournée voit un écran
             chauffeur PROPRE, plein écran, sans le chrome admin qui parasitait. */}
-        {currentUser.role !== UserRole.CLIENT && currentView !== 'driver_tour' && currentView !== 'driver_preview' && (
+        {currentUser.role !== UserRole.CLIENT && currentView !== 'driver_preview' && (
             <MobileNavBar
+              role={currentUser.role}
+              onScan={() => { setDriverScanIntent(true); handleViewChange('driver_tour'); }}
               currentView={currentView}
               onChangeView={handleViewChange}
               onOpenMenu={() => setIsMobileMenuOpen(true)}
@@ -1278,7 +1323,7 @@ const App: React.FC = () => {
             onClick={() => { setDriverScanIntent(true); handleViewChange('driver_tour'); }}
             title="Scanner un colis"
             aria-label="Scanner un colis"
-            className="fixed z-40 bottom-20 right-4 lg:bottom-6 lg:right-6 flex items-center gap-2 pl-4 pr-5 h-14 rounded-full bg-brand-600 hover:bg-brand-700 text-white shadow-lg shadow-brand-600/30 active:scale-95 transition-transform font-bold"
+            className="hidden lg:flex fixed z-40 bottom-20 right-4 lg:bottom-6 lg:right-6 items-center gap-2 pl-4 pr-5 h-14 rounded-full bg-brand-600 hover:bg-brand-700 text-white shadow-lg shadow-brand-600/30 active:scale-95 transition-transform font-bold"
           >
             <ScanLine size={22} /> Scanner
           </button>
@@ -1290,10 +1335,11 @@ const App: React.FC = () => {
             Documents sans avoir tout traité. Pas de « Plus tard ». */}
         <Suspense fallback={null}>
           <DocumentAlertModal
-            isOpen={pendingDocumentsList.length > 0 && currentView !== 'documents' && currentView !== 'company_docs'}
+            isOpen={pendingDocumentsList.length > 0 && currentView !== 'documents' && currentView !== 'company_docs' && currentView !== 'help'}
             blocking
             onClose={() => setCurrentView('documents')}
             onGoToDocuments={() => setCurrentView('documents')}
+            onHelp={() => handleViewChange('help')}
             pendingDocuments={pendingDocumentsList}
             currentUser={currentUser}
           />

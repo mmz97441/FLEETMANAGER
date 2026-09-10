@@ -10,7 +10,8 @@
  * missions) ; il suffit de lui passer la liste des utilisateurs.
  */
 import React, { useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
+import Modal from './shared/Modal';
+import { useUrlParam, updateUrlParams } from '../hooks/useUrlState';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -163,7 +164,14 @@ const MapController: React.FC<MapControllerProps> = ({ markers, selected }) => {
 const FleetMapView: React.FC<FleetMapViewProps> = ({ users }) => {
   const [locations, setLocations] = useState<DriverLocation[]>([]);
   const [missions, setMissions] = useState<Mission[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedDate, setSelectedDate] = useUrlParam<string>('date', '');
+  const [search, setSearch] = useUrlParam<string>('q', '');
+  const [driverParam] = useUrlParam<string>('driver', '');
+  const [missionParam] = useUrlParam<string>('mission', '');
+  const selectedId = driverParam || missions.find(mission => mission.id === missionParam)?.driverId || null;
+  const setSelectedId = (id: string | null) => updateUrlParams({ driver: id, mission: null });
+  const [ageTick, setAgeTick] = useState(0);
+  useEffect(() => { const timer = window.setInterval(() => setAgeTick(value => value + 1), 30000); return () => window.clearInterval(timer); }, []);
   const [openGroups, setOpenGroups] = useState<Record<DriverBucket, boolean>>({
     ON_TOUR: true,
     AVAILABLE: true,
@@ -188,7 +196,7 @@ const FleetMapView: React.FC<FleetMapViewProps> = ({ users }) => {
 
     const activeMissionByDriver = new Map<string, Mission>();
     for (const m of missions) {
-      if (!m.driverId) continue;
+      if (!m.driverId || (selectedDate && m.date !== selectedDate)) continue;
       const isActive =
         m.status === MissionStatus.IN_PROGRESS ||
         m.status === MissionStatus.DISPATCHED;
@@ -242,8 +250,9 @@ const FleetMapView: React.FC<FleetMapViewProps> = ({ users }) => {
           totalDeliveryStops: deliveryStops.length,
         };
       })
+      .filter(driver => !search.trim() || [driver.name, driver.plate, driver.activeMission?.id].some(value => (value || '').toLowerCase().includes(search.toLowerCase().trim())))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [users, locations, missions]);
+  }, [users, locations, missions, selectedDate, search, ageTick]);
 
   const groups = useMemo(() => {
     return {
@@ -279,7 +288,7 @@ const FleetMapView: React.FC<FleetMapViewProps> = ({ users }) => {
         <div>
           <h1 className="text-xl font-bold text-slate-800">🚚 Carte des chauffeurs</h1>
           <p className="text-sm text-slate-500">
-            Suivi temps réel de la flotte — position, tournée, avancement.
+            Dernières positions reçues — tournée et avancement. Une position ancienne ne représente pas la position actuelle.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-4 text-sm">
@@ -299,6 +308,12 @@ const FleetMapView: React.FC<FleetMapViewProps> = ({ users }) => {
         </div>
       </div>
 
+      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-3">
+        <label className="text-sm font-medium text-slate-700">Date des tournées (vide : toutes)<input type="date" value={selectedDate} onChange={event => setSelectedDate(event.target.value)} className="mt-1 block min-h-11 rounded-lg border border-slate-300 px-3" /></label>
+        <label className="flex-1 text-sm font-medium text-slate-700">Chauffeur, véhicule ou tournée<input type="search" value={search} onChange={event => setSearch(event.target.value, true)} className="mt-1 block min-h-11 w-full rounded-lg border border-slate-300 px-3" /></label>
+        <a href="/missions?tab=packages" className="min-h-11 inline-flex items-center px-3 text-sm font-semibold text-blue-800 underline">Retrouver un colis</a>
+      </div>
+      <p className="text-sm text-slate-600">Tournées : {selectedDate || 'toutes dates'}. Les marqueurs montrent la dernière position publiée, pas un historique à la date choisie. Les heures d’arrivée sont des estimations issues de la planification.</p>
       {/* Deux colonnes (lg) / empilé (mobile) */}
       <div className="flex flex-col gap-4 lg:flex-row">
         {/* PANNEAU LATÉRAL */}
@@ -617,7 +632,7 @@ const DriverDetail: React.FC<{ driver: ParsedDriver }> = ({ driver }) => {
                 <div className="text-xs text-slate-500">
                   {nextStop.city}
                   {nextStop.estimatedArrival && (
-                    <span> · ETA {formatEta(nextStop.estimatedArrival)}</span>
+                    <span> · Arrivée estimée : {formatEta(nextStop.estimatedArrival)}</span>
                   )}
                 </div>
               </div>
@@ -682,15 +697,6 @@ const DriverTourModal: React.FC<{ driver: ParsedDriver; onClose: () => void }> =
 }) => {
   const { activeMission } = driver;
 
-  // Fermeture au clavier (Échap)
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [onClose]);
-
   // TOUS les arrêts de livraison, triés par séquence
   const deliveryStops = useMemo<MissionStop[]>(
     () =>
@@ -707,17 +713,9 @@ const DriverTourModal: React.FC<{ driver: ParsedDriver; onClose: () => void }> =
     (s) => s.status === StopStatus.PENDING || s.status === StopStatus.ARRIVED
   )?.id;
 
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[130] bg-black/50 flex items-center justify-center p-4"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-    >
-      <div
-        className="max-w-lg w-full max-h-[85vh] overflow-y-auto rounded-2xl bg-white shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
+  return (
+    <Modal isOpen={true} onClose={onClose} title={`Tournée de ${driver.name}`} size="lg">
+      <div>
         {/* En-tête */}
         <div className="sticky top-0 z-10 px-5 py-4 bg-indigo-600 text-white rounded-t-2xl">
           <div className="flex items-start justify-between gap-3">
@@ -800,7 +798,7 @@ const DriverTourModal: React.FC<{ driver: ParsedDriver; onClose: () => void }> =
                           )}
                           {s.estimatedArrival && (
                             <span className="text-slate-500">
-                              Prévu {formatEta(s.estimatedArrival)}
+                              Arrivée estimée : {formatEta(s.estimatedArrival)}
                             </span>
                           )}
                         </div>
@@ -813,8 +811,7 @@ const DriverTourModal: React.FC<{ driver: ParsedDriver; onClose: () => void }> =
           )}
         </div>
       </div>
-    </div>,
-    document.body
+    </Modal>
   );
 };
 

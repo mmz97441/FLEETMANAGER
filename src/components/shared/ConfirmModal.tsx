@@ -13,7 +13,7 @@
  * />
  */
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle, Info, HelpCircle } from 'lucide-react';
 import Modal from './Modal';
 
@@ -22,7 +22,7 @@ export type ConfirmType = 'danger' | 'success' | 'info' | 'warning';
 export interface ConfirmModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: () => void;
+  onConfirm: () => void | Promise<void>;
   title: string;
   message: string | React.ReactNode;
   confirmLabel?: string;
@@ -72,12 +72,16 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({
 }) => {
   const config = typeConfig[type];
 
-  const handleConfirm = () => {
-    onConfirm();
-    // Ne pas fermer automatiquement si loading (l'appelant gère)
-    if (!isLoading) {
-      onClose();
-    }
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => { if (isOpen) setError(''); }, [isOpen]);
+  const busy = isLoading || pending;
+  const handleConfirm = async () => {
+    if (busy) return;
+    setPending(true); setError('');
+    try { await onConfirm(); onClose(); }
+    catch (e) { setError(e instanceof Error ? e.message : 'L’opération n’a pas été enregistrée. Réessayez.'); }
+    finally { setPending(false); }
   };
 
   return (
@@ -85,9 +89,12 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({
       isOpen={isOpen}
       onClose={onClose}
       size="sm"
+      ariaLabel={title}
+      role="alertdialog"
+      preventClose={busy}
       showCloseButton={false}
-      closeOnOverlay={!isLoading}
-      closeOnEscape={!isLoading}
+      closeOnOverlay={!busy}
+      closeOnEscape={!busy}
     >
       <div className="text-center py-2">
         {/* Icône */}
@@ -103,21 +110,25 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({
           {message}
         </div>
 
+        {error && <p role="alert" className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
         {/* Boutons */}
         <div className="flex gap-3">
           <button 
+            type="button"
+            data-autofocus
             onClick={onClose}
-            disabled={isLoading}
+            disabled={busy}
             className="flex-1 py-3 bg-slate-100 text-slate-700 rounded-xl font-bold hover:bg-slate-200 transition-colors disabled:opacity-50"
           >
             {cancelLabel}
           </button>
           <button 
+            type="button"
             onClick={handleConfirm}
-            disabled={isLoading}
+            disabled={busy}
             className={`flex-1 py-3 text-white rounded-xl font-bold shadow-lg transition-colors disabled:opacity-50 ${config.buttonClass}`}
           >
-            {isLoading ? (
+            {busy ? (
               <span className="flex items-center justify-center gap-2">
                 <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />

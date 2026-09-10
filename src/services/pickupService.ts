@@ -32,9 +32,9 @@ const barcodeDataUri = (code: string): string => {
   try {
     const canvas = document.createElement('canvas');
     JsBarcode(canvas, code, {
-      format: 'CODE128', width: 2, height: 45,
-      displayValue: true, fontSize: 12, font: 'monospace',
-      fontOptions: 'bold', margin: 2,
+      format: 'CODE128', width: 3, height: 160,
+      displayValue: false,
+      margin: 30,
     });
     return canvas.toDataURL('image/png');
   } catch {
@@ -258,7 +258,7 @@ export const generateBatchLabelsHTML = (
   const FMT: Record<LabelFormat, { page: string; cols: string; perPage: number; lw: string; lh: string }> = {
     A4: { page: 'A4', cols: '1fr 1fr', perPage: 4, lw: '95mm', lh: '140mm' },
     A5: { page: 'A5', cols: '1fr', perPage: 1, lw: '138mm', lh: '198mm' },
-    A6: { page: 'A6', cols: '1fr', perPage: 1, lw: '98mm', lh: '138mm' },
+    A6: { page: 'A6', cols: '1fr', perPage: 1, lw: '95mm', lh: '138mm' },
   };
   const cfg = FMT[format] || FMT.A4;
   const labels = packages.map(pkg => `
@@ -270,6 +270,7 @@ export const generateBatchLabelsHTML = (
       </div>
       <div class="barcode-zone">
         <img class="barcode-img" src="${barcodeDataUri(pkg.barcode || pkg.orderNumber)}" alt="${escapeHtml(pkg.barcode || pkg.orderNumber)}" />
+        <div class="barcode-value">${escapeHtml(pkg.barcode || pkg.orderNumber)}</div>
       </div>
       <div class="dest-zone">
         <div class="dest-label">DESTINATAIRE</div>
@@ -313,7 +314,8 @@ export const generateBatchLabelsHTML = (
   .company { font-size: 10pt; font-weight: bold; }
   .zone { font-size: 13pt; font-weight: bold; color: #333; background: #e0e0e0; padding: 1mm 3mm; border-radius: 3px; }
   .barcode-zone { text-align: center; padding: 3mm 0; border-bottom: 1px solid #ccc; }
-  .barcode-zone img { width: 80mm; height: 18mm; object-fit: contain; }
+  .barcode-zone img { width: 80mm; max-width: 100%; height: 22mm; object-fit: fill; image-rendering: pixelated; }
+  .barcode-value { font: bold 8pt monospace; overflow-wrap: anywhere; margin-top: 1mm; }
   .dest-zone { flex: 1; padding: 3mm 2mm; border-bottom: 1px solid #ccc; }
   .dest-label { font-size: 7pt; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 1mm; }
   .dest-name { font-size: 13pt; font-weight: bold; margin-bottom: 1mm; }
@@ -324,7 +326,8 @@ export const generateBatchLabelsHTML = (
   .sender-zone { font-size: 8pt; color: #666; padding: 2mm; border-bottom: 1px solid #eee; }
   .sender-label { font-weight: bold; }
   .comment { font-size: 8pt; color: #c60; padding: 1mm 2mm; background: #fff8e1; }
-  .ref-zone { display: flex; justify-content: space-between; padding: 2mm; font-size: 8pt; color: #888; }
+  .ref-zone { display: flex; justify-content: space-between; gap: 2mm; padding: 2mm; font-size: 8pt; color: #555; overflow-wrap: anywhere; }
+  .ref-zone > span { min-width: 0; }
 </style>
 </head><body>
 <div class="page">

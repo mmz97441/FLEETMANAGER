@@ -1,4 +1,7 @@
 import { escapeHtml } from '../utils/html';
+import { useUrlParam, updateUrlParams } from '../hooks/useUrlState';
+import { confirmAction } from '../services/confirmationService';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 /**
  * MISSION MANAGER
  * 
@@ -21,6 +24,7 @@ import {
   subscribeToDispatchablePackages,
   subscribeToImportBatches,
   getPackagesByIds,
+  getMissionById,
   calculateMissionStats,
   getAvailableDriversForZone,
   getDriversWithVehicles,
@@ -86,7 +90,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
     );
   }, [absences]);
   // États
-  const [activeTab, setActiveTab] = useState<TabType>('dashboard');
+  const [activeTab, setActiveTab] = useUrlParam<TabType>('tab', 'dashboard', ['dashboard', 'dispatch', 'imports', 'missions', 'packages', 'hubs']);
   const [missions, setMissions] = useState<Mission[]>([]);
   const [packages, setPackages] = useState<Package[]>([]);
   // Colis dispatchables (AT_HUB/SORTED) SANS plafond 500 → le tableau de dispatch
@@ -97,10 +101,16 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   
   // Filtres
-  const [selectedDate, setSelectedDate] = useState(todayISO());
-  const [selectedZone, setSelectedZone] = useState<Zone | 'all'>('all');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [expandedMissionId, setExpandedMissionId] = useState<string | null>(null);
+  const [dateParam] = useUrlParam<string>('date', todayISO());
+  const setSelectedDate = (date: string) => updateUrlParams({ date: date === todayISO() ? null : date, page: null, mission: null });
+  const selectedDate = /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : todayISO();
+  const [selectedZone] = useUrlParam<Zone | 'all'>('zone', 'all', ['all', ...Object.values(Zone)]);
+  const setSelectedZone = (zone: Zone | 'all') => updateUrlParams({ zone: zone === 'all' ? null : zone, page: null });
+  const [searchTerm] = useUrlParam<string>('q', '');
+  const setSearchTerm = (value: string) => updateUrlParams({ q: value || null, page: null }, true);
+  const [missionParam, setMissionParam] = useUrlParam<string>('mission', '');
+  const expandedMissionId = missionParam || null;
+  const setExpandedMissionId = (id: string | null) => setMissionParam(id || '');
   
   // Modals
   const [showImportModal, setShowImportModal] = useState(false);
@@ -119,15 +129,21 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   
   // Edit/Delete colis (admin)
   const [editingPkg, setEditingPkg] = useState<Package | null>(null);
-  const [expandedPkgTimelineId, setExpandedPkgTimelineId] = useState<string | null>(null);
+  const [packageParam, setPackageParam] = useUrlParam<string>('package', '');
+  const expandedPkgTimelineId = packageParam || null;
+  const setExpandedPkgTimelineId = (id: string | null) => setPackageParam(id || '');
+  const [linkedPackage, setLinkedPackage] = useState<Package | null>(null);
+  const [linkError, setLinkError] = useState('');
   // Consultation d'un lot d'import
   const [viewingBatch, setViewingBatch] = useState<ImportBatch | null>(null);
   const [batchPackages, setBatchPackages] = useState<Package[]>([]);
   const [loadingBatch, setLoadingBatch] = useState(false);
   type PkgSortKey = 'orderNumber' | 'externalId' | 'contactName' | 'city' | 'zone' | 'status' | 'createdAt';
   const [pkgSort, setPkgSort] = useState<{ key: PkgSortKey; dir: 'asc' | 'desc' }>({ key: 'createdAt', dir: 'desc' });
-  const togglePkgSort = (key: PkgSortKey) =>
+  const togglePkgSort = (key: PkgSortKey) => {
+    updateUrlParams({ page: null }, true);
     setPkgSort(s => s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' });
+  };
   const pkgSortVal = (p: Package, key: PkgSortKey): string =>
     key === 'externalId' ? (p.externalId || '') :
     key === 'contactName' ? (p.contactName || '') :
@@ -185,6 +201,12 @@ const MissionManager: React.FC<MissionManagerProps> = ({
     closingTime: '18:00',
     assignedPostalCodes: '' // Séparés par virgule
   });
+
+  const packageDirty = !!editingPkg && Object.entries(editPkgForm).some(([key, value]) => String(value ?? '') !== String((editingPkg as any)[key] ?? ''));
+  const requestPackageClose = useUnsavedChanges(packageDirty, isSavingPkg);
+  const closePackageEditor = () => void requestPackageClose(() => { setEditingPkg(null); updateUrlParams({ edit: null }, true); });
+  const requestQuickClose = useUnsavedChanges(showQuickDispatch && !!quickDispatchDriverId, isQuickDispatching);
+  const closeQuickDispatch = () => void requestQuickClose(() => setShowQuickDispatch(false));
 
   // Charger les données
   useEffect(() => {
@@ -250,21 +272,83 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
   // Vue de suivi des colis : par défaut TOUS les colis (suivi global), avec la
   // date en filtre optionnel. Évite que l'admin ne voie rien à cause du filtre jour.
-  const [colisAllDates, setColisAllDates] = useState(true);
+  const [dateScope] = useUrlParam<'all' | 'date'>('scope', 'all', ['all', 'date']);
+  const colisAllDates = dateScope === 'all';
+  const setColisAllDates = (next: boolean | ((previous: boolean) => boolean)) => updateUrlParams({ scope: (typeof next === 'function' ? next(colisAllDates) : next) ? null : 'date', page: null });
   const colisView = useMemo(
-    () => colisAllDates ? packages : todayPackages,
-    [colisAllDates, packages, todayPackages]
+    () => {
+      const base = colisAllDates ? packages : todayPackages;
+      return linkedPackage && !base.some(pkg => pkg.id === linkedPackage.id) ? [linkedPackage, ...base] : base;
+    },
+    [colisAllDates, packages, todayPackages, linkedPackage]
   );
 
   // Filtre statut de l'onglet Colis (piloté par les cartes cliquables du
   // tableau de bord et les cartes stats de l'onglet Colis).
-  const [pkgStatusFilter, setPkgStatusFilter] = useState<PackageStatus | 'all' | 'failed'>('all');
+  type StatusFilter = PackageStatus | 'all' | 'failed';
+  const [pkgStatusFilter] = useUrlParam<StatusFilter>('status', 'all', ['all', 'failed', ...Object.values(PackageStatus)]);
+  const setPkgStatusFilter = (next: StatusFilter | ((previous: StatusFilter) => StatusFilter)) => {
+    const status = typeof next === 'function' ? next(pkgStatusFilter) : next;
+    updateUrlParams({ status: status === 'all' ? null : status, page: null });
+  };
+  const [packagePageParam, setPackagePage] = useUrlParam<string>('page', '1');
+  const [packagePageSizeParam] = useUrlParam<'50' | '100'>('pageSize', '50', ['50', '100']);
 
   const matchesPkgStatusFilter = useCallback((p: Package) => {
     if (pkgStatusFilter === 'all') return true;
     if (pkgStatusFilter === 'failed') return p.status === PackageStatus.FAILED || p.status === PackageStatus.RETURNED;
     return p.status === pkgStatusFilter;
   }, [pkgStatusFilter]);
+
+  useEffect(() => {
+    let active = true;
+    setLinkError('');
+    if (!packageParam) { setLinkedPackage(null); return; }
+    getPackagesByIds([packageParam]).then(found => {
+      if (!active) return;
+      setLinkedPackage(found[0] || null);
+      if (!found[0]) setLinkError('Le colis de ce lien est introuvable ou inaccessible. Vérifiez son identifiant.');
+      else if (new URLSearchParams(window.location.search).get('edit') === '1') {
+        setEditingPkg(found[0]); setEditPkgForm({ ...found[0] });
+      }
+    }).catch(() => { if (active) setLinkError('Impossible de charger le colis lié. Réessayez avec une connexion disponible.'); });
+    return () => { active = false; };
+  }, [packageParam]);
+  useEffect(() => {
+    let active = true;
+    if (!missionParam) return;
+    getMissionById(missionParam).then(mission => {
+      if (!active) return;
+      if (!mission) { setLinkError('La tournée de ce lien est introuvable ou inaccessible.'); return; }
+      if (mission.date !== new URLSearchParams(window.location.search).get('date')) {
+        updateUrlParams({ date: mission.date }, true);
+      }
+    }).catch(() => { if (active) setLinkError('Impossible de charger la tournée liée. Vérifiez la connexion.'); });
+    return () => { active = false; };
+  }, [missionParam]);
+
+  const filteredPackages = useMemo(() => colisView.filter(pkg => {
+    if (!matchesPkgStatusFilter(pkg)) return false;
+    if (selectedZone !== 'all' && pkg.zone !== selectedZone) return false;
+    if (packageParam && pkg.id === packageParam) return true;
+    const term = searchTerm.toLowerCase().trim();
+    return !term || [pkg.orderNumber, pkg.externalId, pkg.barcode, pkg.contactName, pkg.address, pkg.city]
+      .some(value => (value || '').toLowerCase().includes(term));
+  }).sort((a, b) => {
+    if (a.id === packageParam) return -1;
+    if (b.id === packageParam) return 1;
+    const direction = pkgSort.dir === 'asc' ? 1 : -1;
+    const first = pkgSortVal(a, pkgSort.key), second = pkgSortVal(b, pkgSort.key);
+    return first < second ? -direction : first > second ? direction : 0;
+  }), [colisView, matchesPkgStatusFilter, selectedZone, searchTerm, pkgSort, packageParam]);
+  const packagePageSize = Number(packagePageSizeParam);
+  const packagePageCount = Math.max(1, Math.ceil(filteredPackages.length / packagePageSize));
+  const packagePage = Math.min(packagePageCount, /^\d+$/.test(packagePageParam) ? Math.max(1, Number(packagePageParam)) : 1);
+  const packagePageStart = (packagePage - 1) * packagePageSize;
+  const visiblePackages = filteredPackages.slice(packagePageStart, packagePageStart + packagePageSize);
+  const selectableVisibleIds = visiblePackages.filter(pkg => !pkg.missionId && !pkg.currentDriverId).map(pkg => pkg.id);
+  const selectedOutsideFilter = [...selectedPackageIds].filter(id => !filteredPackages.some(pkg => pkg.id === id)).length;
+  const selectedOtherPages = [...selectedPackageIds].filter(id => filteredPackages.some(pkg => pkg.id === id) && !visiblePackages.some(pkg => pkg.id === id)).length;
 
   // Resynchronisation des statuts colis ↔ arrêts (répare les "En livraison"
   // bloqués alors que l'arrêt est terminé).
@@ -305,10 +389,16 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   }, []);
 
   // Permissions via le hook
-  const { hasPermission } = usePermissions();
-  const canImport = hasPermission(Permission.MISSIONS_IMPORT);
-  const canDispatch = hasPermission(Permission.MISSIONS_DISPATCH);
-  const canManageHubs = hasPermission(Permission.HUBS_MANAGE);
+  const { hasPermission, isLoading: permissionsLoading } = usePermissions();
+  const canImport = !permissionsLoading && hasPermission(Permission.MISSIONS_IMPORT);
+  const canDispatch = !permissionsLoading && hasPermission(Permission.MISSIONS_DISPATCH);
+  const canManageHubs = !permissionsLoading && hasPermission(Permission.HUBS_MANAGE);
+  useEffect(() => {
+    if (permissionsLoading) return;
+    if ((activeTab === 'dispatch' && !canDispatch) || (activeTab === 'hubs' && !canManageHubs)) {
+      setActiveTab('dashboard', true);
+    }
+  }, [activeTab, permissionsLoading, canDispatch, canManageHubs, setActiveTab]);
 
   // === IMPRESSION TOURNÉE ===
   // === RÉORDONNANCEMENT DES STOPS ===
@@ -321,7 +411,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
         targetType: 'mission',
         targetId: mission.id,
         targetName: `Tournée ${mission.driverName || 'Non assigné'}`,
-        details: { changes: [`Ordre des stops modifié manuellement (${newStops.length} stops)`] }
+        details: { changes: [`Ordre des arrêts modifié manuellement (${newStops.length} arrêts)`] }
       });
 
       console.log('✅ Ordre des stops sauvegardé');
@@ -408,7 +498,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
             <div class="meta-value">${escapeHtml(mission.hubName || '-')}</div>
           </div>
           <div class="meta-item">
-            <div class="meta-label">Nombre de stops</div>
+            <div class="meta-label">Nombre d’arrêts</div>
             <div class="meta-value">${sortedStops.length}</div>
           </div>
           <div class="meta-item">
@@ -672,11 +762,11 @@ const MissionManager: React.FC<MissionManagerProps> = ({
     <div className="flex border-b border-slate-200 mb-6 overflow-x-auto">
       {[
         { id: 'dashboard', label: 'Tableau de bord', icon: BarChart3 },
-        ...(canDispatch ? [{ id: 'dispatch', label: 'Dispatch', icon: Zap }] : []),
+        ...(canDispatch ? [{ id: 'dispatch', label: 'Préparer les tournées', icon: Zap }] : []),
         { id: 'imports', label: 'Imports', icon: Upload },
-        { id: 'missions', label: 'Missions', icon: Route },
+        { id: 'missions', label: 'Suivre les tournées', icon: Route },
         { id: 'packages', label: 'Colis', icon: PackageIcon },
-        ...(canManageHubs ? [{ id: 'hubs', label: 'Hubs', icon: Building2 }] : [])
+        ...(canManageHubs ? [{ id: 'hubs', label: 'Configurer les hubs', icon: Building2 }] : [])
       ].map(tab => (
         <button
           key={tab.id}
@@ -902,7 +992,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
-            placeholder="Rechercher par chauffeur, véhicule..."
+            aria-label="Rechercher une tournée par chauffeur ou véhicule" placeholder="Rechercher par chauffeur, véhicule..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
@@ -910,6 +1000,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
         </div>
         
         <select
+          aria-label="Filtrer les tournées par zone"
           value={selectedZone}
           onChange={(e) => setSelectedZone(e.target.value as Zone | 'all')}
           className="px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none bg-white font-medium"
@@ -922,6 +1013,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
         
         <input
           type="date"
+          aria-label="Date des tournées"
           value={selectedDate}
           onChange={(e) => setSelectedDate(e.target.value)}
           className="px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
@@ -973,11 +1065,12 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                           </div>
                           <p className="text-sm text-slate-500">
                             {mission.vehiclePlate || 'Pas de véhicule'} • {mission.hubName}
+                            <a onClick={event => event.stopPropagation()} href={`/missions?tab=missions&date=${encodeURIComponent(mission.date)}&mission=${encodeURIComponent(mission.id)}`} className="ml-2 text-blue-800 underline">Lien vers cette tournée</a>
                           </p>
                           <div className="flex items-center gap-4 mt-2 text-sm">
                             <span className="flex items-center gap-1 text-slate-600">
                               <MapPin size={14} />
-                              {mission.stops.length} stops
+                              {mission.stops.length} arrêts
                             </span>
                             <span className="flex items-center gap-1 text-slate-600">
                               <PackageIcon size={14} />
@@ -1042,7 +1135,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                             </span>
                             {mission.dispatchedAt && (
                               <span className="text-slate-500">
-                                Dispatché le {new Date(mission.dispatchedAt).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                Affectée le {new Date(mission.dispatchedAt).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
                                 {mission.dispatchedByName ? ` par ${mission.dispatchedByName}` : ''}
                               </span>
                             )}
@@ -1069,7 +1162,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                                   setReorderingMission(mission);
                                 }}
                                 className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 hover:bg-amber-100 hover:border-amber-300 transition-colors text-xs font-medium"
-                                title="Réordonner les stops"
+                                title="Réordonner les arrêts"
                               >
                                 <GripVertical size={14} />
                                 Réordonner
@@ -1083,7 +1176,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                               <Printer size={14} />
                               Imprimer
                             </button>
-                            <span>{sortedStops.filter(s => s.status === 'Terminé').length}/{sortedStops.length} stops terminés</span>
+                            <span>{sortedStops.filter(s => s.status === 'Terminé').length}/{sortedStops.length} arrêts terminés</span>
                           </div>
                         </div>
                       </div>
@@ -1522,7 +1615,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
     const mission = addingStopToMission;
 
     if (!newStopForm.contactName || !newStopForm.address || !newStopForm.city || !newStopForm.postalCode) {
-      alert('Veuillez remplir au minimum : destinataire, adresse, ville et code postal');
+      notifyError('Veuillez remplir au minimum : destinataire, adresse, ville et code postal');
       return;
     }
 
@@ -1640,7 +1733,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
         <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
         <input
           type="text"
-          placeholder="Rechercher par n° colis, n° commande, destinataire, adresse..."
+          aria-label="Rechercher dans les colis affichés" placeholder="Rechercher par n° colis, n° commande, destinataire, adresse..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
@@ -1648,11 +1741,27 @@ const MissionManager: React.FC<MissionManagerProps> = ({
       </div>
 
       {/* Actions de masse pour sélection */}
+      <nav aria-label="Pagination des colis" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3 text-sm">
+        <div>
+          <p aria-live="polite">{filteredPackages.length ? packagePageStart + 1 : 0}–{Math.min(packagePageStart + packagePageSize, filteredPackages.length)} sur <strong>{filteredPackages.length}</strong> colis filtrés</p>
+          <p className="text-xs text-slate-500">La case d’en-tête sélectionne les colis disponibles de cette page. La sélection est conservée entre les pages.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <label htmlFor="package-page-size">Par page</label>
+          <select id="package-page-size" value={packagePageSizeParam} onChange={event => updateUrlParams({ pageSize: event.target.value === '50' ? null : event.target.value, page: null })} className="rounded-lg border border-slate-300 p-2">
+            <option value="50">50</option><option value="100">100</option>
+          </select>
+          <button type="button" aria-label="Page précédente de colis" disabled={packagePage <= 1} onClick={() => setPackagePage(String(packagePage - 1))} className="rounded-lg border border-slate-300 p-2 disabled:opacity-40">Précédente</button>
+          <span>Page {packagePage} / {packagePageCount}</span>
+          <button type="button" aria-label="Page suivante de colis" disabled={packagePage >= packagePageCount} onClick={() => setPackagePage(String(packagePage + 1))} className="rounded-lg border border-slate-300 p-2 disabled:opacity-40">Suivante</button>
+        </div>
+      </nav>
       {selectedPackageIds.size > 0 && (
         <div className="bg-brand-50 border border-brand-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-3">
             <span className="text-sm font-bold text-brand-700">
-              {selectedPackageIds.size} colis sélectionné{selectedPackageIds.size > 1 ? 's' : ''}
+              {selectedPackageIds.size} colis sélectionné{selectedPackageIds.size > 1 ? 's' : ''}, dont {selectedOutsideFilter} hors filtre
+              {selectedOtherPages > 0 && ` et ${selectedOtherPages} sur d’autres pages`}
             </span>
             <button
               onClick={() => setSelectedPackageIds(new Set())}
@@ -1679,7 +1788,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-gradient-to-r from-brand-500 to-blue-500 text-white hover:from-brand-600 hover:to-blue-600 transition-all shadow-sm"
             >
               <Zap size={14} />
-              Dispatcher
+              Affecter
             </button>
             
             <div className="w-px h-5 bg-slate-300 mx-1" />
@@ -1694,9 +1803,15 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                 key={status}
                 disabled={isChangingStatus}
                 onClick={async () => {
-                  if (!confirm(`Passer ${selectedPackageIds.size} colis vers "${label}" ?`)) return;
+                  const actionIds = [...selectedPackageIds];
+                  const summary = actionIds.map(id => {
+                    const pkg = packages.find(item => item.id === id);
+                    return `${pkg?.orderNumber || pkg?.externalId || id} — ${pkg?.contactName || 'colis hors liste'}`;
+                  }).join('\n');
+                  if (!await confirmAction({ title: `Modifier ${actionIds.length} colis`, message: `${selectedOutsideFilter} colis sont hors filtre. Tous les colis ci-dessous passeront vers « ${label} ».\n\n${summary}`, confirmLabel: 'Confirmer la modification', cancelLabel: 'Revoir la sélection' })) return;
                   setIsChangingStatus(true);
-                  for (const pkgId of selectedPackageIds) {
+                  const failedIds: string[] = [];
+                  for (const pkgId of actionIds) {
                     try {
                       await updatePackageStatus(pkgId, status, {
                         action: 'MANUAL_STATUS_CHANGE',
@@ -1704,9 +1819,11 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                         driverName: `${currentUser.firstName} ${currentUser.lastName}`,
                         notes: `Changement groupé → ${label}`
                       });
-                    } catch (e) { console.warn('Erreur:', pkgId, e); }
+                    } catch (e) { failedIds.push(pkgId); console.warn('Erreur:', pkgId, e); }
                   }
-                  setSelectedPackageIds(new Set());
+                  setSelectedPackageIds(new Set(failedIds));
+                  if (failedIds.length) notifyError(`${failedIds.length} colis n’ont pas été modifiés et restent sélectionnés. Consultez leur statut puis réessayez.`);
+                  if (actionIds.length > failedIds.length) notifySuccess(`${actionIds.length - failedIds.length} colis modifiés.`);
                   setIsChangingStatus(false);
                 }}
                 className={`px-2.5 py-1 rounded-lg text-xs font-medium ${color} hover:opacity-80 transition-opacity disabled:opacity-50`}
@@ -1727,38 +1844,23 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                 <th className="px-2 py-3 text-center">
                   <input
                     type="checkbox"
-                    checked={selectedPackageIds.size > 0 && selectedPackageIds.size === colisView.filter(p => {
-                      if (!matchesPkgStatusFilter(p)) return false;
-                      if (!searchTerm) return true;
-                      const term = searchTerm.toLowerCase();
-                      return p.orderNumber.toLowerCase().includes(term) || p.contactName.toLowerCase().includes(term);
-                    }).slice(0, 50).length}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        const visibleIds = colisView
-                          .filter(p => {
-                            if (!matchesPkgStatusFilter(p)) return false;
-                            if (!searchTerm) return true;
-                            const term = searchTerm.toLowerCase();
-                            return p.orderNumber.toLowerCase().includes(term) || (p.externalId || '').toLowerCase().includes(term) || p.contactName.toLowerCase().includes(term);
-                          })
-                          .slice(0, 50)
-                          .map(p => p.id);
-                        setSelectedPackageIds(new Set(visibleIds));
-                      } else {
-                        setSelectedPackageIds(new Set());
-                      }
-                    }}
+                    aria-label="Sélectionner les colis disponibles affichés"
+                    checked={selectableVisibleIds.length > 0 && selectableVisibleIds.every(id => selectedPackageIds.has(id))}
+                    onChange={event => setSelectedPackageIds(previous => {
+                      const next = new Set(previous);
+                      selectableVisibleIds.forEach(id => event.target.checked ? next.add(id) : next.delete(id));
+                      return next;
+                    })}
                     className="w-4 h-4 rounded border-slate-300 text-brand-500 focus:ring-brand-500"
                   />
                 </th>
                 {(() => {
                   const SortTh = ({ label, k, align = 'left' }: { label: string; k: PkgSortKey; align?: 'left' | 'center' }) => (
                     <th
-                      onClick={() => togglePkgSort(k)}
+                      aria-sort={pkgSort.key === k ? (pkgSort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
                       className={`px-3 py-3 text-${align} text-xs font-bold text-slate-500 uppercase cursor-pointer select-none hover:text-slate-700`}
                     >
-                      {label}{pkgSort.key === k ? (pkgSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
+                      <button type="button" onClick={() => togglePkgSort(k)} className="text-inherit font-inherit uppercase" aria-label={`Trier par ${label}`}>{label}{pkgSort.key === k ? (pkgSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}</button>
                     </th>
                   );
                   return (
@@ -1780,7 +1882,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {colisView.filter(matchesPkgStatusFilter).length === 0 ? (
+              {filteredPackages.length === 0 ? (
                 <tr>
                   <td colSpan={12} className="px-4 py-8 text-center text-slate-500">
                     {pkgStatusFilter === 'all'
@@ -1789,27 +1891,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                   </td>
                 </tr>
               ) : (
-                colisView
-                  .filter(p => {
-                    if (!matchesPkgStatusFilter(p)) return false;
-                    if (!searchTerm) return true;
-                    const term = searchTerm.toLowerCase();
-                    return (
-                      p.orderNumber.toLowerCase().includes(term) ||
-                      (p.externalId || '').toLowerCase().includes(term) ||
-                      (p.barcode || '').toLowerCase().includes(term) ||
-                      p.contactName.toLowerCase().includes(term) ||
-                      p.address.toLowerCase().includes(term) ||
-                      p.city.toLowerCase().includes(term)
-                    );
-                  })
-                  .sort((a, b) => {
-                    const dir = pkgSort.dir === 'asc' ? 1 : -1;
-                    const va = pkgSortVal(a, pkgSort.key);
-                    const vb = pkgSortVal(b, pkgSort.key);
-                    return va < vb ? -dir : va > vb ? dir : 0;
-                  })
-                  .slice(0, 50)
+                visiblePackages
                   .map(pkg => {
                     const zoneColors = ZONE_COLORS[pkg.zone];
                     const statusColors = PACKAGE_STATUS_COLORS[pkg.status];
@@ -1819,7 +1901,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                     const isTimelineOpen = expandedPkgTimelineId === pkg.id;
                     return (
                       <React.Fragment key={pkg.id}>
-                      <tr
+                      <tr id={`package-${pkg.id}`}
                         className={`transition-colors ${
                           isDispatched
                             ? 'bg-slate-100 opacity-60 cursor-not-allowed'
@@ -1868,6 +1950,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                         {/* Adresse */}
                         <td className="px-3 py-2">
                           <p className="text-sm text-slate-700">{pkg.address}</p>
+                          <a href={`/missions?tab=packages&package=${encodeURIComponent(pkg.id)}`} className="text-sm text-blue-700 underline">Lien vers ce colis</a>
                           <p className="text-xs text-slate-500">{pkg.postalCode} {pkg.city}</p>
                         </td>
                         {/* Zone */}
@@ -2054,14 +2137,14 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
       {/* === MODAL ÉDITION COLIS === */}
       {editingPkg && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setEditingPkg(null)}>
-          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <Modal isOpen={true} onClose={closePackageEditor} title="Modifier le colis" preventClose={isSavingPkg} size="lg">
+          <div>
             <div className="p-4 border-b border-slate-200 flex items-center justify-between">
               <div>
                 <h3 className="font-bold text-slate-800">Modifier le colis</h3>
                 <p className="text-xs text-slate-500 font-mono">{editingPkg.orderNumber}</p>
               </div>
-              <button onClick={() => setEditingPkg(null)} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100">
+              <button aria-label="Fermer la fiche colis" onClick={closePackageEditor} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100">
                 <XCircle size={18} />
               </button>
             </div>
@@ -2069,64 +2152,64 @@ const MissionManager: React.FC<MissionManagerProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-medium text-slate-500 block mb-1">Destinataire</label>
-                  <input type="text" value={editPkgForm.contactName || ''} onChange={e => setEditPkgForm(f => ({...f, contactName: e.target.value}))}
+                  <input type="text" aria-label="Destinataire" value={editPkgForm.contactName || ''} onChange={e => setEditPkgForm(f => ({...f, contactName: e.target.value}))}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
                 </div>
                 <div>
                   <label className="text-xs font-medium text-slate-500 block mb-1">Téléphone</label>
-                  <input type="text" value={editPkgForm.contactPhone || ''} onChange={e => setEditPkgForm(f => ({...f, contactPhone: e.target.value}))}
+                  <input type="text" aria-label="Téléphone du destinataire" value={editPkgForm.contactPhone || ''} onChange={e => setEditPkgForm(f => ({...f, contactPhone: e.target.value}))}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
                 </div>
               </div>
               <div>
                 <label className="text-xs font-medium text-slate-500 block mb-1">Adresse</label>
-                <input type="text" value={editPkgForm.address || ''} onChange={e => setEditPkgForm(f => ({...f, address: e.target.value}))}
+                <input type="text" aria-label="Adresse de livraison" value={editPkgForm.address || ''} onChange={e => setEditPkgForm(f => ({...f, address: e.target.value}))}
                   className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-medium text-slate-500 block mb-1">Code postal</label>
-                  <input type="text" value={editPkgForm.postalCode || ''} onChange={e => setEditPkgForm(f => ({...f, postalCode: e.target.value}))}
+                  <input type="text" aria-label="Code postal" value={editPkgForm.postalCode || ''} onChange={e => setEditPkgForm(f => ({...f, postalCode: e.target.value}))}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
                 </div>
                 <div>
                   <label className="text-xs font-medium text-slate-500 block mb-1">Ville</label>
-                  <input type="text" value={editPkgForm.city || ''} onChange={e => setEditPkgForm(f => ({...f, city: e.target.value}))}
+                  <input type="text" aria-label="Ville" value={editPkgForm.city || ''} onChange={e => setEditPkgForm(f => ({...f, city: e.target.value}))}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-medium text-slate-500 block mb-1">Créneau début</label>
-                  <input type="time" value={editPkgForm.timeWindowStart || ''} onChange={e => setEditPkgForm(f => ({...f, timeWindowStart: e.target.value}))}
+                  <input type="time" aria-label="Début du créneau demandé" value={editPkgForm.timeWindowStart || ''} onChange={e => setEditPkgForm(f => ({...f, timeWindowStart: e.target.value}))}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
                 </div>
                 <div>
                   <label className="text-xs font-medium text-slate-500 block mb-1">Créneau fin</label>
-                  <input type="time" value={editPkgForm.timeWindowEnd || ''} onChange={e => setEditPkgForm(f => ({...f, timeWindowEnd: e.target.value}))}
+                  <input type="time" aria-label="Fin du créneau demandé" value={editPkgForm.timeWindowEnd || ''} onChange={e => setEditPkgForm(f => ({...f, timeWindowEnd: e.target.value}))}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-medium text-slate-500 block mb-1">Poids (kg)</label>
-                  <input type="number" step="0.1" value={editPkgForm.weight || ''} onChange={e => setEditPkgForm(f => ({...f, weight: e.target.value ? parseFloat(e.target.value) : ''}))}
+                  <input type="number" step="0.1" aria-label="Poids en kilogrammes" value={editPkgForm.weight || ''} onChange={e => setEditPkgForm(f => ({...f, weight: e.target.value ? parseFloat(e.target.value) : ''}))}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
                 </div>
                 <div>
                   <label className="text-xs font-medium text-slate-500 block mb-1">Volume (m³)</label>
-                  <input type="number" step="0.01" value={editPkgForm.volume || ''} onChange={e => setEditPkgForm(f => ({...f, volume: e.target.value ? parseFloat(e.target.value) : ''}))}
+                  <input type="number" step="0.01" aria-label="Volume en mètres cubes" value={editPkgForm.volume || ''} onChange={e => setEditPkgForm(f => ({...f, volume: e.target.value ? parseFloat(e.target.value) : ''}))}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
                 </div>
               </div>
               <div>
                 <label className="text-xs font-medium text-slate-500 block mb-1">Commentaire</label>
-                <textarea value={editPkgForm.comment || ''} onChange={e => setEditPkgForm(f => ({...f, comment: e.target.value}))}
+                <textarea aria-label="Commentaire" value={editPkgForm.comment || ''} onChange={e => setEditPkgForm(f => ({...f, comment: e.target.value}))}
                   className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none resize-none h-16" />
               </div>
             </div>
             <div className="p-4 border-t border-slate-100 flex gap-2">
-              <button onClick={() => setEditingPkg(null)} className="flex-1 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-600">
+              <button onClick={closePackageEditor} className="flex-1 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-600">
                 Annuler
               </button>
               <button
@@ -2167,7 +2250,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
               </button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* === MODAL SUPPRESSION COLIS === */}
@@ -2601,29 +2684,37 @@ const MissionManager: React.FC<MissionManagerProps> = ({
         <div>
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
             <Route className="text-brand-500" />
-            Gestion des Missions
+            Exploitation des livraisons
           </h1>
           <p className="text-slate-500 text-sm mt-1">
-            Import, dispatch et suivi des tournées de livraison
+            Colis, préparation des tournées et suivi des livraisons
           </p>
         </div>
         
         <div className="flex items-center gap-2">
           <input
             type="date"
-            value={selectedDate}
+            aria-label="Date des tournées" value={selectedDate}
             onChange={(e) => setSelectedDate(e.target.value)}
             className="px-3 py-2 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 outline-none"
           />
         </div>
       </div>
 
+      <form className="mb-4 flex flex-wrap items-end gap-2" onSubmit={event => { event.preventDefault(); updateUrlParams({ tab: 'packages', scope: null, status: null, mission: null, package: null }); }}>
+        <label className="flex-1 min-w-48 text-sm font-medium text-slate-700">Retrouver un colis
+          <input type="search" value={searchTerm} onChange={event => setSearchTerm(event.target.value)} placeholder="Code colis, commande, destinataire ou adresse" className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" />
+        </label>
+        <button type="submit" className="min-h-11 rounded-xl bg-blue-700 px-4 text-white font-semibold">Rechercher dans les colis</button>
+        <a href="/hub-operations" className="min-h-11 inline-flex items-center rounded-xl border border-slate-300 px-4 text-sm font-semibold">Opérations hub</a>
+      </form>
+      {linkError && <p role="alert" className="mb-4 rounded-xl bg-amber-50 p-3 text-amber-900">{linkError}</p>}
       {/* Tabs */}
       {renderTabs()}
 
       {/* Content */}
       {activeTab === 'dashboard' && renderDashboard()}
-      {activeTab === 'dispatch' && (
+      {activeTab === 'dispatch' && canDispatch && (
         <DispatchManager
           packages={dispatchablePackages}
           hubs={hubs}
@@ -2637,7 +2728,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
       {activeTab === 'imports' && !reviewData && renderImports()}
 
       {/* === TABLE DE REVUE POST-IMPORT === */}
-      {activeTab === 'imports' && reviewData && selectedClient && users.find(u => u.id === selectedClient) && (
+      {activeTab === 'imports' && canImport && reviewData && selectedClient && users.find(u => u.id === selectedClient) && (
         <ImportReviewTable
           reviewResult={reviewData}
           client={users.find(u => u.id === selectedClient)!}
@@ -2674,7 +2765,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
       )}
       {activeTab === 'missions' && renderMissions()}
       {activeTab === 'packages' && renderPackages()}
-      {activeTab === 'hubs' && renderHubs()}
+      {activeTab === 'hubs' && canManageHubs && renderHubs()}
 
       {/* Modal Import */}
       <Modal
@@ -3034,7 +3125,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="p-4 border-b border-slate-200 flex items-center justify-between">
               <div>
-                <h3 className="font-bold text-slate-800">Modifier le stop</h3>
+                <h3 className="font-bold text-slate-800">Modifier l’arrêt</h3>
                 <p className="text-xs text-slate-500">Stop #{editingStop.stop.sequence} — {editingStop.mission.zone}</p>
               </div>
               <button onClick={() => setEditingStop(null)} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100">
@@ -3118,7 +3209,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
               <div className="w-14 h-14 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3">
                 <Trash2 size={24} className="text-red-600" />
               </div>
-              <h3 className="font-bold text-slate-800 text-lg mb-1">Supprimer ce stop ?</h3>
+              <h3 className="font-bold text-slate-800 text-lg mb-1">Supprimer cet arrêt ?</h3>
               <p className="text-sm text-slate-600 mb-1">
                 <span className="font-bold">{deletingStop.stop.contactName}</span>
               </p>
@@ -3220,7 +3311,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
               </div>
               <div className="bg-amber-50 border border-amber-200 rounded-lg p-2">
                 <p className="text-xs text-amber-700">
-                  💡 Ce stop sera ajouté à la fin de la tournée. Utilisez les flèches ↑↓ pour le repositionner ensuite.
+                  💡 Cet arrêt sera ajouté à la fin de la tournée. Utilisez les flèches ↑↓ pour le repositionner ensuite.
                 </p>
               </div>
             </div>
@@ -3233,7 +3324,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                 onClick={handleAddNewStop}
                 className="flex-1 py-2.5 bg-green-600 text-white rounded-xl text-sm font-bold hover:bg-green-700 transition-colors disabled:opacity-50"
               >
-                {isSavingPkg ? '⏳ Ajout...' : '+ Ajouter le stop'}
+                {isSavingPkg ? '⏳ Ajout...' : '+ Ajouter l’arrêt'}
               </button>
             </div>
           </div>
@@ -3257,15 +3348,15 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
       {/* === MODAL DISPATCH RAPIDE === */}
       {showQuickDispatch && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowQuickDispatch(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <Modal isOpen={showQuickDispatch} onClose={closeQuickDispatch} title="Affecter la sélection" preventClose={isQuickDispatching} size="lg">
+          <div>
             <div className="p-4 border-b border-slate-200 bg-gradient-to-r from-brand-500 to-blue-500">
               <h3 className="font-bold text-white flex items-center gap-2">
                 <Zap size={20} />
-                Dispatch rapide
+                Affectation de la sélection
               </h3>
               <p className="text-sm text-white/80 mt-1">
-                {selectedPackageIds.size} colis sélectionné{selectedPackageIds.size > 1 ? 's' : ''}
+                {selectedPackageIds.size} colis sélectionné{selectedPackageIds.size > 1 ? 's' : ''}, dont {selectedOutsideFilter} hors filtre — {selectedDate}
               </p>
             </div>
             
@@ -3345,7 +3436,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
             
             <div className="p-4 border-t border-slate-200 flex justify-end gap-2">
               <button
-                onClick={() => setShowQuickDispatch(false)}
+                onClick={closeQuickDispatch}
                 className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
               >
                 Annuler
@@ -3356,7 +3447,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                   if (!quickDispatchDriverId || !quickDispatchHubId || quickDispatchLock.current) return;
                   // Sécurité : refuser un chauffeur en congé validé sur la date
                   if (isDriverOnLeave(quickDispatchDriverId, selectedDate)) {
-                    alert('Ce chauffeur est en congé validé à cette date. Choisissez un autre chauffeur.');
+                    notifyError('Ce chauffeur est en congé validé à cette date. Choisissez un autre chauffeur.');
                     return;
                   }
 
@@ -3370,19 +3461,19 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                       setShowQuickDispatch(false);
                       setSelectedPackageIds(new Set());
                       setQuickDispatchDriverId('');
-                      alert(`Mission confirmée avec ${result.packageCount} colis.`);
+                      notifySuccess(`Tournée confirmée avec ${result.packageCount} colis.`);
                       return;
                     }
                     // Récupérer les colis sélectionnés
                     const selectedPkgs = packages.filter(p => selectedPackageIds.has(p.id));
                     if (selectedPkgs.length === 0) {
-                      alert('Aucun colis sélectionné');
+                      notifyError('Aucun colis sélectionné');
                       setIsQuickDispatching(false);
                       return;
                     }
                     
                     if (selectedPkgs.some(pkg => ![PackageStatus.AT_HUB, PackageStatus.SORTED].includes(pkg.status) || pkg.missionId || pkg.currentDriverId || pkg.stopId)) {
-                      alert('Tous les colis sélectionnés doivent être au hub ou triés, sans affectation à une tournée. Actualisez la sélection.');
+                      notifyError('Tous les colis sélectionnés doivent être au hub ou triés, sans affectation à une tournée. Actualisez la sélection.');
                       return;
                     }
                     // Récupérer le chauffeur et son véhicule
@@ -3391,7 +3482,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                     const hub = hubs.find(h => h.id === quickDispatchHubId);
                     
                     if (!driver || !hub) {
-                      alert('Chauffeur ou hub non trouvé');
+                      notifyError('Chauffeur ou hub non trouvé');
                       setIsQuickDispatching(false);
                       return;
                     }
@@ -3417,7 +3508,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                     );
                     
                     if (!result.success || result.tours.length !== 1 || result.skippedShipments > 0) {
-                      alert(`Erreur d'optimisation: ${result.error || 'Certains colis n’ont pas pu être planifiés. Vérifiez les adresses et les créneaux avant le dispatch.'}`);
+                      notifyError(`Erreur d'optimisation: ${result.error || 'Certains colis n’ont pas pu être planifiés. Vérifiez les adresses et les créneaux avant l’affectation.'}`);
                       setIsQuickDispatching(false);
                       return;
                     }
@@ -3462,11 +3553,11 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                     setSelectedPackageIds(new Set());
                     setQuickDispatchDriverId('');
                     
-                    alert(`✅ Mission créée avec ${tour.stops.length} stops et ${packageIds.length} colis !`);
+                    notifySuccess(`Tournée créée avec ${tour.stops.length} arrêts et ${packageIds.length} colis !`);
                     
                   } catch (error) {
                     console.error('Erreur dispatch rapide:', error);
-                    alert(error instanceof Error ? error.message : 'Le dispatch n’a pas pu être confirmé. Réessayez la même demande sans risque de doublon.');
+                    notifyError(error instanceof Error ? error.message : 'L’affectation n’a pas pu être confirmée. Réessayez la même demande sans risque de doublon.');
                   } finally {
                     quickDispatchLock.current = false;
                     setIsQuickDispatching(false);
@@ -3482,13 +3573,13 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                 ) : (
                   <>
                     <Zap size={16} />
-                    Dispatcher {selectedPackageIds.size} colis
+                    Affecter {selectedPackageIds.size} colis
                   </>
                 )}
               </button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* Modal Réordonnancement des stops */}

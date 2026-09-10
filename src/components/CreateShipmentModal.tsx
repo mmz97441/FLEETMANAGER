@@ -1,295 +1,226 @@
-/**
- * CRÉER UNE EXPÉDITION (client self-service)
- *
- * Le client crée un envoi (choisi dans son carnet ou saisi), le système crée
- * le(s) colis (statut « à collecter », zone auto, code de suivi CL-…), puis
- * ouvre l'impression des étiquettes au format choisi (A4/A5/A6). Multi-colis
- * → étiquettes 1/N…N/N.
- */
-import React, { useState, useMemo } from 'react';
-import { createPortal } from 'react-dom';
+/** Create once, then save the address and print as independent recoverable actions. */
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { User, SavedAddress, Package, Zone } from '../types';
 import { createClientShipment } from '../services/missionService';
 import { estimateZoneFromAddress } from '../services/deliveryService';
 import { generateBatchLabelsHTML, LabelFormat } from '../services/pickupService';
-import { X, Search, Package as PackageIcon, Printer, MapPin, AlertTriangle, Check, UserPlus, BookUser } from 'lucide-react';
+import { Package as PackageIcon, Printer, MapPin, AlertTriangle, Check, BookUser } from 'lucide-react';
+import Modal from './shared/Modal';
+import { FormInput, FormTextarea } from './shared/FormInput';
+import { validateClientShipment, ClientShipmentErrors } from '../utils/clientShipmentForm';
+import { readPendingClientShipment, reservePendingClientShipment, clearPendingClientShipment, PendingShipmentRequest } from '../utils/pendingClientShipment';
+import { confirmAction } from '../services/confirmationService';
 
 interface CreateShipmentModalProps {
   currentUser: User;
   savedAddresses: SavedAddress[];
   onClose: () => void;
   onCreated: (packages: Package[]) => void;
-  /** Enregistre un nouveau destinataire dans le carnet (si coché à la création). */
+  onViewPackages?: () => void;
   onSaveRecipient?: (fields: { contactName: string; address: string; city: string; contactPhone: string; contactEmail?: string }) => Promise<void>;
 }
 
-const splitCity = (city: string): { postalCode: string; cityName: string } => {
-  const m = (city || '').match(/(97\d{3}|\d{5})/);
-  const postalCode = m ? m[1] : '';
-  const cityName = (city || '').replace(postalCode, '').trim().replace(/^,\s*/, '');
-  return { postalCode, cityName };
+const splitCity = (city: string) => {
+  const postalCode = (city || '').match(/\d{5}/)?.[0] || '';
+  return { postalCode, cityName: (city || '').replace(postalCode, '').trim().replace(/^,\s*/, '') };
 };
 
-const CreateShipmentModal: React.FC<CreateShipmentModalProps> = ({ currentUser, savedAddresses, onClose, onCreated, onSaveRecipient }) => {
-  const [contactName, setContactName] = useState('');
-  const [address, setAddress] = useState('');
-  const [postalCode, setPostalCode] = useState('');
-  const [city, setCity] = useState('');
-  const [contactPhone, setContactPhone] = useState('');
-  const [contactEmail, setContactEmail] = useState('');
-  const [packageCount, setPackageCount] = useState(1);
-  const [weight, setWeight] = useState('');
-  const [comment, setComment] = useState('');
-  const [clientReference, setClientReference] = useState('');
+const CreateShipmentModal: React.FC<CreateShipmentModalProps> = ({ currentUser, savedAddresses, onClose, onCreated, onViewPackages, onSaveRecipient }) => {
+  const [initialJournal] = useState(() => {
+    try { return { record: readPendingClientShipment(window.localStorage, currentUser.id), error: '' }; }
+    catch (cause) { return { record: null, error: cause instanceof Error ? cause.message : 'Le stockage local est indisponible. Autorisez le stockage de ce site avant de créer une expédition.' }; }
+  });
+  const initialRequest = initialJournal.record?.request;
+  const [contactName, setContactName] = useState(initialRequest?.recipient.contactName || '');
+  const [address, setAddress] = useState(initialRequest?.recipient.address || '');
+  const [postalCode, setPostalCode] = useState(initialRequest?.recipient.postalCode || '');
+  const [city, setCity] = useState(initialRequest?.recipient.city || '');
+  const [contactPhone, setContactPhone] = useState(initialRequest?.recipient.contactPhone || '');
+  const [contactEmail, setContactEmail] = useState(initialRequest?.recipient.contactEmail || '');
+  const [packageCount, setPackageCount] = useState(initialRequest?.packageCount || 1);
+  const [weight, setWeight] = useState(initialRequest?.weight == null ? '' : String(initialRequest.weight));
+  const [comment, setComment] = useState(initialRequest?.comment || '');
+  const [clientReference, setClientReference] = useState(initialRequest?.clientReference || '');
   const [format, setFormat] = useState<LabelFormat>('A6');
-
-  const [nameFocused, setNameFocused] = useState(false);
-  const [showAllBook, setShowAllBook] = useState(false);          // « voir tout mon carnet »
-  const [linkedId, setLinkedId] = useState<string | null>(null); // destinataire choisi dans le carnet
-  const [saveToBook, setSaveToBook] = useState(true);            // enregistrer un nouveau destinataire
+  const [linkedId, setLinkedId] = useState<string | null>(null);
+  const [showBook, setShowBook] = useState(false);
+  const [saveToBook, setSaveToBook] = useState(!initialRequest);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
+  const submitting = useRef(false);
+  const [error, setError] = useState(initialJournal.error);
+  const [fieldErrors, setFieldErrors] = useState<ClientShipmentErrors>({});
   const [zoneWarn, setZoneWarn] = useState(false);
+  const [created, setCreated] = useState<Package[] | null>(null);
+  const [bookError, setBookError] = useState('');
+  const resultRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (created) resultRef.current?.focus({ preventScroll: true }); }, [created]);
+  const [bookSaved, setBookSaved] = useState(false);
+  const [printError, setPrintError] = useState('');
+  const [printed, setPrinted] = useState(false);
+  const requestId = useRef(initialRequest?.requestId || crypto.randomUUID());
+  const pendingRequest = useRef<PendingShipmentRequest | null>(initialRequest || null);
+  const [requestLocked, setRequestLocked] = useState(Boolean(initialRequest));
+  const [journalSaved, setJournalSaved] = useState(Boolean(initialRequest));
+  const [journalWarning, setJournalWarning] = useState('');
+  const [verifiedBeforeAbandon, setVerifiedBeforeAbandon] = useState(false);
 
-  const deliveryBook = useMemo(
-    () => savedAddresses.filter(a => a.type === 'delivery' || a.type === 'both'),
-    [savedAddresses]
-  );
-
-  // Suggestions du carnet en fonction de ce qui est tapé dans « Nom du destinataire »
+  const deliveryBook = useMemo(() => savedAddresses.filter(a => a.type === 'delivery' || a.type === 'both'), [savedAddresses]);
   const nameMatches = useMemo(() => {
-    const q = contactName.trim().toLowerCase();
-    if (!q) return deliveryBook.slice(0, showAllBook ? 500 : 8);
-    return deliveryBook.filter(a =>
-      (a.contactName || a.label || '').toLowerCase().includes(q) ||
-      (a.address || '').toLowerCase().includes(q) ||
-      (a.city || '').toLowerCase().includes(q)
-    ).slice(0, 8);
-  }, [deliveryBook, contactName, showAllBook]);
-
-  const showSuggestions = nameFocused && !linkedId && nameMatches.length > 0;
-  const isNewRecipient = !linkedId && contactName.trim().length >= 2 && nameMatches.length === 0;
+    const q = contactName.trim().toLocaleLowerCase('fr');
+    return deliveryBook.filter(a => !q || [a.contactName, a.label, a.address, a.city].some(value => value?.toLocaleLowerCase('fr').includes(q))).slice(0, showBook ? 100 : 5);
+  }, [contactName, deliveryBook, showBook]);
+  const dirty = !created && Boolean(contactName || address || postalCode || city || contactPhone || contactEmail || weight || comment || clientReference || packageCount !== 1);
 
   const pickAddress = (a: SavedAddress) => {
-    const { postalCode: cp, cityName } = splitCity(a.city);
-    setContactName(a.contactName || a.label || '');
-    setAddress(a.address || '');
-    setPostalCode(cp);
-    setCity(cityName || a.city || '');
-    setContactPhone(a.contactPhone || '');
-    setContactEmail(a.contactEmail || '');
-    setLinkedId(a.id);
-    setNameFocused(false);
+    const split = splitCity(a.city);
+    setContactName(a.contactName || a.label || ''); setAddress(a.address || '');
+    setPostalCode(split.postalCode); setCity(split.cityName); setContactPhone(a.contactPhone || ''); setContactEmail(a.contactEmail || '');
+    setLinkedId(a.id); setShowBook(false); setFieldErrors({});
   };
 
-  // Toute modification manuelle du nom « délie » du carnet (redevient nouveau/éditable)
-  const onNameChange = (v: string) => {
-    setContactName(v);
-    setShowAllBook(false);
-    if (linkedId) setLinkedId(null);
-  };
-
-  const canSubmit = contactName.trim() && address.trim() && (postalCode.trim() || city.trim()) && contactPhone.trim();
-
-  const handleSubmit = async () => {
-    if (!canSubmit || busy) return;
-    setBusy(true);
-    setError('');
+  const print = () => {
+    if (!created) return;
+    setPrintError('');
     try {
-      const fullAddr = `${address}, ${postalCode} ${city}`.trim();
-      let zone: Zone = Zone.NORD;
-      let cp = postalCode.trim();
-      const est = await estimateZoneFromAddress(fullAddr);
-      if (est) { zone = est.zone; cp = est.postalCode || cp; setZoneWarn(false); }
-      else { setZoneWarn(true); }
-
-      const packages = await createClientShipment({
-        client: { id: currentUser.id, companyName: currentUser.companyName || `${currentUser.firstName} ${currentUser.lastName}` },
-        recipient: {
-          contactName: contactName.trim(),
-          address: address.trim(),
-          city: city.trim(),
-          postalCode: cp,
-          contactPhone: contactPhone.trim() || undefined,
-          contactEmail: contactEmail.trim() || undefined,
-        },
-        zone,
-        packageCount,
-        weight: weight ? Number(weight) : undefined,
-        comment: comment.trim() || undefined,
-        clientReference: clientReference.trim() || undefined,
-      });
-
-      // Nouveau destinataire → on l'ajoute au carnet (si demandé), pour ne plus le retaper
-      if (!linkedId && saveToBook && onSaveRecipient) {
-        try {
-          await onSaveRecipient({
-            contactName: contactName.trim(),
-            address: address.trim(),
-            city: `${cp || postalCode.trim()} ${city.trim()}`.trim(),
-            contactPhone: contactPhone.trim(),
-            contactEmail: contactEmail.trim() || undefined,
-          });
-        } catch { /* non bloquant : l'expédition est déjà créée */ }
-      }
-
-      // Impression immédiate au format choisi
-      const html = generateBatchLabelsHTML(
-        packages,
-        currentUser.companyName || 'Expéditeur',
-        format
-      );
       const win = window.open('', '_blank');
-      if (win) { win.document.write(html); win.document.close(); }
-
-      onCreated(packages);
-      onClose();
-    } catch (e) {
-      setError("Erreur lors de la création. Réessaie.");
-      setBusy(false);
-    }
+      if (!win) { setPrintError('La fenêtre d’impression a été bloquée. Autorisez les fenêtres de ce site, puis cliquez sur Imprimer les étiquettes. Vos colis sont déjà enregistrés.'); return; }
+      win.opener = null;
+      win.document.write(generateBatchLabelsHTML(created, currentUser.companyName || 'Expéditeur', format));
+      win.document.close(); setPrinted(true);
+    } catch { setPrintError('L’impression n’a pas pu s’ouvrir. Vos colis sont enregistrés ; vous pouvez réimprimer depuis Mes colis.'); }
   };
 
-  const inputCls = 'w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500';
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (submitting.current || created) return;
+    const errors = validateClientShipment({ contactName, address, postalCode, city, contactPhone, contactEmail, packageCount, weight });
+    setFieldErrors(errors); setError('');
+    const first = Object.keys(errors)[0];
+    if (first) { document.getElementById(`shipment-${first}`)?.focus(); return; }
+    submitting.current = true; setBusy(true);
+    let packages: Package[];
+    let cp = postalCode.trim();
+    try {
+      let zone: Zone = Zone.NORD;
+      if (!pendingRequest.current) {
+      try {
+        const est = await estimateZoneFromAddress(`${address}, ${postalCode} ${city}`.trim());
+        if (est) { zone = est.zone; cp = est.postalCode || cp; setZoneWarn(false); }
+        else setZoneWarn(true);
+      } catch { setZoneWarn(true); }
+      pendingRequest.current = {
+        requestId: requestId.current,
+        client: { id: currentUser.id, companyName: currentUser.companyName || `${currentUser.firstName} ${currentUser.lastName}` },
+        recipient: { contactName: contactName.trim(), address: address.trim(), city: city.trim(), postalCode: cp, contactPhone: contactPhone.trim(), contactEmail: contactEmail.trim() || undefined },
+        zone, packageCount, weight: weight ? Number(weight) : undefined, comment: comment.trim() || undefined, clientReference: clientReference.trim() || undefined,
+      };
+      setRequestLocked(true);
+      }
+      cp = pendingRequest.current.recipient.postalCode;
+      try {
+        await reservePendingClientShipment(window.localStorage, currentUser.id, pendingRequest.current);
+        setJournalSaved(true);
+      } catch (cause) {
+        const detail = cause instanceof Error ? cause.message : '';
+        throw new Error(`La demande n’a pas pu être conservée sur cet appareil. Aucun nouvel envoi n’a été lancé. ${detail} Autorisez le stockage du site puis réessayez, ou reprenez la demande déjà en attente.`);
+      }
+      packages = await createClientShipment(pendingRequest.current);
+    } catch (e) {
+      setError(e instanceof Error ? `${e.message} Vos saisies sont conservées.` : 'La création n’a pas pu être confirmée. Vérifiez votre connexion ; vos saisies sont conservées.');
+      submitting.current = false; setBusy(false); return;
+    }
+    // From this point creation is confirmed. A carnet or print failure must never enable another creation.
+    setCreated(packages);
+    try {
+      const cleared = await clearPendingClientShipment(window.localStorage, currentUser.id, requestId.current);
+      if (!cleared) setJournalWarning('Une autre demande est en attente sur cet appareil. Elle a été conservée ; rouvrez le formulaire pour la reprendre.');
+      else setJournalSaved(false);
+    } catch {
+      setJournalWarning('Vos colis sont confirmés. Le rappel local n’a pas pu être effacé ; une reprise éventuelle vérifiera les mêmes codes sans recréer les colis.');
+    }
+    if (!linkedId && saveToBook && onSaveRecipient) {
+      try {
+        await onSaveRecipient({ contactName: contactName.trim(), address: address.trim(), city: `${cp} ${city.trim()}`.trim(), contactPhone: contactPhone.trim(), contactEmail: contactEmail.trim() || undefined });
+        setBookSaved(true);
+      } catch { setBookError('Vos colis sont créés, mais l’ajout au carnet n’a pas été confirmé. Vérifiez Mes destinataires avant de l’ajouter à nouveau.'); }
+    }
+    setBusy(false); submitting.current = false;
+    onCreated(packages);
+  };
 
-  return createPortal(
-    <div className="fixed inset-0 z-[120] bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-5" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-bold text-slate-800 flex items-center gap-2"><PackageIcon size={18} className="text-indigo-600" /> Créer une expédition</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
+  const abandonPending = async () => {
+    if (busy || !verifiedBeforeAbandon || !pendingRequest.current) return;
+    const confirmed = await confirmAction({
+      title: 'Abandonner la reprise de cette demande ?',
+      message: 'Vous confirmez avoir vérifié Mes colis. Cette action efface uniquement le rappel sur cet appareil : elle ne supprime aucun colis déjà enregistré. Créer ensuite un nouvel envoi peut produire un doublon si cette demande avait déjà abouti. En cas de doute, conservez la demande et contactez votre responsable.',
+      cancelLabel: 'Conserver et reprendre', confirmLabel: 'J’ai vérifié, abandonner la reprise', danger: true,
+    });
+    if (!confirmed) return;
+    try {
+      const cleared = await clearPendingClientShipment(window.localStorage, currentUser.id, requestId.current);
+      if (!cleared) { setError('Une autre demande a été enregistrée dans un autre onglet. Elle a été conservée ; fermez puis rouvrez le formulaire pour la consulter.'); return; }
+      onClose();
+    } catch { setError('Le rappel local n’a pas pu être supprimé. Il reste conservé ; autorisez le stockage du site puis réessayez.'); }
+  };
+
+  return (
+    <Modal isOpen onClose={onClose} title={created ? 'Expédition enregistrée' : 'Créer une expédition'} headerIcon={<PackageIcon size={22} />} size="lg" dirty={dirty && !journalSaved} preventClose={busy}>
+      {created ? (
+        <div className="space-y-4">
+          <div ref={resultRef} tabIndex={-1} role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-800">
+            <p className="font-bold flex items-center gap-2"><Check size={20} /> {created.length} colis enregistré(s)</p>
+            <p className="mt-1 text-sm">Ils sont en attente de collecte. L’impression des étiquettes peut être faite maintenant ou depuis Mes colis.</p>
+          </div>
+          <ul aria-label="Codes des colis enregistrés" className="max-h-48 overflow-auto rounded-xl border p-3 text-sm font-mono break-all space-y-1">
+            {created.map(p => <li key={p.id}>{p.externalId || p.barcode || p.orderNumber}</li>)}
+          </ul>
+          {busy && <p role="status" className="text-sm text-slate-700">Enregistrement du destinataire dans le carnet…</p>}
+          {journalWarning && <p role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{journalWarning}</p>}
+          {bookSaved && <p className="text-sm text-emerald-800">Destinataire ajouté à votre carnet.</p>}
+          {bookError && <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{bookError}</p>}
+          {zoneWarn && <p className="text-sm text-amber-900 flex gap-2"><MapPin size={18} /> Zone à vérifier par le transporteur : l’adresse n’a pas pu être reconnue automatiquement.</p>}
+          <fieldset><legend className="font-medium text-sm mb-2">Format d’étiquette</legend><div className="flex gap-2">
+            {(['A4', 'A5', 'A6'] as LabelFormat[]).map(f => <button type="button" key={f} aria-pressed={format === f} onClick={() => setFormat(f)} className={`flex-1 min-h-11 rounded-xl border font-semibold ${format === f ? 'bg-indigo-700 text-white' : 'text-slate-700'}`}>{f}</button>)}
+          </div><p className="mt-2 text-sm text-slate-600">A6 : une étiquette par page. A4 : quatre par page.</p></fieldset>
+          {printError && <p role="alert" className="text-sm text-red-800">{printError}</p>}
+          <button type="button" onClick={print} className="w-full min-h-12 bg-indigo-700 text-white rounded-xl font-semibold flex items-center justify-center gap-2"><Printer size={18} /> {printed ? 'Imprimer à nouveau' : 'Imprimer les étiquettes'}</button>
+          <button type="button" disabled={busy} onClick={() => { onClose(); onViewPackages?.(); }} className="w-full min-h-11 rounded-xl border text-slate-700 font-semibold disabled:opacity-50">{onViewPackages ? 'Voir mes colis' : 'Terminer'}</button>
         </div>
-
-        {/* Aide : commencez par taper le nom → on cherche dans votre carnet */}
-        <div className="mb-2 flex items-center gap-1.5 text-[12px] text-slate-500">
-          <BookUser size={14} className="text-indigo-500" />
-          Tapez le nom : s'il est dans votre carnet, il apparaît. Sinon, remplissez et il sera enregistré.
-        </div>
-
-        {/* Formulaire destinataire */}
-        <div className="space-y-2">
-          {/* Champ nom = recherche instantanée dans le carnet */}
-          <div className="relative">
-            <div className="relative">
-              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-              <input
-                value={contactName}
-                onChange={e => onNameChange(e.target.value)}
-                onFocus={() => setNameFocused(true)}
-                onBlur={() => setTimeout(() => setNameFocused(false), 150)}
-                placeholder="Nom du destinataire (pharmacie) *"
-                className={`${inputCls} pl-9 ${linkedId ? 'border-emerald-400 ring-1 ring-emerald-300' : ''}`}
-                autoComplete="off"
-              />
+      ) : (
+        <form onSubmit={handleSubmit} noValidate className="space-y-4" aria-busy={busy}>
+          {journalSaved && <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"><p className="font-bold">Demande précédente non confirmée : reprendre</p><p className="mt-1">Elle est conservée sur cet appareil, même après fermeture ou rechargement. Reprendre vérifie les mêmes codes ; ne créez pas un nouvel envoi pour contourner une erreur.</p>{onViewPackages && <button type="button" disabled={busy} onClick={() => { onClose(); onViewPackages(); }} className="mt-2 min-h-11 underline font-semibold">Vérifier Mes colis en conservant cette demande</button>}</div>}
+          <p className="text-sm text-slate-600">Créez les colis et leurs codes de suivi. La collecte sera ensuite organisée par le transporteur. Les champs marqués * sont obligatoires.</p>
+          {Object.keys(fieldErrors).length > 0 && <div role="alert" className="rounded-xl bg-red-50 border border-red-200 p-3 text-sm text-red-800"><p className="font-bold">Complétez les informations suivantes :</p><ul className="mt-1 space-y-1">{Object.entries(fieldErrors).map(([key, message]) => <li key={key}><button type="button" className="text-left underline" onClick={() => document.getElementById(`shipment-${key}`)?.focus()}>{message}</button></li>)}</ul></div>}
+          <fieldset disabled={busy || requestLocked} className="space-y-3">
+            <FormInput id="shipment-contactName" label="Nom du destinataire" required autoComplete="shipping name" value={contactName} onChange={e => { setContactName(e.target.value); setLinkedId(null); }} error={fieldErrors.contactName} />
+            {deliveryBook.length > 0 && <div className="rounded-xl border bg-slate-50 p-3">
+              <button type="button" onClick={() => setShowBook(!showBook)} aria-expanded={showBook} className="text-sm text-indigo-800 min-h-11 flex items-center gap-2"><BookUser size={18} /> {showBook ? 'Masquer le carnet' : 'Choisir dans mon carnet'}</button>
+              {(showBook || (contactName && !linkedId)) && nameMatches.length > 0 && <ul className="max-h-40 overflow-auto">{nameMatches.map(a => <li key={a.id}><button type="button" onClick={() => pickAddress(a)} className="w-full text-left px-2 py-3 rounded-lg hover:bg-indigo-100 text-sm"><span className="block font-semibold">{a.contactName || a.label}</span><span className="text-slate-600">{a.address} · {a.city}</span></button></li>)}</ul>}
+              {linkedId && <p role="status" className="text-sm text-emerald-800">Destinataire du carnet sélectionné.</p>}
+            </div>}
+            <FormInput id="shipment-address" label="Adresse : rue et numéro" required autoComplete="shipping address-line1" value={address} onChange={e => setAddress(e.target.value)} error={fieldErrors.address} />
+            <div className="grid sm:grid-cols-2 gap-3">
+              <FormInput id="shipment-postalCode" label="Code postal" autoComplete="shipping postal-code" inputMode="numeric" maxLength={5} value={postalCode} onChange={e => setPostalCode(e.target.value)} error={fieldErrors.postalCode} />
+              <FormInput id="shipment-city" label="Ville" autoComplete="shipping address-level2" value={city} onChange={e => setCity(e.target.value)} error={fieldErrors.city} />
             </div>
-
-            {/* Suggestions du carnet */}
-            {showSuggestions && (
-              <div className="absolute z-20 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl max-h-60 overflow-y-auto">
-                <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400 bg-slate-50 border-b border-slate-100">
-                  Dans votre carnet
-                </div>
-                {nameMatches.map(a => (
-                  <button
-                    key={a.id}
-                    onMouseDown={e => { e.preventDefault(); pickAddress(a); }}
-                    className="w-full text-left px-3 py-2 hover:bg-indigo-50 text-sm border-b border-slate-50 last:border-0"
-                  >
-                    <div className="font-semibold text-slate-800 truncate">{a.contactName || a.label}</div>
-                    <div className="text-xs text-slate-500 truncate">{a.address} · {a.city}</div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Voir tout mon carnet (quand le champ est vide) */}
-          {!contactName.trim() && !linkedId && deliveryBook.length > 0 && (
-            <button
-              type="button"
-              onMouseDown={e => { e.preventDefault(); setShowAllBook(true); setNameFocused(true); }}
-              className="flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800"
-            >
-              <BookUser size={14} /> Voir tout mon carnet ({deliveryBook.length})
-            </button>
-          )}
-
-          {/* Statut : destinataire connu ou nouveau */}
-          {linkedId && (
-            <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-1.5">
-              <Check size={14} /> Destinataire de votre carnet — champs remplis automatiquement.
+            <FormInput id="shipment-contactPhone" label="Téléphone du destinataire" required type="tel" autoComplete="shipping tel" value={contactPhone} onChange={e => setContactPhone(e.target.value)} error={fieldErrors.contactPhone} />
+            <FormInput id="shipment-contactEmail" label="Email (facultatif)" type="email" autoComplete="shipping email" hint="Pour la copie du bon de livraison." value={contactEmail} onChange={e => setContactEmail(e.target.value)} error={fieldErrors.contactEmail} />
+            {!linkedId && onSaveRecipient && <label className="flex items-start gap-3 text-sm text-slate-700 py-2"><input type="checkbox" checked={saveToBook} onChange={e => setSaveToBook(e.target.checked)} className="w-5 h-5" /> Ajouter ce destinataire à mon carnet</label>}
+            <div className="grid sm:grid-cols-2 gap-3">
+              <FormInput id="shipment-packageCount" label="Nombre de colis" required type="number" min={1} max={50} step={1} inputMode="numeric" value={packageCount || ''} onChange={e => setPackageCount(Number(e.target.value))} error={fieldErrors.packageCount} />
+              <FormInput id="shipment-weight" label="Poids en kg (facultatif)" type="number" min={0} step="0.1" inputMode="decimal" value={weight} onChange={e => setWeight(e.target.value)} error={fieldErrors.weight} />
             </div>
-          )}
-          {isNewRecipient && (
-            <div className="flex items-center gap-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5">
-              <UserPlus size={14} /> Nouveau destinataire — complétez l'adresse ci-dessous.
-            </div>
-          )}
+            <FormInput label="Votre référence (facultatif)" value={clientReference} onChange={e => setClientReference(e.target.value)} />
+            <FormTextarea label="Consignes de livraison (facultatif)" value={comment} onChange={e => setComment(e.target.value)} rows={3} />
+          </fieldset>
+          {requestLocked && !busy && <p className="text-sm text-slate-700">Les informations restent figées jusqu’à confirmation. Le bouton reprend cette même demande avec les mêmes codes, sans recréer les colis déjà enregistrés.</p>}
+          {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800 flex gap-2"><AlertTriangle size={18} className="shrink-0" />{error}</p>}
+          <button type="submit" disabled={busy} className="w-full min-h-12 bg-indigo-700 text-white rounded-xl font-bold disabled:opacity-50">{busy ? 'Création en cours…' : requestLocked ? 'Vérifier et reprendre la même création' : 'Créer l’expédition'}</button>
+          {journalSaved && !busy && <details className="rounded-xl border border-slate-200 p-3 text-sm text-slate-700"><summary className="min-h-11 cursor-pointer font-semibold">La reprise est définitivement bloquée</summary><p>Vérifiez d’abord les colis de votre compte. Si le refus persiste, vous pouvez abandonner le rappel après cette vérification. Aucun colis existant ne sera annulé.</p><label className="my-3 flex items-start gap-3"><input type="checkbox" checked={verifiedBeforeAbandon} onChange={event => setVerifiedBeforeAbandon(event.target.checked)} className="mt-1 w-5 h-5 shrink-0" /> J’ai vérifié Mes colis et je souhaite abandonner cette reprise.</label><button type="button" disabled={!verifiedBeforeAbandon} onClick={() => void abandonPending()} className="min-h-11 rounded-xl border border-red-300 px-3 text-red-800 font-semibold disabled:opacity-50">Abandonner la reprise après vérification</button></details>}
 
-          <input value={address} onChange={e => setAddress(e.target.value)} placeholder="Adresse (rue et numéro) *" className={inputCls} />
-          <div className="grid grid-cols-3 gap-2">
-            <input value={postalCode} onChange={e => setPostalCode(e.target.value)} placeholder="Code postal" className={inputCls} />
-            <input value={city} onChange={e => setCity(e.target.value)} placeholder="Ville" className={`${inputCls} col-span-2`} />
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <input value={contactPhone} onChange={e => setContactPhone(e.target.value)} placeholder="Téléphone *" className={inputCls} />
-            <input value={contactEmail} onChange={e => setContactEmail(e.target.value)} placeholder="Email (copie du BL)" className={inputCls} />
-          </div>
-
-          {/* Enregistrer le nouveau destinataire dans le carnet */}
-          {!linkedId && contactName.trim() && onSaveRecipient && (
-            <label className="flex items-center gap-2 text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 cursor-pointer select-none">
-              <input type="checkbox" checked={saveToBook} onChange={e => setSaveToBook(e.target.checked)} className="w-4 h-4 accent-indigo-600" />
-              Ajouter ce destinataire à mon carnet <span className="text-slate-400">(pour ne plus le retaper)</span>
-            </label>
-          )}
-
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="text-[11px] text-slate-500 font-medium">Nombre de colis</label>
-              <input type="number" min={1} max={50} value={packageCount} onChange={e => setPackageCount(Math.max(1, Number(e.target.value) || 1))} className={inputCls} />
-            </div>
-            <div>
-              <label className="text-[11px] text-slate-500 font-medium">Poids (kg)</label>
-              <input type="number" min={0} step="0.1" value={weight} onChange={e => setWeight(e.target.value)} placeholder="—" className={inputCls} />
-            </div>
-          </div>
-          <input value={clientReference} onChange={e => setClientReference(e.target.value)} placeholder="Votre référence (optionnel)" className={inputCls} />
-          <input value={comment} onChange={e => setComment(e.target.value)} placeholder="Consignes / remarque (optionnel)" className={inputCls} />
-        </div>
-
-        {/* Format d'étiquette */}
-        <div className="mt-3">
-          <label className="text-[11px] text-slate-500 font-medium">Format d'étiquette</label>
-          <div className="flex gap-2 mt-1">
-            {(['A4', 'A5', 'A6'] as LabelFormat[]).map(f => (
-              <button key={f} onClick={() => setFormat(f)}
-                className={`flex-1 py-2 rounded-xl text-sm font-bold border ${format === f ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200'}`}>
-                {f}
-              </button>
-            ))}
-          </div>
-          <p className="text-[11px] text-slate-400 mt-1">A6 = 1 étiquette/page (entrepôt) · A4 = 4/page</p>
-        </div>
-
-        {zoneWarn && (
-          <div className="mt-3 text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-3 py-2 flex items-center gap-2">
-            <MapPin size={14} /> Zone non reconnue depuis l'adresse — l'expédition est créée, le transporteur ajustera la zone.
-          </div>
-        )}
-        {error && <div className="mt-3 text-xs bg-red-50 border border-red-200 text-red-700 rounded-lg px-3 py-2 flex items-center gap-2"><AlertTriangle size={14} /> {error}</div>}
-
-        <button
-          onClick={handleSubmit}
-          disabled={!canSubmit || busy}
-          className="w-full mt-4 flex items-center justify-center gap-2 py-3 bg-indigo-600 text-white rounded-xl font-bold text-sm disabled:opacity-40"
-        >
-          <Printer size={16} /> {busy ? 'Création…' : `Créer ${packageCount > 1 ? packageCount + ' colis' : "l'expédition"} + imprimer`}
-        </button>
-      </div>
-    </div>,
-    document.body
+        </form>
+      )}
+    </Modal>
   );
 };
-
 export default CreateShipmentModal;

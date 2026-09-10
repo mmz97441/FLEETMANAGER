@@ -1,23 +1,21 @@
 import { escapeHtml } from '../utils/html';
 /**
  * SHIPPING LABEL
- * 
- * Étiquette de transport imprimable, format standard ~10x15cm (A6).
+ *
+ * Étiquette de transport imprimable, format 100 × 150 mm.
  * Génère un code-barres Code128 à partir du numéro de commande.
- * 
+ *
  * Usage :
  * - Portail client : bouton "Imprimer l'étiquette" sur devis accepté
  * - Back-office : impression depuis la vue colis
- * - Impression par lot (futur)
- * 
- * Format : Optimisé pour impression sur étiqueteuse ou imprimante A4
- *           (1 étiquette par page A6 / 4 par A4)
+ * L'impression par lot dispose de son propre gabarit dans pickupService.
  */
 
-import React, { useRef, useEffect, useCallback } from 'react';
+import React, { useRef, useEffect, useCallback, useState } from 'react';
 import JsBarcode from 'jsbarcode';
-import { QuoteRequest, Zone, ZONE_COLORS } from '../types';
-import { Printer, X } from 'lucide-react';
+import { QuoteRequest, Zone } from '../types';
+import { Printer } from 'lucide-react';
+import Modal from './shared/Modal';
 import { formatWeight } from '../utils/format';
 
 export interface ShippingLabelData {
@@ -25,7 +23,7 @@ export interface ShippingLabelData {
   orderNumber: string;             // Numéro affiché + code-barres
   barcode?: string;                // Si différent du orderNumber
   externalId?: string;             // Ref client (ex: C0004911-15087911)
-  
+
   // Expéditeur
   senderName: string;
   senderAddress?: string;
@@ -74,8 +72,8 @@ export const quoteToLabelData = (quote: QuoteRequest): ShippingLabelData => {
   const address = destParts[0] || '';
 
   return {
-    orderNumber: quote.convertedToPackageId 
-      ? `Q${quote.id.slice(-6)}` 
+    orderNumber: quote.convertedToPackageId
+      ? `Q${quote.id.slice(-6)}`
       : quote.id.slice(-8),
     externalId: quote.id,
     senderName: quote.clientName,
@@ -99,49 +97,19 @@ export const quoteToLabelData = (quote: QuoteRequest): ShippingLabelData => {
   };
 };
 
-const ShippingLabel: React.FC<ShippingLabelProps> = ({ 
-  data, 
-  onClose, 
-  companyName = 'FleetGenius Transport' 
-}) => {
-  const barcodeRef = useRef<SVGSVGElement>(null);
-  const printAreaRef = useRef<HTMLDivElement>(null);
+export const shippingBarcodeOptions = {
+  format: 'CODE128', width: 2, height: 80, displayValue: false,
+  // Ten modules of white space on each side remain inside the SVG viewBox.
+  margin: 0, marginLeft: 20, marginRight: 20,
+  background: '#ffffff', lineColor: '#000000',
+};
 
-  // Générer le code-barres
-  useEffect(() => {
-    if (barcodeRef.current && data.orderNumber) {
-      try {
-        JsBarcode(barcodeRef.current, data.barcode || data.orderNumber, {
-          format: 'CODE128',
-          width: 2,
-          height: 50,
-          displayValue: true,
-          fontSize: 14,
-          font: 'monospace',
-          fontOptions: 'bold',
-          margin: 5,
-          background: '#ffffff',
-          lineColor: '#000000'
-        });
-      } catch (e) {
-        /* silenced */
-      }
-    }
-  }, [data.orderNumber, data.barcode]);
-
-  // Impression
-  const handlePrint = useCallback(() => {
-    const printContent = printAreaRef.current;
-    if (!printContent) return;
-
-    const printWindow = window.open('', '_blank', 'width=450,height=650');
-    if (!printWindow) return;
-
-    printWindow.document.write(`
+/** The markup comes from this component's React-rendered label, including its local SVG. */
+export const buildShippingLabelPrintHtml = (markup: string, orderNumber: string): string => `
       <!DOCTYPE html>
       <html>
       <head>
-        <title>Étiquette - ${escapeHtml(data.orderNumber)}</title>
+        <title>Étiquette - ${escapeHtml(orderNumber)}</title>
         <style>
           @page {
             size: 100mm 150mm;
@@ -154,6 +122,8 @@ const ShippingLabel: React.FC<ShippingLabelProps> = ({
           }
           body {
             font-family: Arial, Helvetica, sans-serif;
+            background: #fff;
+            color: #000;
             width: 100mm;
             height: 150mm;
             padding: 3mm;
@@ -161,6 +131,8 @@ const ShippingLabel: React.FC<ShippingLabelProps> = ({
           .label-container {
             width: 100%;
             height: 100%;
+            min-width: 0;
+            overflow-wrap: anywhere;
             border: 2px solid #000;
             display: flex;
             flex-direction: column;
@@ -262,13 +234,16 @@ const ShippingLabel: React.FC<ShippingLabelProps> = ({
             font-weight: bold;
           }
           .barcode-block {
+            flex-shrink: 0;
             padding: 2mm;
             text-align: center;
             border-bottom: 1px solid #000;
           }
           .barcode-block svg {
             max-width: 100%;
-            height: 40px;
+            width: 100%;
+            height: 22mm;
+            display: block;
           }
           .comment-block {
             padding: 2mm 3mm;
@@ -292,23 +267,78 @@ const ShippingLabel: React.FC<ShippingLabelProps> = ({
         </style>
       </head>
       <body>
-        ${printContent.innerHTML}
+        ${markup}
       </body>
       </html>
-    `);
+    `;
 
-    printWindow.document.close();
-    setTimeout(() => {
-      printWindow.print();
+const ShippingLabel: React.FC<ShippingLabelProps> = ({
+  data,
+  onClose,
+  companyName = 'FleetGenius Transport'
+}) => {
+  const barcodeRef = useRef<SVGSVGElement>(null);
+  const printAreaRef = useRef<HTMLDivElement>(null);
+  const [barcodeError, setBarcodeError] = useState('');
+  const [printError, setPrintError] = useState('');
+  const barcodeValue = data.barcode || data.orderNumber;
+
+  // Only the bars scale; keep the full identifier separately readable below.
+  useEffect(() => {
+    setBarcodeError('');
+    setPrintError('');
+    if (!barcodeRef.current) return;
+    try {
+      JsBarcode(barcodeRef.current, barcodeValue, shippingBarcodeOptions);
+      barcodeRef.current.setAttribute('preserveAspectRatio', 'none');
+    } catch {
+      barcodeRef.current.replaceChildren();
+      setBarcodeError('Le code-barres ne peut pas être généré. Vérifiez le numéro du colis avant d’imprimer.');
+    }
+  }, [barcodeValue]);
+
+  // Impression
+  const handlePrint = useCallback(() => {
+    const printContent = printAreaRef.current;
+    if (!printContent || barcodeError) return;
+    setPrintError('');
+
+    let printWindow: Window | null;
+    try { printWindow = window.open('', '_blank', 'width=450,height=650'); }
+    catch { printWindow = null; }
+    if (!printWindow) {
+      setPrintError('La fenêtre d’impression a été bloquée. Autorisez les fenêtres contextuelles pour ce site, puis réessayez.');
+      return;
+    }
+    try {
+      printWindow.document.write(buildShippingLabelPrintHtml(printContent.innerHTML, data.orderNumber));
+      printWindow.document.close();
+      const target = printWindow;
+      setTimeout(() => {
+        try {
+          const label = target.document.querySelector<HTMLElement>('.label-container');
+          if (!label || label.scrollHeight > label.clientHeight + 1 || label.scrollWidth > label.clientWidth + 1) {
+            setPrintError('Le contenu dépasse le format 100 × 150 mm. Raccourcissez les instructions ou l’adresse avec le bureau avant d’imprimer.');
+            target.close();
+            return;
+          }
+          target.focus();
+          target.print();
+        } catch {
+          setPrintError('L’impression n’a pas pu être ouverte. Vérifiez les autorisations du navigateur, puis réessayez.');
+        }
+      }, 250);
+    } catch {
       printWindow.close();
-    }, 250);
-  }, [data.orderNumber]);
+      setPrintError('L’étiquette n’a pas pu être préparée pour l’impression. Réessayez.');
+    }
+  }, [data.orderNumber, barcodeError]);
 
   const formatDate = (dateStr?: string) => {
     if (!dateStr) return '—';
     try {
-      return new Date(dateStr).toLocaleDateString('fr-FR', { 
-        day: '2-digit', month: '2-digit', year: 'numeric' 
+      return new Date(dateStr).toLocaleDateString('fr-FR', {
+        day: '2-digit', month: '2-digit', year: 'numeric'
       });
     } catch { return '—'; }
   };
@@ -316,48 +346,33 @@ const ShippingLabel: React.FC<ShippingLabelProps> = ({
   const zoneDisplay = data.zone || '?';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full">
-        {/* Toolbar */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200">
-          <h3 className="font-bold text-slate-800 text-sm">Aperçu étiquette</h3>
-          <div className="flex gap-2">
-            <button
-              onClick={handlePrint}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700 transition-colors"
-            >
-              <Printer size={14} />
-              Imprimer
-            </button>
-            {onClose && (
-              <button
-                onClick={onClose}
-                className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-              >
-                <X size={18} />
-              </button>
-            )}
-          </div>
-        </div>
-
+    <Modal isOpen={true} onClose={onClose || (() => {})} showCloseButton={!!onClose}
+      closeOnOverlay={!!onClose} closeOnEscape={!!onClose} title="Aperçu de l’étiquette" size="lg"
+      footer={<div className="space-y-2">
+        {(barcodeError || printError) && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-900">{barcodeError || printError}</p>}
+        <button type="button" onClick={handlePrint} disabled={!!barcodeError} className="flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-blue-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">
+          <Printer size={16} /> Imprimer l’étiquette
+        </button>
+        <p className="text-center text-xs text-slate-600">Format 100 × 150 mm · Taille réelle 100 % · Marges désactivées dans l’imprimante</p>
+      </div>}>
         {/* Label Preview */}
-        <div className="p-5 flex justify-center">
-          <div 
+        <div className="flex min-w-0 justify-center">
+          <div
             ref={printAreaRef}
-            className="bg-white border-2 border-black"
-            style={{ width: '378px', minHeight: '567px', fontSize: '0' }} // ~100mm x 150mm at 96dpi
+            className="w-full min-w-0 bg-white"
+            style={{ maxWidth: '378px', fontSize: '0', overflowWrap: 'anywhere' }}
           >
-            <div className="label-container flex flex-col h-full" style={{ fontFamily: 'Arial, sans-serif' }}>
+            <div className="label-container flex min-w-0 flex-col border-2 border-black" style={{ fontFamily: 'Arial, sans-serif' }}>
 
               {/* HEADER — Société + Zone */}
-              <div className="flex items-center justify-between px-3 py-2 border-b-2 border-black bg-gray-100">
+              <div className="header flex items-center justify-between gap-2 px-3 py-2 border-b-2 border-black bg-gray-100">
                 <span style={{ fontSize: '12pt', fontWeight: 'bold' }}>{companyName}</span>
-                <span 
+                <span
                   className="zone-badge"
-                  style={{ 
-                    fontSize: '14pt', fontWeight: 'bold', 
-                    padding: '2px 10px', border: '2px solid #000', 
-                    borderRadius: '6px', background: '#000', color: '#fff' 
+                  style={{
+                    fontSize: '14pt', fontWeight: 'bold',
+                    padding: '2px 10px', border: '2px solid #000',
+                    borderRadius: '6px', background: '#000', color: '#fff', whiteSpace: 'nowrap', flexShrink: 0
                   }}
                 >
                   {zoneDisplay}
@@ -365,7 +380,7 @@ const ShippingLabel: React.FC<ShippingLabelProps> = ({
               </div>
 
               {/* EXPÉDITEUR */}
-              <div className="px-3 py-1.5 border-b border-dashed border-gray-400">
+              <div className="sender-block px-3 py-1.5 border-b border-dashed border-gray-400">
                 <div style={{ fontSize: '7pt', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5pt', color: '#999' }}>
                   Expéditeur
                 </div>
@@ -378,7 +393,7 @@ const ShippingLabel: React.FC<ShippingLabelProps> = ({
               </div>
 
               {/* DESTINATAIRE (bloc principal) */}
-              <div className="px-3 py-2 border-b-2 border-black flex-1">
+              <div className="recipient-block px-3 py-2 border-b-2 border-black flex-1">
                 <div style={{ fontSize: '7pt', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5pt', color: '#999', marginBottom: '2px' }}>
                   Destinataire
                 </div>
@@ -402,9 +417,9 @@ const ShippingLabel: React.FC<ShippingLabelProps> = ({
                   </div>
                 )}
                 {data.timeWindowLabel || (data.timeWindowStart && data.timeWindowEnd) ? (
-                  <div style={{ 
-                    display: 'inline-block', marginTop: '4px', padding: '2px 8px', 
-                    background: '#eee', borderRadius: '4px', fontSize: '9pt', fontWeight: 'bold' 
+                  <div style={{
+                    display: 'inline-block', marginTop: '4px', padding: '2px 8px',
+                    background: '#eee', borderRadius: '4px', fontSize: '9pt', fontWeight: 'bold'
                   }}>
                     🕐 {data.timeWindowLabel || `${data.timeWindowStart} — ${data.timeWindowEnd}`}
                   </div>
@@ -412,21 +427,21 @@ const ShippingLabel: React.FC<ShippingLabelProps> = ({
               </div>
 
               {/* DÉTAILS — Poids / Volume / Date / N° colis */}
-              <div className="flex border-b border-black">
-                <div className="flex-1 px-2 py-1.5 border-r border-black text-center">
+              <div className="details-row grid grid-cols-2 sm:flex border-b border-black">
+                <div className="detail-cell min-w-0 flex-1 px-2 py-1.5 border-r border-black text-center">
                   <div style={{ fontSize: '6pt', fontWeight: 'bold', textTransform: 'uppercase', color: '#999' }}>Poids</div>
                   <div style={{ fontSize: '10pt', fontWeight: 'bold' }}>{formatWeight(data.weight) || '—'}</div>
                 </div>
-                <div className="flex-1 px-2 py-1.5 border-r border-black text-center">
+                <div className="detail-cell min-w-0 flex-1 px-2 py-1.5 border-r border-black text-center">
                   <div style={{ fontSize: '6pt', fontWeight: 'bold', textTransform: 'uppercase', color: '#999' }}>Volume</div>
                   <div style={{ fontSize: '10pt', fontWeight: 'bold' }}>{data.volume ? `${data.volume} m³` : '—'}</div>
                 </div>
-                <div className="flex-1 px-2 py-1.5 border-r border-black text-center">
+                <div className="detail-cell min-w-0 flex-1 px-2 py-1.5 border-r border-black text-center">
                   <div style={{ fontSize: '6pt', fontWeight: 'bold', textTransform: 'uppercase', color: '#999' }}>Livraison</div>
-                  <div style={{ fontSize: '10pt', fontWeight: 'bold' }}>{formatDate(data.deliveryDate)}</div>
+                  <div style={{ fontSize: '8pt', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatDate(data.deliveryDate)}</div>
                 </div>
                 {data.packageCount && data.packageTotal && (
-                  <div className="flex-1 px-2 py-1.5 text-center">
+                  <div className="detail-cell min-w-0 flex-1 px-2 py-1.5 text-center">
                     <div style={{ fontSize: '6pt', fontWeight: 'bold', textTransform: 'uppercase', color: '#999' }}>Colis</div>
                     <div style={{ fontSize: '10pt', fontWeight: 'bold' }}>{data.packageCount}/{data.packageTotal}</div>
                   </div>
@@ -434,13 +449,14 @@ const ShippingLabel: React.FC<ShippingLabelProps> = ({
               </div>
 
               {/* CODE-BARRES */}
-              <div className="px-2 py-1 text-center border-b border-black">
-                <svg ref={barcodeRef} />
+              <div className="barcode-block min-w-0 shrink-0 px-2 py-1 text-center border-b border-black">
+                <svg ref={barcodeRef} role="img" aria-label={`Code-barres ${barcodeValue}`} preserveAspectRatio="none" style={{ width: '100%', maxWidth: '100%', height: '22mm', display: 'block' }} />
+                <div className="barcode-value" style={{ font: 'bold 8pt monospace', overflowWrap: 'anywhere', marginTop: '1mm' }}>{barcodeValue}</div>
               </div>
 
               {/* COMMENTAIRE / DESCRIPTION */}
               {(data.goodsDescription || data.comment) && (
-                <div className="px-3 py-1.5" style={{ fontSize: '7pt', color: '#555', maxHeight: '35px', overflow: 'hidden' }}>
+                <div className="comment-block px-3 py-1.5" style={{ fontSize: '7pt', color: '#555', maxHeight: '35px', overflow: 'hidden' }}>
                   {data.goodsDescription && <span><strong>Contenu:</strong> {data.goodsDescription}</span>}
                   {data.comment && <span> | <strong>Note:</strong> {data.comment}</span>}
                 </div>
@@ -449,14 +465,7 @@ const ShippingLabel: React.FC<ShippingLabelProps> = ({
           </div>
         </div>
 
-        {/* Infos sous l'aperçu */}
-        <div className="px-5 pb-4 text-center">
-          <p className="text-xs text-slate-400">
-            Format 10×15 cm — Compatible étiqueteuse et impression A4
-          </p>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 };
 

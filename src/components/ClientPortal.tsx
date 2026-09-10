@@ -4,6 +4,8 @@ import { QuoteRequest, QuoteStatus, User, UserRole, ViewState, SavedAddress, Del
 import { Package, MapPin, Calendar, Plus, CheckCircle, XCircle, Clock, Truck, Euro, Send, X, ArrowRight, User as UserIcon, Phone, Box, Info, Bell, FileText, Weight, Building2, StickyNote, BarChart3, Users, Mail, UserPlus, AlertTriangle, PieChart as PieChartIcon, Edit, Trash2, HelpCircle, PhoneCall, FileQuestion, BookOpen, ChevronDown, ChevronUp, Bookmark, Star, Printer, Search, Download, QrCode, Eye, FileSpreadsheet, Navigation } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import Modal from './shared/Modal';
+import { FormInput } from './shared/FormInput';
+import { useUrlParam, updateUrlParams } from '../hooks/useUrlState';
 import ConfirmModal from './ConfirmModal';
 import PackageTimeline from './PackageTimeline';
 import { sendUserInvitationEmail } from '../services/emailService';
@@ -34,16 +36,8 @@ import { changePassword } from '../services/accountService';
 // ============================================================================
 // COMPOSANT InputField DÉFINI EN DEHORS pour éviter le bug de focus
 // ============================================================================
-const InputField = ({ icon: Icon, ...props }: any) => (
-    <div className="relative">
-        <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
-            <Icon size={18} />
-        </div>
-        <input 
-            {...props}
-            className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 font-medium focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all placeholder:text-slate-400 shadow-sm"
-        />
-    </div>
+const InputField = ({ icon, label, placeholder, ...props }: any) => (
+    <FormInput icon={icon} label={label || placeholder} placeholder={placeholder} {...props} />
 );
 
 // ============================================================================
@@ -362,6 +356,17 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   // === MES EXPÉDITIONS (colis du client) ===
   const [clientPackages, setClientPackages] = useState<PackageType[]>([]);
   const [isLoadingPackages, setIsLoadingPackages] = useState(true);
+  const [labelPrintError, setLabelPrintError] = useState('');
+  const printShipmentLabels = (parcels: PackageType[]) => {
+    if (!parcels.length) return;
+    setLabelPrintError('');
+    try {
+      const win = window.open('', '_blank');
+      if (!win) { setLabelPrintError('La fenêtre d’impression est bloquée. Autorisez les fenêtres de ce site puis cliquez à nouveau sur Imprimer. Vos colis sont déjà enregistrés.'); return; }
+      win.opener = null;
+      win.document.write(generateBatchLabelsHTML(parcels, currentUser.companyName || 'Expéditeur')); win.document.close();
+    } catch { setLabelPrintError('L’impression n’a pas pu s’ouvrir. Les colis sont enregistrés ; vous pouvez réessayer.'); }
+  };
 
   // Gestion du carnet de destinataires (CRUD)
   const recipientPackageCounts = useMemo(() => {
@@ -399,9 +404,12 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
     }
   };
 
-  const [shipmentSearch, setShipmentSearch] = useState('');
-  const [shipmentFilter, setShipmentFilter] = useState<'all' | 'pending' | 'transit' | 'delivered' | 'failed'>('all');
-  const [expandedShipmentId, setExpandedShipmentId] = useState<string | null>(null); // timeline colis dépliée
+  const [shipmentSearch, setShipmentSearchParam] = useUrlParam<string>('clientSearch', '');
+  const setShipmentSearch = (value: string) => updateUrlParams({ clientSearch: value, package: null }, true);
+  const [shipmentFilter, setShipmentFilterParam] = useUrlParam<'all' | 'pending' | 'transit' | 'delivered' | 'failed'>('clientStatus', 'all', ['all', 'pending', 'transit', 'delivered', 'failed']);
+  const setShipmentFilter = (value: 'all' | 'pending' | 'transit' | 'delivered' | 'failed') => updateUrlParams({ clientStatus: value === 'all' ? null : value, package: null });
+  const [expandedShipmentId, setExpandedShipmentParam] = useUrlParam<string>('package', '');
+  const setExpandedShipmentId = (id: string | null) => setExpandedShipmentParam(id || '');
   const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null); // groupe pharmacie déplié
   const [selectedLabels, setSelectedLabels] = useState<Set<string>>(new Set());
   const [showCreateShipment, setShowCreateShipment] = useState(false);
@@ -644,7 +652,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
               
               setIsModalOpen(false);
               setNewRequest({
-                  originAddress: '', originCity: '', originContactName: '', originContactPhone: '',
+                  originAddress: _origin.street, originCity: _origin.city, originContactName: currentUser.companyName || '', originContactPhone: currentUser.companyPhone || '',
                   destinationAddress: '', destinationCity: '', destContactName: '', destContactPhone: '',
                   goodsDescription: '', weight: '', length: '', width: '', height: '', volume: 0,
                   pickupDate: '', deliveryDate: '', clientNotes: ''
@@ -721,7 +729,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
       setIsConfirmModalOpen(false);
       setPendingAction(null);
       } catch (error) {
-        alert(error instanceof Error ? error.message : "L’opération n’a pas été enregistrée. Réessayez.");
+        throw error; // ConfirmModal keeps the failure visible and the pending payload available.
       }
   };
 
@@ -892,8 +900,9 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                         onClick={() => setIsModalOpen(true)}
                         className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl font-bold shadow-lg shadow-indigo-200 transition-all flex items-center gap-2 transform active:scale-95"
                     >
-                        <Plus size={18} /> Nouvelle Demande
+                        <Plus size={18} /> Demander un devis
                     </button>
+                    <p className="w-full text-center text-sm text-slate-600">Recevoir une offre de prix avant de confirmer le transport.</p>
                 </div>
             </div>
         </div>
@@ -922,12 +931,12 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
               <p className="text-slate-500 mb-4">Que voulez-vous faire ?</p>
               <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
                 {[
-                  { icon: Plus, label: 'Créer une expédition', hint: 'Nouvel envoi + étiquette', color: 'bg-indigo-600', onClick: () => setShowCreateShipment(true) },
+                  { icon: Plus, label: 'Créer une expédition', hint: 'Créer les colis à collecter', color: 'bg-indigo-600', onClick: () => setShowCreateShipment(true) },
                   { icon: Search, label: 'Suivre mes colis', hint: 'Où sont mes envois ?', color: 'bg-blue-600', onClick: () => onNavigate?.('client_shipments') },
-                  { icon: Navigation, label: 'Suivi live', hint: 'Le livreur en direct', color: 'bg-teal-600', onClick: () => onNavigate?.('client_tracking') },
-                  { icon: BarChart3, label: 'Mes statistiques', hint: 'KPI & graphiques', color: 'bg-fuchsia-600', onClick: () => onNavigate?.('client_analytics') },
+                  { icon: Navigation, label: 'Suivi des livraisons', hint: 'Dernières positions reçues', color: 'bg-teal-600', onClick: () => onNavigate?.('client_tracking') },
+                  { icon: BarChart3, label: 'Mes statistiques', hint: 'Résultats et tendances', color: 'bg-slate-700', onClick: () => onNavigate?.('client_analytics') },
                   { icon: UserPlus, label: 'Mes destinataires', hint: 'Ajouter, modifier, importer', color: 'bg-emerald-600', onClick: () => onNavigate?.('client_recipients') },
-                  { icon: Building2, label: 'Mon Entreprise', hint: 'Infos société + équipe', color: 'bg-amber-500', onClick: () => onNavigate?.('client_company') },
+                  { icon: Building2, label: 'Mon Entreprise', hint: 'Infos société + équipe', color: 'bg-slate-700', onClick: () => onNavigate?.('client_company') },
                   { icon: UserIcon, label: 'Mon compte', hint: 'Profil & mot de passe', color: 'bg-slate-700', onClick: () => setShowAccountHub(true) },
                 ].map((a, i) => (
                   <button
@@ -1515,12 +1524,14 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                     ))}
                 </div>
 
+                {labelPrintError && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{labelPrintError}</p>}
                 {/* Actions : Recherche + Impression lot */}
                 <div className="flex flex-col md:flex-row gap-3">
                     <div className="relative flex-1">
                         <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                         <input
-                            type="text"
+                            type="search"
+                            aria-label="Rechercher dans mes colis"
                             value={shipmentSearch}
                             onChange={(e) => setShipmentSearch(e.target.value)}
                             placeholder="Rechercher par code, destinataire, adresse..."
@@ -1533,9 +1544,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                             onClick={() => {
                                 const selected = clientPackages.filter(p => selectedLabels.has(p.id));
                                 if (selected.length === 0) return;
-                                const html = generateBatchLabelsHTML(selected, 'FleetGenius Transport');
-                                const win = window.open('', '_blank');
-                                if (win) { win.document.write(html); win.document.close(); }
+                                printShipmentLabels(selected);
                             }}
                             className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-bold text-sm shadow-lg shadow-indigo-200 active:scale-95 transition-transform"
                         >
@@ -1548,9 +1557,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                         onClick={() => {
                             const pending = clientPackages.filter(p => p.status === PackageStatus.PENDING);
                             if (pending.length === 0) return;
-                            const html = generateBatchLabelsHTML(pending as PackageType[], 'FleetGenius Transport');
-                            const win = window.open('', '_blank');
-                            if (win) { win.document.write(html); win.document.close(); }
+                            printShipmentLabels(pending);
                         }}
                         className="flex items-center gap-2 px-5 py-2.5 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold text-sm hover:bg-slate-50 transition-colors"
                     >
@@ -1560,8 +1567,13 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                 </div>
 
                 {/* Liste des colis */}
-                {(() => {
+{expandedShipmentId && <div role="status" className="rounded-xl border border-indigo-200 bg-indigo-50 p-3 flex flex-wrap justify-between gap-3 text-sm text-indigo-900">
+                      <p>{isLoadingPackages ? 'Chargement du colis demandé…' : clientPackages.some(parcel => parcel.id === expandedShipmentId) ? 'Colis ouvert depuis un lien. Les filtres précédents sont temporairement ignorés.' : 'Ce colis est indisponible dans votre compte ou n’existe plus.'}</p>
+                      <button type="button" onClick={() => updateUrlParams({ package: null, clientSearch: null, clientStatus: null })} className="font-semibold underline min-h-11">Afficher tous mes colis</button>
+                    </div>}
+                                {(() => {
                     const filtered = clientPackages.filter(p => {
+                        if (expandedShipmentId) return p.id === expandedShipmentId;
                         // Filtre statut
                         if (shipmentFilter === 'pending' && p.status !== PackageStatus.PENDING) return false;
                         if (shipmentFilter === 'transit' && ![PackageStatus.COLLECTED, PackageStatus.AT_HUB, PackageStatus.SORTED, PackageStatus.IN_TRANSIT, PackageStatus.LOADED, PackageStatus.IN_DELIVERY].includes(p.status)) return false;
@@ -1624,7 +1636,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                             {Array.from(pointsMap.entries()).map(([key, pkgs]) => {
                                                 const rep = pkgs[0];
                                                 const groupId = day + '||' + key;
-                                                const open = expandedGroupId === groupId;
+                                                const open = expandedGroupId === groupId || pkgs.some(parcel => parcel.id === expandedShipmentId);
                                                 const sStatus = summaryStatus(pkgs);
                                                 const sColors = PACKAGE_STATUS_COLORS[sStatus] || { bg:'bg-slate-100', text:'text-slate-700' };
                                                 const delivered = pkgs.filter(p => p.status === PackageStatus.DELIVERED).length;
@@ -1643,9 +1655,9 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                                             <HintTooltip label={STATUS_TOOLTIP[sStatus] || sStatus}><span className={`hidden sm:inline-flex items-center px-2 py-1 rounded-lg text-[11px] font-bold cursor-help ${sColors.bg} ${sColors.text}`}>
                                                                 {delivered === pkgs.length ? 'Tous livrés' : delivered > 0 ? `${delivered}/${pkgs.length} livrés` : sStatus}
                                                             </span></HintTooltip>
-                                                            <HintTooltip label="Imprimer les étiquettes"><button onClick={() => { const html = generateBatchLabelsHTML(pkgs as PackageType[], currentUser.companyName || 'Expéditeur'); const win=window.open('','_blank'); if(win){win.document.write(html);win.document.close();} }} className="p-2 bg-slate-100 hover:bg-indigo-100 text-slate-600 hover:text-indigo-700 rounded-lg"><QrCode size={14} /></button></HintTooltip>
-                                                            <HintTooltip label="Bon de livraison (PDF)"><button onClick={() => openDeliveryNote(rep as PackageType, clientPackages, { companyName: companyForm.companyName || currentUser?.companyName || rep.clientName, address: companyForm.companyAddress || undefined, siret: companyForm.companySiret || undefined, phone: companyForm.companyPhone || undefined, email: currentUser?.email })} className="p-2 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded-lg"><FileText size={14} /></button></HintTooltip>
-                                                            <HintTooltip label={open ? 'Masquer les colis' : 'Voir les colis'}><button onClick={() => setExpandedGroupId(open ? null : groupId)} className="p-2 bg-slate-100 hover:bg-blue-100 text-slate-600 rounded-lg">{open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</button></HintTooltip>
+                                                            <HintTooltip label="Imprimer les étiquettes"><button aria-label="Imprimer les étiquettes du destinataire" onClick={() => printShipmentLabels(pkgs)} className="p-2 bg-slate-100 hover:bg-indigo-100 text-slate-600 hover:text-indigo-700 rounded-lg"><QrCode size={14} /></button></HintTooltip>
+                                                            <HintTooltip label="Bon de livraison (PDF)"><button aria-label="Ouvrir le bon de livraison du destinataire" onClick={() => openDeliveryNote(rep as PackageType, clientPackages, { companyName: companyForm.companyName || currentUser?.companyName || rep.clientName, address: companyForm.companyAddress || undefined, siret: companyForm.companySiret || undefined, phone: companyForm.companyPhone || undefined, email: currentUser?.email })} className="p-2 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded-lg"><FileText size={14} /></button></HintTooltip>
+                                                            <HintTooltip label={open ? 'Masquer les colis' : 'Voir les colis'}><button aria-label={open ? 'Masquer les colis du destinataire' : 'Afficher les colis du destinataire'} aria-expanded={open} onClick={() => { if (open && pkgs.some(parcel => parcel.id === expandedShipmentId)) setExpandedShipmentId(null); setExpandedGroupId(open ? null : groupId); }} className="p-2 bg-slate-100 hover:bg-blue-100 text-slate-600 rounded-lg">{open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</button></HintTooltip>
                                                         </div>
                                                     </div>
                                                     {open && (
@@ -1664,11 +1676,11 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                                                             )}
                                                                         </div>
                                                                         <HintTooltip label={STATUS_TOOLTIP[pkg.status] || pkg.status}><span className={`inline-flex items-center px-2 py-1 rounded-lg text-[11px] font-bold cursor-help ${sc.bg} ${sc.text}`}>{pkg.status}</span></HintTooltip>
-                                                                        <HintTooltip label="Étiquette de ce colis"><button onClick={() => { const html = generateBatchLabelsHTML([pkg as PackageType], currentUser.companyName || 'Expéditeur'); const win=window.open('','_blank'); if(win){win.document.write(html);win.document.close();} }} className="p-1.5 bg-slate-100 hover:bg-indigo-100 text-slate-600 rounded-lg"><QrCode size={13} /></button></HintTooltip>
+                                                                        <HintTooltip label="Étiquette de ce colis"><button aria-label={`Imprimer l’étiquette du colis ${pkg.externalId || pkg.orderNumber}`} onClick={() => printShipmentLabels([pkg])} className="p-1.5 bg-slate-100 hover:bg-indigo-100 text-slate-600 rounded-lg"><QrCode size={13} /></button></HintTooltip>
                                                                         {pkg.status === PackageStatus.DELIVERED && pkg.pod && (
                                                                             <HintTooltip label="Preuve de livraison"><button onClick={() => setViewingPOD({ pod: pkg.pod!, quote: { id: pkg.id, clientName: pkg.clientName, destination: pkg.city, destinationAddress: pkg.address, destinationContact: { name: pkg.contactName } } as any })} className="p-1.5 bg-green-100 hover:bg-green-200 text-green-700 rounded-lg"><Eye size={13} /></button></HintTooltip>
                                                                         )}
-                                                                        <HintTooltip label={tOpen ? 'Masquer le suivi' : 'Voir le suivi'}><button onClick={() => setExpandedShipmentId(tOpen ? null : pkg.id)} className="p-1.5 bg-slate-100 hover:bg-blue-100 text-slate-600 rounded-lg">{tOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}</button></HintTooltip>
+                                                                        <HintTooltip label={tOpen ? 'Masquer le suivi' : 'Voir le suivi'}><button aria-label={tOpen ? 'Masquer le suivi du colis' : 'Afficher le suivi du colis'} aria-expanded={tOpen} onClick={() => setExpandedShipmentId(tOpen ? null : pkg.id)} className="p-1.5 bg-slate-100 hover:bg-blue-100 text-slate-600 rounded-lg">{tOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}</button></HintTooltip>
                                                                     </div>
                                                                     {tOpen && (
                                                                         <div className="mt-2">
@@ -1731,124 +1743,20 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
             </div>
         )}
 
-        {/* --- VIEW: HELP & SUPPORT --- */}
-        {activeView === 'help' && (
-            <div className="space-y-8 animate-fade-in">
-                
-                {/* Intro Section */}
-                <div className="bg-gradient-to-r from-indigo-700 to-blue-600 rounded-3xl p-8 text-white shadow-xl relative overflow-hidden">
-                    <div className="relative z-10 max-w-2xl">
-                        <h2 className="text-3xl font-bold mb-3 flex items-center gap-3">
-                            <HelpCircle className="text-indigo-200" size={32} />
-                            Centre d'Aide & Support
-                        </h2>
-                        <p className="text-indigo-100 text-lg">
-                            Besoin d'assistance ? Retrouvez ici toutes les réponses à vos questions et les coordonnées de vos interlocuteurs dédiés.
-                        </p>
-                    </div>
-                    <div className="absolute right-0 bottom-0 opacity-10 transform translate-x-1/4 translate-y-1/4">
-                        <FileQuestion size={300} />
-                    </div>
-                </div>
-
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    
-                    {/* Colonne Gauche : FAQ */}
-                    <div className="lg:col-span-2 space-y-6">
-                        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                            <h3 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2">
-                                <BookOpen className="text-indigo-600" /> Questions Fréquentes
-                            </h3>
-                            <div className="space-y-4">
-                                {faqItems.map((item, index) => (
-                                    <div key={index} className="border border-slate-100 rounded-xl overflow-hidden">
-                                        <button 
-                                            onClick={() => setOpenFaqIndex(openFaqIndex === index ? null : index)}
-                                            className="w-full flex items-center justify-between p-4 bg-slate-50 hover:bg-slate-100 transition-colors text-left font-bold text-slate-800"
-                                        >
-                                            {item.question}
-                                            {openFaqIndex === index ? <ChevronUp size={20} className="text-indigo-600" /> : <ChevronDown size={20} className="text-slate-400" />}
-                                        </button>
-                                        {openFaqIndex === index && (
-                                            <div className="p-4 bg-white text-slate-600 text-sm leading-relaxed border-t border-slate-100 animate-fade-in">
-                                                {item.answer}
-                                            </div>
-                                        )}
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-
-                        {/* Contact Form */}
-                        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                            <h3 className="text-xl font-bold text-slate-800 mb-4">Envoyer une demande spécifique</h3>
-                            <form className="space-y-4">
-                                <div className="grid grid-cols-2 gap-4">
-                                    <input type="text" placeholder="Sujet" className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none text-sm" />
-                                    <select className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none text-sm bg-white">
-                                        <option>Urgence Transport</option>
-                                        <option>Facturation</option>
-                                        <option>Technique / Bug</option>
-                                        <option>Autre</option>
-                                    </select>
-                                </div>
-                                <textarea rows={4} placeholder="Détaillez votre demande..." className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none text-sm"></textarea>
-                                <button type="button" onClick={() => alert("Message envoyé au support.")} className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-lg">
-                                    Envoyer le message
-                                </button>
-                            </form>
-                        </div>
-                    </div>
-
-                    {/* Colonne Droite : Contacts */}
-                    <div className="space-y-6">
-                        {/* Contact Card */}
-                        <div className="bg-white p-6 rounded-2xl border border-indigo-100 shadow-lg shadow-indigo-50">
-                            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Votre Interlocuteur Dédié</h4>
-                            <div className="flex items-center gap-4 mb-6">
-                                <img src="https://ui-avatars.com/api/?name=Marie+Logistics&background=random" className="w-16 h-16 rounded-full border-4 border-indigo-50" alt="Support" />
-                                <div>
-                                    <p className="font-bold text-slate-900 text-lg">Marie L.</p>
-                                    <p className="text-indigo-600 font-medium text-sm">Account Manager</p>
-                                </div>
-                            </div>
-                            <div className="space-y-3">
-                                <a href="tel:+33100000000" className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl hover:bg-indigo-50 transition-colors group">
-                                    <div className="bg-white p-2 rounded-full shadow-sm text-slate-400 group-hover:text-indigo-600"><PhoneCall size={18} /></div>
-                                    <span className="font-bold text-slate-700 group-hover:text-indigo-900">01 23 45 67 89</span>
-                                </a>
-                                <a href="mailto:support@fleetgenius.com" className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl hover:bg-indigo-50 transition-colors group">
-                                    <div className="bg-white p-2 rounded-full shadow-sm text-slate-400 group-hover:text-indigo-600"><Mail size={18} /></div>
-                                    <span className="font-bold text-slate-700 group-hover:text-indigo-900">marie@fleetgenius.com</span>
-                                </a>
-                            </div>
-                        </div>
-
-                        {/* Emergency Box */}
-                        <div className="bg-red-50 p-6 rounded-2xl border border-red-100">
-                            <h4 className="font-bold text-red-800 flex items-center gap-2 mb-2">
-                                <AlertTriangle size={20} /> Urgence 24/7
-                            </h4>
-                            <p className="text-red-700 text-sm mb-4">
-                                Pour tout problème critique concernant un transport en cours hors horaires de bureau.
-                            </p>
-                            <div className="text-2xl font-black text-red-600 tracking-wider">0 800 123 456</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        )}
+        {activeView === 'help' && <ClientHelp embedded onNavigate={handleHelpNavigate} onClose={() => onNavigate?.('client_dashboard')} />}
 
         {/* --- MODAL NEW REQUEST --- */}
         <Modal
             isOpen={isModalOpen}
             onClose={() => setIsModalOpen(false)}
-            title="Demander un Devis"
+            dirty={newRequest.originAddress !== _origin.street || newRequest.originCity !== _origin.city || newRequest.originContactName !== (currentUser.companyName || '') || newRequest.originContactPhone !== (currentUser.companyPhone || '') || Object.entries(newRequest).some(([key, value]) => !['originAddress', 'originCity', 'originContactName', 'originContactPhone', 'volume'].includes(key) && Boolean(value)) || saveOriginAddress || saveDestAddress}
+            title="Demander un devis"
             subtitle={`Demandeur : ${currentUser.firstName} ${currentUser.lastName}`}
             size="3xl"
             headerIcon={<Send size={20} />}
         >
-            <form onSubmit={handleQuoteSubmit} className="space-y-8">
+<form onSubmit={handleQuoteSubmit} className="space-y-8">
+                <p className="text-sm text-slate-600">Cette demande permet de recevoir un prix. Le transport sera confirmé après votre acceptation de l’offre. Pour préparer directement vos colis, utilisez Créer une expédition.</p>
                 {/* Toast de feedback pour la sauvegarde d'adresse */}
                 {addressSaveMessage && (
                     <div className={`fixed top-4 right-4 z-[200] px-4 py-3 rounded-xl shadow-lg border animate-fade-in ${
@@ -2190,7 +2098,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                         type="submit"
                         className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all shadow-xl shadow-indigo-200 flex items-center justify-center gap-3 text-lg transform active:scale-[0.99]"
                     >
-                        <Send size={22} /> Envoyer ma demande
+                        <Send size={22} /> Envoyer ma demande de devis
                     </button>
                 </div>
             </form>
@@ -2282,6 +2190,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
             savedAddresses={savedAddresses}
             onClose={() => setShowCreateShipment(false)}
             onCreated={() => { /* la liste se met à jour via l'abonnement temps réel */ }}
+            onViewPackages={() => onNavigate?.('client_shipments')}
             onSaveRecipient={handleCreateRecipient}
           />
         )}
@@ -2291,9 +2200,9 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
           <ImportShipmentsModal
             currentUser={currentUser}
             onClose={() => setShowImportShipments(false)}
+            onViewPackages={() => onNavigate?.('client_shipments')}
             onImported={(count) => {
-              setShowImportShipments(false);
-              setAddressSaveMessage(`✅ ${count} expédition(s) importée(s) — retrouvez-les dans « Mes Colis ».`);
+              setAddressSaveMessage(`✅ ${count} référence(s) confirmée(s) — retrouvez-les dans « Mes Colis ».`);
               setTimeout(() => setAddressSaveMessage(''), 6000);
             }}
           />
@@ -2304,9 +2213,9 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
           <ImportRecipientsModal
             currentUser={currentUser}
             existingAddresses={savedAddresses}
+            onViewRecipients={() => onNavigate?.('client_recipients')}
             onClose={() => setShowImportRecipients(false)}
             onDone={(count) => {
-              setShowImportRecipients(false);
               setAddressSaveMessage(`✅ ${count} destinataire(s) importé(s) dans votre carnet.`);
               setTimeout(() => setAddressSaveMessage(''), 5000);
             }}
