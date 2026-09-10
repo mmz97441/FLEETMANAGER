@@ -367,9 +367,13 @@ service cloud.firestore {
       allow read: if isAuthenticated() && !isClient();
       // Admin : création libre. Chauffeur : peut créer SA propre tournée
       // (prise en charge par scan) — driverId doit être lui-même.
-      allow create: if isAdminRole() || (isDriver() && request.resource.data.driverId == request.auth.uid);
-      allow update: if isAdminRole() || (isDriver() && resource.data.driverId == request.auth.uid && request.resource.data.driverId == request.auth.uid
-        && (!(resource.data.status in ['Terminé','Annulé']) || request.resource.data.status == resource.data.status));
+      allow create: if request.resource.data.status != 'Terminé'
+        && (isAdminRole() || (isDriver() && request.resource.data.driverId == request.auth.uid));
+      // A successful closure must pass finishMission's fresh parcel/proof checks,
+      // including when initiated by the office or an older browser tab.
+      allow update: if !(request.resource.data.status == 'Terminé' && resource.data.status != 'Terminé')
+        && (isAdminRole() || (isDriver() && resource.data.driverId == request.auth.uid && request.resource.data.driverId == request.auth.uid
+        && (!(resource.data.status in ['Terminé','Annulé']) || request.resource.data.status == resource.data.status)));
       allow delete: if isAdminRole();
     }
 

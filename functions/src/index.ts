@@ -1,3 +1,7 @@
+import { receivePackagesAtHubHandler } from './hubReception';
+import { finishMissionHandler } from './missionLifecycle';
+import { placeKey } from './deliveryAddress';
+import { dispatchMissionsTransaction } from './dispatchMissions';
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { getAuth } from "firebase-admin/auth";
 import { randomBytes, createHash } from "crypto";
@@ -1392,17 +1396,32 @@ export const saveAbsence = functions
     });
   });
 
+export const receivePackagesAtHub = functions.region('europe-west1').https.onCall((data, context) => receivePackagesAtHubHandler(data, context, { db, requireActiveCaller, isAdminCaller }));
+
+export const finishMission = functions.region('europe-west1').https.onCall((data, context) => finishMissionHandler(data, context, { db, requireActiveCaller, isAdminCaller }));
+
+export const dispatchMissions = functions
+  .region('europe-west1')
+  .https.onCall(async (data, context) => {
+    const caller = await requireActiveCaller(context);
+    if (!isAdminCaller(caller.role))
+      throw new functions.https.HttpsError('permission-denied', 'Dispatch réservé à l’exploitation.');
+    return dispatchMissionsTransaction(db, data, caller);
+  });
+
 export const transferPackages = functions
   .region('europe-west1')
   .https.onCall(async (data, context) => {
     const caller = await requireActiveCaller(context),
       isAdmin = isAdminCaller(caller.role);
-    if (!isAdmin && normalizeRole(caller.role) !== 'chauffeur')
+    if (!isAdmin && !['chauffeur', 'chauffeuse'].includes(normalizeRole(caller.role)))
       throw new functions.https.HttpsError(
         'permission-denied',
         'Transfert non autorisé.',
       );
-    const ids = [...new Set<string>(data?.packageIds || [])];
+    if (!Array.isArray(data?.packageIds) || typeof data?.missionId !== 'string' || !data.missionId || data.missionId.includes('/'))
+      throw new functions.https.HttpsError('invalid-argument', 'Tournée ou liste de colis invalide.');
+    const ids = [...new Set<string>(data.packageIds)];
     if (
       !ids.length ||
       ids.length > 150 ||
@@ -1447,6 +1466,12 @@ export const transferPackages = functions
       const sourceSnaps = await Promise.all(
         origins.map((id) => tx.get(db.collection('missions').doc(id))),
       );
+      const sources = new Map([[toRef.id, to], ...sourceSnaps.filter(s => s.exists).map(s => [s.id, s.data()!] as [string, any])]);
+      for (const pkg of packages) {
+        const source = sources.get(pkg.missionId);
+        if (source?.stops?.some((stop: any) => stop.proofSyncPending === true && (stop.id === pkg.stopId || stop.packageIds?.includes(pkg.id))))
+          throw new functions.https.HttpsError('failed-precondition', 'Synchronisez la preuve de cet arrêt avant de déplacer ce colis.');
+      }
       const toStops = (to.stops || []).map((s: any) => ({
         ...s,
         packageIds: [...s.packageIds],
@@ -1454,8 +1479,10 @@ export const transferPackages = functions
       const inTour = new Set(toStops.flatMap((s: any) => s.packageIds));
       const add = packages.filter((p) => !inTour.has(p.id));
       const added = new Set(add.map((p) => p.id));
-      const counts = (stops: any[]) => ({
-        totalPackages: stops.reduce((n, s) => n + s.packageIds.length, 0),
+      const counts = (stops: any[], previous: any) => ({
+        totalPackages: Math.max(stops.reduce((n, s) => n + s.packageIds.length, 0),
+          (previous.deliveredPackages || 0) + (previous.failedPackages || 0) +
+          new Set(stops.filter(s => !['Terminé', 'Échec', 'Passé'].includes(s.status)).flatMap(s => s.packageIds)).size),
         completedStops: stops.filter((s) => s.status === 'Terminé').length,
         failedStops: stops.filter((s) => ['Échec', 'Passé'].includes(s.status))
           .length,
@@ -1463,16 +1490,12 @@ export const transferPackages = functions
       const now = new Date().toISOString();
       let seq = Math.max(0, ...toStops.map((s: any) => s.sequence || 0));
       for (const p of add) {
-        const key = (p.address + '|' + p.postalCode + '|' + p.city)
-          .trim()
-          .toLowerCase();
+        const key = placeKey(p);
         let stop = toStops.find(
           (s: any) =>
             s.type === 'DELIVERY' &&
             !['Terminé', 'Échec', 'Passé'].includes(s.status) &&
-            (s.address + '|' + s.postalCode + '|' + s.city)
-              .trim()
-              .toLowerCase() === key,
+            placeKey(s) === key,
         );
         if (!stop) {
           stop = {
@@ -1523,9 +1546,9 @@ export const transferPackages = functions
             return { ...s, packageIds, packageCount: packageIds.length };
           })
           .filter(
-            (s: any) => s.packageIds.length > 0 || s.status === 'Terminé',
+            (s: any) => s.packageIds.length > 0 || ['Terminé', 'Échec', 'Passé'].includes(s.status),
           );
-        tx.update(source.ref, { stops, ...counts(stops), updatedAt: now });
+        tx.update(source.ref, { stops, ...counts(stops, source.data()), updatedAt: now });
         const moved = add
           .filter((p) => p.missionId === source.id)
           .map((p) => p.id);
@@ -1544,7 +1567,7 @@ export const transferPackages = functions
             createdBy: caller.id,
           });
       }
-      tx.update(toRef, { stops: toStops, ...counts(toStops), updatedAt: now });
+      tx.update(toRef, { stops: toStops, ...counts(toStops, to), updatedAt: now });
       return { count: add.length };
     });
   });
@@ -2109,6 +2132,8 @@ export const returnPackage = functions
       const mission = missionRef ? await tx.get(missionRef) : null;
       const now = new Date().toISOString();
       if (mission?.exists) {
+        if (mission.data()?.stops?.some((stop: any) => stop.proofSyncPending === true && (stop.id === pkg.stopId || stop.packageIds?.includes(id))))
+          throw new functions.https.HttpsError('failed-precondition', 'Synchronisez la preuve de cet arrêt avant de déplacer ce colis.');
         const stops = (mission.data()?.stops || [])
           .map((s: any) => {
             const packageIds = s.packageIds.filter((pid: string) => pid !== id);
@@ -2119,7 +2144,10 @@ export const returnPackage = functions
               s.packageIds.length ||
               ['Terminé', 'Échec', 'Passé'].includes(s.status),
           );
-        tx.update(mission!.ref, { stops, updatedAt: now });
+        const totalPackages = Math.max(stops.reduce((sum: number, stop: any) => sum + stop.packageIds.length, 0),
+          (mission.data()?.deliveredPackages || 0) + (mission.data()?.failedPackages || 0) +
+          new Set(stops.filter((stop: any) => !['Terminé', 'Échec', 'Passé'].includes(stop.status)).flatMap((stop: any) => stop.packageIds)).size);
+        tx.update(mission!.ref, { stops, totalPackages, updatedAt: now });
       }
       tx.update(ref, {
         status: 'Retourné',

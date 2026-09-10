@@ -1,4 +1,3 @@
-import { writeBatch } from 'firebase/firestore';
 import { cleanUndefined } from '../utils/firestore';
 /**
  * POD SERVICE v2 — Preuve de Livraison (Production-ready)
@@ -21,11 +20,80 @@ import { cleanUndefined } from '../utils/firestore';
 
 import { storage, db } from '../firebaseConfig';
 import { ref, uploadString, getDownloadURL } from 'firebase/storage';
-import { doc, setDoc, updateDoc, collection, query, where, getDocs, getDoc } from 'firebase/firestore';
-import { ProofOfDelivery, Package, PackageStatus, DeliveryLocation } from '../types';
+import { doc, collection, query, where, getDocs, getDoc, runTransaction } from 'firebase/firestore';
+import { ProofOfDelivery, Package, PackageStatus, DeliveryLocation, MissionStop } from '../types';
 
 const POD_COLLECTION = 'proofs_of_delivery';
 const PACKAGES_COLLECTION = 'packages';
+
+type ProofDocument = Omit<ProofOfDelivery, 'packageId' | 'coordinates'> & {
+  packageIds: string[];
+  coordinates: { lat: number; lng: number } | null;
+  type: 'SUCCESS' | 'FAILURE';
+  locationStatus?: 'captured' | 'unavailable';
+  failureReason?: string;
+  failureNotes?: string | null;
+  createdAt: string;
+};
+
+function assertSameProof(
+  existing: ProofDocument,
+  expected: Pick<ProofDocument, 'driverId' | 'packageIds' | 'type' | 'missionId' | 'stopId'>,
+) {
+  if (
+    existing.driverId !== expected.driverId ||
+    existing.missionId !== expected.missionId ||
+    existing.stopId !== expected.stopId ||
+    (existing.type || 'SUCCESS') !== expected.type ||
+    !Array.isArray(existing.packageIds) ||
+    JSON.stringify([...existing.packageIds].sort()) !== JSON.stringify([...expected.packageIds].sort())
+  ) throw new Error('Une autre preuve existe pour cet arrêt.');
+}
+
+/** Publish the immutable proof and release the closure guard in one transaction. */
+async function saveProofAndFinishSync(payload: ProofDocument): Promise<ProofDocument> {
+  return runTransaction(db, async (tx) => {
+    const proofRef = doc(db, POD_COLLECTION, `${payload.missionId}_${payload.stopId}`);
+    const missionRef = doc(db, 'missions', payload.missionId);
+    const [existing, mission] = await Promise.all([tx.get(proofRef), tx.get(missionRef)]);
+    if (!mission.exists()) throw new Error('Tournée introuvable : les preuves restent conservées sur cet appareil.');
+    const saved = existing.exists() ? existing.data() as ProofDocument : payload;
+    if (existing.exists()) assertSameProof(saved, payload);
+    const stops = (mission.data().stops || []) as MissionStop[];
+    const stop = stops.find((candidate) => candidate.id === payload.stopId);
+    if (!stop) throw new Error('Cet arrêt a changé. Les preuves restent conservées sur cet appareil ; contactez le bureau.');
+
+    // Read before any write. A transfer or reassignment racing with an upload
+    // must never receive the former mission's proof on its parcel document.
+    const packageRefs = !existing.exists() && payload.type === 'SUCCESS'
+      ? payload.packageIds.map((id) => doc(db, PACKAGES_COLLECTION, id)) : [];
+    const packages = await Promise.all(packageRefs.map((reference) => tx.get(reference)));
+    for (const snapshot of packages) {
+      const pkg = snapshot.data();
+      if (!pkg || pkg.missionId !== payload.missionId || pkg.stopId !== payload.stopId || pkg.status !== PackageStatus.DELIVERED) {
+        throw new Error('Un colis de cet arrêt a changé. Les preuves restent conservées ; contactez le bureau.');
+      }
+    }
+
+    if (!existing.exists()) {
+      tx.set(proofRef, cleanUndefined(payload));
+      packageRefs.forEach((reference, index) => {
+        tx.update(reference, {
+          pod: cleanUndefined({ ...payload, packageId: payload.packageIds[index] }),
+          updatedAt: payload.createdAt,
+        });
+      });
+    }
+    if (stop.proofSyncPending) {
+      tx.update(missionRef, {
+        stops: stops.map((candidate) => candidate.id === stop.id
+          ? { ...candidate, proofSyncPending: false } : candidate),
+        updatedAt: new Date().toISOString(),
+      });
+    }
+    return saved;
+  });
+}
 
 // ============================================================================
 // COMPRESSION PHOTO — Critique pour mobile
@@ -191,6 +259,7 @@ export const uploadAndCreatePOD = async (
     signatureBase64?: string;
     photosBase64: string[];
     coordinates: { lat: number; lng: number };
+    recordedAt?: string;
     notes?: string;
   },
   onProgress?: (p: UploadProgress) => void
@@ -199,7 +268,7 @@ export const uploadAndCreatePOD = async (
     missionId, stopId, packageIds, driverId, driverName,
     vehicleId, vehiclePlate, recipientName, deliveryLocation,
     merchandiseGoodCondition, reservesNote,
-    signatureBase64, photosBase64, coordinates, notes
+    signatureBase64, photosBase64, coordinates, recordedAt, notes
   } = params;
   // Normalisé pour Firestore (pas d'undefined : le projet n'active pas ignoreUndefinedProperties)
   const goodCondition = merchandiseGoodCondition ?? true;
@@ -215,12 +284,13 @@ export const uploadAndCreatePOD = async (
   try {
     const existing = await getDoc(doc(db, POD_COLLECTION, `${missionId}_${stopId}`));
     if (existing.exists()) {
-      const data = existing.data();
-      if (data.driverId !== driverId || JSON.stringify(data.packageIds) !== JSON.stringify(packageIds)) throw new Error('Une autre preuve existe pour cet arrêt.');
-      return { ...data, packageId: packageIds[0] || '' } as ProofOfDelivery;
+      const data = existing.data() as ProofDocument;
+      assertSameProof(data, { driverId, packageIds, missionId, stopId, type: 'SUCCESS' });
+      const saved = await saveProofAndFinishSync(data);
+      return { ...saved, packageId: packageIds[0] || '' } as ProofOfDelivery;
     }
     const basePath = `pod/${missionId}/${stopId}/${crypto.randomUUID()}`;
-    const timestamp = new Date().toISOString();
+    const timestamp = recordedAt || new Date().toISOString();
 
     // 1. Compresser photos
     emit('compressing', 'Compression des photos...');
@@ -258,28 +328,16 @@ export const uploadAndCreatePOD = async (
 
     // 4. Firestore
     emit('saving', 'Enregistrement...');
-    const podDocId = `${missionId}_${stopId}`;
     const payload = cleanUndefined({
       packageIds, missionId, stopId, driverId, driverName, vehicleId, vehiclePlate,
       recipientName, deliveryLocation: deliveryLocation || null,
       merchandiseGoodCondition: goodCondition, reservesNote: reservesExtra.reservesNote ?? null,
-      signatureUrl, photoUrls, coordinates, timestamp, notes, type: 'SUCCESS', createdAt: timestamp
-    });
-    const batch = writeBatch(db);
-    batch.set(doc(db, POD_COLLECTION, podDocId), payload);
-    for (const pkgId of packageIds) {
-      batch.update(doc(db, PACKAGES_COLLECTION, pkgId), {pod:cleanUndefined({...payload,packageId:pkgId}),updatedAt:timestamp});
-    }
-    await batch.commit();
+      signatureUrl, photoUrls, coordinates, timestamp, notes, type: 'SUCCESS' as const, createdAt: new Date().toISOString()
+    }) as ProofDocument;
+    const saved = await saveProofAndFinishSync(payload);
 
     emit('done', 'Preuves enregistrées ✓');
-    return {
-      packageId: packageIds[0] || '', missionId, stopId, driverId, driverName,
-      vehicleId, vehiclePlate, recipientName, deliveryLocation,
-      merchandiseGoodCondition: goodCondition, ...reservesExtra,
-      signatureUrl, photoUrls,
-      coordinates, timestamp, notes
-    };
+    return { ...saved, packageId: packageIds[0] || '' } as ProofOfDelivery;
   } catch (err) {
     onProgress?.({ step: 'error', current: 0, total: 0, message: 'Erreur envoi' });
     console.error('[uploadAndCreatePOD]', err);
@@ -303,24 +361,28 @@ export const uploadFailurePOD = async (
     failureReason: string;
     failureNotes?: string;
     photosBase64: string[];
-    coordinates: { lat: number; lng: number };
+    coordinates?: { lat: number; lng: number } | null;
+    recordedAt?: string;
   },
   onProgress?: (p: UploadProgress) => void
 ): Promise<boolean> => {
   const {
     missionId, stopId, packageIds, driverId, driverName,
     vehicleId, vehiclePlate, failureReason, failureNotes,
-    photosBase64, coordinates
+    photosBase64, coordinates, recordedAt
   } = params;
 
   try {
     const existing = await getDoc(doc(db, POD_COLLECTION, `${missionId}_${stopId}`));
     if (existing.exists()) {
-      if (existing.data().driverId !== driverId || existing.data().type !== 'FAILURE') throw new Error('Une autre preuve existe pour cet arrêt.');
+      const data = existing.data() as ProofDocument;
+      assertSameProof(data, { driverId, packageIds, missionId, stopId, type: 'FAILURE' });
+      await saveProofAndFinishSync(data);
       return true;
     }
+    if (!photosBase64.length) throw new Error('Une photo est obligatoire pour déclarer l’échec.');
     const basePath = `pod/${missionId}/${stopId}/${crypto.randomUUID()}`;
-    const timestamp = new Date().toISOString();
+    const timestamp = recordedAt || new Date().toISOString();
 
     let photoUrls: string[] = [];
     if (photosBase64.length > 0) {
@@ -335,12 +397,12 @@ export const uploadFailurePOD = async (
     }
 
     onProgress?.({ step: 'saving', current: 3, total: 3, message: 'Enregistrement...' });
-    const podDocId = `${missionId}_${stopId}`;
-    await setDoc(doc(db, POD_COLLECTION, podDocId), {
+    await saveProofAndFinishSync({
       packageIds, missionId, stopId, driverId, driverName,
-      vehicleId, vehiclePlate, photoUrls, coordinates, timestamp,
+      vehicleId, vehiclePlate, photoUrls, coordinates: coordinates ?? null,
+      locationStatus: coordinates ? 'captured' : 'unavailable', timestamp,
       type: 'FAILURE', failureReason, failureNotes: failureNotes || null,
-      createdAt: timestamp
+      createdAt: new Date().toISOString()
     });
 
     onProgress?.({ step: 'done', current: 3, total: 3, message: 'Enregistré ✓' });

@@ -17,7 +17,16 @@ const env = await initializeTestEnvironment({
 });
 let passed = 0;
 try {
-  await env.clearStorage();
+  // rules-unit-testing clearStorage() deletes root items only; nested proofs
+  // survive and correctly fail the next run's immutable-create rule.
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    const removeTree = async (directory) => {
+      const { items, prefixes } = await directory.listAll();
+      await Promise.all(prefixes.map(removeTree));
+      await Promise.all(items.map((item) => item.delete()));
+    };
+    await removeTree(ctx.storage().ref());
+  });
   await env.withSecurityRulesDisabled(async (ctx) => {
     for (const [id, role] of [
       ['storage-driver', 'Chauffeur'],

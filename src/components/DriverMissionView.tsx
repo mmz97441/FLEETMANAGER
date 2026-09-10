@@ -1,4 +1,4 @@
-import { submitDelivery } from '../services/deliveryOutbox';
+import { assertMissionReadyToClose, submitDelivery } from '../services/deliveryOutbox';
 /**
  * DRIVER MISSION VIEW — Interface Mobile Chauffeur
  * 
@@ -31,12 +31,12 @@ import {
   optimizeDriverMission,
   addManualStopToMission,
   updateMissionStatus,
-  updatePackageStatus,
+  startDriverMission,
   recomputeMissionCounters,
   getPackagesByIds,
   addPackagesToStop
 } from '../services/missionService';
-import { uploadAndCreatePOD, uploadFailurePOD, UploadProgress } from '../services/podService';
+import { UploadProgress } from '../services/podService';
 import { finalizePickup } from '../services/pickupService';
 import { reportError } from '../services/logService';
 import { logActivity } from '../services/activityLogService';
@@ -321,7 +321,12 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   const [showIssue, setShowIssue] = useState(false);
   const [issueForm, setIssueForm] = useState<{ category: string; description: string; priority: 'Low' | 'Medium' | 'High' }>({ category: 'Véhicule / panne', description: '', priority: 'Medium' });
   const [issueSubmitting, setIssueSubmitting] = useState(false);
-  const [showFinishConfirm, setShowFinishConfirm] = useState(false); // confirmation « terminer avec arrêts restants »
+  const [showFinishBlocked, setShowFinishBlocked] = useState(false);
+  const [finishError, setFinishError] = useState('');
+  useEffect(() => {
+    setShowFinishBlocked(false);
+    setFinishError('');
+  }, [activeMissionId]);
   const [stopPackages, setStopPackages] = useState<Package[]>([]);
   // Filet de sécurité : colis à la même adresse NON inclus dans l'arrêt courant
   const [otherAtAddress, setOtherAtAddress] = useState<Package[]>([]);
@@ -660,39 +665,13 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
       const now = new Date();
       const nowISO = now.toISOString();
 
-      // 1. Recalculer les ETAs basées sur l'heure réelle de départ
-      const updatedStops = mission.stops.map((stop, idx) => {
-        const cumulativeMinutes = mission.stops
-          .slice(0, idx + 1)
-          .reduce((sum, s) => sum + (s.durationFromPrevious || 0) + (s.serviceTime || 5), 0);
-
-        const etaDate = new Date(now.getTime() + cumulativeMinutes * 60000);
-        const estimatedArrival = etaDate.toISOString();
-        const estimatedDeparture = new Date(etaDate.getTime() + (stop.serviceTime || 5) * 60000).toISOString();
-
-        return { ...stop, estimatedArrival, estimatedDeparture };
-      });
-
-      // 2. Colis → IN_DELIVERY + heure de livraison prévue (dénormalisée pour le client)
-      for (const stop of updatedStops) {
-        for (const pkgId of (stop.packageIds || [])) {
-          try {
-            await updatePackageStatus(pkgId, PackageStatus.IN_DELIVERY, {
-              action: 'LOADING_COMPLETE',
-              driverId: currentUser.id,
-              driverName: `${currentUser.firstName} ${currentUser.lastName}`,
-              notes: `Chargement terminé — départ ${now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`
-            }, { estimatedDeliveryAt: stop.estimatedArrival });
-          } catch (e) { reportError('driver.loadComplete.item', e, { silent: true, extra: { pkgId } }); }
-        }
-      }
-
-      // 3. Mission → IN_PROGRESS avec loadedAt + stops recalculés
-      await updateMissionFields(mission.id, {
-        status: MissionStatus.IN_PROGRESS,
-        loadedAt: nowISO,
+      // Relire la tournée et ses colis, puis les démarrer ensemble : aucune
+      // affectation récente ni erreur de colis ne doit être écrasée ou ignorée.
+      const updatedStops = await startDriverMission(mission.id, {
+        driverId: currentUser.id,
+        driverName: `${currentUser.firstName} ${currentUser.lastName}`,
         startedAt: nowISO,
-        stops: updatedStops
+        coordinates: startPos,
       });
 
       // JOURNAL — départ de tournée.
@@ -790,7 +769,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
         reasonLabel: returningPackage.returnReason || 'Stop supprimé',
         photoUrls,
         signatureUrl,
-        coordinates: coords || { lat: 0, lng: 0 },
+        coordinates: coords ?? null,
+        locationStatus: coords ? 'captured' as const : 'unavailable' as const,
         timestamp: new Date().toISOString(),
         notes: `Retourné par ${currentUser.firstName} ${currentUser.lastName}`
       };
@@ -851,19 +831,21 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
     s.status !== StopStatus.COMPLETED && s.status !== StopStatus.FAILED && s.status !== StopStatus.SKIPPED
   ).length;
 
-  // Demande de clôture : si tout est fait → clôture directe ; sinon → confirmation
-  // (le chauffeur peut avoir un arrêt bloqué en « Arrivé » ou vouloir finir plus tôt).
+  // Les arrêts non traités doivent être résolus avant toute clôture.
   const requestFinishTour = () => {
     if (isProcessing) return;
-    if (remainingStops > 0) { setShowFinishConfirm(true); return; }
+    if (remainingStops > 0) { setShowFinishBlocked(true); return; }
     void handleFinishTour();
   };
 
   const handleFinishTour = async () => {
     if (!activeMission || isProcessing) return;
-    setShowFinishConfirm(false);
+    if (remainingStops > 0) { setShowFinishBlocked(true); return; }
+    setShowFinishBlocked(false);
+    setFinishError('');
     setIsProcessing(true);
     try {
+      await assertMissionReadyToClose(currentUser.id, activeMission.id, activeMission.stops);
       await updateMissionStatus(activeMission.id, MissionStatus.COMPLETED);
       // JOURNAL — fin de tournée (avec bilan livrés/échecs pour le président).
       void logActivity(currentUser, ActivityAction.MISSION_COMPLETED, {
@@ -876,7 +858,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
       setActiveMissionId(null); // repart sur la liste (la tournée n'est plus « en cours »)
     } catch (err) {
       reportError('driver.finishTour', err, { silent: true });
-      showNotif('❌ Impossible de terminer la tournée');
+      setFinishError(err instanceof Error ? err.message : 'Impossible de terminer la tournée. Réessayez.');
     }
     setIsProcessing(false);
   };
@@ -1037,7 +1019,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
 
   // Échec livraison
   const handleDeliveryFailure = async () => {
-    if (!activeMission || !currentStop) return;
+    if (!activeMission || !currentStop || isProcessing) return;
+    if (!failurePhotos.length) { showNotif('❌ Une photo est obligatoire pour déclarer l’échec.'); return; }
     setIsProcessing(true);
     try {
       let coords: { lat: number; lng: number } | undefined;
@@ -1053,7 +1036,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
             movement:{action:'FAILED',driverId:currentUser.id,driverName:`${currentUser.firstName} ${currentUser.lastName}`,notes:`${failureReason} ${failureNotes}`}}))},
         proof:{missionId:activeMission.id,stopId:currentStop.id,packageIds:currentStop.packageIds,
           driverId:currentUser.id,driverName:`${currentUser.firstName} ${currentUser.lastName}`,vehicleId:activeMission.vehicleId || '',vehiclePlate:activeMission.vehiclePlate || '',
-          failureReason,failureNotes,photosBase64:failurePhotos,coordinates:coords || {lat:0,lng:0}}
+          failureReason,failureNotes,photosBase64:failurePhotos,coordinates:coords ?? null}
       });
 
       // FIX BUG 2: Prochain stop dans l'ORDRE TRIÉ
@@ -1360,25 +1343,20 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
           </div>
         )}
 
-        {/* === CONFIRMATION : terminer alors qu'il reste des arrêts === */}
-        {showFinishConfirm && (
-          <div className="fixed inset-0 z-[60] bg-black/60 flex items-end sm:items-center justify-center sm:p-4" onClick={() => setShowFinishConfirm(false)}>
+        {/* === CLÔTURE BLOQUÉE : chaque arrêt doit avoir un résultat === */}
+        {showFinishBlocked && (
+          <div className="fixed inset-0 z-[60] bg-black/60 flex items-end sm:items-center justify-center sm:p-4" onClick={() => setShowFinishBlocked(false)}>
             <div className="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-md p-5 animate-slide-up" onClick={e => e.stopPropagation()}>
-              <h3 className="font-black text-lg text-slate-800">Terminer la tournée ?</h3>
+              <h3 className="font-black text-lg text-slate-800">Des arrêts restent à traiter</h3>
               <p className="text-sm text-slate-600 mt-2">
                 Il te reste <b>{remainingStops} arrêt{remainingStops > 1 ? 's' : ''}</b> non terminé{remainingStops > 1 ? 's' : ''}.
-                Les colis non livrés resteront à traiter (ils ne seront pas marqués livrés).
+                Enregistrez la livraison ou son échec, ou demandez au bureau de réaffecter les colis avant de clôturer.
               </p>
-              <p className="text-xs text-slate-400 mt-1">À ne faire que si ta tournée est réellement finie (ex. arrêt impossible à valider).</p>
               <div className="mt-4 flex flex-col gap-2">
                 <button
-                  onClick={handleFinishTour}
-                  disabled={isProcessing}
+                  onClick={() => setShowFinishBlocked(false)}
                   className="w-full py-3.5 bg-slate-800 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-60"
                 >
-                  {isProcessing ? <Loader2 size={18} className="animate-spin inline" /> : '🏁 Oui, terminer ma tournée'}
-                </button>
-                <button onClick={() => setShowFinishConfirm(false)} className="w-full py-3 text-slate-500 font-medium text-sm">
                   Continuer ma tournée
                 </button>
               </div>
@@ -1386,11 +1364,17 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
           </div>
         )}
 
+        {finishError && (
+          <div role="alert" className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+            {finishError}
+          </div>
+        )}
+
         {/* === FIN DE TOURNÉE : tous les arrêts sont faits → clôturer explicitement === */}
         {allStopsDone && (
           <div className="bg-green-600 rounded-2xl p-4 text-white shadow-sm text-center space-y-3">
             <p className="text-lg font-black">🎉 Tous tes arrêts sont faits !</p>
-            <p className="text-sm text-white/90">Clôture ta tournée pour la passer en « Terminé ».</p>
+            <p className="text-sm text-white/90">Clôture ta tournée après l’envoi de toutes les preuves.</p>
             <button
               onClick={handleFinishTour}
               disabled={isProcessing}

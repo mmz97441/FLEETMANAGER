@@ -187,6 +187,15 @@ await check('Control: driver role update denied', 'denied', () =>
 await check('Control: admin legitimate mission update allowed', 'allowed', () =>
   updateDoc(doc(db('admin'), 'missions', 'mB'), { status: 'En cours' }),
 );
+await check('Driver cannot bypass server closure checks with a direct write', 'denied', () =>
+  updateDoc(doc(db('driverB'), 'missions', 'mB'), { status: 'Terminé' }),
+);
+await check('Office cannot bypass server closure checks with a direct write', 'denied', () =>
+  updateDoc(doc(db('admin'), 'missions', 'mB'), { status: 'Terminé' }),
+);
+await check('Driver cannot create a tour already completed without verification', 'denied', () =>
+  setDoc(doc(db('driverB'), 'missions', 'closed-without-proof'), { driverId: 'driverB', status: 'Terminé', stops: [] }),
+);
 await check(
   'Driver cannot read another employee private profile',
   'denied',

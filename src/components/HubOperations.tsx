@@ -13,7 +13,7 @@
  *    Liste triée par destinataire (alpha), mise à jour au scan
  */
 
-import React, { useState, useEffect, useMemo, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useMemo, useRef, lazy, Suspense } from 'react';
 import { packageMatchesCode, packageScanCodes } from '../utils/barcode';
 import { todayISO } from '../utils/date';
 import {
@@ -32,6 +32,8 @@ import {
   subscribeToMissions,
   findPackageByCode
 } from '../services/missionService';
+
+import { receivePackagesAtHubCF } from '../services/cloudFunctions';
 
 const BarcodeScanner = lazy(() => import('./BarcodeScanner'));
 
@@ -71,6 +73,7 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
   const [showScanner, setShowScanner] = useState(false);
   const [scanMode, setScanMode] = useState<'reception' | 'loading' | null>(null);
   const [processing, setProcessing] = useState(false);
+  const receptionLock = useRef(false);
   const [notification, setNotification] = useState<{ type: 'success' | 'error' | 'warning'; message: string } | null>(null);
   
   // Scan state
@@ -125,8 +128,11 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
 
   // --- RÉCEPTION : colis PENDING ou COLLECTED à réceptionner ---
   const receptionPackages = useMemo(() => 
-    packages.filter(p => p.status === PackageStatus.COLLECTED || p.status === PackageStatus.PENDING),
-    [packages]
+    packages.filter(p => (
+      p.status === PackageStatus.COLLECTED || p.status === PackageStatus.PENDING ||
+      (p.status === PackageStatus.AT_HUB && (p.missionId || p.stopId || p.currentDriverId || p.currentVehicleId))
+    ) && (!isDriver || p.currentDriverId === currentUser.id)),
+    [packages, isDriver, currentUser.id]
   );
 
   // --- CHARGEMENT : colis SORTED assignés au chauffeur sélectionné ---
@@ -190,73 +196,54 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
 
   // --- RÉCEPTION : Scan un colis → AT_HUB ---
   const handleReceptionScan = async (barcode: string) => {
-    // Recherche en mémoire (rapide) puis, si absent (au-delà des 500 colis
-    // récents chargés en temps réel), recherche directe en base.
-    const pkg = packages.find(p => packageMatchesCode(p, barcode)) || await findPackageByCode(barcode) || undefined;
-
-    if (!pkg) {
-      showNotif('warning', `Code ${barcode} — colis non trouvé`);
-      return;
-    }
-
-    if (pkg.status === PackageStatus.AT_HUB) {
-      showNotif('warning', `${barcode} — déjà au hub`);
-      return;
-    }
-
-    if (pkg.status !== PackageStatus.COLLECTED && pkg.status !== PackageStatus.PENDING) {
-      showNotif('warning', `${barcode} — statut ${pkg.status}, réception non applicable`);
-      return;
-    }
-
-    // FIX v3.7.10: Avertir si le colis est déjà assigné à une mission
-    if (pkg.missionId) {
-      showNotif('warning', `⚠️ ${barcode} — déjà assigné à une mission`);
-    }
-
+    if (receptionLock.current) return;
+    if (!selectedHub?.isActive) { showNotif('warning', 'Sélectionnez un hub actif avant la réception.'); return; }
+    receptionLock.current = true;
+    setProcessing(true);
     try {
-      await updatePackageStatus(pkg.id, PackageStatus.AT_HUB, {
-        action: 'HUB_ARRIVAL',
-        hubId: selectedHubId,
-        hubName: selectedHub?.name || '',
-        notes: `Réceptionné au ${selectedHub?.name || 'hub'}`
-      }, {
-        currentHubId: selectedHubId
-      });
-
-      setScannedCodes(prev => [...prev, barcode]);
-      showNotif('success', `✅ ${barcode} — ${pkg.contactName} réceptionné`);
+      const pkg = packages.find(p => packageMatchesCode(p, barcode)) || await findPackageByCode(barcode);
+      if (!pkg) { showNotif('warning', `Code ${barcode} — colis non trouvé`); return; }
+      if (![PackageStatus.COLLECTED, PackageStatus.PENDING, PackageStatus.AT_HUB].includes(pkg.status)) {
+        showNotif('warning', `${barcode} — statut ${pkg.status}, réception non applicable`); return;
+      }
+      const result = await receivePackagesAtHubCF(selectedHubId, [pkg.id]);
+      if (result.receivedCount > 0) {
+        setScannedCodes(prev => prev.includes(barcode) ? prev : [...prev, barcode]);
+        showNotif('success', `${barcode} — ${pkg.contactName} réceptionné et disponible au hub`);
+      } else {
+        showNotif('warning', `${barcode} — réception déjà confirmée au hub`);
+      }
     } catch (err) {
       console.error('Reception error:', err);
-      showNotif('error', `❌ Erreur réception ${barcode}`);
+      showNotif('error', err instanceof Error ? err.message : `Réception non confirmée pour ${barcode}. Réessayez sans risque de doublon.`);
+    } finally {
+      receptionLock.current = false;
+      setProcessing(false);
     }
   };
 
-  // --- RÉCEPTION EN MASSE ---
+  // Chaque lot est atomique ; le message compte uniquement les réponses serveur.
   const handleReceptionAll = async () => {
-    if (receptionPackages.length === 0) return;
+    if (receptionLock.current || receptionPackages.length === 0) return;
+    if (!selectedHub?.isActive) { showNotif('warning', 'Sélectionnez un hub actif avant la réception.'); return; }
+    receptionLock.current = true;
     setProcessing(true);
-
-    let success = 0;
-    let errors = 0;
-
-    for (const pkg of receptionPackages) {
-      try {
-        await updatePackageStatus(pkg.id, PackageStatus.AT_HUB, {
-          action: 'HUB_ARRIVAL',
-          hubId: selectedHubId,
-          hubName: selectedHub?.name || '',
-          notes: `Réception en masse au ${selectedHub?.name || 'hub'}`
-        }, { currentHubId: selectedHubId });
-        success++;
-      } catch { errors++; }
+    let received = 0, alreadyReceived = 0, confirmed = 0;
+    const ids = receptionPackages.map(pkg => pkg.id);
+    try {
+      for (let offset = 0; offset < ids.length; offset += 150) {
+        const result = await receivePackagesAtHubCF(selectedHubId, ids.slice(offset, offset + 150));
+        received += result.receivedCount;
+        alreadyReceived += result.alreadyReceivedCount;
+        confirmed += result.confirmedPackageIds.length;
+      }
+      showNotif('success', `${received} colis réceptionné(s)${alreadyReceived ? `, ${alreadyReceived} déjà confirmé(s)` : ''}.`);
+    } catch (err) {
+      showNotif('warning', `${received} colis réceptionné(s), ${alreadyReceived} déjà confirmé(s), ${ids.length - confirmed} non confirmé(s). ${err instanceof Error ? err.message : 'Réessayez la réception.'}`);
+    } finally {
+      receptionLock.current = false;
+      setProcessing(false);
     }
-
-    showNotif(errors === 0 ? 'success' : 'warning',
-      `${success} colis réceptionnés${errors > 0 ? `, ${errors} erreurs` : ''}`
-    );
-    setProcessing(false);
-    setScannedCodes([]);
   };
 
   // --- CHARGEMENT : Scan un colis → vérification chauffeur ---
@@ -448,6 +435,7 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
           <div className="flex flex-col sm:flex-row gap-3">
             <button
               onClick={() => openScanner('reception')}
+              disabled={processing || !selectedHub?.isActive}
               className="flex-1 flex items-center justify-center gap-2 py-3.5 bg-blue-600 text-white rounded-xl font-bold text-sm shadow-lg shadow-blue-200 active:scale-95 transition-transform"
             >
               <ScanBarcode size={18} />
@@ -455,7 +443,7 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
             </button>
             <button
               onClick={handleReceptionAll}
-              disabled={processing || receptionPackages.length === 0}
+              disabled={processing || receptionPackages.length === 0 || !selectedHub?.isActive}
               className="flex items-center justify-center gap-2 px-6 py-3.5 bg-slate-800 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-40"
             >
               {processing ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle size={16} />}

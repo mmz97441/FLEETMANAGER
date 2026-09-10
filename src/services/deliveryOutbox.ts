@@ -1,4 +1,5 @@
 import { auth } from '../firebaseConfig';
+import { MissionStop, StopStatus } from '../types';
 import { commitStopOutcome } from './missionService';
 import { uploadAndCreatePOD, uploadFailurePOD } from './podService';
 
@@ -46,16 +47,48 @@ async function write(entry: PendingDelivery | string): Promise<void> {
 }
 export async function pendingDeliveries(
   userId: string,
+  missionId?: string,
 ): Promise<PendingDelivery[]> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const req = db.transaction('deliveries').objectStore('deliveries').getAll();
     req.onsuccess = () =>
       resolve(
-        (req.result as PendingDelivery[]).filter((e) => e.userId === userId),
+        (req.result as PendingDelivery[]).filter(
+          (e) => e.userId === userId && (!missionId || e.action.missionId === missionId),
+        ),
       );
     req.onerror = () => reject(req.error);
   });
+}
+
+/** Local guard; the server also rechecks the latest stops, parcels and proofs. */
+export async function assertMissionReadyToClose(
+  userId: string,
+  missionId: string,
+  stops: Pick<MissionStop, 'status' | 'proofSyncPending'>[],
+): Promise<void> {
+  let pending: PendingDelivery[];
+  try {
+    pending = await pendingDeliveries(userId, missionId);
+  } catch {
+    throw new Error('Impossible de vérifier les envois conservés sur cet appareil. Gardez la tournée ouverte et réessayez.');
+  }
+  if (pending.length) {
+    throw new Error(`${pending.length} livraison(s) ou preuve(s) de cette tournée attendent encore leur envoi. Connectez cet appareil et utilisez « Réessayer » dans le bandeau de synchronisation avant de clôturer.`);
+  }
+  const remaining = stops.filter((stop) => ![
+    StopStatus.COMPLETED, StopStatus.FAILED, StopStatus.SKIPPED,
+  ].includes(stop.status)).length;
+  if (remaining) {
+    throw new Error(`${remaining} arrêt(s) restent à traiter. Enregistrez la livraison ou son échec, ou faites réaffecter les colis par le bureau avant de clôturer.`);
+  }
+  if (stops.some((stop) => stop.proofSyncPending)) {
+    throw new Error('Des preuves de cette tournée attendent leur envoi. Synchronisez l’appareil ayant enregistré ces arrêts avant de clôturer.');
+  }
+  if (!navigator.onLine) {
+    throw new Error('Une connexion est nécessaire pour vérifier et clôturer la tournée. Vos enregistrements restent conservés sur cet appareil.');
+  }
 }
 const running = new Map<
   string,
@@ -75,8 +108,8 @@ async function perform(entry: PendingDelivery) {
     throw new Error('La session a changé ; preuves conservées.');
   const proof =
     entry.kind === 'success'
-      ? await uploadAndCreatePOD(entry.proof)
-      : await uploadFailurePOD(entry.proof);
+      ? await uploadAndCreatePOD({ ...entry.proof, recordedAt: entry.createdAt })
+      : await uploadFailurePOD({ ...entry.proof, recordedAt: entry.createdAt });
   if (!proof)
     throw new Error(
       'Livraison enregistrée ; preuves en attente de synchronisation.',
