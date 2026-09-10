@@ -279,6 +279,32 @@ const check = async (name, fn) => {
       (e) => e.code === 'invalid-argument',
     );
   });
+  await check('legacy approved leave cannot refund an unrecorded debit', async () => {
+    await db.collection('users').doc('legacy-employee').set({ role: 'Chauffeur', leaveBalance: 0 });
+    const old = { ...absence('legacy-leave'), userId: 'legacy-employee', status: 'Validé', workingDays: 2 };
+    await db.collection('absences').doc(old.id).set(old);
+    for (const change of [{ status: 'Refusé' }, { endDate: old.startDate }]) {
+      await assert.rejects(service.saveAbsence.run({ absence: { ...old, ...change, balanceDebit: 2 } }, context('server-admin')), e => e.code === 'failed-precondition');
+    }
+    await assert.rejects(service.deleteAbsence.run({ id: old.id }, context('server-admin')), e => e.code === 'failed-precondition');
+    assert.equal((await db.collection('users').doc('legacy-employee').get()).data().leaveBalance, 0);
+    assert.equal((await db.collection('absences').doc(old.id).get()).data().status, 'Validé');
+  });
+  await check('legacy leave notes preserve the unknown debit despite client supplied values', async () => {
+    const ref = db.collection('absences').doc('legacy-leave');
+    const old = (await ref.get()).data();
+    await service.saveAbsence.run({ absence: { ...old, id: ref.id, adminComment: 'Contrôle en cours', balanceDebit: 2 } }, context('server-admin'));
+    assert.equal((await ref.get()).data().balanceDebit, undefined);
+    assert.equal((await ref.get()).data().adminComment, 'Contrôle en cours');
+    assert.equal((await db.collection('users').doc('legacy-employee').get()).data().leaveBalance, 0);
+  });
+  await check('reconciled legacy leave refunds only the verified debit', async () => {
+    const ref = db.collection('absences').doc('legacy-leave');
+    await ref.update({ balanceDebit: 0.5 });
+    await service.deleteAbsence.run({ id: ref.id }, context('server-admin'));
+    await service.deleteAbsence.run({ id: ref.id }, context('server-admin'));
+    assert.equal((await db.collection('users').doc('legacy-employee').get()).data().leaveBalance, 0.5);
+  });
   await check(
     'employee can reject a manager proposal without altering dates',
     async () => {

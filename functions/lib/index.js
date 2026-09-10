@@ -1079,11 +1079,22 @@ exports.saveAbsence = functions
         const days = workingDays(next.startDate, next.endDate, next.halfDayStart, next.halfDayEnd);
         if (days <= 0)
             throw new functions.https.HttpsError('invalid-argument', 'Cette demande ne contient aucun jour ouvré.');
-        const previousDebit = old?.balanceDebit ??
-            (old?.status === 'Validé' && old?.type === 'Congés Payés'
-                ? Number(old.workingDays || 0)
-                : 0);
-        const debit = next.status === 'Validé' && next.type === 'Congés Payés' ? days : 0;
+        // Older clients clamped balances to zero, so workingDays is not proof
+        // of the amount actually deducted. Preserve that unknown debit until
+        // accounting has reconciled it; never infer a refund from the duration.
+        const unverifiedLegacyDebit = old?.status === 'Validé' &&
+            old?.type === 'Congés Payés' &&
+            old?.balanceDebit == null;
+        if (unverifiedLegacyDebit &&
+            (next.status !== 'Validé' ||
+                next.type !== 'Congés Payés' ||
+                days !== Number(old?.workingDays)))
+            throw new functions.https.HttpsError('failed-precondition', 'La direction doit vérifier le montant déjà débité pour cet ancien congé avant de modifier son solde.');
+        const previousDebit = old?.balanceDebit ?? 0;
+        if (typeof previousDebit !== 'number' || !Number.isFinite(previousDebit) || previousDebit < 0)
+            throw new functions.https.HttpsError('failed-precondition', 'Le débit de congés enregistré doit être vérifié par la direction.');
+        const debit = !unverifiedLegacyDebit && next.status === 'Validé' && next.type === 'Congés Payés' ? days : 0;
+        delete next.balanceDebit;
         const balance = Number(user.data()?.leaveBalance || 0) + previousDebit - debit;
         if (balance < 0)
             throw new functions.https.HttpsError('failed-precondition', 'Solde de congés insuffisant.');
@@ -1091,7 +1102,7 @@ exports.saveAbsence = functions
         tx.set(ref, {
             ...next,
             workingDays: days,
-            balanceDebit: debit,
+            ...(unverifiedLegacyDebit ? {} : { balanceDebit: debit }),
             createdBy: old?.createdBy || caller.id,
             createdAt: old?.createdAt || now,
             updatedAt: now,
@@ -1569,10 +1580,11 @@ exports.deleteAbsence = functions
         if (!manager && (old.userId !== caller.id || old.status !== 'En attente'))
             throw new functions.https.HttpsError('permission-denied', 'Seule votre demande en attente peut être supprimée.');
         const userRef = db.collection('users').doc(old.userId), user = await tx.get(userRef);
-        const debit = old.balanceDebit ??
-            (old.status === 'Validé' && old.type === 'Congés Payés'
-                ? Number(old.workingDays || 0)
-                : 0);
+        if (old.status === 'Validé' && old.type === 'Congés Payés' && old.balanceDebit == null)
+            throw new functions.https.HttpsError('failed-precondition', 'La direction doit vérifier le montant déjà débité pour cet ancien congé avant sa suppression.');
+        const debit = old.balanceDebit ?? 0;
+        if (typeof debit !== 'number' || !Number.isFinite(debit) || debit < 0)
+            throw new functions.https.HttpsError('failed-precondition', 'Le débit de congés enregistré doit être vérifié par la direction.');
         if (debit && !user.exists)
             throw new functions.https.HttpsError('failed-precondition', 'Profil salarié introuvable.');
         if (debit)
