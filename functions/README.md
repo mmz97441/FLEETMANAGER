@@ -1,88 +1,9 @@
-# Cloud Functions FleetGenius
+# Fonctions serveur FleetGenius
 
-Ce dossier contient les Cloud Functions Firebase pour les opérations serveur.
+Node.js 22, Firebase CLI 15.15.0 et Java 21 pour les émulateurs. Installer les dépendances avec `npm ci --prefix functions`, puis compiler avec `npm run build --prefix functions`, depuis la racine.
 
-## Prérequis
+Les fonctions gèrent les invitations et activations, les comptes, les absences et soldes, les affectations, transferts, retours, imports, acceptations de devis, notifications, l’annuaire et les appels Google. Les fichiers `lib/` sont régénérés automatiquement avant un déploiement grâce au hook `predeploy`.
 
-- Node.js 18+
-- Firebase CLI installé : `npm install -g firebase-tools`
-- Plan Firebase Blaze (pay-as-you-go)
+La configuration serveur est décrite dans [.env.example](.env.example). Le conseiller IA reste indisponible tant que sa clé et son modèle ne sont pas configurés. La clé Gemini ne doit jamais être injectée dans le frontend. Le projet Google Route Optimization peut être différent du projet Firebase : vérifier son API, sa facturation et les droits du compte de service.
 
-## Installation
-
-```bash
-# 1. Se placer dans le dossier functions
-cd functions
-
-# 2. Installer les dépendances
-npm install
-
-# 3. Compiler TypeScript
-npm run build
-```
-
-## Configuration
-
-1. **Modifiez `.firebaserc`** à la racine du projet :
-   ```json
-   {
-     "projects": {
-       "default": "votre-project-id-firebase"
-     }
-   }
-   ```
-   
-   Trouvez votre Project ID dans la Firebase Console.
-
-2. **Connectez-vous à Firebase** :
-   ```bash
-   firebase login
-   ```
-
-## Déploiement
-
-```bash
-# Depuis la racine du projet (pas le dossier functions)
-cd ..
-firebase deploy --only functions
-```
-
-## Fonctions disponibles
-
-### `deleteUserCompletely`
-
-Supprime complètement un utilisateur :
-- Compte Firebase Auth
-- Document Firestore (users)
-- Invitations associées
-- Log d'audit
-
-**Sécurité** : Seuls les admins/présidents/directeurs peuvent appeler cette fonction.
-
-### `cleanupExpiredInvitations`
-
-Fonction planifiée (cron) qui s'exécute tous les jours à 3h du matin pour supprimer les invitations expirées non utilisées.
-
-## Test local (optionnel)
-
-```bash
-# Lancer l'émulateur Firebase
-npm run serve
-
-# Dans cloudFunctions.ts, décommenter :
-# connectFunctionsEmulator(functions, "localhost", 5001);
-```
-
-## Logs
-
-```bash
-# Voir les logs en temps réel
-firebase functions:log
-```
-
-## Coûts
-
-Avec le plan Blaze :
-- 2 millions d'invocations gratuites par mois
-- Au-delà : ~$0.40 / million d'invocations
-- La fonction `cleanupExpiredInvitations` = 30 invocations/mois (gratuit)
+La recette reproductible, les changements de schéma et les conditions de publication figurent dans [PRODUCTION-READINESS.md](../PRODUCTION-READINESS.md). Les tests utilisent exclusivement un projet de démonstration local. Ils n’envoient aucun email réel et ne contactent pas les API Google métier.

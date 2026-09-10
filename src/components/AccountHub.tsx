@@ -359,6 +359,8 @@ const AccountHub: React.FC<AccountHubProps> = ({
                       <input
                         type="text"
                         value={companyName}
+                        readOnly
+                        title="Nom de société géré par votre responsable"
                         onChange={(e) => setCompanyName(e.target.value)}
                         className={inputClass}
                         placeholder="Ex : PREM BPA"

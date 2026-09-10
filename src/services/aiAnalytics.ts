@@ -14,7 +14,8 @@
 //   5. Narratif template   -> construit à partir des valeurs calculées (pas de LLM)
 // ============================================================================
 
-import { GoogleGenAI } from '@google/genai';
+import { getFunctions, httpsCallable } from 'firebase/functions';
+import app from '../firebaseConfig';
 import { Package, PackageStatus, PackageMovement } from '../types';
 import {
   filterPackages,
@@ -85,13 +86,6 @@ export interface QueryResult {
 // ----------------------------------------------------------------------------
 // LLM (même pattern que geminiService.ts)
 // ----------------------------------------------------------------------------
-
-const apiKey = process.env.API_KEY;
-
-let ai: GoogleGenAI | null = null;
-if (apiKey) {
-  ai = new GoogleGenAI({ apiKey });
-}
 
 const ERROR_REFORMULATE =
   'Reformule ta question (ex. "taux de livraison par zone ce mois").';
@@ -550,56 +544,9 @@ async function interpretOnce(
   question: string,
   context: { pharmacies: string[]; zones: string[] }
 ): Promise<AnalyticsSpec | null> {
-  if (!ai) return null;
-
-  const systemInstruction = `Tu es un interpréteur de requêtes analytiques pour une société de livraison.
-Ta SEULE tâche : convertir la question de l'utilisateur en un objet JSON conforme à la grammaire ci-dessous.
-Tu ne calcules RIEN, tu ne donnes AUCUN chiffre, AUCUNE phrase.
-
-Grammaire (valeurs autorisées UNIQUEMENT) :
-- metric   : "volume" | "deliveryRate" | "punctualityRate" | "avgDelayHours" | "failRate" | "weight"
-- dimension: "none" | "pharmacy" | "zone" | "day" | "status"
-- period   : "7d" | "30d" | "month" | "all"
-- chart    : "kpi" | "line" | "bar" | "donut" | "table"
-- pharmacy : (optionnel) un nom EXACT parmi la liste connue, sinon omets
-- zone     : (optionnel) un nom EXACT parmi la liste connue, sinon omets
-
-Correspondances utiles :
-- "combien de colis", "volume", "nombre" -> metric "volume"
-- "taux de livraison", "livrés" (en %) -> metric "deliveryRate"
-- "ponctualité", "à l'heure", "retard %" -> metric "punctualityRate"
-- "délai moyen", "temps de livraison" -> metric "avgDelayHours"
-- "échecs", "échec", "ratés" -> metric "failRate"
-- "poids", "kg", "tonnage" -> metric "weight"
-- "par pharmacie / client / destinataire" -> dimension "pharmacy"
-- "par zone / secteur / région" -> dimension "zone"
-- "par jour / évolution / tendance" -> dimension "day"
-- "par statut / répartition statut" -> dimension "status"
-- pas de regroupement explicite -> dimension "none"
-- "cette semaine" -> "7d" ; "30 jours" -> "30d" ; "ce mois" -> "month" ; sinon "all"
-- dimension "none" -> chart "kpi" ; "day" -> "line" ; "status" -> "donut" ; "pharmacy"/"zone" -> "bar"
-
-Pharmacies connues : ${JSON.stringify(context.pharmacies.slice(0, 100))}
-Zones connues : ${JSON.stringify(context.zones)}
-
-Réponds UNIQUEMENT en JSON, aucun texte, aucun chiffre.
-Exemple : {"metric":"deliveryRate","dimension":"zone","period":"month","chart":"bar"}`;
-
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: question,
-      config: {
-        systemInstruction,
-        temperature: 0,
-        responseMimeType: 'application/json',
-      },
-    });
-    const parsed = parseJsonLoose(response.text || '');
-    return validateSpec(parsed, context);
-  } catch {
-    return null;
-  }
+  const call = httpsCallable<{question: string; context: typeof context}, {text: string}>(getFunctions(app, 'europe-west1'), 'interpretAnalytics');
+  const response = await call({question, context});
+  return validateSpec(parseJsonLoose(response.data.text || ''), context);
 }
 
 // ----------------------------------------------------------------------------
@@ -611,10 +558,6 @@ export async function runQuery(
   question: string,
   context: { pharmacies: string[]; zones: string[] }
 ): Promise<QueryResult | { error: string }> {
-  // 0. LLM indisponible (clé absente) -> échec gracieux
-  if (!ai) {
-    return { error: ERROR_REFORMULATE };
-  }
   if (!question || !question.trim()) {
     return { error: ERROR_REFORMULATE };
   }
@@ -624,17 +567,15 @@ export async function runQuery(
     zones: Array.isArray(context?.zones) ? context.zones : [],
   };
 
-  // 1 + 2. Interprétation + validation
-  const first = await interpretOnce(question, safeContext);
-  if (!first) {
-    return { error: ERROR_REFORMULATE };
+  // Both interpretations must agree on metric, period and every filter.
+  let first: AnalyticsSpec | null, second: AnalyticsSpec | null;
+  try {
+    [first, second] = await Promise.all([interpretOnce(question,safeContext),interpretOnce(question,safeContext)]);
+  } catch {
+    return {error: 'L’analyse en langage naturel est indisponible. Les statistiques restent accessibles ; réessayez plus tard.'};
   }
-
-  // 3. Auto-cohérence : 2e interprétation. Si échec du 2e appel -> on accepte le 1er.
-  const second = await interpretOnce(question, safeContext);
-  if (second && (second.metric !== first.metric || second.dimension !== first.dimension)) {
-    return { error: ERROR_CLARIFY };
-  }
+  if (!first || !second) return {error: ERROR_REFORMULATE};
+  if (JSON.stringify(first) !== JSON.stringify(second)) return {error: ERROR_CLARIFY};
 
   const spec = first;
 

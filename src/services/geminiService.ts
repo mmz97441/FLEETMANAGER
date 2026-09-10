@@ -1,70 +1,7 @@
-
-import { GoogleGenAI } from "@google/genai";
-import { Vehicle, User, FuelLog, MaintenanceLog } from '../types';
-
-// ⚠️ SÉCURITÉ — RISQUE CONNU À CORRIGER
-// La variable VITE_GEMINI_API_KEY est bundlée dans le JS livré au navigateur
-// (le préfixe VITE_ rend la valeur publique). N'importe quel visiteur peut
-// extraire la clé du bundle et faire facturer ton compte Google.
-//
-// Solution recommandée : déplacer cet appel dans une Cloud Function callable
-// (functions/src/index.ts), conserver la clé dans la config Firebase Functions
-// (firebase functions:config:set gemini.key="..."), et appeler depuis le frontend
-// via httpsCallable. Voir TODO sécurité dans CHANGELOG.
-const apiKey = process.env.API_KEY;
-
-let ai: GoogleGenAI | null = null;
-
-if (apiKey) {
-  ai = new GoogleGenAI({ apiKey });
-} else {
-  // Gemini API Key is missing - AI features will be disabled
-}
-
-export const askFleetGenius = async (
-  userPrompt: string, 
-  context: { 
-    vehicles: Vehicle[], 
-    users: User[], 
-    logs: FuelLog[], 
-    maintenanceLogs: MaintenanceLog[] 
-  }
-): Promise<string> => {
-  if (!ai) {
-    return "Le service d'intelligence artificielle n'est pas configuré (Clé API manquante).";
-  }
-
-  try {
-    const { vehicles, users, logs, maintenanceLogs } = context;
-
-    const SYSTEM_INSTRUCTION = `
-You are FleetGenius, an expert AI transport logistics assistant.
-Your goal is to help the CEO make decisions to optimize costs, improve safety, and manage maintenance.
-
-Data Context:
-- Vehicles: ${JSON.stringify(vehicles.map(v => ({ id: v.plate, model: v.model, status: v.status, km: v.currentMileage })))}
-- Recent Fuel Logs (Last 10): ${JSON.stringify(logs.slice(0, 10))}
-- Recent Maintenance (Last 5): ${JSON.stringify(maintenanceLogs.slice(0, 5))}
-- Users count: ${users.length}
-
-Rules:
-1. Be concise, professional, and actionable.
-2. If asked about "problems", check vehicles with status 'ISSUE' or 'MAINTENANCE'.
-3. Use Markdown formatting.
-4. Reply in French.
-    `;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: userPrompt,
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION,
-      }
-    });
-
-    return response.text || "Désolé, je n'ai pas pu analyser les données pour le moment.";
-  } catch (error) {
-    console.error("Gemini API Error:", error);
-    return "Une erreur de connexion avec le module IA est survenue. Veuillez réessayer plus tard.";
-  }
+import { getFunctions, httpsCallable } from 'firebase/functions';
+import app from '../firebaseConfig';
+import { Vehicle,User,FuelLog,MaintenanceLog } from '../types';
+export const askFleetGenius=async(userPrompt:string,_context:{vehicles:Vehicle[];users:User[];logs:FuelLog[];maintenanceLogs:MaintenanceLog[]}):Promise<string>=>{
+ try{const call=httpsCallable<{prompt:string},{text:string}>(getFunctions(app,'europe-west1'),'askFleetGenius');return (await call({prompt:userPrompt})).data.text;}
+ catch(error){return error instanceof Error?error.message:'Le conseiller IA est indisponible.';}
 };

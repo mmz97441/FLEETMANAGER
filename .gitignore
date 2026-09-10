@@ -120,3 +120,7 @@ dist
 # macOS
 .DS_Store
 .gstack/
+
+# Environment files for each Firebase project
+.env.*
+!.env.example

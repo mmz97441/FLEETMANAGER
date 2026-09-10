@@ -11,29 +11,34 @@ service firebase.storage {
       return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role;
     }
 
+    function isActive() {
+      return request.auth != null && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('isDisabled', false) == false
+        && (firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('sessionsRevokedAt',0) == 0 || request.auth.token.auth_time > firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.sessionsRevokedAt);
+    }
+
     // Rôles d'administration (regex ancrées pour éviter les faux positifs type "sous-président")
     function isAdminRole() {
-      return request.auth != null && getUserRole().matches('(?i)^(admin|pr[eé]sident[e]?|directeur|directrice|direction|secr[eé]taire|secr[eé]tariat)$');
+      return isActive() && getUserRole().matches('(?i)^(admin|pr[eé]sident[e]?|directeur(?: exploitation)?|directrice(?: exploitation)?|direction|secr[eé]taire|secr[eé]tariat)$');
     }
 
     // Est un chauffeur
     function isDriver() {
-      return request.auth != null && getUserRole().matches('(?i)^(chauffeur|chauffeuse)$');
+      return isActive() && getUserRole().matches('(?i)^(chauffeur|chauffeuse)$');
     }
 
     // Est un mécanicien
     function isMechanic() {
-      return request.auth != null && getUserRole().matches('(?i)^(m[eé]canicien|m[eé]canicienne)$');
+      return isActive() && getUserRole().matches('(?i)^(m[eé]canicien|m[eé]canicienne)$');
     }
 
     // Est un client
     function isClient() {
-      return request.auth != null && getUserRole().matches('(?i)^client$');
+      return isActive() && getUserRole().matches('(?i)^client$');
     }
 
     // Utilisateur interne (tous sauf Client)
     function isInternalUser() {
-      return request.auth != null && getUserRole().matches('(?i)^(admin|pr[eé]sident[e]?|directeur|directrice|direction|secr[eé]taire|secr[eé]tariat|chauffeur|chauffeuse|m[eé]canicien|m[eé]canicienne|stagiaire)$');
+      return isActive() && getUserRole().matches('(?i)^(admin|pr[eé]sident[e]?|directeur(?: exploitation)?|directrice(?: exploitation)?|direction|secr[eé]taire|secr[eé]tariat|chauffeur|chauffeuse|m[eé]canicien|m[eé]canicienne|stagiaire)$');
     }
 
     // ============================================================
@@ -43,11 +48,15 @@ service firebase.storage {
     //         pod/{missionId}/{stopId}/photo-{n}.jpg
     // Lecture : tous les connectés (clients voient les POD de leurs colis)
     // Écriture : admin + chauffeurs (seuls à livrer)
-    match /pod/{allPaths=**} {
-      allow read: if request.auth != null;
-      allow write: if (isAdminRole() || isDriver())
-        && request.resource.size < 10 * 1024 * 1024
-        && request.resource.contentType.matches('image/.*');
+    match /pod/{missionId}/{stopId}/{allPaths=**} {
+      allow read: if isAdminRole() || (isDriver() && firestore.get(/databases/(default)/documents/missions/$(missionId)).data.driverId == request.auth.uid);
+      allow create: if resource == null && (isAdminRole() || (isDriver() && firestore.get(/databases/(default)/documents/missions/$(missionId)).data.driverId == request.auth.uid))
+        && request.resource.size < 10 * 1024 * 1024 && request.resource.contentType.matches('image/.*');
+    }
+    match /pod/returns/{packageId}/{filename} {
+      allow read: if isInternalUser();
+      allow create: if resource == null && (isAdminRole() || (isDriver() && firestore.get(/databases/(default)/documents/packages/$(packageId)).data.currentDriverId == request.auth.uid))
+        && request.resource.size < 10 * 1024 * 1024 && request.resource.contentType.matches('image/.*');
     }
 
     // ============================================================
@@ -56,9 +65,9 @@ service firebase.storage {
     // Chemin: pickups/{missionId}/{stopId}/client-signature.png
     // Lecture : tous les connectés
     // Écriture : admin + chauffeurs
-    match /pickups/{allPaths=**} {
-      allow read: if request.auth != null;
-      allow write: if (isAdminRole() || isDriver())
+    match /pickups/{missionId}/{stopId}/{allPaths=**} {
+      allow read: if isAdminRole() || (isDriver() && firestore.get(/databases/(default)/documents/missions/$(missionId)).data.driverId == request.auth.uid);
+      allow create: if resource == null && (isAdminRole() || (isDriver() && firestore.get(/databases/(default)/documents/missions/$(missionId)).data.driverId == request.auth.uid))
         && request.resource.size < 10 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
     }
@@ -86,7 +95,7 @@ service firebase.storage {
       allow read: if isInternalUser();
       allow write: if (isAdminRole() || isMechanic())
         && request.resource.size < 10 * 1024 * 1024
-        && request.resource.contentType.matches('image/.*');
+        && request.resource.contentType.matches('image/.*|application/pdf');
     }
 
     // ============================================================
@@ -108,9 +117,9 @@ service firebase.storage {
     // Chemin: absences/{absenceId}/{timestamp}_{filename}
     // Lecture : utilisateurs internes uniquement (RH / sa propre absence)
     // Écriture : utilisateurs internes (image ou PDF uniquement, pas d'.exe ni .html)
-    match /absences/{allPaths=**} {
-      allow read: if isInternalUser();
-      allow write: if isInternalUser()
+    match /absences/{absenceId}/{filename} {
+      allow read: if isAdminRole() || (isInternalUser() && firestore.get(/databases/(default)/documents/absences/$(absenceId)).data.userId == request.auth.uid);
+      allow create: if resource == null && (isAdminRole() || (isInternalUser() && firestore.get(/databases/(default)/documents/absences/$(absenceId)).data.userId == request.auth.uid))
         && request.resource.size < 10 * 1024 * 1024
         && request.resource.contentType.matches('image/.*|application/pdf');
     }

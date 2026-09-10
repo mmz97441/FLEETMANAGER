@@ -44,7 +44,7 @@ export const packagesAtSamePoint = (pkg: Package, all: Package[]): Package[] => 
 // Helpers de formatage
 // ---------------------------------------------------------------------------
 const esc = (v: unknown): string =>
-  String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
 const fmtDateTime = (iso?: string): string => {
   if (!iso) return '—';

@@ -1,0 +1,89 @@
+import { beforeEach, it, expect, vi } from 'vitest';
+import { IDBFactory } from 'fake-indexeddb';
+const calls = vi.hoisted(() => ({
+  auth: { currentUser: { uid: 'driver' } },
+  commit: vi.fn(),
+  proof: vi.fn(),
+  failure: vi.fn(),
+}));
+vi.mock('../firebaseConfig', () => ({ auth: calls.auth }));
+vi.mock('./missionService', () => ({ commitStopOutcome: calls.commit }));
+vi.mock('./podService', () => ({
+  uploadAndCreatePOD: calls.proof,
+  uploadFailurePOD: calls.failure,
+}));
+beforeEach(() => {
+  calls.auth.currentUser = { uid: 'driver' };
+  vi.resetModules();
+  vi.stubGlobal('indexedDB', new IDBFactory());
+  vi.stubGlobal('window', new EventTarget());
+  vi.stubGlobal('navigator', { onLine: true });
+  calls.commit.mockReset().mockResolvedValue({ allDone: true, stops: [] });
+  calls.proof.mockReset().mockResolvedValue({ id: 'proof' });
+});
+const entry = () => ({
+  id: 'driver/mission/stop',
+  userId: 'driver',
+  kind: 'success' as const,
+  createdAt: '2026-09-09',
+  action: { missionId: 'mission', stopId: 'stop', stopPatch: {} },
+  proof: {
+    missionId: 'mission',
+    stopId: 'stop',
+    packageIds: ['p'],
+    driverId: 'driver',
+    driverName: 'Test',
+    vehicleId: 'v',
+    vehiclePlate: 'TEST',
+    photosBase64: ['photo-data'],
+    signatureBase64: 'signature-data',
+    coordinates: { lat: 1, lng: 1 },
+  },
+});
+it('keeps photos and signatures across reload after upload failure', async () => {
+  const outbox = await import('./deliveryOutbox');
+  calls.proof.mockResolvedValueOnce(null);
+  await expect(outbox.submitDelivery(entry())).rejects.toThrow();
+  vi.resetModules();
+  const reloaded = await import('./deliveryOutbox');
+  const rows = await reloaded.pendingDeliveries('driver');
+  expect(rows).toHaveLength(1);
+  expect(rows[0].proof.photosBase64).toEqual(['photo-data']);
+  expect(rows[0].committed).toBe(true);
+  expect(await reloaded.pendingDeliveries('another-driver')).toEqual([]);
+  await reloaded.syncDeliveries('driver');
+  expect(await reloaded.pendingDeliveries('driver')).toEqual([]);
+});
+it('persists the full action without starting network writes offline', async () => {
+  vi.stubGlobal('navigator', { onLine: false });
+  const outbox = await import('./deliveryOutbox');
+  await expect(outbox.submitDelivery(entry())).rejects.toThrow();
+  expect(calls.commit).not.toHaveBeenCalled();
+  expect(await outbox.pendingDeliveries('driver')).toHaveLength(1);
+});
+it('does not drop a delivery when the atomic commit fails', async () => {
+  calls.commit.mockRejectedValue(new Error('Conflict'));
+  const outbox = await import('./deliveryOutbox');
+  await expect(outbox.submitDelivery(entry())).rejects.toThrow('Conflict');
+  expect(calls.proof).not.toHaveBeenCalled();
+  expect(await outbox.pendingDeliveries('driver')).toHaveLength(1);
+});
+
+it('does not replay another account’s pending delivery', async () => {
+  const outbox = await import('./deliveryOutbox');
+  calls.auth.currentUser = { uid: 'another-driver' };
+  await expect(outbox.submitDelivery(entry())).rejects.toThrow('Reconnectez');
+  expect(calls.commit).not.toHaveBeenCalled();
+  expect(await outbox.pendingDeliveries('driver')).toHaveLength(1);
+});
+
+it('preserves the first pending intention across concurrent tabs',async()=>{
+ vi.stubGlobal('navigator',{onLine:false});
+ const firstTab=await import('./deliveryOutbox');vi.resetModules();
+ const secondTab=await import('./deliveryOutbox');
+ const original=entry(), changed={...entry(),proof:{...entry().proof,photosBase64:['different-photo']}};
+ await Promise.allSettled([firstTab.submitDelivery(original),secondTab.submitDelivery(changed)]);
+ const rows=await firstTab.pendingDeliveries('driver');
+ expect(rows).toHaveLength(1);expect(rows[0].proof.photosBase64).toEqual(['photo-data']);
+ expect(calls.commit).not.toHaveBeenCalled();
+});

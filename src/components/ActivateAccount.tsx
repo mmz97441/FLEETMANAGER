@@ -81,8 +81,8 @@ const ActivateAccount: React.FC<ActivateAccountProps> = ({ token, onSuccess }) =
     setError(null);
 
     // Validations
-    if (password.length < 6) {
-      setError('Le mot de passe doit contenir au moins 6 caractères.');
+    if (password.length < 8) {
+      setError('Le mot de passe doit contenir au moins 8 caractères.');
       return;
     }
 
@@ -365,10 +365,10 @@ const ActivateAccount: React.FC<ActivateAccountProps> = ({ token, onSuccess }) =
                 type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Minimum 6 caractères"
+                placeholder="Minimum 8 caractères"
                 className="w-full pl-10 pr-12 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none text-slate-900 font-medium"
                 required
-                minLength={6}
+                minLength={8}
               />
               <button
                 type="button"
@@ -439,7 +439,7 @@ const ActivateAccount: React.FC<ActivateAccountProps> = ({ token, onSuccess }) =
           {/* Bouton submit */}
           <button
             type="submit"
-            disabled={loading || password.length < 6 || password !== confirmPassword}
+            disabled={loading || password.length < 8 || password !== confirmPassword}
             className="w-full py-4 bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-700 hover:to-brand-600 disabled:from-slate-300 disabled:to-slate-400 text-white rounded-xl font-bold text-lg transition-all flex items-center justify-center gap-3 shadow-lg hover:shadow-xl disabled:shadow-none"
           >
             {loading ? (

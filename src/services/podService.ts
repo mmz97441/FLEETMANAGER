@@ -1,3 +1,5 @@
+import { writeBatch } from 'firebase/firestore';
+import { cleanUndefined } from '../utils/firestore';
 /**
  * POD SERVICE v2 — Preuve de Livraison (Production-ready)
  * 
@@ -211,7 +213,13 @@ export const uploadAndCreatePOD = async (
   };
 
   try {
-    const basePath = `pod/${missionId}/${stopId}`;
+    const existing = await getDoc(doc(db, POD_COLLECTION, `${missionId}_${stopId}`));
+    if (existing.exists()) {
+      const data = existing.data();
+      if (data.driverId !== driverId || JSON.stringify(data.packageIds) !== JSON.stringify(packageIds)) throw new Error('Une autre preuve existe pour cet arrêt.');
+      return { ...data, packageId: packageIds[0] || '' } as ProofOfDelivery;
+    }
+    const basePath = `pod/${missionId}/${stopId}/${crypto.randomUUID()}`;
     const timestamp = new Date().toISOString();
 
     // 1. Compresser photos
@@ -251,27 +259,18 @@ export const uploadAndCreatePOD = async (
     // 4. Firestore
     emit('saving', 'Enregistrement...');
     const podDocId = `${missionId}_${stopId}`;
-    await setDoc(doc(db, POD_COLLECTION, podDocId), {
-      packageIds, missionId, stopId, driverId, driverName,
-      vehicleId, vehiclePlate, recipientName, deliveryLocation: deliveryLocation || null,
+    const payload = cleanUndefined({
+      packageIds, missionId, stopId, driverId, driverName, vehicleId, vehiclePlate,
+      recipientName, deliveryLocation: deliveryLocation || null,
       merchandiseGoodCondition: goodCondition, reservesNote: reservesExtra.reservesNote ?? null,
-      signatureUrl, photoUrls,
-      coordinates, timestamp, notes, type: 'SUCCESS', createdAt: timestamp
+      signatureUrl, photoUrls, coordinates, timestamp, notes, type: 'SUCCESS', createdAt: timestamp
     });
-
-    // 5. MAJ chaque colis
+    const batch = writeBatch(db);
+    batch.set(doc(db, POD_COLLECTION, podDocId), payload);
     for (const pkgId of packageIds) {
-      try {
-        const pkgPod: ProofOfDelivery = {
-          packageId: pkgId, missionId, stopId, driverId, driverName,
-          vehicleId, vehiclePlate, recipientName, deliveryLocation,
-          merchandiseGoodCondition: goodCondition, ...reservesExtra,
-          signatureUrl, photoUrls,
-          coordinates, timestamp, notes
-        };
-        await updateDoc(doc(db, PACKAGES_COLLECTION, pkgId), { pod: pkgPod, updatedAt: timestamp });
-      } catch (e) { /* silenced */ }
+      batch.update(doc(db, PACKAGES_COLLECTION, pkgId), {pod:cleanUndefined({...payload,packageId:pkgId}),updatedAt:timestamp});
     }
+    await batch.commit();
 
     emit('done', 'Preuves enregistrées ✓');
     return {
@@ -315,7 +314,12 @@ export const uploadFailurePOD = async (
   } = params;
 
   try {
-    const basePath = `pod/${missionId}/${stopId}`;
+    const existing = await getDoc(doc(db, POD_COLLECTION, `${missionId}_${stopId}`));
+    if (existing.exists()) {
+      if (existing.data().driverId !== driverId || existing.data().type !== 'FAILURE') throw new Error('Une autre preuve existe pour cet arrêt.');
+      return true;
+    }
+    const basePath = `pod/${missionId}/${stopId}/${crypto.randomUUID()}`;
     const timestamp = new Date().toISOString();
 
     let photoUrls: string[] = [];

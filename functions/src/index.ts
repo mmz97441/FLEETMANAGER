@@ -1,3 +1,6 @@
+import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import { getAuth } from "firebase-admin/auth";
+import { randomBytes, createHash } from "crypto";
 /**
  * Cloud Functions FleetGenius
  * 
@@ -5,15 +8,15 @@
  * Elles permettent des opérations impossibles depuis le client (navigateur).
  */
 
-import * as functions from "firebase-functions";
+import * as functions from "firebase-functions/v1";
 import * as admin from "firebase-admin";
 import { GoogleAuth } from "google-auth-library";
 
 // Initialiser Firebase Admin
 admin.initializeApp();
 
-const db = admin.firestore();
-const auth = admin.auth();
+const db = getFirestore();
+const auth = getAuth();
 
 // URL de l'application (configurable via Firebase Functions config ou variable d'environnement)
 const APP_URL = process.env.APP_URL || "https://delivrex.vercel.app";
@@ -96,6 +99,11 @@ export const optimizeTours = functions
       );
     }
 
+    const caller = await requireActiveCaller(context);
+    if (!isAdminCaller(caller.role)) throw new functions.https.HttpsError("permission-denied", "Optimisation réservée à l'exploitation.");
+    if (!Array.isArray(model.shipments) || !Array.isArray(model.vehicles) || model.shipments.length > 450 || model.vehicles.length > 100) throw new functions.https.HttpsError("invalid-argument", "Volume d'optimisation invalide.");
+    const quotaRef=db.collection("operation_quotas").doc(`optimize-${context.auth!.uid}`);
+    await db.runTransaction(async tx=>{const previous=await tx.get(quotaRef);if(previous.exists && Date.now()-(previous.data()?.lastAt || 0)<10000)throw new functions.https.HttpsError("resource-exhausted","Attendez quelques secondes avant une nouvelle optimisation.");tx.set(quotaRef,{lastAt:Date.now()});});
     const shipmentCount = model.shipments.length;
     const vehicleCount = model.vehicles.length;
 
@@ -152,7 +160,7 @@ export const optimizeTours = functions
     // 4. Appeler Route Optimization API
     // IMPORTANT: GCLOUD_PROJECT renvoie "fleet-genius-app" (alias Firebase)
     // mais le vrai project ID GCP est "fleet-genius-app-485611"
-    const projectId = "fleet-genius-app-485611";
+    const projectId = process.env.GMPRO_PROJECT_ID || "fleet-genius-app-485611";
     const url = `https://routeoptimization.googleapis.com/v1/projects/${projectId}:optimizeTours`;
 
     // Appel GMPRO
@@ -202,7 +210,7 @@ export const optimizeTours = functions
         await db.collection("audit_logs").add({
           action: "TOURS_OPTIMIZED",
           performedBy: context.auth.uid,
-          performedAt: admin.firestore.FieldValue.serverTimestamp(),
+          performedAt: FieldValue.serverTimestamp(),
           details: {
             shipments: shipmentCount,
             vehicles: vehicleCount,
@@ -253,7 +261,8 @@ export const deleteUserCompletely = functions
 
     const callerUid = context.auth.uid;
     const targetUserId = data.userId;
-    const targetEmail = data.email;
+    const targetProfile = await db.collection("users").doc(String(targetUserId)).get();
+    const targetEmail = targetProfile.data()?.email;
 
     if (!targetUserId) {
       throw new functions.https.HttpsError(
@@ -264,14 +273,15 @@ export const deleteUserCompletely = functions
 
     // 2. Vérifier que l'appelant a les droits (admin/président/directeur)
     const callerDoc = await db.collection("users").doc(callerUid).get();
-    if (!callerDoc.exists) {
+    if (!callerDoc.exists || callerDoc.data()?.isDisabled || (callerDoc.data()?.sessionsRevokedAt && Number(context.auth.token.auth_time || 0) <= callerDoc.data()!.sessionsRevokedAt)) {
       throw new functions.https.HttpsError(
         "permission-denied",
         "Votre profil n'a pas été trouvé."
       );
     }
 
-    if (!isAdminCaller(callerDoc.data()?.role)) {
+    const isClientTeammate = normalizeRole(callerDoc.data()?.role)==='client' && normalizeRole(targetProfile.data()?.role)==='client' && !!callerDoc.data()?.companyName && callerDoc.data()?.companyName===targetProfile.data()?.companyName;
+    if (!isAdminCaller(callerDoc.data()?.role) && !isClientTeammate) {
       throw new functions.https.HttpsError(
         "permission-denied",
         "Vous n'avez pas les droits pour supprimer un utilisateur."
@@ -325,6 +335,8 @@ export const deleteUserCompletely = functions
       results.errors.push(`Auth: ${error.message}`);
     }
 
+    if (results.errors.length) throw new functions.https.HttpsError("internal", "Le compte n’a pas pu être supprimé. Son profil est conservé pour réessayer.");
+
     // 5. Supprimer le document Firestore
     try {
       await db.collection("users").doc(targetUserId).delete();
@@ -366,7 +378,7 @@ export const deleteUserCompletely = functions
         targetUserId,
         targetEmail: targetEmail || "unknown",
         performedBy: callerUid,
-        performedAt: admin.firestore.FieldValue.serverTimestamp(),
+        performedAt: FieldValue.serverTimestamp(),
         results,
       });
     } catch (logError) {
@@ -455,7 +467,7 @@ export const toggleUserStatus = functions
 
     // 2. Vérifier les permissions
     const callerDoc = await db.collection("users").doc(callerUid).get();
-    if (!callerDoc.exists) {
+    if (!callerDoc.exists || callerDoc.data()?.isDisabled || (callerDoc.data()?.sessionsRevokedAt && Number(context.auth.token.auth_time || 0) <= callerDoc.data()!.sessionsRevokedAt)) {
       throw new functions.https.HttpsError(
         "permission-denied",
         "Votre profil n'a pas été trouvé."
@@ -499,6 +511,7 @@ export const toggleUserStatus = functions
 
       if (authUser) {
         await auth.updateUser(authUser.uid, { disabled: disable });
+        if (disable) await auth.revokeRefreshTokens(authUser.uid);
         results.authUpdated = true;
         console.log(`✅ Auth ${disable ? "désactivé" : "réactivé"} pour: ${authUser.email}`);
       } else {
@@ -514,7 +527,7 @@ export const toggleUserStatus = functions
     try {
       await db.collection("users").doc(userId).update({
         isDisabled: disable,
-        disabledAt: disable ? admin.firestore.FieldValue.serverTimestamp() : null,
+        disabledAt: disable ? FieldValue.serverTimestamp() : null,
         disabledBy: disable ? callerUid : null,
       });
       results.firestoreUpdated = true;
@@ -531,7 +544,7 @@ export const toggleUserStatus = functions
         targetUserId: userId,
         targetEmail: email || "unknown",
         performedBy: callerUid,
-        performedAt: admin.firestore.FieldValue.serverTimestamp(),
+        performedAt: FieldValue.serverTimestamp(),
         results,
       });
     } catch (logError) {
@@ -578,7 +591,7 @@ export const forcePasswordReset = functions
 
     // 2. Vérifier les permissions
     const callerDoc = await db.collection("users").doc(callerUid).get();
-    if (!callerDoc.exists) {
+    if (!callerDoc.exists || callerDoc.data()?.isDisabled || (callerDoc.data()?.sessionsRevokedAt && Number(context.auth.token.auth_time || 0) <= callerDoc.data()!.sessionsRevokedAt)) {
       throw new functions.https.HttpsError(
         "permission-denied",
         "Votre profil n'a pas été trouvé."
@@ -665,7 +678,7 @@ export const forcePasswordReset = functions
         targetUserId: userId || authUser.uid,
         targetEmail: email,
         performedBy: callerUid,
-        performedAt: admin.firestore.FieldValue.serverTimestamp(),
+        performedAt: FieldValue.serverTimestamp(),
       });
 
       return {
@@ -731,6 +744,7 @@ export const validateInvitationToken = functions
       const invitationDoc = snapshot.docs[0];
       const invitation = invitationDoc.data();
 
+      if (invitation.schemaVersion !== 2) return {valid:false,error:'EXPIRED',message:'Demandez une nouvelle invitation à votre responsable.'};
       // Vérifier si déjà utilisé
       if (invitation.used) {
         console.warn(`❌ Token déjà utilisé: ${token.substring(0, 8)}...`);
@@ -803,250 +817,1705 @@ export const validateInvitationToken = functions
  * 5. Log d'audit
  */
 export const activateAccount = functions
-  .region("europe-west1")
+  .region('europe-west1')
   .https.onCall(async (data) => {
-    const { token, password } = data;
-
-    // ========================================
-    // VALIDATIONS
-    // ========================================
-    if (!token || typeof token !== "string") {
+    const { token, password } = data || {};
+    if (
+      typeof token !== 'string' ||
+      typeof password !== 'string' ||
+      password.length < 8
+    )
       throw new functions.https.HttpsError(
-        "invalid-argument",
-        "Token manquant"
+        'invalid-argument',
+        'Lien invalide ou mot de passe trop court (8 caractères minimum).',
       );
-    }
-
-    if (!password || password.length < 6) {
+    const rows = await db
+      .collection('invitations')
+      .where('token', '==', token)
+      .limit(1)
+      .get();
+    if (rows.empty)
       throw new functions.https.HttpsError(
-        "invalid-argument",
-        "Le mot de passe doit contenir au moins 6 caractères"
+        'not-found',
+        'Invitation introuvable.',
       );
-    }
-
+    const ref = rows.docs[0].ref,
+      invitation = rows.docs[0].data();
+    if (invitation.schemaVersion !== 2)
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        'Demandez une nouvelle invitation à votre responsable.',
+      );
+    if (
+      invitation.used ||
+      !Number.isFinite(Date.parse(invitation.expiresAt)) ||
+      Date.parse(invitation.expiresAt) < Date.now()
+    )
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        'Invitation utilisée ou expirée.',
+      );
+    const profileRef = db.collection('users').doc(invitation.userId);
+    const profile = await profileRef.get();
+    if (
+      !profile.exists ||
+      profile.data()?.isDisabled ||
+      profile.data()?.email?.toLowerCase().trim() !== invitation.email ||
+      profile.data()?.role !== invitation.role
+    )
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        'Le profil a changé. Demandez une nouvelle invitation.',
+      );
+    let createdHere = false;
     try {
-      // ========================================
-      // ÉTAPE 1: TROUVER ET VALIDER L'INVITATION
-      // ========================================
-      console.log(`🔍 Recherche invitation pour token: ${token.substring(0, 8)}...`);
-      
-      const snapshot = await db
-        .collection("invitations")
-        .where("token", "==", token)
-        .limit(1)
-        .get();
-
-      if (snapshot.empty) {
-        throw new functions.https.HttpsError(
-          "not-found",
-          "Lien d'invitation invalide"
-        );
-      }
-
-      const invitationDoc = snapshot.docs[0];
-      const invitation = invitationDoc.data();
-
-      console.log(`📧 Invitation trouvée pour: ${invitation.email}`);
-
-      if (invitation.used) {
-        throw new functions.https.HttpsError(
-          "already-exists",
-          "Ce lien a déjà été utilisé. Connectez-vous avec votre email et mot de passe."
-        );
-      }
-
-      const now = new Date();
-      const expiresAt = new Date(invitation.expiresAt);
-      if (now > expiresAt) {
-        throw new functions.https.HttpsError(
-          "deadline-exceeded",
-          "Ce lien a expiré. Demandez une nouvelle invitation à votre administrateur."
-        );
-      }
-
-      // ========================================
-      // ÉTAPE 2: CRÉER LE COMPTE FIREBASE AUTH
-      // ========================================
-      console.log(`🔐 Création du compte Auth pour: ${invitation.email}`);
-      
-      let authUser;
-      try {
-        authUser = await auth.createUser({
-          email: invitation.email.toLowerCase().trim(),
-          password: password,
-          emailVerified: true, // Email vérifié car il a reçu l'invitation
+      await auth.createUser({
+        uid: invitation.userId,
+        email: invitation.email,
+        password,
+        emailVerified: true,
+      });
+      createdHere = true;
+      await db.runTransaction(async (tx) => {
+        const current = await tx.get(ref),
+          user = await tx.get(profileRef);
+        const fresh = current.data();
+        if (
+          !fresh ||
+          fresh.used ||
+          fresh.token !== token ||
+          !Number.isFinite(Date.parse(fresh.expiresAt)) ||
+          Date.parse(fresh.expiresAt) < Date.now() ||
+          !user.exists ||
+          user.data()?.isDisabled ||
+          user.data()?.role !== fresh.role ||
+          user.data()?.email?.toLowerCase().trim() !== fresh.email
+        )
+          throw new functions.https.HttpsError(
+            'failed-precondition',
+            'L’invitation a changé pendant l’activation.',
+          );
+        tx.update(profileRef, {
+          id: invitation.userId,
+          activatedAt: FieldValue.serverTimestamp(),
+          status: 'active',
+          isDisabled: false,
         });
-        console.log(`✅ Compte Auth créé: ${authUser.uid}`);
-      } catch (authError: any) {
-        if (authError.code === "auth/email-already-exists") {
-          // L'utilisateur existe déjà dans Auth - peut-être une activation partielle précédente
-          console.warn(`⚠️ Compte Auth existe déjà pour: ${invitation.email}`);
-          
-          // Récupérer l'UID existant
-          const existingUser = await auth.getUserByEmail(invitation.email.toLowerCase().trim());
-          
-          // Vérifier si le profil Firestore existe
-          const existingProfile = await db.collection("users").doc(existingUser.uid).get();
-          
-          if (existingProfile.exists) {
-            // Le compte est déjà complètement activé
-            throw new functions.https.HttpsError(
-              "already-exists",
-              "Ce compte existe déjà. Utilisez 'Mot de passe oublié' si vous avez oublié votre mot de passe."
-            );
-          }
-          
-          // Le compte Auth existe mais pas le profil - on continue avec cet UID
-          authUser = existingUser;
-          console.log(`🔄 Utilisation du compte Auth existant: ${authUser.uid}`);
-        } else {
-          throw authError;
-        }
-      }
-
-      // ========================================
-      // ÉTAPE 3: CRÉER/MIGRER LE PROFIL FIRESTORE + MARQUER L'INVITATION
-      // ========================================
-      // Toutes les écritures Firestore sont enveloppées dans une transaction :
-      // si l'une plante, aucune n'est appliquée → pas d'invitation marquée "used"
-      // alors que le profil n'a pas été créé, et inversement.
-      // En cas d'échec Firestore après création Auth, on supprime le compte Auth
-      // pour ne pas laisser de compte orphelin (sinon le user retombe sur
-      // "Ce compte existe déjà" sans pouvoir se connecter).
-      console.log(`📝 Migration/Création du profil Firestore (transactionnel)...`);
-
-      // Pré-validation : si on doit reconstruire, on a besoin de firstName/lastName.
-      // On vérifie AVANT la transaction pour ne pas créer Auth pour rien.
-      if (!invitation.firstName || !invitation.lastName) {
-        // On vérifiera dans la transaction si on tombe dans le cas "reconstruction"
-        // (sinon les noms viennent du profil existant)
-      }
-
-      const authUid = authUser.uid;
-      const normalizedEmail = invitation.email.toLowerCase().trim();
-      let wasReconstructed = false;
-
-      try {
-        await db.runTransaction(async (tx) => {
-          // --- Lectures (obligatoires AVANT toute écriture en transaction) ---
-          const newProfileRef = db.collection("users").doc(authUid);
-          const newProfileSnap = await tx.get(newProfileRef);
-
-          // L'ID original (pré-activation) peut être différent de l'UID Auth.
-          // Si invitation.userId est absent, on est forcément en cas "reconstruction".
-          const oldProfileRef = invitation.userId
-            ? db.collection("users").doc(invitation.userId)
-            : null;
-          const oldProfileSnap = oldProfileRef ? await tx.get(oldProfileRef) : null;
-
-          // --- Écritures ---
-          if (newProfileSnap.exists) {
-            // Double activation : le profil cible existe déjà, on ne touche pas
-            console.log(`✅ Profil existe déjà avec le bon UID: ${authUid}`);
-          } else if (oldProfileSnap && oldProfileSnap.exists) {
-            // MIGRATION : copier l'ancien profil vers le nouvel UID puis supprimer
-            const userData = oldProfileSnap.data() || {};
-            tx.set(newProfileRef, {
-              ...userData,
-              id: authUid,
-              email: normalizedEmail,
-              activatedAt: admin.firestore.FieldValue.serverTimestamp(),
-              status: "active",
-            });
-            tx.delete(oldProfileRef!);
-            console.log(`✅ Profil migré de ${invitation.userId} vers ${authUid}`);
-          } else {
-            // RECONSTRUCTION depuis l'invitation
-            if (!invitation.firstName || !invitation.lastName) {
-              throw new functions.https.HttpsError(
-                "failed-precondition",
-                "Les informations de profil sont manquantes. Contactez votre administrateur."
-              );
-            }
-            wasReconstructed = true;
-            tx.set(newProfileRef, {
-              id: authUid,
-              email: normalizedEmail,
-              firstName: invitation.firstName,
-              lastName: invitation.lastName,
-              role: invitation.role || "Chauffeur",
-              activatedAt: admin.firestore.FieldValue.serverTimestamp(),
-              createdAt: invitation.createdAt || new Date().toISOString(),
-              status: "active",
-              phone: "",
-              assignedVehicleId: null,
-              companyName: "",
-            });
-            console.log(`✅ Profil reconstruit pour ${authUid}: ${invitation.firstName} ${invitation.lastName}`);
-          }
-
-          // Marquer l'invitation comme utilisée (atomique avec le profil)
-          tx.update(invitationDoc.ref, {
-            used: true,
-            usedAt: new Date().toISOString(),
-            authUid: authUid,
-            activationSuccess: true,
-          });
+        tx.update(ref, {
+          used: true,
+          usedAt: new Date().toISOString(),
+          authUid: invitation.userId,
+          activationSuccess: true,
         });
-      } catch (firestoreError: any) {
-        // Rollback : supprimer le compte Auth qu'on vient de créer
-        // (sauf si on l'avait récupéré dans le branch email-already-exists,
-        // mais on peut quand même tenter le delete sans bloquer)
-        console.error("❌ Échec écriture Firestore après création Auth, rollback de l'utilisateur Auth", firestoreError);
-        try {
-          await auth.deleteUser(authUid);
-          console.log(`🧹 Compte Auth ${authUid} supprimé (rollback)`);
-        } catch (deleteErr) {
-          console.error(`⚠️ Impossible de supprimer le compte Auth orphelin ${authUid}`, deleteErr);
-        }
-        if (firestoreError instanceof functions.https.HttpsError) {
-          throw firestoreError;
-        }
-        throw new functions.https.HttpsError(
-          "internal",
-          `Échec activation côté base de données : ${firestoreError?.message || firestoreError}`
-        );
-      }
-
-      console.log(`✅ Compte activé avec succès pour: ${invitation.email}`);
-
-      // ========================================
-      // ÉTAPE 5: LOG D'AUDIT (best-effort, ne bloque pas le retour)
-      // ========================================
-      // Avant : `reconstructed: !await db...` lisait un doc qui venait d'être
-      // supprimé dans la migration → la valeur était quasi-toujours fausse.
-      // On utilise désormais la variable `wasReconstructed` réellement calculée.
-      try {
-        await db.collection("audit_logs").add({
-          action: "ACCOUNT_ACTIVATED",
-          userId: authUid,
-          email: invitation.email,
-          invitedBy: invitation.invitedBy,
-          invitedByName: invitation.invitedByName,
-          originalUserId: invitation.userId,
-          reconstructed: wasReconstructed,
-          activatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-      } catch (auditErr) {
-        console.warn("⚠️ Échec écriture audit_log (non bloquant)", auditErr);
-      }
-
+      });
       return {
         success: true,
+        message: 'Compte activé',
         email: invitation.email,
-        message: "Compte activé avec succès ! Vous pouvez maintenant vous connecter.",
       };
-
     } catch (error: any) {
-      console.error("❌ Erreur activation:", error);
-      
-      if (error instanceof functions.https.HttpsError) {
-        throw error;
-      }
-      
+      if (createdHere) await auth.deleteUser(invitation.userId).catch(() => {});
+      if (
+        error.code === 'auth/email-already-exists' ||
+        error.code === 'auth/uid-already-exists'
+      )
+        throw new functions.https.HttpsError(
+          'already-exists',
+          'Ce compte existe déjà. Utilisez la réinitialisation du mot de passe.',
+        );
+      if (error instanceof functions.https.HttpsError) throw error;
       throw new functions.https.HttpsError(
-        "internal",
-        `Erreur lors de l'activation: ${error.message}`
+        'internal',
+        'Activation impossible. Réessayez ou contactez votre responsable.',
       );
     }
+  });
+
+async function requireActiveCaller(context: functions.https.CallableContext) {
+  if (!context.auth)
+    throw new functions.https.HttpsError(
+      'unauthenticated',
+      'Connexion requise.',
+    );
+  const snap = await db.collection('users').doc(context.auth.uid).get();
+  if (
+    !snap.exists ||
+    snap.data()?.isDisabled ||
+    (snap.data()?.sessionsRevokedAt &&
+      Number(context.auth.token.auth_time || 0) <=
+        snap.data()!.sessionsRevokedAt)
+  )
+    throw new functions.https.HttpsError(
+      'permission-denied',
+      'Compte indisponible.',
+    );
+  return { ...snap.data(), id: snap.id } as any;
+}
+
+export const createInvitation = functions
+  .region('europe-west1')
+  .https.onCall(async (data, context) => {
+    const caller = await requireActiveCaller(context);
+    if (!isAdminCaller(caller.role) && normalizeRole(caller.role) !== 'client')
+      throw new functions.https.HttpsError(
+        'permission-denied',
+        'Invitation non autorisée.',
+      );
+    const email = String(data?.email || '')
+      .toLowerCase()
+      .trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        'Email invalide.',
+      );
+    const matches = await db
+      .collection('users')
+      .where('email', '==', email)
+      .get();
+    const target = data.userId
+      ? matches.docs.find((d) => d.id === data.userId)
+      : matches.docs.length === 1
+        ? matches.docs[0]
+        : undefined;
+    if (!target)
+      throw new functions.https.HttpsError(
+        'not-found',
+        'Profil unique introuvable.',
+      );
+    const user = target.data();
+    if (
+      !isAdminCaller(caller.role) &&
+      (normalizeRole(user.role) !== 'client' ||
+        !caller.companyName ||
+        user.companyName !== caller.companyName)
+    )
+      throw new functions.https.HttpsError(
+        'permission-denied',
+        'Vous ne pouvez inviter que votre équipe cliente.',
+      );
+    if (user.activatedAt)
+      throw new functions.https.HttpsError(
+        'already-exists',
+        'Compte déjà activé. Utilisez Mot de passe oublié.',
+      );
+    const token = randomBytes(32).toString('hex'),
+      expiresAt = new Date(Date.now() + 7 * 86400000).toISOString();
+    await db
+      .collection('invitations')
+      .doc(target.id)
+      .set({
+        schemaVersion: 2,
+        token,
+        email,
+        userId: target.id,
+        role: user.role,
+        firstName: user.firstName || '',
+        lastName: user.lastName || '',
+        companyName: user.companyName || '',
+        invitedBy: caller.id,
+        invitedByName: `${caller.firstName || ''} ${caller.lastName || ''}`,
+        createdAt: new Date().toISOString(),
+        expiresAt,
+        used: false,
+      });
+    await db
+      .collection('mail')
+      .add({
+        to: email,
+        message: {
+          subject: 'Votre invitation FleetGenius',
+          text: `Vous êtes invité à rejoindre FleetGenius. Activez votre compte : ${APP_URL}/activate?token=${token}\nCe lien expire le ${expiresAt}.`,
+        },
+        type: 'user_invitation',
+        createdAt: new Date().toISOString(),
+      });
+    return { token, expiresAt };
+  });
+
+// Recovery is server-only and proves ownership of the verified Auth email.
+export const linkAuthToProfile = functions
+  .region('europe-west1')
+  .https.onCall(async (_data, context) => {
+    if (!context.auth || !context.auth.token.email_verified)
+      throw new functions.https.HttpsError(
+        'permission-denied',
+        'Vérifiez votre adresse email avant récupération du profil.',
+      );
+    const uid = context.auth.uid,
+      email = String(context.auth.token.email || '')
+        .toLowerCase()
+        .trim();
+    const current = await db.collection('users').doc(uid).get();
+    if (current.exists) return { success: true };
+    const rows = await db.collection('users').where('email', '==', email).get();
+    if (rows.size !== 1 || rows.docs[0].data().isDisabled)
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        'Profil introuvable ou ambigu. Contactez votre responsable.',
+      );
+    const old = rows.docs[0];
+    // Idempotent updates: preserve business references before publishing the new profile.
+    const references: Record<string, string[]> = {
+      vehicles: ['driverId', 'assignedDriverId'],
+      missions: ['driverId', 'clientId'],
+      packages: ['clientId', 'currentDriverId'],
+      absences: ['userId'],
+      leaves: ['userId'],
+      documentAcknowledgments: ['userId'],
+      quotes: ['clientId', 'requesterId', 'createdBy'],
+      notifications: ['recipientId'],
+    };
+    for (const [collection, fields] of Object.entries(references))
+      for (const field of fields) {
+        const docs = await db
+          .collection(collection)
+          .where(field, '==', old.id)
+          .get();
+        for (let i = 0; i < docs.size; i += 400) {
+          const batch = db.batch();
+          for (const d of docs.docs.slice(i, i + 400))
+            batch.update(d.ref, { [field]: uid });
+          await batch.commit();
+        }
+      }
+    await db.runTransaction(async (tx) => {
+      const fresh = await tx.get(old.ref),
+        existing = await tx.get(db.collection('users').doc(uid));
+      if (existing.exists) return;
+      if (
+        !fresh.exists ||
+        fresh.data()?.email !== email ||
+        fresh.data()?.isDisabled
+      )
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          'Profil modifié pendant récupération.',
+        );
+      tx.set(db.collection('users').doc(uid), {
+        ...fresh.data(),
+        id: uid,
+        originalUserId: old.id,
+      });
+      tx.delete(old.ref);
+    });
+    return { success: true };
+  });
+
+export const revokeOwnSessions = functions
+  .region('europe-west1')
+  .https.onCall(async (_data, context) => {
+    const caller = await requireActiveCaller(context);
+    await auth.revokeRefreshTokens(caller.id);
+    await db
+      .collection('users')
+      .doc(caller.id)
+      .update({ sessionsRevokedAt: Math.floor(Date.now() / 1000) });
+    return { success: true };
+  });
+
+const absenceStates = new Set([
+  'En attente',
+  'Validé',
+  'Refusé',
+  'Modification proposée',
+]);
+const absenceTypes = new Set([
+  'Congés Payés',
+  'RTT',
+  'Congé Sans Solde',
+  'Arrêt Maladie',
+  'Accident de Travail',
+  'Congé Maternité',
+  'Congé Paternité',
+  'Formation',
+  'Absence Injustifiée',
+  'Récupération',
+  'Autre',
+]);
+function workingDays(
+  start: string,
+  end: string,
+  halfStart?: string,
+  halfEnd?: string,
+): number {
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(start) ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(end) ||
+    start > end
+  )
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'Dates invalides.',
+    );
+  const first = Date.parse(start + 'T00:00:00Z'),
+    last = Date.parse(end + 'T00:00:00Z');
+  if (
+    !Number.isFinite(first) ||
+    !Number.isFinite(last) ||
+    new Date(first).toISOString().slice(0, 10) !== start ||
+    new Date(last).toISOString().slice(0, 10) !== end ||
+    last - first > 366 * 86400000
+  )
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'Période invalide ou supérieure à un an.',
+    );
+  let count = 0;
+  for (let t = first; t <= last; t += 86400000) {
+    const day = new Date(t).getUTCDay();
+    if (day !== 0 && day !== 6) count++;
+  }
+  if (
+    (halfStart && !['morning', 'afternoon'].includes(halfStart)) ||
+    (halfEnd && !['morning', 'afternoon'].includes(halfEnd)) ||
+    (start === end && halfStart === 'afternoon' && halfEnd === 'morning')
+  )
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'Demi-journées invalides.',
+    );
+  if (
+    count > 0 &&
+    halfStart === 'afternoon' &&
+    ![0, 6].includes(new Date(first).getUTCDay())
+  )
+    count -= 0.5;
+  if (
+    count > 0 &&
+    halfEnd === 'morning' &&
+    ![0, 6].includes(new Date(last).getUTCDay())
+  )
+    count -= 0.5;
+  return Math.max(0, count);
+}
+export const saveAbsence = functions
+  .region('europe-west1')
+  .https.onCall(async (data, context) => {
+    const caller = await requireActiveCaller(context),
+      manager = isAdminCaller(caller.role);
+    const input = data?.absence;
+    if (
+      !input ||
+      typeof input.id !== 'string' ||
+      !/^[\w-]{1,128}$/.test(input.id)
+    )
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        'Demande invalide.',
+      );
+    return db.runTransaction(async (tx) => {
+      const ref = db.collection('absences').doc(input.id),
+        snap = await tx.get(ref),
+        old = snap.data();
+      const userId = old?.userId || input.userId;
+      if (typeof userId !== 'string' || (!manager && userId !== caller.id))
+        throw new functions.https.HttpsError(
+          'permission-denied',
+          'Demande non autorisée.',
+        );
+      const userRef = db.collection('users').doc(userId),
+        user = await tx.get(userRef);
+      if (!user.exists)
+        throw new functions.https.HttpsError(
+          'not-found',
+          'Salarié introuvable.',
+        );
+      let next = { ...input, userId };
+      delete next.id;
+      if (!manager) {
+        if (
+          old?.status === 'Modification proposée' &&
+          input.status === 'Validé'
+        ) {
+          const proposal = old.modificationProposal;
+          if (!proposal)
+            throw new functions.https.HttpsError(
+              'failed-precondition',
+              'Proposition absente.',
+            );
+          next = {
+            ...old,
+            startDate: proposal.proposedStartDate,
+            endDate: proposal.proposedEndDate,
+            status: 'Validé',
+            modificationProposal: null,
+            validatedBy: proposal.proposedBy,
+          };
+        } else if (
+          old?.status === 'Modification proposée' &&
+          input.status === 'En attente'
+        ) {
+          next = {
+            ...old,
+            status: 'En attente',
+            modificationProposal: null,
+            validatedBy: null,
+            validatedAt: null,
+          };
+        } else {
+          if (
+            (old && old.status !== 'En attente') ||
+            next.status !== 'En attente'
+          )
+            throw new functions.https.HttpsError(
+              'permission-denied',
+              'Seule une demande en attente est modifiable.',
+            );
+          if (
+            ![
+              'Congés Payés',
+              'RTT',
+              'Congé Sans Solde',
+              'Récupération',
+              'Autre',
+            ].includes(next.type)
+          )
+            throw new functions.https.HttpsError(
+              'permission-denied',
+              'Type réservé à la direction.',
+            );
+          next = {
+            ...next,
+            validatedBy: null,
+            validatedAt: null,
+            adminComment: null,
+            modificationProposal: null,
+          };
+        }
+      }
+      if (
+        manager &&
+        userId === caller.id &&
+        next.status === 'Validé' &&
+        !['admin', 'president', 'presidente'].includes(
+          normalizeRole(caller.role),
+        )
+      )
+        throw new functions.https.HttpsError(
+          'permission-denied',
+          'Un autre responsable doit valider votre absence.',
+        );
+      if (!absenceStates.has(next.status) || !absenceTypes.has(next.type))
+        throw new functions.https.HttpsError(
+          'invalid-argument',
+          'Statut ou type invalide.',
+        );
+      if (
+        ['Arrêt Maladie', 'Accident de Travail'].includes(next.type) &&
+        ![
+          'admin',
+          'president',
+          'presidente',
+          'directeur',
+          'directrice',
+          'directeur exploitation',
+          'directrice exploitation',
+          'direction',
+        ].includes(normalizeRole(caller.role))
+      )
+        throw new functions.https.HttpsError(
+          'permission-denied',
+          'Déclaration réservée à la direction.',
+        );
+      if (next.modificationProposal) {
+        workingDays(
+          next.modificationProposal.proposedStartDate,
+          next.modificationProposal.proposedEndDate,
+        );
+        next.modificationProposal = {
+          ...next.modificationProposal,
+          proposedBy: caller.id,
+          proposedAt: new Date().toISOString(),
+        };
+      }
+      const days = workingDays(
+        next.startDate,
+        next.endDate,
+        next.halfDayStart,
+        next.halfDayEnd,
+      );
+      if (days <= 0)
+        throw new functions.https.HttpsError(
+          'invalid-argument',
+          'Cette demande ne contient aucun jour ouvré.',
+        );
+      // Older clients clamped balances to zero, so workingDays is not proof
+      // of the amount actually deducted. Preserve that unknown debit until
+      // accounting has reconciled it; never infer a refund from the duration.
+      const unverifiedLegacyDebit =
+        old?.status === 'Validé' &&
+        old?.type === 'Congés Payés' &&
+        old?.balanceDebit == null;
+      if (
+        unverifiedLegacyDebit &&
+        (next.status !== 'Validé' ||
+          next.type !== 'Congés Payés' ||
+          days !== Number(old?.workingDays))
+      )
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          'La direction doit vérifier le montant déjà débité pour cet ancien congé avant de modifier son solde.',
+        );
+      const previousDebit = old?.balanceDebit ?? 0;
+      if (typeof previousDebit !== 'number' || !Number.isFinite(previousDebit) || previousDebit < 0)
+        throw new functions.https.HttpsError('failed-precondition', 'Le débit de congés enregistré doit être vérifié par la direction.');
+      const debit =
+        !unverifiedLegacyDebit && next.status === 'Validé' && next.type === 'Congés Payés' ? days : 0;
+      delete next.balanceDebit;
+      const balance =
+        Number(user.data()?.leaveBalance || 0) + previousDebit - debit;
+      if (balance < 0)
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          'Solde de congés insuffisant.',
+        );
+      const now = new Date().toISOString();
+      tx.set(ref, {
+        ...next,
+        workingDays: days,
+        ...(unverifiedLegacyDebit ? {} : { balanceDebit: debit }),
+        createdBy: old?.createdBy || caller.id,
+        createdAt: old?.createdAt || now,
+        updatedAt: now,
+        ...(next.status === 'Validé'
+          ? {
+              validatedBy: manager ? caller.id : next.validatedBy,
+              validatedAt:
+                old?.status === 'Validé' ? old.validatedAt || now : now,
+            }
+          : {}),
+      });
+      if (debit !== previousDebit)
+        tx.update(userRef, { leaveBalance: balance });
+      return { success: true };
+    });
+  });
+
+export const transferPackages = functions
+  .region('europe-west1')
+  .https.onCall(async (data, context) => {
+    const caller = await requireActiveCaller(context),
+      isAdmin = isAdminCaller(caller.role);
+    if (!isAdmin && normalizeRole(caller.role) !== 'chauffeur')
+      throw new functions.https.HttpsError(
+        'permission-denied',
+        'Transfert non autorisé.',
+      );
+    const ids = [...new Set<string>(data?.packageIds || [])];
+    if (
+      !ids.length ||
+      ids.length > 150 ||
+      ids.some((id) => typeof id !== 'string' || id.includes('/'))
+    )
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        'Liste de colis invalide (150 maximum).',
+      );
+    const toRef = db.collection('missions').doc(String(data.missionId));
+    return db.runTransaction(async (tx) => {
+      const toSnap = await tx.get(toRef);
+      if (!toSnap.exists)
+        throw new functions.https.HttpsError(
+          'not-found',
+          'Tournée introuvable.',
+        );
+      const to = toSnap.data()!;
+      if (
+        (!isAdmin && to.driverId !== caller.id) ||
+        ['Terminé', 'Annulé'].includes(to.status)
+      )
+        throw new functions.https.HttpsError(
+          'permission-denied',
+          'Tournée indisponible.',
+        );
+      const snaps = await Promise.all(
+        ids.map((id) => tx.get(db.collection('packages').doc(id))),
+      );
+      const packages = snaps
+        .filter(
+          (p) => p.exists && !['Livré', 'Retourné'].includes(p.data()?.status),
+        )
+        .map((p) => ({ id: p.id, ...p.data() }) as any);
+      const origins = [
+        ...new Set<string>(
+          packages
+            .map((p) => p.missionId)
+            .filter((mid) => mid && mid !== toRef.id),
+        ),
+      ];
+      const sourceSnaps = await Promise.all(
+        origins.map((id) => tx.get(db.collection('missions').doc(id))),
+      );
+      const toStops = (to.stops || []).map((s: any) => ({
+        ...s,
+        packageIds: [...s.packageIds],
+      }));
+      const inTour = new Set(toStops.flatMap((s: any) => s.packageIds));
+      const add = packages.filter((p) => !inTour.has(p.id));
+      const added = new Set(add.map((p) => p.id));
+      const counts = (stops: any[]) => ({
+        totalPackages: stops.reduce((n, s) => n + s.packageIds.length, 0),
+        completedStops: stops.filter((s) => s.status === 'Terminé').length,
+        failedStops: stops.filter((s) => ['Échec', 'Passé'].includes(s.status))
+          .length,
+      });
+      const now = new Date().toISOString();
+      let seq = Math.max(0, ...toStops.map((s: any) => s.sequence || 0));
+      for (const p of add) {
+        const key = (p.address + '|' + p.postalCode + '|' + p.city)
+          .trim()
+          .toLowerCase();
+        let stop = toStops.find(
+          (s: any) =>
+            s.type === 'DELIVERY' &&
+            !['Terminé', 'Échec', 'Passé'].includes(s.status) &&
+            (s.address + '|' + s.postalCode + '|' + s.city)
+              .trim()
+              .toLowerCase() === key,
+        );
+        if (!stop) {
+          stop = {
+            id: 'transfer-' + randomBytes(10).toString('hex'),
+            type: 'DELIVERY',
+            status: 'En attente',
+            sequence: ++seq,
+            address: p.address || '',
+            postalCode: p.postalCode || '',
+            city: p.city || '',
+            contactName: p.contactName || '',
+            contactPhone: p.contactPhone || '',
+            packageIds: [],
+            packageCount: 0,
+            serviceTime: p.serviceTime || 5,
+            ...(p.coordinates ? { coordinates: p.coordinates } : {}),
+          };
+          toStops.push(stop);
+        }
+        stop.packageIds.push(p.id);
+        stop.packageCount = stop.packageIds.length;
+        tx.update(db.collection('packages').doc(p.id), {
+          missionId: toRef.id,
+          stopId: stop.id,
+          currentDriverId: to.driverId,
+          currentVehicleId: to.vehicleId || null,
+          status: data.claimMode ? 'En livraison' : p.status,
+          movements: [
+            ...(p.movements || []),
+            {
+              action: data.claimMode ? 'OUT_FOR_DELIVERY' : 'TRANSFERRED',
+              timestamp: now,
+              driverId: to.driverId,
+              driverName: to.driverName || '',
+              notes: String(data.notes || '').slice(0, 1000),
+            },
+          ],
+          updatedAt: now,
+        });
+      }
+      for (const source of sourceSnaps) {
+        if (!source.exists) continue;
+        const stops = (source.data()?.stops || [])
+          .map((s: any) => {
+            const packageIds = s.packageIds.filter(
+              (id: string) => !added.has(id),
+            );
+            return { ...s, packageIds, packageCount: packageIds.length };
+          })
+          .filter(
+            (s: any) => s.packageIds.length > 0 || s.status === 'Terminé',
+          );
+        tx.update(source.ref, { stops, ...counts(stops), updatedAt: now });
+        const moved = add
+          .filter((p) => p.missionId === source.id)
+          .map((p) => p.id);
+        if (moved.length)
+          tx.create(db.collection('package_transfers').doc(), {
+            packageIds: moved,
+            packageCount: moved.length,
+            fromDriverId: source.data()?.driverId || '',
+            toDriverId: to.driverId,
+            fromMissionId: source.id,
+            toMissionId: toRef.id,
+            status: 'Confirmé',
+            reason: data.reason || 'Passation',
+            createdAt: now,
+            updatedAt: now,
+            createdBy: caller.id,
+          });
+      }
+      tx.update(toRef, { stops: toStops, ...counts(toStops), updatedAt: now });
+      return { count: add.length };
+    });
+  });
+
+export const sendBusinessNotification = functions
+  .region('europe-west1')
+  .https.onCall(async (data, context) => {
+    const caller = await requireActiveCaller(context),
+      manager = isAdminCaller(caller.role);
+    const titles: Record<string, string> = {
+      incident_created: 'Incident signalé',
+      incident_response: 'Réponse à un incident',
+      incident_closed: 'Incident clôturé',
+      leave_request: 'Demande d’absence',
+      leave_approved: 'Absence validée',
+      leave_rejected: 'Absence refusée',
+      leave_modification_proposal: 'Modification d’absence proposée',
+      ct_alert: 'Contrôle technique à vérifier',
+      license_alert: 'Document chauffeur à vérifier',
+      password_reset: 'Demande de réinitialisation',
+    };
+    const type = String(data?.type || '');
+    if (
+      !titles[type] ||
+      (!manager &&
+        ![
+          'incident_created',
+          'leave_request',
+          'password_reset',
+          ...(['mecanicien', 'mecanicienne'].includes(
+            normalizeRole(caller.role),
+          )
+            ? ['incident_response', 'incident_closed']
+            : []),
+        ].includes(type)) ||
+      normalizeRole(caller.role) === 'client'
+    )
+      throw new functions.https.HttpsError(
+        'permission-denied',
+        'Notification non autorisée.',
+      );
+    const recipients = [
+      ...new Set<string>(
+        [
+          ...(Array.isArray(data.to) ? data.to : [data.to]),
+          ...(Array.isArray(data.cc) ? data.cc : []),
+          ...(Array.isArray(data.bcc) ? data.bcc : []),
+        ].filter(Boolean),
+      ),
+    ];
+    if (recipients.length > 20 || !recipients.length)
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        'Destinataires invalides.',
+      );
+    for (const email of recipients) {
+      const users = await db
+        .collection('users')
+        .where('email', '==', String(email).toLowerCase().trim())
+        .get();
+      if (
+        users.empty ||
+        (!manager &&
+          !users.docs.some(
+            (u) =>
+              !u.data().isDisabled &&
+              (isAdminCaller(u.data().role) ||
+                u.id === caller.id ||
+                (type.startsWith('incident_') &&
+                  ['mecanicien', 'mecanicienne'].includes(
+                    normalizeRole(u.data().role),
+                  ))),
+          ))
+      )
+        throw new functions.https.HttpsError(
+          'permission-denied',
+          'Destinataire non autorisé.',
+        );
+    }
+    const quotaRef = db
+        .collection('operation_quotas')
+        .doc('email-' + caller.id),
+      now = Date.now();
+    await db.runTransaction(async (tx) => {
+      const previous = await tx.get(quotaRef),
+        q = previous.data();
+      const count = q && now - q.start < 60000 ? q.count : 0;
+      if (count >= 20)
+        throw new functions.https.HttpsError(
+          'resource-exhausted',
+          'Trop de notifications. Réessayez dans une minute.',
+        );
+      tx.set(quotaRef, { start: count ? q!.start : now, count: count + 1 });
+    });
+    // Never accept a browser-provided HTML body, subject or action URL.
+    await db
+      .collection('mail')
+      .add({
+        to: recipients,
+        message: {
+          subject: 'FleetGenius — ' + titles[type],
+          text: `${titles[type]}\nAction signalée par ${caller.firstName || ''} ${caller.lastName || ''}.\nConsultez les détails dans votre espace : ${APP_URL}`,
+        },
+        createdAt: new Date().toISOString(),
+        type,
+        createdBy: caller.id,
+      });
+    return { success: true };
+  });
+
+export const askFleetGenius = functions
+  .region('europe-west1')
+  .runWith({ timeoutSeconds: 60 })
+  .https.onCall(async (data, context) => {
+    const caller = await requireActiveCaller(context);
+    if (!isAdminCaller(caller.role))
+      throw new functions.https.HttpsError(
+        'permission-denied',
+        'Conseiller réservé à la direction.',
+      );
+    const key = process.env.GEMINI_API_KEY,
+      model = process.env.GEMINI_MODEL;
+    if (!key || !model || !/^[\w.-]+$/.test(model))
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        'Le conseiller IA n’est pas configuré côté serveur.',
+      );
+    const prompt = String(data?.prompt || '');
+    if (!prompt || prompt.length > 8000)
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        'Question invalide.',
+      );
+    const quota = db.collection('operation_quotas').doc('ai-' + caller.id),
+      now = Date.now();
+    await db.runTransaction(async (tx) => {
+      const prev = await tx.get(quota),
+        q = prev.data();
+      if (q && now - q.at < 10000)
+        throw new functions.https.HttpsError(
+          'resource-exhausted',
+          'Patientez dix secondes entre deux questions.',
+        );
+      tx.set(quota, { at: now });
+    });
+    const vehicles = await db.collection('vehicles').limit(100).get();
+    const contextData = vehicles.docs.map((d) => ({
+      plate: d.data().plate || d.data().licensePlate,
+      status: d.data().status,
+      km: d.data().currentMileage,
+    }));
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  text: `Réponds en français, comme conseiller de flotte. Données véhicules: ${JSON.stringify(contextData)}\nQuestion: ${prompt}`,
+                },
+              ],
+            },
+          ],
+        }),
+        signal: AbortSignal.timeout(45000),
+      },
+    );
+    if (!response.ok)
+      throw new functions.https.HttpsError(
+        'unavailable',
+        'Le conseiller IA est temporairement indisponible.',
+      );
+    const payload: any = await response.json();
+    return {
+      text:
+        payload.candidates?.[0]?.content?.parts
+          ?.map((p: any) => p.text || '')
+          .join('') || 'Aucune réponse disponible.',
+    };
+  });
+
+export const assignVehicle = functions
+  .region('europe-west1')
+  .https.onCall(async (data, context) => {
+    const caller = await requireActiveCaller(context);
+    if (!isAdminCaller(caller.role))
+      throw new functions.https.HttpsError(
+        'permission-denied',
+        'Affectation réservée à l’exploitation.',
+      );
+    const vehicleId = String(data?.vehicleId || ''),
+      driverId = data?.driverId || null;
+    if (
+      !vehicleId ||
+      vehicleId.includes('/') ||
+      (driverId && (typeof driverId !== 'string' || driverId.includes('/')))
+    )
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        'Affectation invalide.',
+      );
+    return db.runTransaction(async (tx) => {
+      const vehicleRef = db.collection('vehicles').doc(vehicleId),
+        vehicle = await tx.get(vehicleRef);
+      if (!vehicle.exists)
+        throw new functions.https.HttpsError(
+          'not-found',
+          'Véhicule introuvable.',
+        );
+      const previousDriver =
+        vehicle.data()?.driverId || vehicle.data()?.assignedDriverId;
+      const driverRef = driverId ? db.collection('users').doc(driverId) : null,
+        driver = driverRef ? await tx.get(driverRef) : null;
+      if (
+        driverRef &&
+        (!driver?.exists ||
+          normalizeRole(driver.data()?.role) !== 'chauffeur' ||
+          driver.data()?.isDisabled)
+      )
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          'Chauffeur indisponible.',
+        );
+      // Query reads participate in the transaction: concurrent assignments conflict and retry.
+      const oldVehicles = driverId
+        ? await tx.get(
+            db.collection('vehicles').where('driverId', '==', driverId),
+          )
+        : null;
+      const legacyVehicles = driverId
+        ? await tx.get(
+            db.collection('vehicles').where('assignedDriverId', '==', driverId),
+          )
+        : null;
+      const oldDriverRef =
+        previousDriver && previousDriver !== driverId
+          ? db.collection('users').doc(previousDriver)
+          : null;
+      const oldDriver = oldDriverRef ? await tx.get(oldDriverRef) : null;
+      const oldIds = new Set<string>();
+      for (const row of [
+        ...(oldVehicles?.docs || []),
+        ...(legacyVehicles?.docs || []),
+      ])
+        if (row.id !== vehicleId) {
+          oldIds.add(row.id);
+          tx.update(row.ref, { driverId: null, assignedDriverId: null });
+        }
+      tx.update(vehicleRef, { driverId, assignedDriverId: driverId });
+      if (driverRef) tx.update(driverRef, { assignedVehicleId: vehicleId });
+      if (
+        oldDriverRef &&
+        oldDriver?.exists &&
+        oldDriver.data()?.assignedVehicleId === vehicleId
+      )
+        tx.update(oldDriverRef, { assignedVehicleId: null });
+      return {
+        success: true,
+        message: driverId ? 'Chauffeur affecté.' : 'Véhicule libéré.',
+        changes: {
+          vehicleUpdated: true,
+          oldVehicleCleared: oldIds.size > 0,
+          oldDriverCleared: !!oldDriver?.exists,
+        },
+      };
+    });
+  });
+
+export const importPackages = functions
+  .region('europe-west1')
+  .https.onCall(async (data, context) => {
+    const caller = await requireActiveCaller(context),
+      manager = isAdminCaller(caller.role),
+      client = normalizeRole(caller.role) === 'client';
+    if (!manager && !client)
+      throw new functions.https.HttpsError(
+        'permission-denied',
+        'Import non autorisé.',
+      );
+    if (
+      !Array.isArray(data?.packages) ||
+      !data.packages.length ||
+      data.packages.length > 150
+    )
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        'Lot invalide (150 lignes maximum).',
+      );
+    const rows = data.packages.map((raw: any) => {
+      const allowed = [
+        'clientId',
+        'clientName',
+        'importBatchId',
+        'externalId',
+        'orderNumber',
+        'barcode',
+        'address',
+        'city',
+        'postalCode',
+        'zone',
+        'coordinates',
+        'floor',
+        'hasElevator',
+        'contactName',
+        'contactPhone',
+        'contactEmail',
+        'packageIndex',
+        'packageTotal',
+        'createdByClient',
+        'clientReference',
+        'requestedDeliveryDate',
+        'timeWindowStart',
+        'timeWindowEnd',
+        'serviceTime',
+        'comment',
+        'volume',
+        'weight',
+        'status',
+        'currentHubId',
+      ];
+      const p: any = {};
+      for (const key of allowed) if (raw[key] !== undefined) p[key] = raw[key];
+      p.movements = [
+        {
+          action: 'IMPORTED',
+          timestamp: new Date().toISOString(),
+          notes: 'Import enregistré',
+          driverId: caller.id,
+        },
+      ];
+      if (client) {
+        p.clientId = caller.id;
+        p.clientName = caller.companyName || '';
+        p.createdByClient = true;
+        p.status = 'En attente';
+        delete p.currentHubId;
+      }
+      if (!['En attente', 'Au hub', 'Trié'].includes(p.status))
+        throw new functions.https.HttpsError(
+          'invalid-argument',
+          'Statut initial invalide.',
+        );
+      const code = String(p.externalId || p.orderNumber || p.barcode || '')
+        .trim()
+        .toUpperCase();
+      if (
+        !code ||
+        typeof p.clientId !== 'string' ||
+        !String(p.address || '').trim() ||
+        !String(p.contactName || '').trim()
+      )
+        throw new functions.https.HttpsError(
+          'invalid-argument',
+          'Code, client, destinataire et adresse obligatoires.',
+        );
+      const id =
+        'pkg-' +
+        createHash('sha256')
+          .update(
+            p.clientId + '\0' + code + '\0' + String(p.packageIndex || ''),
+          )
+          .digest('hex');
+      return { id, code, p };
+    });
+    return db.runTransaction(async (tx) => {
+      const snapshots = await Promise.all(
+        rows.map((r: any) => tx.get(db.collection('packages').doc(r.id))),
+      );
+      // Recognize historical documents whose IDs predate deterministic imports.
+      const legacy = await Promise.all(
+        rows.map((r: any, i: number) =>
+          snapshots[i].exists
+            ? Promise.resolve(null)
+            : tx.get(
+                db
+                  .collection('packages')
+                  .where('clientId', '==', r.p.clientId)
+                  .where(
+                    r.p.externalId ? 'externalId' : 'orderNumber',
+                    '==',
+                    r.p.externalId || r.p.orderNumber || r.code,
+                  )
+                  .limit(2),
+              ),
+        ),
+      );
+      if (legacy.some((result: any) => result && result.size > 1))
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          'Des doublons existent déjà pour cette référence. Faites-les contrôler avant de reprendre l’import.',
+        );
+      const ids: string[] = [];
+      const written = new Set<string>();
+      const now = new Date().toISOString();
+      rows.forEach((row: any, i: number) => {
+        const existing = legacy[i]?.docs[0];
+        if (existing) {
+          ids.push(existing.id);
+          return;
+        }
+        ids.push(row.id);
+        if (!snapshots[i].exists && !written.has(row.id)) {
+          written.add(row.id);
+          tx.create(db.collection('packages').doc(row.id), {
+            ...row.p,
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+      });
+      return { ids };
+    });
+  });
+
+export const deleteVehicle = functions
+  .region('europe-west1')
+  .https.onCall(async (data, context) => {
+    const caller = await requireActiveCaller(context);
+    if (!isAdminCaller(caller.role))
+      throw new functions.https.HttpsError(
+        'permission-denied',
+        'Suppression réservée à l’exploitation.',
+      );
+    const id = String(data?.vehicleId || '');
+    if (!id || id.includes('/'))
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        'Véhicule invalide.',
+      );
+    return db.runTransaction(async (tx) => {
+      const ref = db.collection('vehicles').doc(id),
+        vehicle = await tx.get(ref);
+      if (!vehicle.exists) return { success: true };
+      const missions = await tx.get(
+        db.collection('missions').where('vehicleId', '==', id),
+      );
+      if (
+        missions.docs.some(
+          (d) => !['Terminé', 'Annulé'].includes(d.data().status),
+        )
+      )
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          'Réaffectez ou clôturez les tournées de ce véhicule avant suppression.',
+        );
+      const drivers = await tx.get(
+        db.collection('users').where('assignedVehicleId', '==', id),
+      );
+      for (const driver of drivers.docs)
+        tx.update(driver.ref, { assignedVehicleId: null });
+      tx.delete(ref);
+      return { success: true };
+    });
+  });
+
+export const deleteAbsence = functions
+  .region('europe-west1')
+  .https.onCall(async (data, context) => {
+    const caller = await requireActiveCaller(context),
+      manager = isAdminCaller(caller.role);
+    const id = String(data?.id || '');
+    if (!id || id.includes('/'))
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        'Demande invalide.',
+      );
+    return db.runTransaction(async (tx) => {
+      const ref = db.collection('absences').doc(id),
+        snap = await tx.get(ref);
+      if (!snap.exists) return { success: true };
+      const old = snap.data()!;
+      if (!manager && (old.userId !== caller.id || old.status !== 'En attente'))
+        throw new functions.https.HttpsError(
+          'permission-denied',
+          'Seule votre demande en attente peut être supprimée.',
+        );
+      const userRef = db.collection('users').doc(old.userId),
+        user = await tx.get(userRef);
+      if (old.status === 'Validé' && old.type === 'Congés Payés' && old.balanceDebit == null)
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          'La direction doit vérifier le montant déjà débité pour cet ancien congé avant sa suppression.',
+        );
+      const debit = old.balanceDebit ?? 0;
+      if (typeof debit !== 'number' || !Number.isFinite(debit) || debit < 0)
+        throw new functions.https.HttpsError('failed-precondition', 'Le débit de congés enregistré doit être vérifié par la direction.');
+      if (debit && !user.exists)
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          'Profil salarié introuvable.',
+        );
+      if (debit)
+        tx.update(userRef, {
+          leaveBalance: Number(user.data()?.leaveBalance || 0) + debit,
+        });
+      tx.create(db.collection('audit_logs').doc(), {
+        action: 'ABSENCE_DELETED',
+        performedBy: caller.id,
+        performedAt: FieldValue.serverTimestamp(),
+        absenceId: id,
+        previous: old,
+      });
+      tx.delete(ref);
+      return { success: true };
+    });
+  });
+
+export const returnPackage = functions
+  .region('europe-west1')
+  .https.onCall(async (data, context) => {
+    const caller = await requireActiveCaller(context),
+      manager = isAdminCaller(caller.role);
+    const id = String(data?.packageId || ''),
+      proof = data?.extra?.returnProof;
+    if (
+      !id ||
+      id.includes('/') ||
+      !proof ||
+      !Array.isArray(proof.photoUrls) ||
+      !proof.photoUrls.length ||
+      proof.photoUrls.some(
+        (url: unknown) =>
+          typeof url !== 'string' || !url.startsWith('https://'),
+      )
+    )
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        'Une preuve photographique du retour est obligatoire.',
+      );
+    return db.runTransaction(async (tx) => {
+      const ref = db.collection('packages').doc(id),
+        snap = await tx.get(ref);
+      if (!snap.exists)
+        throw new functions.https.HttpsError('not-found', 'Colis introuvable.');
+      const pkg = snap.data()!;
+      if (
+        pkg.status === 'Retourné' &&
+        !pkg.missionId &&
+        pkg.returnProof?.driverId === caller.id
+      )
+        return { success: true };
+      if (
+        !manager &&
+        (!['chauffeur', 'chauffeuse'].includes(normalizeRole(caller.role)) ||
+          pkg.currentDriverId !== caller.id)
+      )
+        throw new functions.https.HttpsError(
+          'permission-denied',
+          'Ce colis ne vous est pas affecté.',
+        );
+      if (!['À retourner', 'Échec', 'Retourné'].includes(pkg.status))
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          'Ce colis n’est pas en attente de retour.',
+        );
+      const missionRef = pkg.missionId
+        ? db.collection('missions').doc(pkg.missionId)
+        : null;
+      const mission = missionRef ? await tx.get(missionRef) : null;
+      const now = new Date().toISOString();
+      if (mission?.exists) {
+        const stops = (mission.data()?.stops || [])
+          .map((s: any) => {
+            const packageIds = s.packageIds.filter((pid: string) => pid !== id);
+            return { ...s, packageIds, packageCount: packageIds.length };
+          })
+          .filter(
+            (s: any) =>
+              s.packageIds.length ||
+              ['Terminé', 'Échec', 'Passé'].includes(s.status),
+          );
+        tx.update(mission!.ref, { stops, updatedAt: now });
+      }
+      tx.update(ref, {
+        status: 'Retourné',
+        missionId: null,
+        stopId: null,
+        currentDriverId: null,
+        currentVehicleId: null,
+        currentHubId: mission?.data()?.hubId || pkg.currentHubId || null,
+        returnProof: {
+          ...proof,
+          packageId: id,
+          driverId: caller.id,
+          timestamp: now,
+        },
+        movements: [
+          ...(pkg.movements || []),
+          {
+            timestamp: now,
+            action: 'RETURNED',
+            driverId: caller.id,
+            driverName:
+              `${caller.firstName || ''} ${caller.lastName || ''}`.trim(),
+            notes: 'Retour au hub confirmé',
+          },
+        ],
+        updatedAt: now,
+      });
+      return { success: true };
+    });
+  });
+
+// A deterministic event ID makes retries of the Firestore trigger harmless.
+export const notifyPackageStatus = functions
+  .region('europe-west1')
+  .firestore.document('packages/{packageId}')
+  .onUpdate(async (change, context) => {
+    const before = change.before.data(),
+      after = change.after.data();
+    const types: Record<string, [string, string]> = {
+      Livré: ['package_delivered', 'Colis livré'],
+      Échec: ['package_failed', 'Échec de livraison'],
+      'En livraison': ['package_in_delivery', 'Colis en livraison'],
+    };
+    const notification = types[after.status];
+    if (before.status === after.status || !notification || !after.clientId)
+      return;
+    const id =
+      'package-' + createHash('sha256').update(context.eventId).digest('hex');
+    try {
+      await db
+        .collection('notifications')
+        .doc(id)
+        .create({
+          type: notification[0],
+          title: notification[1],
+          message: `Colis ${after.orderNumber || after.externalId || context.params.packageId}`,
+          priority: after.status === 'Échec' ? 'high' : 'normal',
+          recipientId: after.clientId,
+          read: false,
+          createdAt: new Date().toISOString(),
+          _createdAt: FieldValue.serverTimestamp(),
+          actionType: 'navigate',
+          actionTarget: 'client_shipments',
+          metadata: { packageId: context.params.packageId },
+        });
+    } catch (error: any) {
+      if (error.code !== 6) throw error;
+    }
+    if (after.status === 'Échec') {
+      const users = await db.collection('users').get();
+      await Promise.all(
+        users.docs
+          .filter((u) => !u.data().isDisabled && isAdminCaller(u.data().role))
+          .map(async (u) => {
+            try {
+              await db
+                .collection('notifications')
+                .doc(id + '_' + u.id)
+                .create({
+                  type: 'delivery_failure',
+                  priority: 'high',
+                  recipientId: u.id,
+                  title: 'Échec de livraison',
+                  message: `Colis ${after.orderNumber || context.params.packageId}`,
+                  read: false,
+                  createdAt: new Date().toISOString(),
+                  _createdAt: FieldValue.serverTimestamp(),
+                  actionType: 'navigate',
+                  actionTarget: 'missions',
+                  metadata: { packageId: context.params.packageId },
+                });
+            } catch (error: any) {
+              if (error.code !== 6) throw error;
+            }
+          }),
+      );
+    }
+  });
+
+// Operational lists need names and professional contacts, never HR documents.
+export const getTeamDirectory = functions
+  .region('europe-west1')
+  .https.onCall(async (_data, context) => {
+    const caller = await requireActiveCaller(context);
+    if (normalizeRole(caller.role) === 'client')
+      throw new functions.https.HttpsError(
+        'permission-denied',
+        'Annuaire interne.',
+      );
+    const users = await db.collection('users').get();
+    return {
+      users: users.docs
+        .filter((d) => !d.data().isDisabled)
+        .map((d) => {
+          const u = d.data();
+          return {
+            id: d.id,
+            firstName: u.firstName || '',
+            lastName: u.lastName || '',
+            role: u.role || '',
+            email: u.email || '',
+            phone: u.phone || '',
+            companyName: u.companyName || '',
+            assignedVehicleId: u.assignedVehicleId || null,
+          };
+        }),
+    };
+  });
+
+export const acceptQuote = functions
+  .region('europe-west1')
+  .https.onCall(async (data, context) => {
+    const caller = await requireActiveCaller(context),
+      manager = isAdminCaller(caller.role);
+    const id = String(data?.quoteId || '');
+    if (!id || id.includes('/'))
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        'Devis invalide.',
+      );
+    return db.runTransaction(async (tx) => {
+      const ref = db.collection('quotes').doc(id),
+        snap = await tx.get(ref);
+      if (!snap.exists)
+        throw new functions.https.HttpsError('not-found', 'Devis introuvable.');
+      const quote = snap.data()!;
+      if (
+        !manager &&
+        (normalizeRole(caller.role) !== 'client' ||
+          ![quote.clientId, quote.requesterId, quote.createdBy].includes(
+            caller.id,
+          ))
+      )
+        throw new functions.https.HttpsError(
+          'permission-denied',
+          'Ce devis ne vous appartient pas.',
+        );
+      if (quote.status === 'Accepté (Commande)' && quote.convertedToPackageId) {
+        const existing = await tx.get(
+          db.collection('packages').doc(quote.convertedToPackageId),
+        );
+        if (!existing.exists)
+          throw new functions.https.HttpsError(
+            'failed-precondition',
+            'Le colis de ce devis est introuvable. Contactez l’exploitation.',
+          );
+        return { packageId: existing.id, zone: existing.data()?.zone };
+      }
+      if (!manager && quote.status !== 'Offre envoyée')
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          'Attendez une offre avant d’accepter ce devis.',
+        );
+      const destination = [quote.destinationAddress, quote.destination]
+          .filter(Boolean)
+          .join(', '),
+        postalCode = destination.match(/\b974\d{2}\b/)?.[0];
+      if (!postalCode)
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          'Complétez le code postal de destination avant acceptation.',
+        );
+      const mapping = await tx.get(
+        db.collection('postal_code_mappings').doc(postalCode),
+      );
+      const defaults: Record<string, string> = {};
+      for (const [zone, codes] of Object.entries({
+        Nord: ['97400', '97490', '97419', '97417', '97488'],
+        Sud: [
+          '97410',
+          '97430',
+          '97480',
+          '97450',
+          '97424',
+          '97432',
+          '97421',
+          '97426',
+          '97416',
+          '97422',
+          '97418',
+          '97442',
+          '97429',
+        ],
+        Est: [
+          '97440',
+          '97470',
+          '97431',
+          '97437',
+          '97438',
+          '97441',
+          '97412',
+          '97433',
+          '97439',
+        ],
+        Ouest: [
+          '97420',
+          '97460',
+          '97434',
+          '97435',
+          '97436',
+          '97423',
+          '97411',
+          '97413',
+          '97414',
+          '97415',
+          '97425',
+          '97427',
+        ],
+      }))
+        for (const code of codes) defaults[code] = zone;
+      const zone = mapping.data()?.zone || defaults[postalCode];
+      if (!zone)
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          'Aucune zone de livraison pour cette destination.',
+        );
+      const packageRef = db
+        .collection('packages')
+        .doc('quote-' + createHash('sha256').update(id).digest('hex'));
+      const existing = await tx.get(packageRef),
+        now = new Date().toISOString(),
+        parts = destination.split(',').map((s) => s.trim());
+      if (!existing.exists)
+        tx.create(packageRef, {
+          clientId: quote.clientId,
+          clientName: quote.clientName || '',
+          externalId: id,
+          orderNumber: 'Q' + id.slice(-10),
+          barcode: 'Q' + id.slice(-10),
+          importBatchId: 'QUOTE-' + id,
+          address: parts[0] || destination,
+          city: parts[parts.length - 1] || '',
+          postalCode,
+          zone,
+          contactName: quote.destinationContact?.name || quote.clientName || '',
+          contactPhone: quote.destinationContact?.phone || '',
+          requestedDeliveryDate:
+            quote.deliveryDate || quote.requestedDeliveryDate || null,
+          timeWindowStart: quote.deliveryTimeWindow?.start || null,
+          timeWindowEnd: quote.deliveryTimeWindow?.end || null,
+          serviceTime: 10,
+          comment: [quote.goodsDescription, quote.clientNotes]
+            .filter(Boolean)
+            .join(' | '),
+          volume: quote.volume || null,
+          weight: quote.weight || null,
+          status: 'En attente',
+          movements: [
+            {
+              timestamp: now,
+              action: 'IMPORTED',
+              driverId: caller.id,
+              notes: 'Créé depuis le devis accepté',
+            },
+          ],
+          createdAt: now,
+          updatedAt: now,
+        });
+      tx.update(ref, {
+        status: 'Accepté (Commande)',
+        convertedToPackageId: packageRef.id,
+        convertedAt: now,
+        updatedAt: now,
+      });
+      return { packageId: packageRef.id, zone };
+    });
+  });
+
+
+export const interpretAnalytics = functions
+  .region('europe-west1')
+  .runWith({ timeoutSeconds: 60 })
+  .https.onCall(async (data, callableContext) => {
+    const caller = await requireActiveCaller(callableContext);
+    if (!isAdminCaller(caller.role) && normalizeRole(caller.role) !== 'client')
+      throw new functions.https.HttpsError(
+        'permission-denied',
+        'Analyse non autorisée.',
+      );
+    const question = String(data?.question || '');
+    if (!question.trim() || question.length > 2000)
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        'Question invalide.',
+      );
+    const key = process.env.GEMINI_API_KEY,
+      model = process.env.GEMINI_MODEL;
+    if (!key || !model || !/^[\w.-]+$/.test(model))
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        'Analyse IA non configurée.',
+      );
+    const context = {
+      pharmacies: (Array.isArray(data?.context?.pharmacies)
+        ? data.context.pharmacies
+        : []
+      )
+        .filter((s: unknown) => typeof s === 'string' && s.length <= 150)
+        .slice(0, 100),
+      zones: (Array.isArray(data?.context?.zones) ? data.context.zones : [])
+        .filter((s: unknown) => typeof s === 'string' && s.length <= 50)
+        .slice(0, 20),
+    };
+    const quota = db
+        .collection('operation_quotas')
+        .doc('analytics-' + caller.id),
+      now = Date.now();
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(quota),
+        q = snap.data(),
+        count = q && now - q.start < 60000 ? q.count : 0;
+      if (count >= 20)
+        throw new functions.https.HttpsError(
+          'resource-exhausted',
+          'Trop de demandes. Réessayez dans une minute.',
+        );
+      tx.set(quota, { start: count ? q!.start : now, count: count + 1 });
+    });
+    const systemInstruction = `Tu es un interpréteur de requêtes analytiques pour une société de livraison.
+Ta SEULE tâche : convertir la question de l'utilisateur en un objet JSON conforme à la grammaire ci-dessous.
+Tu ne calcules RIEN, tu ne donnes AUCUN chiffre, AUCUNE phrase.
+
+Grammaire (valeurs autorisées UNIQUEMENT) :
+- metric   : "volume" | "deliveryRate" | "punctualityRate" | "avgDelayHours" | "failRate" | "weight"
+- dimension: "none" | "pharmacy" | "zone" | "day" | "status"
+- period   : "7d" | "30d" | "month" | "all"
+- chart    : "kpi" | "line" | "bar" | "donut" | "table"
+- pharmacy : (optionnel) un nom EXACT parmi la liste connue, sinon omets
+- zone     : (optionnel) un nom EXACT parmi la liste connue, sinon omets
+
+Correspondances utiles :
+- "combien de colis", "volume", "nombre" -> metric "volume"
+- "taux de livraison", "livrés" (en %) -> metric "deliveryRate"
+- "ponctualité", "à l'heure", "retard %" -> metric "punctualityRate"
+- "délai moyen", "temps de livraison" -> metric "avgDelayHours"
+- "échecs", "échec", "ratés" -> metric "failRate"
+- "poids", "kg", "tonnage" -> metric "weight"
+- "par pharmacie / client / destinataire" -> dimension "pharmacy"
+- "par zone / secteur / région" -> dimension "zone"
+- "par jour / évolution / tendance" -> dimension "day"
+- "par statut / répartition statut" -> dimension "status"
+- pas de regroupement explicite -> dimension "none"
+- "cette semaine" -> "7d" ; "30 jours" -> "30d" ; "ce mois" -> "month" ; sinon "all"
+- dimension "none" -> chart "kpi" ; "day" -> "line" ; "status" -> "donut" ; "pharmacy"/"zone" -> "bar"
+
+Pharmacies connues : ${JSON.stringify(context.pharmacies.slice(0, 100))}
+Zones connues : ${JSON.stringify(context.zones)}
+
+Réponds UNIQUEMENT en JSON, aucun texte, aucun chiffre.
+Exemple : {"metric":"deliveryRate","dimension":"zone","period":"month","chart":"bar"}`;
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemInstruction }] },
+          contents: [{ parts: [{ text: question }] }],
+          generationConfig: {
+            temperature: 0,
+            responseMimeType: 'application/json',
+          },
+        }),
+        signal: AbortSignal.timeout(45000),
+      },
+    );
+    if (!response.ok)
+      throw new functions.https.HttpsError(
+        'unavailable',
+        'Analyse temporairement indisponible.',
+      );
+    const payload: any = await response.json();
+    return {
+      text:
+        payload.candidates?.[0]?.content?.parts
+          ?.map((p: any) => p.text || '')
+          .join('') || '',
+    };
   });

@@ -24,14 +24,16 @@ const firebaseConfig = {
   appId: env.VITE_FIREBASE_APP_ID
 };
 
+for (const key of ['apiKey','authDomain','projectId','storageBucket','appId'] as const) {
+  if (!firebaseConfig[key]) throw new Error(`Configuration Firebase manquante : ${key}. Vérifiez les variables du déploiement.`);
+}
+
 // Initialisation de Firebase
 const app = initializeApp(firebaseConfig);
 
-// Firestore avec CACHE LOCAL PERSISTANT (IndexedDB) : l'app fonctionne
-// hors-ligne (scan, prise en charge, validation de livraison) et synchronise
-// automatiquement au retour du réseau. Essentiel pour les chauffeurs en zone
-// blanche (les hauts, Cilaos, Salazie…). Repli sur getFirestore si IndexedDB
-// est indisponible (mode privé strict, très vieux navigateur).
+// Cache persistant pour les lectures déjà chargées. Les transactions exigent le
+// réseau. Les validations de livraison et leurs médias ont une file IndexedDB
+// dédiée (deliveryOutbox), rejouée explicitement au retour de la connexion.
 //
 // MONO-ONGLET (persistentSingleTabManager) et NON multi-onglets : le gestionnaire
 // multi-onglets déclenche « FIRESTORE INTERNAL ASSERTION FAILED: Unexpected state »

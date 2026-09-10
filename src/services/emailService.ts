@@ -1,3 +1,5 @@
+import { getFunctions, httpsCallable } from "firebase/functions";
+import app from "../firebaseConfig";
 /**
  * Service d'envoi d'emails via Firebase Extension "Trigger Email from Firestore"
  * 
@@ -177,7 +179,8 @@ export const sendEmail = async (
     if (options?.cc) emailDoc.cc = options.cc;
     if (options?.bcc) emailDoc.bcc = options.bcc;
 
-    await addDoc(collection(db, "mail"), emailDoc);
+    if (options?.type === 'user_invitation') return true; // Already queued by createInvitation on the server.
+    await httpsCallable(getFunctions(app,'europe-west1'),'sendBusinessNotification')({to,cc:options?.cc || [],bcc:options?.bcc || [],type:options?.type || 'general'});
     return true;
   } catch (error) {
     console.error("❌ Erreur envoi email:", error);

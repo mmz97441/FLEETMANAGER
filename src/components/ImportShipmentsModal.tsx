@@ -118,13 +118,15 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
 
   const handleFile = async (file: File) => {
     setError('');
+    if (file.size > 5 * 1024 * 1024) { setError('Fichier trop volumineux (5 Mo maximum).'); return; }
     setFileName(file.name);
     try {
       const buf = await file.arrayBuffer();
-      const wb = XLSX.read(buf, { type: 'array' });
+      const wb = XLSX.read(buf, { type: 'array', sheetRows: 10002 });
       const ws = wb.Sheets[wb.SheetNames[0]];
       const raw = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: '' });
 
+      if (raw.length > 10000) { setError('Limite de 10 000 lignes par fichier.'); setRows(null); return; }
       if (raw.length === 0) { setError('Aucune ligne trouvée dans le fichier.'); setRows(null); return; }
 
       // 1er passage : lecture + mapping des colonnes
