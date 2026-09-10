@@ -1,3 +1,4 @@
+import { useClientAccess } from './client/ClientAccessContext';
 import React, { useState, useMemo } from 'react';
 import Modal from './shared/Modal';
 import { User, Package as PackageType } from '../types';
@@ -64,6 +65,7 @@ const AccountHub: React.FC<AccountHubProps> = ({
   onChangePassword,
   onSaveCompany,
 }) => {
+  const access = useClientAccess();
   const [activeTab, setActiveTab] = useState<TabId>('profile');
 
   // --- Onglet Profil & sécurité : changement de mot de passe ---
@@ -76,6 +78,7 @@ const AccountHub: React.FC<AccountHubProps> = ({
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (access.readOnly || access.impersonating) return;
     if (pwdLoading) return;
     setPwdError('');
     setPwdSuccess(false);
@@ -119,6 +122,7 @@ const AccountHub: React.FC<AccountHubProps> = ({
 
   const handleSaveCompany = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (access.readOnly) return;
     if (companyLoading) return;
     setCompanyError('');
     setCompanySuccess(false);
@@ -151,7 +155,7 @@ const AccountHub: React.FC<AccountHubProps> = ({
   }, [packages]);
 
   return (
-    <Modal isOpen onClose={onClose} title="Mon compte" subtitle={currentUser.email} size="3xl" dirty={dirty} preventClose={pwdLoading || companyLoading} bodyClassName="p-0 sm:p-0">
+    <Modal isOpen onClose={onClose} title="Mon compte" subtitle={access.contextLabel || currentUser.email} size="3xl" dirty={dirty} preventClose={pwdLoading || companyLoading} bodyClassName="p-0 sm:p-0">
         {/* Corps : rail vertical (desktop) + onglets horizontaux (mobile) */}
         <div className="flex flex-col md:flex-row flex-1 min-h-0">
           {/* Rail vertical desktop */}
@@ -239,6 +243,8 @@ const AccountHub: React.FC<AccountHubProps> = ({
                 </div>
 
                 {/* Changement de mot de passe */}
+                <fieldset disabled={access.readOnly || access.impersonating}>
+                {access.impersonating && <p className="mb-3 text-sm text-slate-700">Le changement de mot de passe est réservé au titulaire dans sa propre session.</p>}
                 <form
                   onSubmit={handleChangePassword}
                   className="rounded-2xl border border-slate-200 p-5"
@@ -314,12 +320,13 @@ const AccountHub: React.FC<AccountHubProps> = ({
                     </button>
                   </div>
                 </form>
+                </fieldset>
               </div>
             )}
 
             {/* ===================== ONGLET 2 : MON ENTREPRISE ===================== */}
             {activeTab === 'company' && (
-              <form onSubmit={handleSaveCompany} className="space-y-5">
+              <fieldset disabled={access.readOnly}><form onSubmit={handleSaveCompany} className="space-y-5">
                 <div className="rounded-2xl border border-slate-200 p-5">
                   <h3 className="text-sm font-bold text-slate-900 mb-1 flex items-center gap-2">
                     <Building2 size={18} className="text-indigo-600" />
@@ -415,7 +422,7 @@ const AccountHub: React.FC<AccountHubProps> = ({
                     </button>
                   </div>
                 </div>
-              </form>
+              </form></fieldset>
             )}
 
             {/* ===================== ONGLET 3 : ÉQUIPE & ACCÈS ===================== */}

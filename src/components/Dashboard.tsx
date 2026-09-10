@@ -37,7 +37,7 @@ interface DashboardProps {
   currentUser: User;
   users: User[];
   pendingDocuments?: number;
-  onNavigate: (view: ViewState) => void;
+  onNavigate: (view: ViewState, params?: Record<string, string>) => void;
 }
 
 interface AlertItem {
@@ -134,6 +134,9 @@ const KpiCard: React.FC<KpiCardProps> = ({ title, value, subtitle, icon, trend, 
   return (
     <div 
       onClick={onClick}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={event => { if (onClick && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onClick(); } }}
       className={`bg-white p-5 rounded-2xl shadow-sm border border-slate-100 relative overflow-hidden group ${onClick ? 'cursor-pointer hover:shadow-md hover:border-brand-200 transition-all' : ''}`}
     >
       {onClick && (
@@ -271,7 +274,13 @@ const Dashboard: React.FC<DashboardProps> = ({
   const { hasPermission, hasAnyPermission } = usePermissions();
 
   // === MISSIONS : Stats temps réel du jour ===
-  const missionStats = useMissionStats();
+  const canViewMissions = hasPermission(Permission.MISSIONS_VIEW);
+  const missionStats = useMissionStats(undefined, {
+    enabled: canViewMissions,
+    driverId: hasPermission(Permission.MISSIONS_VIEW_ALL) ? undefined : currentUser.id,
+    includePackages: hasPermission(Permission.PACKAGES_VIEW) && hasPermission(Permission.MISSIONS_VIEW_ALL),
+  });
+  const [urgentIssue, setUrgentIssue] = useState<Issue | null>(null);
 
   // Anciennes vérifications de rôle (gardées pour compatibilité avec le rendu conditionnel existant)
   const effectiveRole = normalizeRole(currentUser.role);
@@ -293,6 +302,24 @@ const Dashboard: React.FC<DashboardProps> = ({
   // Pour la compatibilité avec le code existant
   const isPresident = canViewFinancialKpis; // Les KPIs financiers = accès Président
   const isDirector = canViewFleetKpis && !canViewFinancialKpis; // Accès flotte mais pas financier
+
+  const canReadIssue = (issue: Issue) => hasPermission(Permission.ISSUES_VIEW) && (hasPermission(Permission.ISSUES_VIEW_ALL) || issue.reportedByUserId === currentUser.id || issue.reportedBy === currentUser.id);
+  const blockingIssues = issues.filter(issue => canReadIssue(issue) && issue.status !== IssueStatus.RESOLVED && (issue.vehicleImmobilized || issue.priority === 'High'));
+  const canReadUrgentIssue = urgentIssue && canReadIssue(urgentIssue);
+  const showOperationalQueue = canViewMissions || hasPermission(Permission.ISSUES_VIEW);
+  const operationalQueue = showOperationalQueue && <section aria-label="À traiter maintenant" className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 space-y-3">
+    <div><h3 className="text-lg font-bold text-slate-900">À traiter maintenant</h3><p className="text-sm text-slate-600">Tournées du {new Date(`${todayISO()}T12:00:00`).toLocaleDateString('fr-FR')} et incidents bloquants encore ouverts. Les statistiques mensuelles sont présentées plus bas.</p></div>
+    {canViewMissions && missionStats.loading && <p role="status" className="rounded-lg bg-blue-50 p-3 text-sm text-blue-900">Chargement des tournées et des colis…</p>}
+    {canViewMissions && missionStats.error && <div role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-900"><p>{missionStats.error}</p><button type="button" onClick={missionStats.retry} className="mt-2 min-h-11 rounded-lg border border-red-300 px-3 font-bold">Réessayer</button></div>}
+    <div className="max-h-[28rem] overflow-y-auto space-y-2">
+      {blockingIssues.map(issue => <button key={issue.id} type="button" onClick={() => setUrgentIssue(issue)} className="flex min-h-14 w-full items-center gap-3 rounded-xl border border-red-200 bg-red-50 p-3 text-left"><AlertTriangle size={20} className="shrink-0 text-red-800" /><span className="min-w-0 flex-1"><span className="block font-bold text-red-900">{issue.vehicleImmobilized ? 'Véhicule immobilisé' : 'Incident de priorité haute'}</span><span className="block break-words text-sm text-red-900">{vehicles.find(vehicle => vehicle.id === issue.vehicleId)?.plate || 'Véhicule'} · {issue.description}</span></span><ChevronRight size={20} className="shrink-0" /></button>)}
+      {canViewMissions && missionStats.tasks.map(task => <button key={task.id} type="button" onClick={() => onNavigate('missions', { tab: 'missions', date: task.date, mission: task.missionId })} className={`flex min-h-14 w-full items-center gap-3 rounded-xl border p-3 text-left ${task.priority === 'urgent' ? 'border-amber-300 bg-amber-50 text-amber-950' : 'border-slate-200 bg-slate-50 text-slate-900'}`}><Route size={20} className="shrink-0" /><span className="min-w-0 flex-1"><span className="block font-bold">{task.label}</span><span className="block break-words text-sm">{task.detail}</span></span><ChevronRight size={20} className="shrink-0" /></button>)}
+    </div>
+    {!blockingIssues.length && (!canViewMissions || (!missionStats.loading && !missionStats.error && !missionStats.tasks.length)) && <p className="text-sm text-slate-700">Aucune action prioritaire détectée dans ce périmètre.</p>}
+    <Modal isOpen={!!canReadUrgentIssue} onClose={() => setUrgentIssue(null)} title="Incident à traiter" size="lg">
+      {canReadUrgentIssue && urgentIssue && <div className="space-y-3"><p className="font-bold text-slate-900">{vehicles.find(vehicle => vehicle.id === urgentIssue.vehicleId)?.plate || 'Véhicule'} · {urgentIssue.status}</p><p className="whitespace-pre-wrap text-slate-800">{urgentIssue.description}</p><p className="text-sm text-slate-700">Signalé le {urgentIssue.date}{urgentIssue.vehicleImmobilized ? ' · Véhicule immobilisé' : ''}{urgentIssue.needsTowing ? ' · Dépannage nécessaire' : ''}</p><button type="button" onClick={() => onNavigate('issues', { issue: urgentIssue.id })} className="min-h-11 rounded-xl bg-brand-700 px-4 py-3 text-white font-bold">Ouvrir le dossier incident</button></div>}
+    </Modal>
+  </section>;
 
   // --- Navigation période ---
   const handleNavigateDate = (direction: -1 | 1) => {
@@ -807,7 +834,7 @@ const Dashboard: React.FC<DashboardProps> = ({
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
               <p className="text-white/80 text-[11px] font-bold uppercase tracking-wider">Ma tournée du jour</p>
-              {myTour ? (
+              {missionStats.loading ? <p role="status" className="text-white mt-2">Chargement de votre tournée…</p> : missionStats.error ? <p role="alert" className="text-white mt-2">Votre tournée ne peut pas être chargée. Ouvrez Ma tournée pour réessayer.</p> : myTour ? (
                 <>
                   <p className="text-white text-2xl font-black mt-1 tabular-nums">
                     {myTour.totalStops > 0 ? `${myTour.completedStops}/${myTour.totalStops}` : '—'} <span className="text-base font-bold">arrêts</span>
@@ -857,7 +884,7 @@ const Dashboard: React.FC<DashboardProps> = ({
 
         {/* Alertes warning chauffeur */}
         {warningAlerts.length > 0 && (
-          <div className="bg-gradient-to-r from-orange-500 to-orange-600 rounded-2xl p-4 shadow-lg">
+          <div className="bg-gradient-to-r from-amber-800 to-amber-900 rounded-2xl p-4 shadow-lg">
             <div className="flex items-center gap-2 mb-3">
               <AlertTriangle className="text-white" size={20} />
               <span className="text-white font-bold">À prévoir</span>
@@ -1169,6 +1196,7 @@ const Dashboard: React.FC<DashboardProps> = ({
           </div>
         </div>
 
+        {operationalQueue}
         {periodNotice}
         {/* Alertes critiques */}
         <AlertBanner alerts={criticalAlerts} />
@@ -1664,7 +1692,8 @@ const Dashboard: React.FC<DashboardProps> = ({
           <button aria-label="Mois suivant" onClick={() => handleNavigateDate(1)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500"><ChevronRight size={18} /></button>
         </div>
       </div>
-      {periodNotice}
+      {operationalQueue}
+        {periodNotice}
 
       {/* KPIs principaux */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1702,7 +1731,7 @@ const Dashboard: React.FC<DashboardProps> = ({
       </div>
 
       {/* === BLOC OPÉRATIONS LIVRAISON DU JOUR === */}
-      {!missionStats.loading && missionStats.totalMissions > 0 && (
+      {canViewMissions && !missionStats.loading && !missionStats.error && missionStats.packagesAvailable && missionStats.totalMissions > 0 && (
         <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl border border-blue-200/50 overflow-hidden">
           <div className="p-4 border-b border-blue-200/30 flex items-center justify-between">
             <h3 className="font-bold text-slate-800 flex items-center gap-2">
@@ -1720,7 +1749,7 @@ const Dashboard: React.FC<DashboardProps> = ({
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-4">
             <div className="bg-white/80 rounded-xl p-3 text-center border border-white">
               <p className="text-2xl font-extrabold text-slate-800">{missionStats.totalPackages}</p>
-              <p className="text-[11px] font-medium text-slate-500 uppercase">Colis total</p>
+              <p className="text-[11px] font-medium text-slate-500 uppercase">Colis des tournées</p>
             </div>
             <div className="bg-white/80 rounded-xl p-3 text-center border border-white">
               <p className="text-2xl font-extrabold text-green-600">{missionStats.deliveredPackages}</p>
@@ -1818,13 +1847,13 @@ const Dashboard: React.FC<DashboardProps> = ({
       )}
 
       {/* Lien rapide vers missions quand aucune mission du jour */}
-      {!missionStats.loading && missionStats.totalMissions === 0 && (
+      {canViewMissions && !missionStats.loading && !missionStats.error && missionStats.totalMissions === 0 && (
         <button 
           onClick={() => onNavigate('missions')} 
           className="w-full bg-white rounded-2xl border border-dashed border-blue-300 p-6 text-center hover:bg-blue-50/50 transition-colors group"
         >
           <Route size={28} className="mx-auto mb-2 text-blue-400 group-hover:text-blue-600 transition-colors" />
-          <p className="text-sm font-bold text-slate-700">Aucune mission aujourd'hui</p>
+          <p className="text-sm font-bold text-slate-700">Aucune tournée aujourd’hui</p>
           <p className="text-xs text-slate-500 mt-1">Cliquez pour créer des tournées de livraison</p>
         </button>
       )}

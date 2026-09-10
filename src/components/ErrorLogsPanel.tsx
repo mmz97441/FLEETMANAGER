@@ -58,6 +58,7 @@ const ErrorLogsPanel: React.FC = () => {
       return (
         l.message.toLowerCase().includes(term) ||
         l.context.toLowerCase().includes(term) ||
+        (l.referenceId || '').toLowerCase().includes(term) ||
         (l.userName || '').toLowerCase().includes(term) ||
         (l.userRole || '').toLowerCase().includes(term)
       );
@@ -91,6 +92,7 @@ const ErrorLogsPanel: React.FC = () => {
 
   return (
     <div className="space-y-4">
+      <p className="text-sm text-slate-600">Journal des 200 derniers événements. La référence d’erreur fournie dans l’aide permet de retrouver un événement chargé ici.</p>
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="bg-white rounded-xl border border-slate-200 p-4">
@@ -122,9 +124,10 @@ const ErrorLogsPanel: React.FC = () => {
         <div className="relative flex-1 min-w-[200px]">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
+            aria-label="Rechercher dans les 200 derniers événements"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Rechercher (message, contexte, utilisateur, rôle)…"
+            placeholder="Référence d’erreur, message, contexte ou utilisateur"
             className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-brand-500"
           />
         </div>
@@ -172,6 +175,7 @@ const ErrorLogsPanel: React.FC = () => {
                       )}
                     </div>
                     <p className="text-sm text-slate-800 mt-0.5 break-words">{log.message}</p>
+                    {log.referenceId && <p className="text-sm text-slate-600 mt-1 break-all">Référence : {log.referenceId}</p>}
                   </div>
                   {open ? <ChevronDown size={16} className="text-slate-400 mt-1" /> : <ChevronRight size={16} className="text-slate-400 mt-1" />}
                 </button>

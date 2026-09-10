@@ -168,11 +168,8 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
       items: [
         { id: 'users', label: 'Utilisateurs', icon: Users, permission: Permission.USERS_VIEW },
         { id: 'permissions', label: 'Permissions', icon: Shield, permission: Permission.USERS_PERMISSIONS },
-        { id: 'company_settings', label: 'Entreprise', icon: Building2, permission: Permission.SETTINGS_COMPANY },
         { id: 'delivery_schedule', label: 'Horaires livraison', icon: Clock, permission: Permission.SETTINGS_COMPANY },
         { id: 'zone_management', label: 'Zones (codes postaux)', icon: MapPin, permission: Permission.SETTINGS_COMPANY },
-        { id: 'import_export', label: 'Imports / Exports', icon: Download, permission: Permission.IMPORT_EXPORT_ACCESS },
-        { id: 'notifications_settings', label: 'Notifications', icon: Bell, permission: Permission.SETTINGS_ACCESS },
         { id: 'settings', label: 'Préférences', icon: SettingsIcon, permission: Permission.SETTINGS_ACCESS },
         { id: 'activity_logs', label: 'Journal (président)', icon: ClipboardList },
         { id: 'api_diagnostic', label: 'Diagnostic API', icon: Activity, permission: Permission.SETTINGS_COMPANY },

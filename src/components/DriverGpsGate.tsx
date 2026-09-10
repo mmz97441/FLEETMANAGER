@@ -88,7 +88,7 @@ const DriverGpsGate: React.FC<DriverGpsGateProps> = ({ currentUser, onHelp }) =>
   const hi = firstName ? `${firstName}, ` : '';
 
   return (
-    <Modal isOpen onClose={() => {}} ariaLabel="Localisation requise" size="full" showCloseButton={false} preventClose closeOnEscape={false} closeOnOverlay={false} bodyClassName="!p-0 bg-slate-900">
+    <Modal isOpen onClose={() => {}} ariaLabel="Localisation requise" size="full" showCloseButton={false} preventClose busy={false} closeOnEscape={false} closeOnOverlay={false} bodyClassName="!p-0 bg-slate-900">
     <div className="bg-slate-900 text-white flex items-center justify-center p-6 min-h-[70dvh]">
       <div className="max-w-sm w-full text-center">
         <div className="w-20 h-20 rounded-full bg-white/10 flex items-center justify-center mx-auto mb-5">

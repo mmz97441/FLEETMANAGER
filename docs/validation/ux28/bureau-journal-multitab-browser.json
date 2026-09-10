@@ -1,0 +1,22 @@
+{
+  "checkedAt": "2026-09-10T17:22:37.012Z",
+  "fixture": "Two independent Chrome tabs on the same origin, real pendingManualStop utility and Web Locks, no business writes",
+  "results": [
+    {
+      "id": "web-locks-supported",
+      "pass": true
+    },
+    {
+      "id": "other-tab-cannot-overwrite",
+      "pass": true
+    },
+    {
+      "id": "other-tab-cannot-clear",
+      "pass": true
+    },
+    {
+      "id": "simultaneous-tabs-single-reservation",
+      "pass": true
+    }
+  ]
+}

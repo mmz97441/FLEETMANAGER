@@ -1,0 +1,13 @@
+{
+  "results": [
+    {
+      "name": "nested-account-and-shipment-write-guards",
+      "passed": true,
+      "width": 390,
+      "scroll": 390,
+      "labels": [],
+      "focusInside": true
+    }
+  ],
+  "exceptions": []
+}

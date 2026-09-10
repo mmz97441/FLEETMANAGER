@@ -1,10 +1,11 @@
 import { confirmAction } from './services/confirmationService';
+import { installNavigationGuard, requestNavigation } from './utils/navigationGuard';
 import WorkspaceSearch from './components/WorkspaceSearch';
 import { useDialogLayer } from './hooks/useDialogLayer';
 import { addMaintenanceToFirestore } from './services/firestore';
 import PendingSyncBanner from './components/PendingSyncBanner';
 
-import React, { useState, useMemo, useEffect, useRef, Suspense, lazy } from 'react';
+import React, { useState, useMemo, useEffect, useLayoutEffect, useRef, Suspense, lazy } from 'react';
 // @ts-ignore
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { auth } from "./firebaseConfig";
@@ -121,6 +122,7 @@ const PageLoader: React.FC = () => (
 );
 
 const App: React.FC = () => {
+  useLayoutEffect(() => installNavigationGuard(), []);
   // --- AUTH STATE ---
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
@@ -459,6 +461,7 @@ const App: React.FC = () => {
   // --- HANDLERS ---
   
   const handleViewChange = (view: ViewState, params?: Record<string, string>) => {
+    void requestNavigation(() => {
     if (view !== 'issues') {
         setTargetIssueVehicleId(null);
     }
@@ -474,19 +477,24 @@ const App: React.FC = () => {
     setCurrentView(view);
     window.dispatchEvent(new Event('fleet-url-change'));
     setIsMobileMenuOpen(false);
+    });
   };
 
   const handleNavigateToVehicleIssues = (vehicleId: string) => {
+    void requestNavigation(() => {
       setTargetIssueVehicleId(vehicleId);
       setCurrentView('issues');
+    });
   };
 
   const handleLogout = async () => {
+    await requestNavigation(async () => {
     try {
       await signOut(auth);
     } catch (error) {
       console.error("Logout failed", error);
     }
+    });
   };
 
   // Vehicles
@@ -1004,18 +1012,11 @@ const App: React.FC = () => {
 
       // === NOUVELLES VUES ADMINISTRATION & PARAMÈTRES ===
       case 'company_settings':
-        return (
-          <div className="p-8">
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8 text-center">
-              <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <span className="text-3xl">🏢</span>
-              </div>
-              <h2 className="text-2xl font-bold text-slate-800 mb-2">Paramètres Entreprise</h2>
-              <p className="text-slate-500 mb-4">Configuration de l'identité de l'entreprise (nom, logo, SIRET, TVA...)</p>
-              <span className="inline-block px-3 py-1 bg-amber-100 text-amber-700 text-sm font-bold rounded-full">À venir</span>
-            </div>
-          </div>
-        );
+        return <section className="max-w-2xl mx-auto p-4 sm:p-8 space-y-4">
+          <h1 className="text-2xl font-bold text-slate-900">Réglages de l’entreprise</h1>
+          <p className="text-base text-slate-700">La modification de l’identité de l’entreprise n’est pas encore disponible dans cet écran. Consultez l’aide pour transmettre une demande au responsable.</p>
+          <button type="button" onClick={() => handleViewChange('help')} className="min-h-11 rounded-xl bg-blue-800 text-white px-4 py-3 font-semibold">Ouvrir l’aide</button>
+        </section>;
 
       case 'activity_logs':
         return (
@@ -1072,18 +1073,11 @@ const App: React.FC = () => {
         return <DriverMissionView currentUser={currentUser} clients={users.filter(u => u.role === UserRole.CLIENT || String(u.role).toLowerCase().includes('client'))} />;
 
       case 'notifications_settings':
-        return (
-          <div className="p-8">
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8 text-center">
-              <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <span className="text-3xl">🔔</span>
-              </div>
-              <h2 className="text-2xl font-bold text-slate-800 mb-2">Notifications</h2>
-              <p className="text-slate-500 mb-4">Configurer les alertes email, seuils carburant, rappels contrôle technique...</p>
-              <span className="inline-block px-3 py-1 bg-blue-100 text-blue-700 text-sm font-bold rounded-full">À venir</span>
-            </div>
-          </div>
-        );
+        return <section className="max-w-2xl mx-auto p-4 sm:p-8 space-y-4">
+          <h1 className="text-2xl font-bold text-slate-900">Réglages des notifications</h1>
+          <p className="text-base text-slate-700">Les préférences de notification ne sont pas configurables dans cet écran. Les notifications reçues restent accessibles depuis la cloche du menu.</p>
+          <button type="button" onClick={() => handleViewChange('help')} className="min-h-11 rounded-xl bg-blue-800 text-white px-4 py-3 font-semibold">Ouvrir l’aide</button>
+        </section>;
 
       case 'delivery_schedule':
         return (
@@ -1125,18 +1119,11 @@ const App: React.FC = () => {
         );
 
       case 'import_export':
-        return (
-          <div className="p-8">
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8 text-center">
-              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <span className="text-3xl">📥</span>
-              </div>
-              <h2 className="text-2xl font-bold text-slate-800 mb-2">Imports / Exports</h2>
-              <p className="text-slate-500 mb-4">Exporter vos données en Excel, importer un historique...</p>
-              <span className="inline-block px-3 py-1 bg-green-100 text-green-700 text-sm font-bold rounded-full">À venir</span>
-            </div>
-          </div>
-        );
+        return <section className="max-w-2xl mx-auto p-4 sm:p-8 space-y-4">
+          <h1 className="text-2xl font-bold text-slate-900">Importer ou exporter des colis</h1>
+          <p className="text-base text-slate-700">Les imports et exports de colis se trouvent dans l’exploitation des livraisons, avec les droits de votre compte.</p>
+          <button type="button" onClick={() => handleViewChange('missions', { tab: 'imports' })} className="min-h-11 rounded-xl bg-blue-800 text-white px-4 py-3 font-semibold">Ouvrir les imports de colis</button>
+        </section>;
 
       case 'client_dashboard':
       case 'client_list':
@@ -1337,8 +1324,8 @@ const App: React.FC = () => {
           <DocumentAlertModal
             isOpen={pendingDocumentsList.length > 0 && currentView !== 'documents' && currentView !== 'company_docs' && currentView !== 'help'}
             blocking
-            onClose={() => setCurrentView('documents')}
-            onGoToDocuments={() => setCurrentView('documents')}
+            onClose={() => handleViewChange('documents')}
+            onGoToDocuments={() => handleViewChange('documents')}
             onHelp={() => handleViewChange('help')}
             pendingDocuments={pendingDocumentsList}
             currentUser={currentUser}

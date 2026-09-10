@@ -1,7 +1,11 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { confirmAction } from '../services/confirmationService';
+import { registerNavigationDraft } from '../utils/navigationGuard';
 
 export function useUnsavedChanges(dirty: boolean, busy = false) {
+  const state = useRef({ dirty, busy });
+  state.current = { dirty, busy };
+  useLayoutEffect(() => registerNavigationDraft(() => state.current), []);
   const asking = useRef(false);
   const requestClose = useCallback(async (close: () => void) => {
     if (busy || asking.current) return;

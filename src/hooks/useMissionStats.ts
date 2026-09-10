@@ -6,9 +6,10 @@
  */
 
 import { useState, useEffect } from 'react';
-import { collection, query, where, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { todayISO, localDatePart } from '../utils/date';
+import { buildOperationalQueue, OperationalTask } from '../utils/operationalQueue';
 import { Mission, MissionStatus, Package, PackageStatus, Zone } from '../types';
 
 // === Types ===
@@ -40,6 +41,10 @@ export interface MissionDayStats {
 
   // Loading
   loading: boolean;
+  error: string | null;
+  tasks: OperationalTask[];
+  retry: () => void;
+  packagesAvailable: boolean;
 }
 
 export interface ZoneStat {
@@ -67,66 +72,63 @@ export interface ActiveMission {
 
 // === Hook ===
 
-export const useMissionStats = (date?: string): MissionDayStats => {
+interface MissionStatsOptions { enabled?: boolean; driverId?: string; includePackages?: boolean }
+
+export const useMissionStats = (date?: string, { enabled = true, driverId, includePackages = true }: MissionStatsOptions = {}): MissionDayStats => {
+  const today = date || todayISO();
   const [missions, setMissions] = useState<Mission[]>([]);
   const [packages, setPackages] = useState<Package[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [missionsReady, setMissionsReady] = useState(false);
+  const [packagesReady, setPackagesReady] = useState(false);
+  const [missionError, setMissionError] = useState<string | null>(null);
+  const [packageError, setPackageError] = useState<string | null>(null);
+  const [revision, setRevision] = useState(0);
+  const missionKey = JSON.stringify(missions.map(mission => mission.id).sort());
 
-  const today = date || todayISO();
-
-  // Abonnement missions du jour
   useEffect(() => {
-    const q = query(
-      collection(db, 'missions'),
-      where('date', '==', today),
-      orderBy('createdAt', 'desc'),
-      limit(100)
-    );
+    setMissions([]); setMissionsReady(false); setMissionError(null);
+    if (!enabled) return;
+    // All missions in the authorized day/scope: no arbitrary cap hiding an urgent task.
+    const constraints = [where('date', '==', today)];
+    if (driverId) constraints.push(where('driverId', '==', driverId));
+    return onSnapshot(query(collection(db, 'missions'), ...constraints), snapshot => {
+      setMissions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Mission)));
+      setMissionsReady(true); setMissionError(null);
+    }, () => { setMissionError('Les tournées ne peuvent pas être chargées. Vérifiez la connexion et vos droits, puis réessayez.'); setMissionsReady(true); });
+  }, [today, enabled, driverId, revision]);
 
-    const unsub = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Mission));
-      setMissions(data);
-      setLoading(false);
-    }, (err) => {
-      console.error('useMissionStats missions error:', err);
-      setLoading(false);
-    });
-
-    return unsub;
-  }, [today]);
-
-  // Abonnement colis — fenêtre glissante de ~3 jours autour du jour ciblé, au
-  // lieu des « 500 plus récents (tous clients confondus) » qui pouvaient éjecter
-  // les colis du jour sur gros volume. La fenêtre couvre aussi le flux « importé
-  // la veille, livré le jour même » (Boiron). Le filtre fin (missionId du jour OU
-  // créé aujourd'hui) reste appliqué côté client dans computeStats.
-  // NB : where + orderBy sur le MÊME champ createdAt est autorisé par Firestore.
   useEffect(() => {
-    // Midi local du jour ciblé (robuste au fuseau), moins 3 jours.
-    const target = new Date(`${today}T12:00:00`);
-    const windowStartISO = new Date(target.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString();
+    setPackages([]); setPackagesReady(false); setPackageError(null);
+    if (!enabled || !missionsReady || missionError) return;
+    if (!includePackages) { setPackagesReady(true); return; }
+    const ids: string[] = JSON.parse(missionKey);
+    if (!ids.length) { setPackagesReady(true); return; }
+    // Query packages by their actual mission, including parcels imported long ago.
+    // Groups of ten keep each Firestore `in` query bounded without truncating records.
+    const groups: string[][] = [];
+    for (let index = 0; index < ids.length; index += 10) groups.push(ids.slice(index, index + 10));
+    const snapshots = new Map<number, Package[]>();
+    const failed = new Set<number>();
+    return (() => {
+      const unsubscribers = groups.map((group, index) => onSnapshot(query(collection(db, 'packages'), where('missionId', 'in', group)), snapshot => {
+        snapshots.set(index, snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Package)));
+        failed.delete(index);
+        setPackages([...new Map([...snapshots.values()].flat().map(pkg => [pkg.id, pkg])).values()]);
+        setPackagesReady(groups.every((_, groupIndex) => snapshots.has(groupIndex) || failed.has(groupIndex)));
+        setPackageError(failed.size ? 'Certains colis ne peuvent pas être chargés. Les indicateurs de livraison sont indisponibles.' : null);
+      }, () => { failed.add(index); setPackagesReady(groups.every((_, groupIndex) => snapshots.has(groupIndex) || failed.has(groupIndex))); setPackageError('Les colis ne peuvent pas être chargés. Les indicateurs de livraison sont indisponibles.'); }));
+      return () => unsubscribers.forEach(unsubscribe => unsubscribe());
+    })();
+  }, [enabled, includePackages, missionKey, missionsReady, missionError, revision]);
 
-    const q = query(
-      collection(db, 'packages'),
-      where('createdAt', '>=', windowStartISO),
-      orderBy('createdAt', 'desc'),
-      limit(3000) // garde-fou (fenêtre déjà bornée dans le temps)
-    );
-
-    const unsub = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Package));
-      setPackages(data);
-    }, (err) => {
-      console.error('useMissionStats packages error:', err);
-    });
-
-    return unsub;
-  }, [today]);
-
-  // Calcul des stats
-  const stats = computeStats(missions, packages, today, loading);
-
-  return stats;
+  const loading = enabled && (!missionsReady || (!missionError && !packagesReady));
+  return {
+    ...computeStats(missions, packages, today, loading),
+    error: missionError || packageError,
+    tasks: !missionError && missionsReady ? buildOperationalQueue(missions) : [],
+    retry: () => setRevision(value => value + 1),
+    packagesAvailable: includePackages,
+  };
 };
 
 // === Calculs ===
@@ -136,7 +138,7 @@ function computeStats(
   allPackages: Package[], 
   today: string,
   loading: boolean
-): MissionDayStats {
+): Omit<MissionDayStats, 'error' | 'tasks' | 'retry' | 'packagesAvailable'> {
   // Filtrer les colis qui ont un missionId dans les missions du jour
   const missionIds = new Set(missions.map(m => m.id));
   const todayPackages = allPackages.filter(p => 

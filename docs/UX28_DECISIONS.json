@@ -1,0 +1,170 @@
+[
+  {
+    "id": "UI-01",
+    "point": "Protéger la modification d’un arrêt",
+    "decision": "Ajout/édition d’arrêt dans Modal ; protection de toutes les fermetures et de l’envoi ; reprise journalisée.",
+    "verification_et_limites": "Bureau : fermetures, busy, reprise après reload."
+  },
+  {
+    "id": "UI-02",
+    "point": "Ne pas présenter un chargement comme une liste vide",
+    "decision": "Un état par source : chargement, vide confirmé, ancien résultat, erreur durable et reprise ciblée.",
+    "verification_et_limites": "Bureau : lectures différées et cinq sources en erreur."
+  },
+  {
+    "id": "UI-03",
+    "point": "Fiabiliser les états de chargement du portail client",
+    "decision": "Attendre les deux sources de colis ; le GPS facultatif ne termine pas le chargement. Une source refusée interdit de présenter une liste partielle comme complète.",
+    "verification_et_limites": "clientPackageSubscription.test ; client chargement/erreur/reprise."
+  },
+  {
+    "id": "UI-04",
+    "point": "Rendre l’éditeur d’arrêt accessible",
+    "decision": "Neuf champs arrêt nommés ; fenêtres héritées sur Modal, focus contenu et restauré.",
+    "verification_et_limites": "Bureau : neuf labels, Tab/Maj+Tab, focus restauré."
+  },
+  {
+    "id": "UI-05",
+    "point": "Permettre d’ouvrir une tournée au clavier",
+    "decision": "Bouton de développement avec aria-expanded/controls ; impression et lien séparés.",
+    "verification_et_limites": "Bureau : Entrée et Espace."
+  },
+  {
+    "id": "UI-06",
+    "point": "Renforcer le contraste des alertes utiles",
+    "decision": "Alertes utiles assombries ; texte et icône conservés.",
+    "verification_et_limites": "Alerte chauffeur : 7,09:1 sur blanc à 320/390 px."
+  },
+  {
+    "id": "UI-07",
+    "point": "Étendre la protection des brouillons au retour navigateur",
+    "decision": "Registre global des brouillons, sorties de vue et Retour/Avancer protégés, y compris après reload et vers Documents.",
+    "verification_et_limites": "navigationGuard.test ; Chrome navigation et reload."
+  },
+  {
+    "id": "UI-08",
+    "point": "Rendre les refus de saisie et d’enregistrement explicites",
+    "decision": "Validation explicite : champs requis, ZIP, durée 1–480 min, créneau complet et ordonné ; erreurs conservant la saisie.",
+    "verification_et_limites": "missionStopForm.test ; missionStopEditor.test ; refus sans écriture."
+  },
+  {
+    "id": "UI-09",
+    "point": "Séparer recherche de colis et filtre des tournées",
+    "decision": "Recherche colis globale indépendante du filtre des tournées ; une date de travail.",
+    "verification_et_limites": "Bureau : recherche historique et indépendance des filtres."
+  },
+  {
+    "id": "UI-10",
+    "point": "Recomposer l’exploitation pour les petits écrans",
+    "decision": "Cartes de tournée mobiles, filtres repliables et retour à la ligne des contenus longs.",
+    "verification_et_limites": "Bureau : aucun débordement à 320/390 px."
+  },
+  {
+    "id": "UI-11",
+    "point": "Agrandir les commandes d’arrêt et les champs étroits",
+    "decision": "Commandes arrêt d’au moins 44 px et champs mobiles lisibles.",
+    "verification_et_limites": "Bureau : dimensions et styles calculés."
+  },
+  {
+    "id": "UI-12",
+    "point": "Distinguer une fenêtre obligatoire d’une opération en cours",
+    "decision": "Séparer fenêtre obligatoire et opération occupée ; GPS/Documents sans requête utilisent busy=false.",
+    "verification_et_limites": "Contrat Modal, typecheck et garde navigation."
+  },
+  {
+    "id": "UI-13",
+    "point": "Terminer l’harmonisation des panneaux après scan",
+    "decision": "Panneaux QuickScan sur Modal ; échecs conservés par colis ; reprise d’un scan refusé possible.",
+    "verification_et_limites": "Terrain : manifeste en erreur, reprise, brouillon, busy."
+  },
+  {
+    "id": "UI-14",
+    "point": "Unifier les retours d’action du portail",
+    "decision": "Messages communs à la place de alert ; invitation confirmée seulement après confirmation email.",
+    "verification_et_limites": "Client : réponse false puis succès."
+  },
+  {
+    "id": "UI-15",
+    "point": "Alléger la création d’expédition sur mobile",
+    "decision": "Trois groupes Destinataire/Colis/Options ; options repliées sans effacer les valeurs ; action finale dans le pied fixe.",
+    "verification_et_limites": "Client : création à 320/390 px."
+  },
+  {
+    "id": "UI-16",
+    "point": "Simplifier la compréhension d’une demande à reprendre",
+    "decision": "Demande incertaine datée et expliquée ; reprise du même identifiant et payload ; abandon avancé explicite.",
+    "verification_et_limites": "pendingClientShipment.test ; Chrome reprise sans doublon."
+  },
+  {
+    "id": "UI-17",
+    "point": "Faciliter le partage et la saisie des références",
+    "decision": "Référence complète regroupée visuellement, copie exacte et partage natif si disponible. Aucun alias court ni migration d’identité.",
+    "verification_et_limites": "shipmentReference.test ; copie exacte dans Chrome."
+  },
+  {
+    "id": "UI-18",
+    "point": "Clarifier l’intervention dans un compte client",
+    "decision": "Consultation réellement en lecture seule. Intervention explicite, acteur/client visibles, audit préalable obligatoire ; échec de l’audit final ne transforme pas une écriture réussie en invitation à la rejouer.",
+    "verification_et_limites": "clientMutation.test ; clientInterventionService.test ; fenêtres imbriquées."
+  },
+  {
+    "id": "UI-19",
+    "point": "Éviter les entrées de menu sans fonction utilisable",
+    "decision": "Retirer les menus sans fonction ; les anciens liens expliquent la limite et orientent vers une fonction existante.",
+    "verification_et_limites": "Revue Sidebar/App et compilation."
+  },
+  {
+    "id": "UI-20",
+    "point": "Faire du tableau de bord une liste d’actions prioritaires",
+    "decision": "Urgences avant statistiques : incidents critiques, arrêts échoués, preuves explicitement en attente, affectations manquantes ; permissions respectées.",
+    "verification_et_limites": "operationalQueue.test ; liens dossier, erreur/reprise. Seuil utilisateur de 10 s à mesurer."
+  },
+  {
+    "id": "UI-21",
+    "point": "Mesurer puis réduire les lectures de gros historiques",
+    "decision": "Filtrer les tournées par date côté serveur, stabiliser les autres abonnements ; statistiques par vrais IDs de tournée sans plafonds silencieux ; conserver la recherche historique complète.",
+    "verification_et_limites": "Benchmark 1 000/10 000 colis et abonnements. Mesures production à recueillir."
+  },
+  {
+    "id": "UI-22",
+    "point": "Unifier les mots, les statuts et le ton",
+    "decision": "Libellés partagés et vouvoiement ; distinguer affectation/départ et retour à remettre/reçu. SKIPPED devient Non effectué sans promettre une reprogrammation.",
+    "verification_et_limites": "Revue libellés et tests ; enums enregistrés inchangés."
+  },
+  {
+    "id": "UI-23",
+    "point": "Harmoniser l’explication des heures de livraison",
+    "decision": "Estimation d’arrivée pour calcul, Créneau demandé pour demande ; date si autre jour, texte de 14 px. Aucune fraîcheur GPS inventée.",
+    "verification_et_limites": "Client : liste et estimation datée."
+  },
+  {
+    "id": "UI-24",
+    "point": "Conserver aussi le tri et proposer des vues favorites",
+    "decision": "Tri dans URL ; huit favoris locaux maximum par compte. Seulement filtres/tri, jamais sélection, recherche personnelle ou ancienne date.",
+    "verification_et_limites": "officeSavedViews.test ; reload, favoris et sélection."
+  },
+  {
+    "id": "UI-25",
+    "point": "Faciliter un contact support contextualisé",
+    "decision": "Brouillon support avec aperçu et contexte optionnel : version, écran autorisé, heure et référence opaque ; copie/outil email.",
+    "verification_et_limites": "supportContext.test ; aperçu mobile sans données métier automatiques."
+  },
+  {
+    "id": "UI-26",
+    "point": "Vérifier l’adoption du système de composants écran par écran",
+    "decision": "Matrice versionnée par écran et état, preuves distinctes de la présence du composant ; tests de régression sur navigation, reprises, transactions et permissions.",
+    "verification_et_limites": "UX28_COVERAGE.md et tests exécutés en CI."
+  },
+  {
+    "id": "UI-27",
+    "point": "Valider les appareils et les gestes réellement utilisés",
+    "decision": "Diagnostic volontaire caméra/GPS, étiquette fictive TEST et grille exportable dans Aide. Résultats physiques laissés Non testé.",
+    "verification_et_limites": "Outillage vérifié dans Chrome ; séances Android/iPhone/imprimantes NON RÉALISÉES."
+  },
+  {
+    "id": "UI-28",
+    "point": "Mesurer l’amélioration au lieu de lui attribuer une note",
+    "decision": "Mesures locales désactivables/exportables : recherche, création, affectation, livraison, synchronisation et chargement ; tâche/rôle/résultat et chiffres uniquement.",
+    "verification_et_limites": "uxMetrics.test ; instrumentation des opérations. Comparaison d’usage réelle à recueillir."
+  }
+]

@@ -1,0 +1,98 @@
+{
+  "checks": [
+    {
+      "label": "failed first claim remains actionable in scanner",
+      "pass": true
+    },
+    {
+      "label": "manifest uses shared dialog and retains failure",
+      "pass": true
+    },
+    {
+      "label": "rescan failed claim is accepted and confirmed once",
+      "pass": true
+    },
+    {
+      "label": "all quick creation fields have associated labels",
+      "pass": true
+    },
+    {
+      "label": "quick creation close guards a changed draft",
+      "pass": true
+    },
+    {
+      "label": "dashboard shows real prepared priorities",
+      "pass": true
+    },
+    {
+      "label": "priority opens the correct mission and date",
+      "pass": true
+    },
+    {
+      "label": "restricted dashboard hides operational queue",
+      "pass": true
+    },
+    {
+      "label": "issue deep link opens real allowed record",
+      "pass": true
+    },
+    {
+      "label": "issue detail refreshes on incoming data",
+      "pass": true
+    },
+    {
+      "label": "unknown issue gives explicit contextual state",
+      "pass": true
+    },
+    {
+      "label": "support preview before mailto 320",
+      "pass": true
+    },
+    {
+      "label": "support no horizontal overflow 320",
+      "pass": true
+    },
+    {
+      "label": "hardware APIs not called on mount 320",
+      "pass": true
+    },
+    {
+      "label": "hardware APIs called only after explicit actions 320",
+      "pass": true
+    },
+    {
+      "label": "field results remain non-tested 320",
+      "pass": true
+    },
+    {
+      "label": "diagnostic no horizontal overflow 320",
+      "pass": true
+    },
+    {
+      "label": "support preview before mailto 390",
+      "pass": true
+    },
+    {
+      "label": "support no horizontal overflow 390",
+      "pass": true
+    },
+    {
+      "label": "hardware APIs not called on mount 390",
+      "pass": true
+    },
+    {
+      "label": "hardware APIs called only after explicit actions 390",
+      "pass": true
+    },
+    {
+      "label": "field results remain non-tested 390",
+      "pass": true
+    },
+    {
+      "label": "diagnostic no horizontal overflow 390",
+      "pass": true
+    }
+  ],
+  "exceptions": [],
+  "scope": "Real components with synthetic services and simulated permission responses; no physical hardware tested."
+}

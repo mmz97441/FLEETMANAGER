@@ -1,0 +1,49 @@
+{
+  "checks": [
+    {
+      "label": "hook starts loading before initial mission snapshot",
+      "pass": true
+    },
+    {
+      "label": "hook waits for packages too",
+      "pass": true
+    },
+    {
+      "label": "old imports count in their actual current mission",
+      "pass": true
+    },
+    {
+      "label": "identical mission ids do not resubscribe packages",
+      "pass": true
+    },
+    {
+      "label": "package read failure is explicit",
+      "pass": true
+    },
+    {
+      "label": "no unauthorized hook subscriptions",
+      "pass": true
+    },
+    {
+      "label": "own missions subscription uses driverId constraint",
+      "pass": true
+    },
+    {
+      "label": "search failure remains a dialog rather than missing package",
+      "pass": true
+    },
+    {
+      "label": "pending creation disables close and rescan",
+      "pass": true
+    },
+    {
+      "label": "escape does not interrupt pending creation",
+      "pass": true
+    },
+    {
+      "label": "successful creation does not invite creating it again",
+      "pass": true
+    }
+  ],
+  "exceptions": []
+}

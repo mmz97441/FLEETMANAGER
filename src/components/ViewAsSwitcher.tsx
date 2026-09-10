@@ -2,18 +2,21 @@
  * VOIR EN TANT QUE (aperçu de rôle)
  *
  * Permet à un profil privilégié (président / admin / direction) de prévisualiser
- * l'application dans la peau d'un CLIENT, pour voir exactement son portail et sa
+ * le portail d’un client, en consultation sans écriture par défaut, et sa
  * traçabilité. Rendu dans un overlay isolé, avec sa PROPRE PermissionsProvider
- * (les permissions affichées sont celles du client prévisualisé) et des
- * Les callbacks de devis sont neutralisés ; les actions du portail qui passent
- * directement par les services conservent leur comportement réel et l’annoncent.
+ * (les permissions affichées sont celles du client prévisualisé).
+ * Une intervention réelle exige une activation explicite et un audit de l’acteur authentifié.
  *
  * Volontairement autonome : n'altère pas le currentUser global de l'app.
  */
-import React, { useState, useMemo, lazy, Suspense } from 'react';
+import React, { useState, useMemo, useCallback, lazy, Suspense } from 'react';
 import Modal from './shared/Modal';
 import { User, QuoteRequest, ViewState } from '../types';
 import { PermissionsProvider } from '../usePermissions';
+import { recordClientIntervention } from '../services/clientInterventionService';
+import { confirmAction } from '../services/confirmationService';
+import { notifyWarning } from '../services/logService';
+import { ClientMutationAudit } from '../utils/clientMutation';
 import { Eye, X, Search, Building2 } from 'lucide-react';
 
 const ClientPortal = lazy(() => import('./ClientPortal'));
@@ -31,6 +34,32 @@ const ViewAsSwitcher: React.FC<ViewAsSwitcherProps> = ({ currentUser, users, quo
   const [search, setSearch] = useState('');
   const [previewClient, setPreviewClient] = useState<User | null>(null);
   const [previewView, setPreviewView] = useState<ViewState>('client_dashboard');
+  const [interventionSession, setInterventionSession] = useState<string | null>(null);
+  const [startingIntervention, setStartingIntervention] = useState(false);
+  const [interventionError, setInterventionError] = useState('');
+  const audit = useCallback<ClientMutationAudit>(async (action, phase) => {
+    if (!previewClient || !interventionSession) throw new Error('Aucune intervention active.');
+    await recordClientIntervention(currentUser, previewClient, interventionSession, action, phase);
+  }, [currentUser, previewClient, interventionSession]);
+  const stopIntervention = () => {
+    if (previewClient && interventionSession) void recordClientIntervention(currentUser, previewClient, interventionSession, 'Fin de l’intervention', 'confirmed').catch(() => notifyWarning('L’intervention est terminée, mais sa clôture n’a pas pu être journalisée. Les intentions déjà enregistrées sont conservées.'));
+    setInterventionSession(null);
+    setInterventionError('');
+  };
+  const closePreview = () => { if (startingIntervention) return; stopIntervention(); setPreviewClient(null); };
+  const startIntervention = async () => {
+    if (!previewClient || startingIntervention) return;
+    setStartingIntervention(true); setInterventionError('');
+    try {
+      const confirmed = await confirmAction({ title: 'Intervenir pour ce client ?', message: `Vous agissez sous votre identité (${currentUser.firstName} ${currentUser.lastName}) pour ${previewClient.companyName || previewClient.email}. Les expéditions, destinataires et informations entreprise modifiés seront réels. Chaque demande de modification sera journalisée ; les permissions habituelles restent appliquées.`, confirmLabel: 'Activer l’intervention', cancelLabel: 'Rester en consultation' });
+      if (!confirmed) return;
+      const sessionId = crypto.randomUUID();
+      await recordClientIntervention(currentUser, previewClient, sessionId, 'Début de l’intervention', 'confirmed');
+      setInterventionSession(sessionId);
+    } catch {
+      setInterventionError('L’intervention n’a pas pu être journalisée. Vous restez en consultation ; vérifiez votre connexion puis réessayez.');
+    } finally { setStartingIntervention(false); }
+  };
 
   const clients = useMemo(
     () => users.filter(u => String(u.role || '').toLowerCase().includes('client'))
@@ -50,7 +79,7 @@ const ViewAsSwitcher: React.FC<ViewAsSwitcherProps> = ({ currentUser, users, quo
 
   const previewQuotes = useMemo(
     () => previewClient
-      ? quotes.filter(q => (q as any).clientId === previewClient.id || (q.clientName || '') === (previewClient.companyName || ''))
+      ? quotes.filter(q => (q as any).clientId === previewClient.id || (Boolean(previewClient.companyName) && q.clientName === previewClient.companyName))
       : [],
     [quotes, previewClient]
   );
@@ -81,7 +110,7 @@ const ViewAsSwitcher: React.FC<ViewAsSwitcherProps> = ({ currentUser, users, quo
         </div>
         <p role="status" className="my-3 text-sm text-slate-600">{filtered.length} client{filtered.length > 1 ? 's' : ''} disponible{filtered.length > 1 ? 's' : ''}</p>
         <ul className="divide-y divide-slate-100">
-          {filtered.map(client => <li key={client.id}><button type="button" onClick={() => { setPreviewClient(client); setPreviewView('client_dashboard'); setPickerOpen(false); }} className="w-full min-h-12 text-left p-3 hover:bg-slate-50 rounded-xl flex items-center gap-3" aria-label={`Ouvrir l’aperçu de ${clientLabel(client)}`}>
+          {filtered.map(client => <li key={client.id}><button type="button" onClick={() => { setInterventionSession(null); setInterventionError(''); setPreviewClient(client); setPreviewView('client_dashboard'); setPickerOpen(false); }} className="w-full min-h-12 text-left p-3 hover:bg-slate-50 rounded-xl flex items-center gap-3" aria-label={`Ouvrir l’aperçu de ${clientLabel(client)}`}>
             <Building2 size={20} aria-hidden="true" className="text-indigo-700 shrink-0" />
             <span className="min-w-0"><span className="block font-semibold text-base text-slate-900 break-words">{clientLabel(client)}</span><span className="block text-sm text-slate-600 break-all">{client.email}</span></span>
           </button></li>)}
@@ -91,20 +120,25 @@ const ViewAsSwitcher: React.FC<ViewAsSwitcherProps> = ({ currentUser, users, quo
 
       {/* Overlay d'aperçu (lecture seule) — portail → au-dessus de la sidebar */}
       {previewClient && (
-        <Modal isOpen onClose={() => setPreviewClient(null)} title={`Aperçu de ${clientLabel(previewClient)}`} size="full" closeOnOverlay={false} bodyClassName="!p-0 bg-slate-50">
+        <Modal isOpen onClose={closePreview} preventClose={startingIntervention} title={`${interventionSession ? 'Intervention' : 'Consultation'} : ${clientLabel(previewClient)}`} subtitle={`Intervenant : ${currentUser.firstName} ${currentUser.lastName} (${currentUser.email})`} size="full" closeOnOverlay={false} bodyClassName="!p-0 bg-slate-50">
         <div className="min-w-0 bg-slate-50 flex flex-col">
           <div className="bg-amber-100 text-amber-950 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
             <span className="font-bold text-sm flex items-center gap-2 min-w-0">
               <Eye size={16} className="shrink-0" />
-              <span>Les actions disponibles dans cet aperçu peuvent modifier les données réelles du client.</span>
+              <span>{interventionSession ? 'Intervention réelle active' : 'Consultation en lecture seule'}<span className="block mt-1 font-normal">Client : {clientLabel(previewClient)} · Intervenant : {currentUser.firstName} {currentUser.lastName} ({currentUser.email})</span></span>
             </span>
+            <div className="flex flex-wrap gap-2">
+            {interventionSession ? <button type="button" onClick={stopIntervention} className="min-h-11 rounded-lg border border-amber-400 bg-white px-3 text-sm font-bold">Terminer l’intervention</button> : <button type="button" disabled={startingIntervention} onClick={() => void startIntervention()} className="min-h-11 rounded-lg bg-indigo-800 text-white px-3 text-sm font-bold disabled:opacity-50">{startingIntervention ? 'Activation en cours…' : 'Intervenir pour ce client'}</button>}
             <button
-              onClick={() => setPreviewClient(null)}
+              disabled={startingIntervention}
+              onClick={closePreview}
               className="min-h-11 bg-white hover:bg-amber-50 border border-amber-300 px-3 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-1 shrink-0"
             >
               <X size={18} /> Fermer l’aperçu
             </button>
+            </div>
           </div>
+          {interventionError && <p role="alert" className="m-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-900">{interventionError}</p>}
           {/* Barre de navigation de l'aperçu (le portail n'a pas la sidebar) */}
           <nav aria-label="Navigation de l’aperçu client" className="bg-white border-b border-slate-200 px-3 py-2 flex items-center gap-1 overflow-x-auto shrink-0">
             {([
@@ -135,11 +169,13 @@ const ViewAsSwitcher: React.FC<ViewAsSwitcherProps> = ({ currentUser, users, quo
                     activeView={previewView}
                     currentUser={previewClient}
                     quotes={previewQuotes}
-                    companyUsers={[]}
+                    companyUsers={users.filter(user => (user.id === previewClient.id || (Boolean(previewClient.companyName) && user.companyName === previewClient.companyName)) && String(user.role).toLowerCase().includes('client'))}
                     onNavigate={(v) => setPreviewView(v)}
                     onAddQuote={noop}
                     onUpdateQuoteStatus={noop}
                     previewMode
+                    interventionAudit={interventionSession ? audit : undefined}
+                    interventionActorLabel={`${currentUser.firstName} ${currentUser.lastName} (${currentUser.email})`}
                   />
                 </PermissionsProvider>
               </Suspense>

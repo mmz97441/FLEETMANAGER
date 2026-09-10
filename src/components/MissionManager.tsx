@@ -4,7 +4,7 @@ import { confirmAction } from '../services/confirmationService';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 /**
  * MISSION MANAGER
- * 
+ *
  * Composant principal pour la gestion des missions et tournées
  */
 
@@ -34,7 +34,9 @@ import {
   updatePackageStatus,
   deletePackage,
   updatePackageFields,
-  updateMissionFields,
+  updateMissionStopFields,
+  removeMissionStop,
+  reorderMissionStops,
   addManualStopToMission,
   DEFAULT_POSTAL_CODE_MAPPINGS,
   MissionStats,
@@ -49,6 +51,12 @@ import { ActivityAction } from '../types';
 import { dispatchMissionsCF } from '../services/cloudFunctions';
 import { usePermissions, Permission } from '../usePermissions';
 import Modal from './shared/Modal';
+import MissionStopFields from './MissionStopFields';
+import OfficeSavedViews from './OfficeSavedViews';
+import { startUxTask } from '../utils/uxMetrics';
+import { PendingManualStop, pendingManualStopKey, readPendingManualStop, reservePendingManualStop, clearPendingManualStop } from '../utils/pendingManualStop';
+import { createStopForm, validateStopForm, stopFormPayload, StopForm, StopFormErrors } from '../utils/missionStopForm';
+import { missionStatusLabel, packageStatusLabel, stopStatusLabel } from '../utils/operationalLabels';
 import DispatchManager from './DispatchManager';
 import MissionKPIs from './MissionKPIs';
 import ImportReviewTable from './ImportReviewTable';
@@ -98,20 +106,30 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   const [dispatchablePackages, setDispatchablePackages] = useState<Package[]>([]);
   const [importBatches, setImportBatches] = useState<ImportBatch[]>([]);
   const [hubs, setHubs] = useState<Hub[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  
+  type SourceKey = 'missions' | 'packages' | 'dispatchable' | 'imports' | 'hubs';
+  type SourceState = { status: 'loading' | 'ready' | 'error'; receivedAt?: string; error?: string; scope?: string };
+  const [sourceStates, setSourceStates] = useState<Record<SourceKey, SourceState>>({ missions: { status: 'loading' }, packages: { status: 'loading' }, dispatchable: { status: 'loading' }, imports: { status: 'loading' }, hubs: { status: 'loading' } });
+  const [sourceRetries, setSourceRetries] = useState<Record<SourceKey, number>>({ missions: 0, packages: 0, dispatchable: 0, imports: 0, hubs: 0 });
+  const sourceLabels: Record<SourceKey, string> = { missions: 'Tournées', packages: 'Colis', dispatchable: 'Colis à affecter', imports: 'Historique des imports', hubs: 'Hubs' };
+  const setSourceState = useCallback((key: SourceKey, next: Partial<SourceState>) => setSourceStates(previous => ({ ...previous, [key]: { ...previous[key], ...next } })), []);
+
   // Filtres
   const [dateParam] = useUrlParam<string>('date', todayISO());
   const setSelectedDate = (date: string) => updateUrlParams({ date: date === todayISO() ? null : date, page: null, mission: null });
-  const selectedDate = /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : todayISO();
+  const selectedDate = /^\d{4}-\d{2}-\d{2}$/.test(dateParam) && localDatePart(new Date(`${dateParam}T12:00:00`)) === dateParam ? dateParam : todayISO();
   const [selectedZone] = useUrlParam<Zone | 'all'>('zone', 'all', ['all', ...Object.values(Zone)]);
   const setSelectedZone = (zone: Zone | 'all') => updateUrlParams({ zone: zone === 'all' ? null : zone, page: null });
   const [searchTerm] = useUrlParam<string>('q', '');
   const setSearchTerm = (value: string) => updateUrlParams({ q: value || null, page: null }, true);
+  const [missionSearch, setMissionSearch] = useUrlParam<string>('missionQ', '');
+  const [globalPackageSearch, setGlobalPackageSearch] = useState('');
+  const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
+  const packageSearchTask = useRef<ReturnType<typeof startUxTask> | null>(null);
+  const [packageSearchVersion, setPackageSearchVersion] = useState(0);
   const [missionParam, setMissionParam] = useUrlParam<string>('mission', '');
   const expandedMissionId = missionParam || null;
   const setExpandedMissionId = (id: string | null) => setMissionParam(id || '');
-  
+
   // Modals
   const [showImportModal, setShowImportModal] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
@@ -119,14 +137,14 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   const [isImporting, setIsImporting] = useState(false);
   const [importResult, setImportResult] = useState<any>(null);
   const [reviewData, setReviewData] = useState<ReviewResult | null>(null);
-  
+
   // POD Viewer
   const [viewingPOD, setViewingPOD] = useState<{ pod: any; pkg: Package } | null>(null);
-  
+
   // Status change (admin)
   const [statusChangePkg, setStatusChangePkg] = useState<Package | null>(null);
   const [isChangingStatus, setIsChangingStatus] = useState(false);
-  
+
   // Edit/Delete colis (admin)
   const [editingPkg, setEditingPkg] = useState<Package | null>(null);
   const [packageParam, setPackageParam] = useUrlParam<string>('package', '');
@@ -138,12 +156,13 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   const [viewingBatch, setViewingBatch] = useState<ImportBatch | null>(null);
   const [batchPackages, setBatchPackages] = useState<Package[]>([]);
   const [loadingBatch, setLoadingBatch] = useState(false);
+  const [batchError, setBatchError] = useState('');
+  const batchRequest = useRef(0);
   type PkgSortKey = 'orderNumber' | 'externalId' | 'contactName' | 'city' | 'zone' | 'status' | 'createdAt';
-  const [pkgSort, setPkgSort] = useState<{ key: PkgSortKey; dir: 'asc' | 'desc' }>({ key: 'createdAt', dir: 'desc' });
-  const togglePkgSort = (key: PkgSortKey) => {
-    updateUrlParams({ page: null }, true);
-    setPkgSort(s => s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' });
-  };
+  const [pkgSortKey] = useUrlParam<PkgSortKey>('sort', 'createdAt', ['orderNumber', 'externalId', 'contactName', 'city', 'zone', 'status', 'createdAt']);
+  const [pkgSortDir] = useUrlParam<'asc' | 'desc'>('dir', 'desc', ['asc', 'desc']);
+  const pkgSort = useMemo(() => ({ key: pkgSortKey, dir: pkgSortDir }), [pkgSortKey, pkgSortDir]);
+  const togglePkgSort = (key: PkgSortKey) => updateUrlParams({ sort: key, dir: pkgSortKey === key && pkgSortDir === 'asc' ? 'desc' : 'asc', page: null });
   const pkgSortVal = (p: Package, key: PkgSortKey): string =>
     key === 'externalId' ? (p.externalId || '') :
     key === 'contactName' ? (p.contactName || '') :
@@ -155,11 +174,11 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   const [editPkgForm, setEditPkgForm] = useState<Record<string, any>>({});
   const [isSavingPkg, setIsSavingPkg] = useState(false);
   const [deletingPkg, setDeletingPkg] = useState<Package | null>(null);
-  
+
   // Sélection multiple de colis
   const [selectedPackageIds, setSelectedPackageIds] = useState<Set<string>>(new Set());
   const [bulkStatusTarget, setBulkStatusTarget] = useState<PackageStatus | null>(null);
-  
+
   // Dispatch rapide depuis sélection
   const [showQuickDispatch, setShowQuickDispatch] = useState(false);
   const [quickDispatchDriverId, setQuickDispatchDriverId] = useState<string>('');
@@ -174,17 +193,34 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   const [isQuickDispatching, setIsQuickDispatching] = useState(false);
   const quickDispatchLock = useRef(false);
   const quickDispatchAttempt = useRef<{ key: string; request: Parameters<typeof dispatchMissionsCF>[0] } | null>(null);
-  
+
   // Edit/Delete stops dans tournée (admin)
   const [editingStop, setEditingStop] = useState<{ mission: Mission; stop: MissionStop } | null>(null);
-  const [editStopForm, setEditStopForm] = useState<Record<string, any>>({});
+  const [editStopForm, setEditStopForm] = useState<StopForm>(createStopForm);
+  const [stopErrors, setStopErrors] = useState<StopFormErrors>({});
+  const [stopSaveError, setStopSaveError] = useState('');
+  const stopMutationLock = useRef(false);
+  const newStopRequestId = useRef<string>(crypto.randomUUID());
+  const [pendingStop, setPendingStop] = useState<PendingManualStop | null>(null);
+  const [pendingStopJournalError, setPendingStopJournalError] = useState('');
+  const pendingStopKey = pendingManualStopKey(currentUser.id);
+  useEffect(() => {
+    const read = () => {
+      try { setPendingStop(readPendingManualStop(localStorage, currentUser.id)); setPendingStopJournalError(''); }
+      catch (error) { setPendingStop(null); setPendingStopJournalError(error instanceof Error ? error.message : 'Le navigateur ne peut pas lire la demande d’arrêt conservée.'); }
+    };
+    read();
+    const sync = (event: StorageEvent) => { if (event.key === pendingStopKey || event.key === null) read(); };
+    window.addEventListener('storage', sync);
+    return () => window.removeEventListener('storage', sync);
+  }, [pendingStopKey, currentUser.id]);
   const [deletingStop, setDeletingStop] = useState<{ mission: Mission; stop: MissionStop } | null>(null);
   const [addingStopToMission, setAddingStopToMission] = useState<Mission | null>(null);
-  const [newStopForm, setNewStopForm] = useState<Record<string, any>>({});
-  
+  const [newStopForm, setNewStopForm] = useState<StopForm>(createStopForm);
+
   // Réordonnancement des stops
   const [reorderingMission, setReorderingMission] = useState<Mission | null>(null);
-  
+
   // Gestion des hubs
   const [showHubModal, setShowHubModal] = useState(false);
   const [editingHub, setEditingHub] = useState<Hub | null>(null);
@@ -202,56 +238,121 @@ const MissionManager: React.FC<MissionManagerProps> = ({
     assignedPostalCodes: '' // Séparés par virgule
   });
 
+  const initialHubForm = useRef(hubForm);
+  const [hubError, setHubError] = useState('');
+  const [isDeletingHub, setIsDeletingHub] = useState(false);
+  const requestHubClose = useUnsavedChanges(showHubModal && JSON.stringify(hubForm) !== JSON.stringify(initialHubForm.current), isSavingHub);
+  const requestImportClose = useUnsavedChanges((showImportModal || !!reviewData) && !importResult?.success && (!!importFile || !!selectedClient), isImporting);
+
+  const logConfirmedActivity = (...args: Parameters<typeof logActivity>) => logActivity(...args).catch(() => { notifyInfo('L’opération est enregistrée, mais le journal est momentanément indisponible.'); });
+
   const packageDirty = !!editingPkg && Object.entries(editPkgForm).some(([key, value]) => String(value ?? '') !== String((editingPkg as any)[key] ?? ''));
   const requestPackageClose = useUnsavedChanges(packageDirty, isSavingPkg);
   const closePackageEditor = () => void requestPackageClose(() => { setEditingPkg(null); updateUrlParams({ edit: null }, true); });
   const requestQuickClose = useUnsavedChanges(showQuickDispatch && !!quickDispatchDriverId, isQuickDispatching);
   const closeQuickDispatch = () => void requestQuickClose(() => setShowQuickDispatch(false));
 
-  // Charger les données
+  const stopDirty = !!editingStop && JSON.stringify(editStopForm) !== JSON.stringify(createStopForm(editingStop.stop));
+  const requestStopClose = useUnsavedChanges(stopDirty, !!editingStop && isSavingPkg);
+  const closeStopEditor = () => void requestStopClose(() => setEditingStop(null));
+  const newStopDirty = !!addingStopToMission && JSON.stringify(newStopForm) !== JSON.stringify(createStopForm());
+  const requestNewStopClose = useUnsavedChanges(newStopDirty, !!addingStopToMission && isSavingPkg);
+  const closeNewStop = () => void requestNewStopClose(() => setAddingStopToMission(null));
+
+  // Each source owns its readiness/error; a date change never rereads stable histories.
   useEffect(() => {
-    const unsubMissions = subscribeToMissions(setMissions, { date: selectedDate });
-    const unsubPackages = subscribeToPackages(setPackages);
-    const unsubDispatchable = subscribeToDispatchablePackages(setDispatchablePackages);
-    const unsubImports = subscribeToImportBatches(setImportBatches);
-    const unsubHubs = subscribeToHubs(setHubs);
+    let active = true;
+    setSourceState('missions', { status: 'loading', error: undefined, scope: selectedDate });
+    setMissions([]);
+    const unsubscribe = subscribeToMissions(value => {
+      if (!active) return;
+      setMissions(value);
+      setSourceState('missions', { status: 'ready', receivedAt: new Date().toISOString(), error: undefined, scope: selectedDate });
+    }, { date: selectedDate }, error => {
+      if (active) setSourceState('missions', { status: 'error', error: error.message || 'Lecture indisponible', scope: selectedDate });
+    });
+    return () => { active = false; unsubscribe(); };
+  }, [selectedDate, sourceRetries.missions, setSourceState]);
 
-    setIsLoading(false);
+  useEffect(() => {
+    let active = true;
+    setSourceState('packages', { status: 'loading', error: undefined });
+    const measurement = startUxTask('load_packages', currentUser.role);
+    const unsubscribe = subscribeToPackages(value => {
+      if (!active) return;
+      setPackages(value);
+      measurement.finish('success', { items: value.length });
+      setSourceState('packages', { status: 'ready', receivedAt: new Date().toISOString(), error: undefined });
+    }, undefined, error => {
+      if (active) { measurement.finish('error', { errors: 1 }); setSourceState('packages', { status: 'error', error: error.message || 'Lecture indisponible' }); }
+    });
+    return () => { active = false; unsubscribe(); };
+  }, [sourceRetries.packages, setSourceState]);
 
-    return () => {
-      unsubMissions();
-      unsubPackages();
-      unsubDispatchable();
-      unsubImports();
-      unsubHubs();
-    };
-  }, [selectedDate]);
+  useEffect(() => {
+    let active = true;
+    setSourceState('dispatchable', { status: 'loading', error: undefined });
+    const unsubscribe = subscribeToDispatchablePackages(value => {
+      if (!active) return;
+      setDispatchablePackages(value);
+      setSourceState('dispatchable', { status: 'ready', receivedAt: new Date().toISOString(), error: undefined });
+    }, error => {
+      if (active) setSourceState('dispatchable', { status: 'error', error: error.message || 'Lecture indisponible' });
+    });
+    return () => { active = false; unsubscribe(); };
+  }, [sourceRetries.dispatchable, setSourceState]);
+
+  useEffect(() => {
+    let active = true;
+    setSourceState('imports', { status: 'loading', error: undefined });
+    const unsubscribe = subscribeToImportBatches(value => {
+      if (!active) return;
+      setImportBatches(value);
+      setSourceState('imports', { status: 'ready', receivedAt: new Date().toISOString(), error: undefined });
+    }, undefined, error => {
+      if (active) setSourceState('imports', { status: 'error', error: error.message || 'Lecture indisponible' });
+    });
+    return () => { active = false; unsubscribe(); };
+  }, [sourceRetries.imports, setSourceState]);
+
+  useEffect(() => {
+    let active = true;
+    setSourceState('hubs', { status: 'loading', error: undefined });
+    const unsubscribe = subscribeToHubs(value => {
+      if (!active) return;
+      setHubs(value);
+      setSourceState('hubs', { status: 'ready', receivedAt: new Date().toISOString(), error: undefined });
+    }, error => {
+      if (active) setSourceState('hubs', { status: 'error', error: error.message || 'Lecture indisponible' });
+    });
+    return () => { active = false; unsubscribe(); };
+  }, [sourceRetries.hubs, setSourceState]);
 
   // Calcul des stats
   const stats = useMemo(() => calculateMissionStats(missions), [missions]);
-  
+
   // Filtrage des missions
   const filteredMissions = useMemo(() => {
     let result = missions;
-    
+
     if (selectedZone !== 'all') {
       result = result.filter(m => m.zone === selectedZone);
     }
-    
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
+
+    if (missionSearch) {
+      const term = missionSearch.toLowerCase();
       result = result.filter(m =>
         m.driverName?.toLowerCase().includes(term) ||
         m.vehiclePlate?.toLowerCase().includes(term) ||
-        m.hubName.toLowerCase().includes(term)
+        (m.hubName || '').toLowerCase().includes(term)
       );
     }
-    
+
     return result;
-  }, [missions, selectedZone, searchTerm]);
+  }, [missions, selectedZone, missionSearch]);
 
   // Clients disponibles pour l'import
-  const clients = useMemo(() => 
+  const clients = useMemo(() =>
     users.filter(u => u.role === UserRole.CLIENT),
     [users]
   );
@@ -404,10 +505,10 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   // === RÉORDONNANCEMENT DES STOPS ===
   const handleSaveReorderedStops = async (mission: Mission, newStops: MissionStop[]) => {
     try {
-      await updateMissionFields(mission.id, { stops: newStops });
-      
+      await reorderMissionStops(mission.id, newStops.map(stop => stop.id));
+
       // Log de l'activité
-      await logActivity(currentUser, ActivityAction.MISSION_UPDATED, {
+      await logConfirmedActivity(currentUser, ActivityAction.MISSION_UPDATED, {
         targetType: 'mission',
         targetId: mission.id,
         targetName: `Tournée ${mission.driverName || 'Non assigné'}`,
@@ -558,6 +659,11 @@ const MissionManager: React.FC<MissionManagerProps> = ({
     printWindow.document.close();
   };
 
+  const renderSavedViews = () => <OfficeSavedViews userId={currentUser.id}
+    label={`${activeTab === 'missions' ? 'Tournées' : 'Colis'} · ${selectedZone === 'all' ? 'Toutes zones' : selectedZone}${activeTab === 'packages' ? ` · ${pkgStatusFilter === 'all' ? 'Tous statuts' : packageStatusLabel(pkgStatusFilter)} · ${({orderNumber:'Commande',externalId:'Référence',contactName:'Destinataire',city:'Ville',zone:'Zone',status:'Statut',createdAt:'Date de création'})[pkgSortKey]} ${pkgSortDir === 'asc' ? 'croissant' : 'décroissant'}` : ''}`}
+    params={{ tab: activeTab, zone: selectedZone, ...(activeTab === 'packages' ? { status: pkgStatusFilter, scope: dateScope, sort: pkgSortKey, dir: pkgSortDir, pageSize: packagePageSizeParam } : {}) }}
+    onApply={params => { setSelectedPackageIds(new Set()); setGlobalPackageSearch(''); updateUrlParams({ tab: null, zone: null, status: null, scope: null, sort: null, dir: null, pageSize: null, ...params, q: null, missionQ: null, date: null, page: null, package: null, mission: null, edit: null }); }} />;
+
   // Handlers
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -569,12 +675,12 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
   const handleImport = async () => {
     if (!importFile || !selectedClient) return;
-    
+
     const client = users.find(u => u.id === selectedClient);
     if (!client) return;
-    
+
     setIsImporting(true);
-    
+
     try {
       // Valider le format d'abord
       const validation = await validateExcelFormat(importFile);
@@ -586,7 +692,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
         setIsImporting(false);
         return;
       }
-      
+
       // Parser pour revue (NE crée PAS les colis en base)
       const review = await parseExcelForReview(importFile);
       setReviewData(review);
@@ -598,21 +704,22 @@ const MissionManager: React.FC<MissionManagerProps> = ({
         errors: [{ row: 0, message: 'Erreur lors de la lecture du fichier' }]
       });
     }
-    
+
     setIsImporting(false);
   };
 
-  const closeImportModal = () => {
+  const closeImportModal = () => void requestImportClose(() => {
     setShowImportModal(false);
     setImportFile(null);
     setSelectedClient('');
     setImportResult(null);
     setReviewData(null);
-  };
+  });
 
   // === GESTION DES HUBS ===
-  
+
   const openHubModal = (hub?: Hub) => {
+    setHubError('');
     if (hub) {
       // Mode édition
       setEditingHub(hub);
@@ -642,17 +749,15 @@ const MissionManager: React.FC<MissionManagerProps> = ({
         assignedPostalCodes: ''
       });
     }
+    initialHubForm.current = hub ? { name: hub.name, zone: hub.zone, address: hub.address, city: hub.city, postalCode: hub.postalCode, contactPhone: hub.contactPhone || '', openingTime: hub.openingTime || '07:00', closingTime: hub.closingTime || '18:00', assignedPostalCodes: hub.assignedPostalCodes?.join(', ') || '' } : { name: '', zone: '', address: '', city: '', postalCode: '', contactPhone: '', openingTime: '07:00', closingTime: '18:00', assignedPostalCodes: '' };
     setShowHubModal(true);
   };
 
-  const closeHubModal = () => {
-    setShowHubModal(false);
-    setEditingHub(null);
-  };
+  const closeHubModal = () => void requestHubClose(() => { setShowHubModal(false); setEditingHub(null); });
 
   const handleHubFormChange = (field: string, value: string) => {
     setHubForm(prev => ({ ...prev, [field]: value }));
-    
+
     // Auto-remplir les codes postaux selon la zone sélectionnée
     if (field === 'zone' && value && !editingHub) {
       const zoneCodes = DEFAULT_POSTAL_CODE_MAPPINGS
@@ -666,9 +771,9 @@ const MissionManager: React.FC<MissionManagerProps> = ({
     if (!hubForm.name || !hubForm.zone || !hubForm.address || !hubForm.city || !hubForm.postalCode) {
       return;
     }
-    
+
     setIsSavingHub(true);
-    
+
     try {
       const hubData: any = {
         name: hubForm.name,
@@ -685,7 +790,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           .filter(cp => cp.length > 0),
         isActive: true
       };
-      
+
       // Géocoder automatiquement l'adresse du hub
       const apiKey = getGoogleMapsApiKey();
       if (apiKey) {
@@ -694,11 +799,11 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           hubData.coordinates = coords;
         }
       }
-      
+
       if (editingHub) {
         // Mise à jour
         await updateHub({ ...editingHub, ...hubData });
-        logActivity(currentUser, ActivityAction.ITEM_UPDATED, {
+        logConfirmedActivity(currentUser, ActivityAction.ITEM_UPDATED, {
           targetType: 'mission',
           targetId: editingHub.id,
           targetName: hubData.name,
@@ -707,28 +812,29 @@ const MissionManager: React.FC<MissionManagerProps> = ({
       } else {
         // Création
         const hubId = await addHub(hubData);
-        logActivity(currentUser, ActivityAction.ITEM_CREATED, {
+        logConfirmedActivity(currentUser, ActivityAction.ITEM_CREATED, {
           targetType: 'mission',
           targetId: hubId,
           targetName: hubData.name,
           details: { metadata: { zone: hubData.zone } }
         });
       }
-      
-      closeHubModal();
+
+      setShowHubModal(false); setEditingHub(null); notifySuccess('Hub enregistré.');
     } catch (error) {
-      console.error('Erreur sauvegarde hub:', error);
+      setHubError('Enregistrement impossible. Votre saisie est conservée ; réessayez.');
     }
-    
+
     setIsSavingHub(false);
   };
 
   const handleDeleteHub = async () => {
-    if (!hubToDelete) return;
-    
+    if (!hubToDelete || isDeletingHub) return;
+    setIsDeletingHub(true); setHubError('');
+
     try {
       await deleteHub(hubToDelete.id);
-      logActivity(currentUser, ActivityAction.ITEM_DELETED, {
+      logConfirmedActivity(currentUser, ActivityAction.ITEM_DELETED, {
         targetType: 'mission',
         targetId: hubToDelete.id,
         targetName: hubToDelete.name,
@@ -736,53 +842,50 @@ const MissionManager: React.FC<MissionManagerProps> = ({
       });
       setHubToDelete(null);
     } catch (error) {
-      console.error('Erreur suppression hub:', error);
-    }
+      setHubError('Suppression impossible. Vérifiez les tournées liées à ce hub puis réessayez.');
+    } finally { setIsDeletingHub(false); }
   };
 
   const toggleHubActive = async (hub: Hub) => {
     try {
       await updateHub({ ...hub, isActive: !hub.isActive });
-      logActivity(currentUser, ActivityAction.STATUS_CHANGED, {
+      logConfirmedActivity(currentUser, ActivityAction.STATUS_CHANGED, {
         targetType: 'mission',
         targetId: hub.id,
         targetName: hub.name,
-        details: { 
+        details: {
           before: { isActive: hub.isActive },
           after: { isActive: !hub.isActive }
         }
       });
     } catch (error) {
-      console.error('Erreur toggle hub:', error);
+      notifyError('Le changement d’état du hub n’a pas été enregistré. Réessayez.');
     }
   };
 
-  // Render tabs
-  const renderTabs = () => (
-    <div className="flex border-b border-slate-200 mb-6 overflow-x-auto">
-      {[
-        { id: 'dashboard', label: 'Tableau de bord', icon: BarChart3 },
-        ...(canDispatch ? [{ id: 'dispatch', label: 'Préparer les tournées', icon: Zap }] : []),
-        { id: 'imports', label: 'Imports', icon: Upload },
-        { id: 'missions', label: 'Suivre les tournées', icon: Route },
-        { id: 'packages', label: 'Colis', icon: PackageIcon },
-        ...(canManageHubs ? [{ id: 'hubs', label: 'Configurer les hubs', icon: Building2 }] : [])
-      ].map(tab => (
-        <button
-          key={tab.id}
-          onClick={() => setActiveTab(tab.id as TabType)}
-          className={`flex items-center gap-2 px-4 py-3 font-medium border-b-2 transition-colors whitespace-nowrap ${
-            activeTab === tab.id
-              ? 'border-brand-500 text-brand-600'
-              : 'border-transparent text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          <tab.icon size={18} />
-          {tab.label}
-        </button>
-      ))}
-    </div>
-  );
+  const renderTabs = () => {
+    const tabs = [
+      { id: 'dashboard', label: 'Tableau de bord', icon: BarChart3 },
+      ...(canDispatch ? [{ id: 'dispatch', label: 'Préparer les tournées', icon: Zap }] : []),
+      { id: 'imports', label: 'Imports', icon: Upload },
+      { id: 'missions', label: 'Suivre les tournées', icon: Route },
+      { id: 'packages', label: 'Colis', icon: PackageIcon },
+      ...(canManageHubs ? [{ id: 'hubs', label: 'Configurer les hubs', icon: Building2 }] : []),
+    ];
+    return <>
+      <label className="mb-3 block sm:hidden text-sm font-semibold text-slate-700">Vue de l’exploitation
+        <select value={activeTab} onChange={event => setActiveTab(event.target.value as TabType)} className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-base font-medium">
+          {tabs.map(tab => <option key={tab.id} value={tab.id}>{tab.label}</option>)}
+        </select>
+      </label>
+      <div className="hidden sm:flex border-b border-slate-200 mb-3 overflow-x-auto" aria-label="Vues de l’exploitation">
+        {tabs.map(tab => <button type="button" key={tab.id} onClick={() => setActiveTab(tab.id as TabType)} aria-current={activeTab === tab.id ? 'page' : undefined}
+          className={`flex items-center gap-2 min-h-11 px-4 py-3 font-medium border-b-2 transition-colors whitespace-nowrap ${activeTab === tab.id ? 'border-brand-700 text-brand-700' : 'border-transparent text-slate-600 hover:text-slate-800'}`}>
+          <tab.icon size={18} />{tab.label}
+        </button>)}
+      </div>
+    </>;
+  };
 
   // Render Dashboard
   const renderDashboard = () => (
@@ -798,6 +901,8 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
   // Ouvre la consultation d'un lot d'import (colis importés)
   const openBatch = async (batch: ImportBatch) => {
+    const request = ++batchRequest.current;
+    setBatchError('');
     setViewingBatch(batch);
     setBatchPackages([]);
     setLoadingBatch(true);
@@ -805,12 +910,12 @@ const MissionManager: React.FC<MissionManagerProps> = ({
       const ids = (batch.zoneBreakdown || []).flatMap(z => z.packageIds || []);
       const pkgs = ids.length > 0
         ? await getPackagesByIds(ids)
-        : packages.filter(p => p.clientId === batch.clientId); // repli si pas d'IDs stockés
-      setBatchPackages(pkgs);
+        : packages.filter(p => p.importBatchId === batch.id); // repli si pas d'IDs stockés
+      if (request === batchRequest.current) setBatchPackages(pkgs);
     } catch (e) {
-      console.error('Erreur chargement lot:', e);
+      if (request === batchRequest.current) setBatchError('Impossible de charger les colis de cet import. Réessayez.');
     }
-    setLoadingBatch(false);
+    if (request === batchRequest.current) setLoadingBatch(false);
   };
 
   // Render Imports
@@ -834,7 +939,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
         <div className="p-4 border-b border-slate-200">
           <h3 className="font-bold text-slate-800">Historique des imports</h3>
         </div>
-        
+
         {importBatches.length === 0 ? (
           <div className="p-8 text-center">
             <FileSpreadsheet size={48} className="mx-auto text-slate-300 mb-3" />
@@ -861,7 +966,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                       </p>
                     </div>
                   </div>
-                  
+
                   <div className="text-right">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium text-green-600">
@@ -878,7 +983,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                     </p>
                   </div>
                 </div>
-                
+
                 {/* Répartition par zone */}
                 <div className="mt-3 flex flex-wrap gap-2">
                   {batch.zoneBreakdown.map(zb => {
@@ -902,26 +1007,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
       {/* Modal consultation d'un lot d'import */}
       {viewingBatch && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center sm:p-4" onClick={() => setViewingBatch(null)}>
-          <div className="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col animate-slide-up" onClick={e => e.stopPropagation()}>
-            {/* Header */}
-            <div className="p-4 border-b border-slate-200 flex items-start justify-between shrink-0">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center shrink-0">
-                  <FileSpreadsheet size={20} className="text-slate-600" />
-                </div>
-                <div className="min-w-0">
-                  <p className="font-bold text-slate-800 truncate">{viewingBatch.fileName}</p>
-                  <p className="text-xs text-slate-500">
-                    {viewingBatch.clientName} • {new Date(viewingBatch.importedAt).toLocaleString('fr-FR')} • {viewingBatch.totalRows} lignes
-                  </p>
-                </div>
-              </div>
-              <button onClick={() => setViewingBatch(null)} className="p-2 rounded-full hover:bg-slate-100 shrink-0">
-                <XCircle size={20} className="text-slate-400" />
-              </button>
-            </div>
-
+        <Modal isOpen onClose={() => { batchRequest.current += 1; setViewingBatch(null); }} title={viewingBatch.fileName} subtitle={`${viewingBatch.clientName} · ${viewingBatch.totalRows} lignes`} size="3xl" footer={<p className="text-sm text-slate-600">{batchPackages.length} colis retrouvés · {viewingBatch.successCount} réussis / {viewingBatch.totalRows} lignes</p>}>
             {/* Erreurs du lot */}
             {viewingBatch.errors && viewingBatch.errors.length > 0 && (
               <div className="mx-4 mt-3 p-2 bg-red-50 border border-red-200 rounded-lg shrink-0">
@@ -936,7 +1022,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
             {/* Contenu : colis importés */}
             <div className="overflow-auto p-4">
-              {loadingBatch ? (
+              {batchError ? (<div role="alert" className="rounded-lg bg-red-50 p-3 text-red-900"><p>{batchError}</p><button type="button" onClick={() => void openBatch(viewingBatch)} className="mt-2 min-h-11 rounded-lg border border-red-300 px-3">Réessayer</button></div>) : loadingBatch ? (
                 <div className="py-10 text-center text-slate-400"><Loader2 size={24} className="animate-spin mx-auto mb-2" /> Chargement des colis…</div>
               ) : batchPackages.length === 0 ? (
                 <div className="py-10 text-center text-slate-400">Aucun colis rattaché à ce lot.</div>
@@ -965,7 +1051,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                           <td className="px-2 py-2 text-slate-500">{p.address}</td>
                           <td className="px-2 py-2 text-slate-500">{p.postalCode} {p.city}</td>
                           <td className="px-2 py-2 text-center"><span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${zc.bg} ${zc.text}`}>{p.zone}</span></td>
-                          <td className="px-2 py-2 text-center"><span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${sc.bg} ${sc.text}`}>{p.status}</span></td>
+                          <td className="px-2 py-2 text-center"><span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${sc.bg} ${sc.text}`}>{packageStatusLabel(p.status)}</span></td>
                         </tr>
                       );
                     })}
@@ -974,11 +1060,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
               )}
             </div>
 
-            <div className="p-3 border-t border-slate-200 text-xs text-slate-500 shrink-0">
-              {batchPackages.length} colis importés · {viewingBatch.successCount} réussis / {viewingBatch.totalRows} lignes
-            </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   );
@@ -987,18 +1069,20 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   const renderMissions = () => (
     <div className="space-y-6">
       {/* Filtres */}
-      <div className="flex flex-col md:flex-row gap-4">
+      <details className="rounded-xl border border-slate-200 bg-white">
+        <summary className="min-h-11 cursor-pointer px-3 py-3 text-sm font-semibold">Filtres des tournées{missionSearch || selectedZone !== 'all' ? ' — actifs' : ''}</summary>
+        <div className="flex flex-col md:flex-row gap-3 p-3 pt-0">
         <div className="flex-1 relative">
           <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
             aria-label="Rechercher une tournée par chauffeur ou véhicule" placeholder="Rechercher par chauffeur, véhicule..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            value={missionSearch}
+            onChange={(e) => setMissionSearch(e.target.value, true)}
             className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
           />
         </div>
-        
+
         <select
           aria-label="Filtrer les tournées par zone"
           value={selectedZone}
@@ -1010,126 +1094,73 @@ const MissionManager: React.FC<MissionManagerProps> = ({
             <option key={zone} value={zone}>{zone}</option>
           ))}
         </select>
-        
-        <input
-          type="date"
-          aria-label="Date des tournées"
-          value={selectedDate}
-          onChange={(e) => setSelectedDate(e.target.value)}
-          className="px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
-        />
-      </div>
 
+        <button type="button" onClick={() => updateUrlParams({ missionQ: null, zone: null, mission: null })} className="min-h-11 rounded-lg border border-slate-300 px-3 text-sm">Réinitialiser les filtres</button>
+        </div>
+      </details>
+
+      {renderSavedViews()}
       {/* Liste des missions */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         {filteredMissions.length === 0 ? (
           <div className="p-8 text-center">
             <Route size={48} className="mx-auto text-slate-300 mb-3" />
-            <p className="text-slate-500">Aucune mission pour cette date</p>
+            <p className="text-slate-500">{missionSearch || selectedZone !== 'all' ? 'Aucune tournée ne correspond aux filtres.' : 'Aucune tournée pour cette date.'}</p>
           </div>
         ) : (
           <div className="divide-y divide-slate-100">
             {filteredMissions.map(mission => {
-              const zoneColors = ZONE_COLORS[mission.zone];
-              const statusColors = MISSION_STATUS_COLORS[mission.status];
+              const zoneColors = ZONE_COLORS[mission.zone] || { bg: 'bg-slate-100', text: 'text-slate-700', dot: 'bg-slate-500' };
+              const statusColors = MISSION_STATUS_COLORS[mission.status] || { bg: 'bg-slate-100', text: 'text-slate-700' };
               const progress = mission.totalPackages > 0
                 ? Math.round(((mission.deliveredPackages || 0) / mission.totalPackages) * 100)
                 : 0;
               const isExpanded = expandedMissionId === mission.id;
               const sortedStops = [...mission.stops].sort((a, b) => a.sequence - b.sequence);
-                
+
               return (
                 <div key={mission.id}>
-                  {/* En-tête mission (cliquable) */}
-                  <div 
-                    className="p-4 hover:bg-slate-50 transition-colors cursor-pointer"
-                    onClick={() => setExpandedMissionId(isExpanded ? null : mission.id)}
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex items-start gap-3">
-                        <div className="flex items-center gap-2 mt-1">
-                          {isExpanded 
-                            ? <ChevronDown size={18} className="text-brand-500" />
-                            : <ChevronRight size={18} className="text-slate-400" />
-                          }
-                          <div className={`w-3 h-3 rounded-full ${zoneColors.dot}`} />
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2 mb-1">
-                            <p className="font-bold text-slate-800">
-                              {mission.driverName || 'Non assigné'}
-                            </p>
-                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColors.bg} ${statusColors.text}`}>
-                              {mission.status}
-                            </span>
+                  <div className="min-w-0 p-3 sm:p-4 hover:bg-slate-50 transition-colors">
+                    <button type="button" onClick={() => setExpandedMissionId(isExpanded ? null : mission.id)}
+                      aria-expanded={isExpanded} aria-controls={`mission-stops-${mission.id}`}
+                      aria-label={`${isExpanded ? 'Replier' : 'Développer'} la tournée de ${mission.driverName || 'chauffeur non affecté'}`}
+                      className="min-h-11 w-full min-w-0 rounded-lg text-left focus-visible:ring-2 focus-visible:ring-blue-700">
+                      <div className="flex items-start gap-2 min-w-0">
+                        {isExpanded ? <ChevronDown size={20} className="mt-1 shrink-0 text-blue-700" /> : <ChevronRight size={20} className="mt-1 shrink-0 text-slate-600" />}
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="min-w-0 break-words font-bold text-base text-slate-900">{mission.driverName || 'Non affecté'}</p>
+                            <span className={`px-2 py-1 rounded-lg text-sm font-medium ${statusColors.bg} ${statusColors.text}`}>{missionStatusLabel(mission.status)}</span>
                           </div>
-                          <p className="text-sm text-slate-500">
-                            {mission.vehiclePlate || 'Pas de véhicule'} • {mission.hubName}
-                            <a onClick={event => event.stopPropagation()} href={`/missions?tab=missions&date=${encodeURIComponent(mission.date)}&mission=${encodeURIComponent(mission.id)}`} className="ml-2 text-blue-800 underline">Lien vers cette tournée</a>
-                          </p>
-                          <div className="flex items-center gap-4 mt-2 text-sm">
-                            <span className="flex items-center gap-1 text-slate-600">
-                              <MapPin size={14} />
-                              {mission.stops.length} arrêts
-                            </span>
-                            <span className="flex items-center gap-1 text-slate-600">
-                              <PackageIcon size={14} />
-                              {mission.totalPackages} colis
-                            </span>
-                            {mission.totalDistance != null && (
-                              <span className="flex items-center gap-1 text-slate-600">
-                                <Navigation size={14} />
-                                {formatDistance(mission.totalDistance)}
-                              </span>
-                            )}
-                            {mission.estimatedDuration != null && (
-                              <span className="flex items-center gap-1 text-slate-600">
-                                <Clock size={14} />
-                                {formatDuration(mission.estimatedDuration)}
-                              </span>
-                            )}
+                          <p className="mt-1 break-words text-sm text-slate-600">{mission.vehiclePlate || 'Pas de véhicule'} · {mission.hubName}</p>
+                          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-sm text-slate-700">
+                            <span>{mission.stops.length} arrêts</span><span>{mission.totalPackages} colis</span>
+                            {mission.totalDistance != null && <span>{formatDistance(mission.totalDistance)}</span>}
+                            {mission.estimatedDuration != null && <span>{formatDuration(mission.estimatedDuration)}</span>}
                           </div>
                         </div>
                       </div>
-                      
-                      <div className="text-right flex flex-col items-end gap-1">
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handlePrintMission(mission); }}
-                            className="p-1.5 rounded-lg hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition-colors"
-                            title="Imprimer la feuille de route"
-                          >
-                            <Printer size={16} />
-                          </button>
-                          <p className="text-2xl font-bold text-slate-800">{progress}%</p>
-                        </div>
-                        <p className="text-xs text-slate-500">
-                          {mission.deliveredPackages || 0} livrés
-                        </p>
-                        {mission.failedPackages > 0 && (
-                          <p className="text-xs text-red-500">
-                            {mission.failedPackages} échecs
-                          </p>
-                        )}
-                      </div>
+                    </button>
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm text-slate-700"><strong className="text-lg">{progress} %</strong> · {mission.deliveredPackages || 0} livrés{mission.failedPackages > 0 && <span className="text-red-800"> · {mission.failedPackages} échecs</span>}</p>
+                      <span className={`rounded-lg px-2 py-1 text-sm ${zoneColors.bg} ${zoneColors.text}`}>{mission.zone}</span>
                     </div>
-                    
-                    {/* Barre de progression */}
-                    <div className="mt-3 h-2 bg-slate-100 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-green-500 transition-all"
-                        style={{ width: `${progress}%` }}
-                      />
+                    <div className="mt-2 h-2 bg-slate-200 rounded-full overflow-hidden" role="progressbar" aria-label="Colis livrés" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.min(100, progress)}>
+                      <div className="h-full bg-green-700 transition-all" style={{ width: `${Math.min(100, progress)}%` }} />
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <a href={`/missions?tab=missions&date=${encodeURIComponent(mission.date)}&mission=${encodeURIComponent(mission.id)}`} className="min-h-11 inline-flex items-center px-2 text-sm text-blue-800 underline">Lien vers cette tournée</a>
+                      <button type="button" onClick={() => handlePrintMission(mission)} className="ml-auto min-h-11 inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 text-sm text-slate-700" title="Imprimer la feuille de route"><Printer size={18} />Imprimer</button>
                     </div>
                   </div>
 
                   {/* Détail de la tournée (expandable) */}
                   {isExpanded && (
-                    <div className="bg-slate-50 border-t border-slate-200">
+                    <div id={`mission-stops-${mission.id}`} className="min-w-0 bg-slate-50 border-t border-slate-200">
                       {/* Résumé de la tournée */}
                       <div className="px-4 py-3 bg-slate-100 border-b border-slate-200">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-6 text-sm">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div className="flex flex-wrap items-center gap-2 text-sm">
                             <span className="font-semibold text-slate-700">
                               Itinéraire de la tournée
                             </span>
@@ -1140,28 +1171,27 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                               </span>
                             )}
                           </div>
-                          <div className="flex items-center gap-4 text-sm text-slate-500">
+                          <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
                             {mission.status === MissionStatus.DISPATCHED && (
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setNewStopForm({});
-                                  setAddingStopToMission(mission);
+                                  openNewStop(mission);
                                 }}
-                                className="flex items-center gap-1.5 px-3 py-1.5 bg-green-50 border border-green-200 rounded-lg text-green-700 hover:bg-green-100 hover:border-green-300 transition-colors text-xs font-medium"
-                                title="Ajouter un nouveau stop"
+                                className="min-h-11 flex items-center gap-1.5 px-3 py-1.5 bg-green-50 border border-green-200 rounded-lg text-green-700 hover:bg-green-100 hover:border-green-300 transition-colors text-xs font-medium"
+                                title="Ajouter un arrêt"
                               >
                                 <Plus size={14} />
-                                Ajouter stop
+                                Ajouter un arrêt
                               </button>
                             )}
-                            {(mission.status === MissionStatus.DISPATCHED || mission.status === MissionStatus.IN_PROGRESS) && (
+                            {mission.status === MissionStatus.DISPATCHED && (
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setReorderingMission(mission);
                                 }}
-                                className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 hover:bg-amber-100 hover:border-amber-300 transition-colors text-xs font-medium"
+                                className="min-h-11 flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 hover:bg-amber-100 hover:border-amber-300 transition-colors text-xs font-medium"
                                 title="Réordonner les arrêts"
                               >
                                 <GripVertical size={14} />
@@ -1170,7 +1200,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                             )}
                             <button
                               onClick={(e) => { e.stopPropagation(); handlePrintMission(mission); }}
-                              className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 hover:border-blue-300 transition-colors text-xs font-medium"
+                              className="min-h-11 flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 hover:border-blue-300 transition-colors text-xs font-medium"
                               title="Imprimer la feuille de route"
                             >
                               <Printer size={14} />
@@ -1193,14 +1223,14 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
                       {/* Liste des stops */}
                       {sortedStops.map((stop, index) => {
-                        const stopStatusIcon = 
+                        const stopStatusIcon =
                           stop.status === 'Terminé' ? <CheckCircle size={16} className="text-green-500" /> :
                           stop.status === 'Échec' ? <XCircle size={16} className="text-red-500" /> :
                           stop.status === 'Passé' ? <XCircle size={16} className="text-amber-500" /> :
                           stop.status === 'Arrivé' ? <Truck size={16} className="text-blue-500" /> :
                           <div className="w-4 h-4 rounded-full border-2 border-slate-300" />;
 
-                        const stopBg = 
+                        const stopBg =
                           stop.status === 'Terminé' ? 'bg-green-50' :
                           stop.status === 'Échec' ? 'bg-red-50' :
                           stop.status === 'Passé' ? 'bg-amber-50' :
@@ -1209,7 +1239,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
                         return (
                           <div key={stop.id} className={`px-4 py-3 border-b border-slate-200 ${stopBg}`}>
-                            <div className="flex items-start gap-3">
+                            <div className="flex flex-wrap items-start gap-3">
                               {/* Numéro du stop */}
                               <div className="flex flex-col items-center">
                                 <div className={`flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold ${
@@ -1226,9 +1256,9 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
                               {/* Détails du stop */}
                               <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 mb-0.5">
+                                <div className="flex flex-wrap items-center gap-2 mb-0.5">
                                   {stopStatusIcon}
-                                  <p className="font-semibold text-slate-800 truncate">
+                                  <p className="min-w-0 break-words font-semibold text-slate-800">
                                     {stop.contactName}
                                   </p>
                                   <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
@@ -1238,14 +1268,14 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                                     stop.status === 'Arrivé' ? 'bg-blue-100 text-blue-700' :
                                     'bg-slate-100 text-slate-600'
                                   }`}>
-                                    {stop.status}
+                                    {stopStatusLabel(stop.status)}
                                   </span>
                                 </div>
                                 <p className="text-sm text-slate-600">
                                   <MapPin size={12} className="inline mr-1" />
                                   {stop.address}, {stop.postalCode} {stop.city}
                                 </p>
-                                <div className="flex items-center gap-4 mt-1 text-xs text-slate-500">
+                                <div className="flex flex-wrap items-center gap-x-3 gap-y-2 mt-1 text-sm text-slate-600">
                                   <span className="flex items-center gap-1">
                                     <PackageIcon size={11} />
                                     {stop.packageCount} colis
@@ -1272,21 +1302,22 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                                   </p>
                                 )}
                                 {stop.notes && (
-                                  <p className="text-xs text-amber-600 mt-1 italic">
+                                  <p className="text-sm text-amber-800 mt-1 italic">
                                     📝 {stop.notes}
                                   </p>
                                 )}
                                 {stop.distanceFromPrevious != null && stop.distanceFromPrevious > 0 && (
                                   <p className="text-xs text-slate-400 mt-1">
-                                    ↳ {formatDistance(stop.distanceFromPrevious)} depuis le stop précédent
+                                    ↳ {formatDistance(stop.distanceFromPrevious)} depuis l’arrêt précédent
                                     {stop.durationFromPrevious ? ` (~${formatDuration(stop.durationFromPrevious)})` : ''}
                                   </p>
                                 )}
-                                
+
                                 {/* POD Status — pour stops traités */}
                                 {stop.status === 'Terminé' && (() => {
+                                  if (sourceStates.packages.status !== 'ready') return <p className="mt-2 text-sm text-slate-600">{sourceStates.packages.status === 'error' ? 'Preuve momentanément inaccessible — réessayez le chargement des colis.' : 'Chargement de la preuve…'}</p>;
                                   // Chercher le colis correspondant pour voir s'il a un POD
-                                  const stopPkg = todayPackages.find(p => 
+                                  const stopPkg = todayPackages.find(p =>
                                     stop.packageIds?.includes(p.id) && p.pod
                                   );
                                   return stopPkg?.pod ? (
@@ -1298,13 +1329,13 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                                       {stopPkg.pod?.signatureUrl ? 'Signé' : 'Photo'} — Voir la preuve
                                     </button>
                                   ) : (
-                                    <span className="inline-flex items-center gap-1 mt-2 px-2 py-0.5 bg-amber-50 text-amber-600 rounded text-[10px] font-medium">
+                                    <span className="inline-flex items-center gap-1 mt-2 px-2 py-0.5 bg-amber-50 text-amber-800 rounded text-[10px] font-medium">
                                       ⚠️ POD manquante
                                     </span>
                                   );
                                 })()}
                                 {stop.status === 'Échec' && (() => {
-                                  const hasFailurePhotos = todayPackages.some(p => 
+                                  const hasFailurePhotos = todayPackages.some(p =>
                                     stop.packageIds?.includes(p.id)
                                   );
                                   return (
@@ -1317,13 +1348,13 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
                               {/* === BOUTONS D'ACTION STOP (admin) === */}
                               {mission.status === MissionStatus.DISPATCHED && (
-                                <div className="flex flex-col gap-1 ml-2">
+                                <div className="basis-full sm:basis-auto flex flex-wrap sm:flex-col gap-2 pt-2 sm:pt-0 ml-11 sm:ml-0">
                                   {/* Monter */}
                                   <button
                                     onClick={(e) => { e.stopPropagation(); handleMoveStopUp(mission, stop); }}
                                     disabled={isSavingPkg || index === 0}
-                                    className="p-1 rounded hover:bg-slate-200 text-slate-400 hover:text-slate-600 disabled:opacity-30 disabled:cursor-not-allowed"
-                                    title="Monter"
+                                    className="min-h-11 min-w-11 inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white hover:bg-slate-200 text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                                    aria-label="Monter" title="Monter"
                                   >
                                     <ArrowUp size={14} />
                                   </button>
@@ -1331,8 +1362,8 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                                   <button
                                     onClick={(e) => { e.stopPropagation(); handleMoveStopDown(mission, stop); }}
                                     disabled={isSavingPkg || index === sortedStops.length - 1}
-                                    className="p-1 rounded hover:bg-slate-200 text-slate-400 hover:text-slate-600 disabled:opacity-30 disabled:cursor-not-allowed"
-                                    title="Descendre"
+                                    className="min-h-11 min-w-11 inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white hover:bg-slate-200 text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                                    aria-label="Descendre" title="Descendre"
                                   >
                                     <ArrowDown size={14} />
                                   </button>
@@ -1340,29 +1371,19 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                                   <button
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      setEditStopForm({
-                                        contactName: stop.contactName,
-                                        contactPhone: stop.contactPhone || '',
-                                        address: stop.address,
-                                        city: stop.city,
-                                        postalCode: stop.postalCode,
-                                        timeWindowStart: stop.timeWindowStart || '',
-                                        timeWindowEnd: stop.timeWindowEnd || '',
-                                        notes: stop.notes || '',
-                                        serviceTime: stop.serviceTime || 5
-                                      });
+                                      setEditStopForm(createStopForm(stop)); setStopErrors({}); setStopSaveError('');
                                       setEditingStop({ mission, stop });
                                     }}
-                                    className="p-1 rounded hover:bg-blue-100 text-blue-400 hover:text-blue-600"
-                                    title="Modifier"
+                                    className="min-h-11 min-w-11 inline-flex items-center justify-center rounded-lg border border-blue-300 bg-blue-50 hover:bg-blue-100 text-blue-800"
+                                    aria-label="Modifier" title="Modifier"
                                   >
                                     <Edit size={14} />
                                   </button>
                                   {/* Supprimer */}
                                   <button
-                                    onClick={(e) => { e.stopPropagation(); setDeletingStop({ mission, stop }); }}
-                                    className="p-1 rounded hover:bg-red-100 text-red-400 hover:text-red-600"
-                                    title="Supprimer"
+                                    onClick={(e) => { e.stopPropagation(); setStopSaveError(''); setDeletingStop({ mission, stop }); }}
+                                    className="ml-auto sm:ml-0 sm:mt-3 min-h-11 min-w-11 inline-flex items-center justify-center rounded-lg border border-red-300 bg-red-50 hover:bg-red-100 text-red-800"
+                                    aria-label="Supprimer" title="Supprimer"
                                   >
                                     <Trash2 size={14} />
                                   </button>
@@ -1419,7 +1440,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
       );
       setStatusChangePkg(null);
     } catch (err) {
-      console.error('Erreur changement statut:', err);
+      notifyError('Le statut n’a pas été modifié. Vérifiez les conditions de cette action puis réessayez.');
     }
     setIsChangingStatus(false);
   };
@@ -1463,191 +1484,97 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   // MANIPULATION DES STOPS DANS LES TOURNÉES
   // ============================================================================
 
-  // Déplacer un stop vers le haut (diminuer sa séquence)
-  const handleMoveStopUp = async (mission: Mission, stop: MissionStop) => {
-    const sortedStops = [...mission.stops].sort((a, b) => a.sequence - b.sequence);
-    const currentIndex = sortedStops.findIndex(s => s.id === stop.id);
-    if (currentIndex <= 0) return; // Déjà en première position
-
-    setIsSavingPkg(true);
-    try {
-      // Échanger les séquences
-      const prevStop = sortedStops[currentIndex - 1];
-      const updatedStops = mission.stops.map(s => {
-        if (s.id === stop.id) return { ...s, sequence: prevStop.sequence };
-        if (s.id === prevStop.id) return { ...s, sequence: stop.sequence };
-        return s;
-      });
-
-      await updateMissionFields(mission.id, { stops: updatedStops });
-      await logActivity(currentUser, ActivityAction.MISSION_UPDATED, {
-        targetType: 'mission',
-        targetName: `Mission ${mission.zone}`,
-        details: { changes: [`Stop ${stop.contactName} déplacé vers le haut`] }
-      });
-    } catch (err) {
-      console.error('Erreur déplacement stop:', err);
-    }
-    setIsSavingPkg(false);
+  const logStopActivity = (mission: Mission, message: string) => {
+    void logConfirmedActivity(currentUser, ActivityAction.MISSION_UPDATED, { targetType: 'mission', targetId: mission.id, targetName: `Tournée ${mission.zone}`, details: { changes: [message] } }).catch(() => notifyInfo('La modification est enregistrée, mais son journal est momentanément indisponible.'));
   };
-
-  // Déplacer un stop vers le bas (augmenter sa séquence)
-  const handleMoveStopDown = async (mission: Mission, stop: MissionStop) => {
-    const sortedStops = [...mission.stops].sort((a, b) => a.sequence - b.sequence);
-    const currentIndex = sortedStops.findIndex(s => s.id === stop.id);
-    if (currentIndex >= sortedStops.length - 1) return; // Déjà en dernière position
-
-    setIsSavingPkg(true);
+  const handleMoveStop = async (mission: Mission, stop: MissionStop, offset: number) => {
+    if (stopMutationLock.current) return;
+    const ids = [...mission.stops].sort((a, b) => a.sequence - b.sequence).map(item => item.id);
+    const index = ids.indexOf(stop.id);
+    const target = index + offset;
+    if (index < 0 || target < 0 || target >= ids.length) return;
+    [ids[index], ids[target]] = [ids[target], ids[index]];
+    stopMutationLock.current = true; setIsSavingPkg(true);
     try {
-      const nextStop = sortedStops[currentIndex + 1];
-      const updatedStops = mission.stops.map(s => {
-        if (s.id === stop.id) return { ...s, sequence: nextStop.sequence };
-        if (s.id === nextStop.id) return { ...s, sequence: stop.sequence };
-        return s;
-      });
-
-      await updateMissionFields(mission.id, { stops: updatedStops });
-      await logActivity(currentUser, ActivityAction.MISSION_UPDATED, {
-        targetType: 'mission',
-        targetName: `Mission ${mission.zone}`,
-        details: { changes: [`Stop ${stop.contactName} déplacé vers le bas`] }
-      });
-    } catch (err) {
-      console.error('Erreur déplacement stop:', err);
-    }
-    setIsSavingPkg(false);
+      await reorderMissionStops(mission.id, ids);
+      logStopActivity(mission, `Arrêt ${stop.contactName} déplacé`);
+      notifySuccess('Ordre des arrêts enregistré.');
+    } catch (error) {
+      notifyError(error instanceof Error ? error.message : 'Impossible de déplacer cet arrêt. Réessayez après actualisation de la tournée.');
+    } finally { stopMutationLock.current = false; setIsSavingPkg(false); }
   };
+  const handleMoveStopUp = (mission: Mission, stop: MissionStop) => handleMoveStop(mission, stop, -1);
+  const handleMoveStopDown = (mission: Mission, stop: MissionStop) => handleMoveStop(mission, stop, 1);
 
-  // Supprimer un stop de la tournée
   const handleDeleteStop = async () => {
-    if (!deletingStop) return;
+    if (!deletingStop || stopMutationLock.current) return;
     const { mission, stop } = deletingStop;
-
-    setIsSavingPkg(true);
+    stopMutationLock.current = true; setIsSavingPkg(true); setStopSaveError('');
     try {
-      // Retirer le stop
-      const updatedStops = mission.stops
-        .filter(s => s.id !== stop.id)
-        .map((s, idx) => ({ ...s, sequence: idx + 1 })); // Reséquencer
-
-      // Recalculer les totaux
-      const totalPackages = updatedStops.reduce((sum, s) => sum + s.packageCount, 0);
-
-      await updateMissionFields(mission.id, {
-        stops: updatedStops,
-        totalPackages
-      });
-
-      // Marquer les colis comme "À retourner" (le chauffeur doit les ramener au hub)
-      for (const pkgId of stop.packageIds) {
-        try {
-          const pkg = packages.find(p => p.id === pkgId);
-          if (pkg && (pkg.status === PackageStatus.SORTED || pkg.status === PackageStatus.LOADED || pkg.status === PackageStatus.IN_DELIVERY)) {
-            // Passer en RETURN_REQUESTED + ajouter la raison
-            await updatePackageStatus(pkgId, PackageStatus.RETURN_REQUESTED, {
-              action: 'STOP_DELETED',
-              driverId: currentUser.id,
-              driverName: `${currentUser.firstName} ${currentUser.lastName}`,
-              notes: `Stop supprimé par ${currentUser.firstName} — À retourner au hub ${mission.hubName}`
-            });
-            // Ajouter la raison du retour
-            await updatePackageFields(pkgId, {
-              returnReason: `Stop supprimé de la tournée ${mission.zone} — Retourner au hub ${mission.hubName}`
-            });
-          }
-        } catch (e) { console.warn('Erreur marquage retour colis:', pkgId, e); }
-      }
-
-      await logActivity(currentUser, ActivityAction.MISSION_UPDATED, {
-        targetType: 'mission',
-        targetName: `Mission ${mission.zone}`,
-        details: { changes: [`Stop ${stop.contactName} supprimé (${stop.packageCount} colis à retourner)`] }
-      });
-
+      const result = await removeMissionStop(mission.id, stop.id, currentUser);
+      logStopActivity(mission, `Arrêt ${stop.contactName} supprimé`);
+      notifySuccess(`Arrêt supprimé. ${result.returnedPackages} colis à retourner au hub.`);
       setDeletingStop(null);
-    } catch (err) {
-      console.error('Erreur suppression stop:', err);
-    }
-    setIsSavingPkg(false);
+    } catch (error) {
+      setStopSaveError(error instanceof Error ? error.message : 'Suppression impossible. La tournée a pu évoluer ; vérifiez son état puis réessayez.');
+    } finally { stopMutationLock.current = false; setIsSavingPkg(false); }
   };
 
-  // Modifier un stop
   const handleSaveEditStop = async () => {
-    if (!editingStop) return;
+    if (!editingStop || stopMutationLock.current) return;
+    const errors = validateStopForm(editStopForm); setStopErrors(errors); setStopSaveError('');
+    if (Object.keys(errors).length) return;
     const { mission, stop } = editingStop;
-
-    setIsSavingPkg(true);
+    stopMutationLock.current = true; setIsSavingPkg(true);
     try {
-      const updatedStops = mission.stops.map(s => {
-        if (s.id !== stop.id) return s;
-        return {
-          ...s,
-          contactName: editStopForm.contactName || s.contactName,
-          contactPhone: editStopForm.contactPhone || null,
-          address: editStopForm.address || s.address,
-          city: editStopForm.city || s.city,
-          postalCode: editStopForm.postalCode || s.postalCode,
-          timeWindowStart: editStopForm.timeWindowStart || null,
-          timeWindowEnd: editStopForm.timeWindowEnd || null,
-          notes: editStopForm.notes || null,
-          serviceTime: parseInt(editStopForm.serviceTime) || s.serviceTime
-        };
-      });
-
-      await updateMissionFields(mission.id, { stops: updatedStops });
-
-      await logActivity(currentUser, ActivityAction.MISSION_UPDATED, {
-        targetType: 'mission',
-        targetName: `Mission ${mission.zone}`,
-        details: { changes: [`Stop ${stop.contactName} modifié`] }
-      });
-
+      await updateMissionStopFields(mission.id, stop.id, stopFormPayload(editStopForm));
+      logStopActivity(mission, `Arrêt ${stop.contactName} modifié`);
+      notifySuccess('Les modifications de l’arrêt sont enregistrées.');
       setEditingStop(null);
-    } catch (err) {
-      console.error('Erreur modification stop:', err);
-    }
-    setIsSavingPkg(false);
+    } catch (error) {
+      setStopSaveError(`Enregistrement impossible. Votre saisie est conservée ; réessayez. ${error instanceof Error ? error.message : ''}`);
+    } finally { stopMutationLock.current = false; setIsSavingPkg(false); }
   };
 
-  // Ajouter un nouveau stop à une mission existante
-  const handleAddNewStop = async () => {
-    if (!addingStopToMission) return;
-    const mission = addingStopToMission;
-
-    if (!newStopForm.contactName || !newStopForm.address || !newStopForm.city || !newStopForm.postalCode) {
-      notifyError('Veuillez remplir au minimum : destinataire, adresse, ville et code postal');
-      return;
-    }
-
-    setIsSavingPkg(true);
+  const openNewStop = (mission: Mission) => {
+    if (pendingStop && pendingStop.missionId !== mission.id) { notifyInfo('Une demande d’arrêt reste à confirmer sur une autre tournée. Utilisez « Reprendre la demande » avant d’en créer une autre.'); return; }
+    setNewStopForm(pendingStop?.form || createStopForm());
+    newStopRequestId.current = pendingStop?.requestId || crypto.randomUUID();
+    setStopErrors({}); setStopSaveError(''); setAddingStopToMission(mission);
+  };
+  const resumePendingStop = async () => {
+    if (!pendingStop) return;
     try {
-      // Délégué au service transactionnel (runTransaction + cleanUndefined + ID
-      // uniforme) au lieu d'un read-modify-write non atomique côté composant, qui
-      // pouvait écraser un stop ajouté entre-temps.
-      await addManualStopToMission(mission.id, {
-        contactName: newStopForm.contactName!,
-        address: newStopForm.address!,
-        postalCode: newStopForm.postalCode!,
-        city: newStopForm.city!,
-        contactPhone: newStopForm.contactPhone || undefined,
-        timeWindowStart: newStopForm.timeWindowStart || undefined,
-        timeWindowEnd: newStopForm.timeWindowEnd || undefined,
-        serviceTime: newStopForm.serviceTime ? parseInt(newStopForm.serviceTime) : undefined,
-        notes: newStopForm.notes || undefined,
-      });
+      const mission = await getMissionById(pendingStop.missionId);
+      if (!mission) { notifyError('La tournée de cette demande est inaccessible. Contactez l’exploitation pour vérifier son état.'); return; }
+      openNewStop(mission);
+    } catch { notifyError('Impossible de retrouver cette tournée. Votre demande est conservée dans ce navigateur.'); }
+  };
 
-      await logActivity(currentUser, ActivityAction.MISSION_UPDATED, {
-        targetType: 'mission',
-        targetName: `Mission ${mission.zone}`,
-        details: { changes: [`Nouveau stop ajouté: ${newStopForm.contactName}`] }
-      });
-
-      setAddingStopToMission(null);
-      setNewStopForm({});
-    } catch (err) {
-      console.error('Erreur ajout stop:', err);
-    }
-    setIsSavingPkg(false);
+  const handleAddNewStop = async () => {
+    if (!addingStopToMission || stopMutationLock.current) return;
+    // A frozen request may originate from the driver flow, where the postal
+    // code is optional. Replay its original contract and payload unchanged.
+    const replay = pendingStop?.requestId === newStopRequestId.current && pendingStop.missionId === addingStopToMission.id ? pendingStop : null;
+    const errors = replay ? {} : validateStopForm(newStopForm); setStopErrors(errors); setStopSaveError('');
+    if (Object.keys(errors).length) return;
+    const mission = addingStopToMission;
+    const request: PendingManualStop = replay || { missionId: mission.id, date: mission.date, requestId: newStopRequestId.current, form: { ...newStopForm } };
+    stopMutationLock.current = true; setIsSavingPkg(true);
+    let reserved = false;
+    try {
+      const journal = await reservePendingManualStop(localStorage, currentUser.id, request);
+      reserved = true; setPendingStop(journal);
+      const payload = stopFormPayload(journal.form);
+      await addManualStopToMission(mission.id, { ...payload, contactPhone: payload.contactPhone || undefined, timeWindowStart: payload.timeWindowStart || undefined, timeWindowEnd: payload.timeWindowEnd || undefined, notes: payload.notes || undefined }, journal.requestId);
+      logStopActivity(mission, `Arrêt ajouté : ${payload.contactName}`);
+      notifySuccess('L’arrêt est confirmé dans la tournée.');
+      try { await clearPendingManualStop(localStorage, currentUser.id, journal.requestId); setPendingStop(readPendingManualStop(localStorage, currentUser.id)); }
+      catch { notifyInfo('L’arrêt est confirmé. Sa référence de reprise reste conservée dans ce navigateur ; une nouvelle vérification ne créera pas de doublon.'); }
+      setAddingStopToMission(null); setNewStopForm(createStopForm());
+    } catch (error) {
+      setStopSaveError(`${reserved ? 'Ajout impossible. Votre saisie est conservée ; réessayez.' : 'Demande non envoyée. Le navigateur doit pouvoir conserver sa référence avant tout ajout.'} ${error instanceof Error ? error.message : ''}`);
+    } finally { stopMutationLock.current = false; setIsSavingPkg(false); }
   };
 
   // Render Packages
@@ -1728,6 +1655,12 @@ const MissionManager: React.FC<MissionManagerProps> = ({
         </div>
       )}
 
+      {renderSavedViews()}
+      <div className="flex flex-wrap items-center gap-2 text-sm text-slate-700" aria-label="Filtres actifs des colis">
+        <span>Zone : {selectedZone === 'all' ? 'toutes' : selectedZone}</span><span>· {colisAllDates ? 'Toutes les dates' : 'Colis actifs et date sélectionnée'}</span>
+        {searchTerm && <span className="break-all">· Recherche : {searchTerm}</span>}
+        <button type="button" onClick={() => updateUrlParams({ q: null, zone: null, status: null, scope: null, sort: null, dir: null, page: null, package: null, edit: null })} className="min-h-11 rounded-lg border border-slate-300 px-3">Réinitialiser la vue</button>
+      </div>
       {/* Recherche */}
       <div className="relative">
         <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -1785,14 +1718,14 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                 setQuickDispatchTime(`${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`);
                 setShowQuickDispatch(true);
               }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-gradient-to-r from-brand-500 to-blue-500 text-white hover:from-brand-600 hover:to-blue-600 transition-all shadow-sm"
+              className="min-h-11 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-gradient-to-r from-brand-500 to-blue-500 text-white hover:from-brand-600 hover:to-blue-600 transition-all shadow-sm"
             >
               <Zap size={14} />
               Affecter
             </button>
-            
+
             <div className="w-px h-5 bg-slate-300 mx-1" />
-            
+
             <span className="text-xs text-slate-500">Statut :</span>
             {[
               { status: PackageStatus.PENDING, label: 'En attente', color: 'bg-slate-100 text-slate-700' },
@@ -1860,7 +1793,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                       aria-sort={pkgSort.key === k ? (pkgSort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
                       className={`px-3 py-3 text-${align} text-xs font-bold text-slate-500 uppercase cursor-pointer select-none hover:text-slate-700`}
                     >
-                      <button type="button" onClick={() => togglePkgSort(k)} className="text-inherit font-inherit uppercase" aria-label={`Trier par ${label}`}>{label}{pkgSort.key === k ? (pkgSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}</button>
+                      <button type="button" onClick={() => togglePkgSort(k)} className="min-h-11 text-inherit font-inherit uppercase" aria-label={`Trier par ${label}`}>{label}{pkgSort.key === k ? (pkgSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}</button>
                     </th>
                   );
                   return (
@@ -1886,7 +1819,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                 <tr>
                   <td colSpan={12} className="px-4 py-8 text-center text-slate-500">
                     {pkgStatusFilter === 'all'
-                      ? 'Aucun colis pour cette date'
+                      ? 'Aucun colis ne correspond à cette vue'
                       : 'Aucun colis pour ce filtre'}
                   </td>
                 </tr>
@@ -1897,7 +1830,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                     const statusColors = PACKAGE_STATUS_COLORS[pkg.status];
                     const isSelected = selectedPackageIds.has(pkg.id);
                     const isDispatched = !!(pkg.missionId || pkg.currentDriverId);
-                    
+
                     const isTimelineOpen = expandedPkgTimelineId === pkg.id;
                     return (
                       <React.Fragment key={pkg.id}>
@@ -1969,7 +1902,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                               try {
                                 await updatePackageFields(pkg.id, { timeWindowStart: e.target.value || undefined });
                               } catch (err) {
-                                console.error('Erreur mise à jour créneau:', err);
+                                notifyError('Le créneau n’a pas été enregistré. Réessayez dans la fiche du colis.');
                               }
                             }}
                             className="w-20 px-1.5 py-1 border border-slate-200 rounded text-xs font-mono text-center focus:ring-2 focus:ring-brand-200 outline-none"
@@ -1986,7 +1919,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                               try {
                                 await updatePackageFields(pkg.id, { timeWindowEnd: e.target.value || undefined });
                               } catch (err) {
-                                console.error('Erreur mise à jour créneau:', err);
+                                notifyError('Le créneau n’a pas été enregistré. Réessayez dans la fiche du colis.');
                               }
                             }}
                             className="w-20 px-1.5 py-1 border border-slate-200 rounded text-xs font-mono text-center focus:ring-2 focus:ring-brand-200 outline-none"
@@ -1996,7 +1929,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                         {/* Statut */}
                         <td className="px-3 py-2 text-center">
                           <span className={`px-2 py-1 rounded-lg text-xs font-medium ${statusColors.bg} ${statusColors.text}`}>
-                            {pkg.status}
+                            {packageStatusLabel(pkg.status)}
                           </span>
                           {isDispatched && (
                             <span className="ml-1 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-blue-100 text-blue-700">
@@ -2072,7 +2005,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                                 e.stopPropagation();
                                 setExpandedPkgTimelineId(isTimelineOpen ? null : pkg.id);
                               }}
-                              className="p-1.5 rounded-lg text-slate-500 hover:bg-blue-50 hover:text-blue-600 transition-colors"
+                              className="min-h-11 min-w-11 inline-flex items-center justify-center p-1.5 rounded-lg text-slate-500 hover:bg-blue-50 hover:text-blue-600 transition-colors"
                               title={isTimelineOpen ? 'Masquer le suivi' : 'Suivi du colis (timeline)'}
                             >
                               {isTimelineOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
@@ -2094,7 +2027,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                                 });
                                 setEditingPkg(pkg);
                               }}
-                              className="p-1.5 rounded-lg text-blue-500 hover:bg-blue-50 transition-colors"
+                              className="min-h-11 min-w-11 inline-flex items-center justify-center p-1.5 rounded-lg text-blue-500 hover:bg-blue-50 transition-colors"
                               title="Modifier ce colis"
                             >
                               <Edit size={14} />
@@ -2105,7 +2038,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                                   e.stopPropagation();
                                   setDeletingPkg(pkg);
                                 }}
-                                className="p-1.5 rounded-lg text-red-400 hover:bg-red-50 transition-colors"
+                                className="min-h-11 min-w-11 inline-flex items-center justify-center p-1.5 rounded-lg text-red-400 hover:bg-red-50 transition-colors"
                                 title="Supprimer ce colis"
                               >
                                 <Trash2 size={14} />
@@ -2139,72 +2072,64 @@ const MissionManager: React.FC<MissionManagerProps> = ({
       {editingPkg && (
         <Modal isOpen={true} onClose={closePackageEditor} title="Modifier le colis" preventClose={isSavingPkg} size="lg">
           <div>
-            <div className="p-4 border-b border-slate-200 flex items-center justify-between">
-              <div>
-                <h3 className="font-bold text-slate-800">Modifier le colis</h3>
-                <p className="text-xs text-slate-500 font-mono">{editingPkg.orderNumber}</p>
-              </div>
-              <button aria-label="Fermer la fiche colis" onClick={closePackageEditor} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100">
-                <XCircle size={18} />
-              </button>
-            </div>
+            <p className="break-all text-sm font-mono text-slate-600">{editingPkg.orderNumber}</p>
             <div className="p-4 space-y-3">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-medium text-slate-500 block mb-1">Destinataire</label>
-                  <input type="text" aria-label="Destinataire" value={editPkgForm.contactName || ''} onChange={e => setEditPkgForm(f => ({...f, contactName: e.target.value}))}
+                  <label htmlFor="office-field-1" className="text-xs font-medium text-slate-500 block mb-1">Destinataire</label>
+                  <input id="office-field-1" disabled={isSavingPkg} type="text" aria-label="Destinataire" value={editPkgForm.contactName || ''} onChange={e => setEditPkgForm(f => ({...f, contactName: e.target.value}))}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-slate-500 block mb-1">Téléphone</label>
-                  <input type="text" aria-label="Téléphone du destinataire" value={editPkgForm.contactPhone || ''} onChange={e => setEditPkgForm(f => ({...f, contactPhone: e.target.value}))}
+                  <label htmlFor="office-field-2" className="text-xs font-medium text-slate-500 block mb-1">Téléphone</label>
+                  <input id="office-field-2" disabled={isSavingPkg} type="text" aria-label="Téléphone du destinataire" value={editPkgForm.contactPhone || ''} onChange={e => setEditPkgForm(f => ({...f, contactPhone: e.target.value}))}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
                 </div>
               </div>
               <div>
-                <label className="text-xs font-medium text-slate-500 block mb-1">Adresse</label>
-                <input type="text" aria-label="Adresse de livraison" value={editPkgForm.address || ''} onChange={e => setEditPkgForm(f => ({...f, address: e.target.value}))}
+                <label htmlFor="office-field-3" className="text-xs font-medium text-slate-500 block mb-1">Adresse</label>
+                <input id="office-field-3" disabled={isSavingPkg} type="text" aria-label="Adresse de livraison" value={editPkgForm.address || ''} onChange={e => setEditPkgForm(f => ({...f, address: e.target.value}))}
                   className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-medium text-slate-500 block mb-1">Code postal</label>
-                  <input type="text" aria-label="Code postal" value={editPkgForm.postalCode || ''} onChange={e => setEditPkgForm(f => ({...f, postalCode: e.target.value}))}
+                  <label htmlFor="office-field-4" className="text-xs font-medium text-slate-500 block mb-1">Code postal</label>
+                  <input id="office-field-4" disabled={isSavingPkg} type="text" aria-label="Code postal" value={editPkgForm.postalCode || ''} onChange={e => setEditPkgForm(f => ({...f, postalCode: e.target.value}))}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-slate-500 block mb-1">Ville</label>
-                  <input type="text" aria-label="Ville" value={editPkgForm.city || ''} onChange={e => setEditPkgForm(f => ({...f, city: e.target.value}))}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-medium text-slate-500 block mb-1">Créneau début</label>
-                  <input type="time" aria-label="Début du créneau demandé" value={editPkgForm.timeWindowStart || ''} onChange={e => setEditPkgForm(f => ({...f, timeWindowStart: e.target.value}))}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-slate-500 block mb-1">Créneau fin</label>
-                  <input type="time" aria-label="Fin du créneau demandé" value={editPkgForm.timeWindowEnd || ''} onChange={e => setEditPkgForm(f => ({...f, timeWindowEnd: e.target.value}))}
+                  <label htmlFor="office-field-5" className="text-xs font-medium text-slate-500 block mb-1">Ville</label>
+                  <input id="office-field-5" disabled={isSavingPkg} type="text" aria-label="Ville" value={editPkgForm.city || ''} onChange={e => setEditPkgForm(f => ({...f, city: e.target.value}))}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-medium text-slate-500 block mb-1">Poids (kg)</label>
-                  <input type="number" step="0.1" aria-label="Poids en kilogrammes" value={editPkgForm.weight || ''} onChange={e => setEditPkgForm(f => ({...f, weight: e.target.value ? parseFloat(e.target.value) : ''}))}
+                  <label htmlFor="office-field-6" className="text-xs font-medium text-slate-500 block mb-1">Créneau début</label>
+                  <input id="office-field-6" disabled={isSavingPkg} type="time" aria-label="Début du créneau demandé" value={editPkgForm.timeWindowStart || ''} onChange={e => setEditPkgForm(f => ({...f, timeWindowStart: e.target.value}))}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-slate-500 block mb-1">Volume (m³)</label>
-                  <input type="number" step="0.01" aria-label="Volume en mètres cubes" value={editPkgForm.volume || ''} onChange={e => setEditPkgForm(f => ({...f, volume: e.target.value ? parseFloat(e.target.value) : ''}))}
+                  <label htmlFor="office-field-7" className="text-xs font-medium text-slate-500 block mb-1">Créneau fin</label>
+                  <input id="office-field-7" disabled={isSavingPkg} type="time" aria-label="Fin du créneau demandé" value={editPkgForm.timeWindowEnd || ''} onChange={e => setEditPkgForm(f => ({...f, timeWindowEnd: e.target.value}))}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="office-field-8" className="text-xs font-medium text-slate-500 block mb-1">Poids (kg)</label>
+                  <input id="office-field-8" disabled={isSavingPkg} type="number" step="0.1" aria-label="Poids en kilogrammes" value={editPkgForm.weight || ''} onChange={e => setEditPkgForm(f => ({...f, weight: e.target.value ? parseFloat(e.target.value) : ''}))}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
+                </div>
+                <div>
+                  <label htmlFor="office-field-9" className="text-xs font-medium text-slate-500 block mb-1">Volume (m³)</label>
+                  <input id="office-field-9" disabled={isSavingPkg} type="number" step="0.01" aria-label="Volume en mètres cubes" value={editPkgForm.volume || ''} onChange={e => setEditPkgForm(f => ({...f, volume: e.target.value ? parseFloat(e.target.value) : ''}))}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
                 </div>
               </div>
               <div>
-                <label className="text-xs font-medium text-slate-500 block mb-1">Commentaire</label>
-                <textarea aria-label="Commentaire" value={editPkgForm.comment || ''} onChange={e => setEditPkgForm(f => ({...f, comment: e.target.value}))}
+                <label htmlFor="office-field-10" className="text-xs font-medium text-slate-500 block mb-1">Commentaire</label>
+                <textarea id="office-field-10" disabled={isSavingPkg} aria-label="Commentaire" value={editPkgForm.comment || ''} onChange={e => setEditPkgForm(f => ({...f, comment: e.target.value}))}
                   className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none resize-none h-16" />
               </div>
             </div>
@@ -2228,10 +2153,10 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                     if (editPkgForm.comment !== (editingPkg.comment || '')) fields.comment = editPkgForm.comment || null;
                     if (editPkgForm.weight !== (editingPkg.weight || '')) fields.weight = editPkgForm.weight || null;
                     if (editPkgForm.volume !== (editingPkg.volume || '')) fields.volume = editPkgForm.volume || null;
-                    
+
                     if (Object.keys(fields).length > 0) {
                       await updatePackageFields(editingPkg.id, fields);
-                      await logActivity(currentUser, ActivityAction.ITEM_UPDATED, {
+                      await logConfirmedActivity(currentUser, ActivityAction.ITEM_UPDATED, {
                         targetType: 'package',
                         targetId: editingPkg.id,
                         targetName: editingPkg.orderNumber,
@@ -2240,7 +2165,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                     }
                     setEditingPkg(null);
                   } catch (err) {
-                    console.error('Erreur modification colis:', err);
+                    notifyError('Enregistrement impossible. Votre saisie est conservée ; réessayez.');
                   }
                   setIsSavingPkg(false);
                 }}
@@ -2255,13 +2180,13 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
       {/* === MODAL SUPPRESSION COLIS === */}
       {deletingPkg && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setDeletingPkg(null)}>
-          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full" onClick={e => e.stopPropagation()}>
+        <Modal isOpen onClose={() => setDeletingPkg(null)} title="Supprimer ce colis ?" role="alertdialog" preventClose={isSavingPkg} busy={isSavingPkg} size="sm">
+          <div>
             <div className="p-5 text-center">
               <div className="w-14 h-14 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3">
                 <Trash2 size={24} className="text-red-600" />
               </div>
-              <h3 className="font-bold text-slate-800 text-lg mb-1">Supprimer ce colis ?</h3>
+
               <p className="text-sm text-slate-500 mb-1">
                 <span className="font-mono font-bold">{deletingPkg.orderNumber}</span> — {deletingPkg.contactName}
               </p>
@@ -2270,7 +2195,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
               </p>
             </div>
             <div className="p-4 border-t border-slate-100 flex gap-2">
-              <button onClick={() => setDeletingPkg(null)} className="flex-1 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-600">
+              <button disabled={isSavingPkg} onClick={() => setDeletingPkg(null)} className="flex-1 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-600">
                 Annuler
               </button>
               <button
@@ -2279,7 +2204,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                   setIsSavingPkg(true);
                   try {
                     await deletePackage(deletingPkg.id);
-                    await logActivity(currentUser, ActivityAction.ITEM_DELETED, {
+                    await logConfirmedActivity(currentUser, ActivityAction.ITEM_DELETED, {
                       targetType: 'package',
                       targetId: deletingPkg.id,
                       targetName: deletingPkg.orderNumber,
@@ -2287,7 +2212,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                     });
                     setDeletingPkg(null);
                   } catch (err) {
-                    console.error('Erreur suppression colis:', err);
+                    notifyError('Suppression impossible. Le colis est conservé ; réessayez.');
                   }
                   setIsSavingPkg(false);
                 }}
@@ -2297,7 +2222,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
               </button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );
@@ -2319,7 +2244,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           Ajouter un hub
         </button>
       </div>
-      
+
       {/* Liste des hubs */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {hubs.length === 0 ? (
@@ -2341,7 +2266,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           hubs.map(hub => {
             const colors = ZONE_COLORS[hub.zone];
             const zoneDrivers = users.filter(u => u.role === UserRole.DRIVER && u.zone === hub.zone && !u.isDisabled);
-            
+
             return (
               <div key={hub.id} className={`bg-white rounded-xl border-2 overflow-hidden transition-all ${hub.isActive ? 'border-slate-200' : 'border-red-200 opacity-60'}`}>
                 {/* Header avec zone */}
@@ -2365,7 +2290,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                     </div>
                   </div>
                 </div>
-                
+
                 {/* Contenu */}
                 <div className="p-4 space-y-4">
                   {/* Adresse */}
@@ -2376,7 +2301,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                       <p className="text-sm text-slate-500">{hub.postalCode} {hub.city}</p>
                     </div>
                   </div>
-                  
+
                   {/* Téléphone */}
                   {hub.contactPhone && (
                     <div className="flex items-center gap-3">
@@ -2384,7 +2309,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                       <p className="text-sm text-slate-700">{hub.contactPhone}</p>
                     </div>
                   )}
-                  
+
                   {/* Horaires */}
                   {hub.openingTime && hub.closingTime && (
                     <div className="flex items-center gap-3">
@@ -2392,7 +2317,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                       <p className="text-sm text-slate-700">{hub.openingTime} - {hub.closingTime}</p>
                     </div>
                   )}
-                  
+
                   {/* Stats */}
                   <div className="flex gap-4 pt-2">
                     <div className="flex-1 bg-slate-50 rounded-lg p-3 text-center">
@@ -2404,7 +2329,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                       <p className="text-xs text-slate-500">Codes postaux</p>
                     </div>
                   </div>
-                  
+
                   {/* Codes postaux (affichage condensé) */}
                   {hub.assignedPostalCodes && hub.assignedPostalCodes.length > 0 && (
                     <div className="pt-2 border-t border-slate-100">
@@ -2424,7 +2349,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                     </div>
                   )}
                 </div>
-                
+
                 {/* Actions */}
                 <div className="px-4 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
                   <button
@@ -2436,15 +2361,15 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => openHubModal(hub)}
-                      className="p-2 text-slate-500 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors"
-                      title="Modifier"
+                      className="min-h-11 min-w-11 inline-flex items-center justify-center p-2 text-slate-500 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors"
+                      aria-label="Modifier" title="Modifier"
                     >
                       <Edit size={18} />
                     </button>
                     <button
-                      onClick={() => setHubToDelete(hub)}
-                      className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                      title="Supprimer"
+                      onClick={() => { setHubError(''); setHubToDelete(hub); }}
+                      className="min-h-11 min-w-11 inline-flex items-center justify-center p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      aria-label="Supprimer" title="Supprimer"
                     >
                       <Trash2 size={18} />
                     </button>
@@ -2455,266 +2380,93 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           })
         )}
       </div>
-      
+
       {/* Info codes postaux */}
       {hubs.length > 0 && (
         <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
           <p className="text-blue-800 text-sm">
-            <strong>💡 Astuce :</strong> Les codes postaux déterminent automatiquement la zone de livraison des colis importés. 
+            <strong>💡 Astuce :</strong> Les codes postaux déterminent automatiquement la zone de livraison des colis importés.
             Assurez-vous que chaque code postal de La Réunion est assigné à un hub.
           </p>
         </div>
       )}
 
-      {/* Modal création/édition hub */}
-      <Modal
-        isOpen={showHubModal}
-        onClose={closeHubModal}
-        title={editingHub ? `Modifier ${editingHub.name}` : 'Nouveau hub'}
-        size="lg"
-        headerIcon={<Building2 size={20} />}
-      >
-        <div className="space-y-5">
-          {/* Nom et Zone */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1.5">
-                Nom du hub <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                value={hubForm.name}
-                onChange={(e) => handleHubFormChange('name', e.target.value)}
-                placeholder="Ex: Dépôt Nord Saint-Denis"
-                className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1.5">
-                Zone <span className="text-red-500">*</span>
-              </label>
-              <select
-                value={hubForm.zone}
-                onChange={(e) => handleHubFormChange('zone', e.target.value)}
-                className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none bg-white"
-              >
-                <option value="">Sélectionner une zone</option>
-                {Object.values(Zone).map(zone => (
-                  <option key={zone} value={zone}>{zone}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Adresse */}
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1.5">
-              Adresse complète <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              value={hubForm.address}
-              onChange={(e) => handleHubFormChange('address', e.target.value)}
-              placeholder="Ex: 15 rue du Commerce, ZI Cambaie"
-              className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
-            />
-          </div>
-
-          {/* Ville et Code postal */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1.5">
-                Ville <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                value={hubForm.city}
-                onChange={(e) => handleHubFormChange('city', e.target.value)}
-                placeholder="Ex: Saint-Denis"
-                className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1.5">
-                Code postal <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                value={hubForm.postalCode}
-                onChange={(e) => handleHubFormChange('postalCode', e.target.value)}
-                placeholder="Ex: 97400"
-                className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
-              />
-            </div>
-          </div>
-
-          {/* Téléphone et Horaires */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1.5">
-                Téléphone
-              </label>
-              <input
-                type="tel"
-                value={hubForm.contactPhone}
-                onChange={(e) => handleHubFormChange('contactPhone', e.target.value)}
-                placeholder="0262 XX XX XX"
-                className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1.5">
-                Ouverture
-              </label>
-              <input
-                type="time"
-                value={hubForm.openingTime}
-                onChange={(e) => handleHubFormChange('openingTime', e.target.value)}
-                className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1.5">
-                Fermeture
-              </label>
-              <input
-                type="time"
-                value={hubForm.closingTime}
-                onChange={(e) => handleHubFormChange('closingTime', e.target.value)}
-                className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
-              />
-            </div>
-          </div>
-
-          {/* Codes postaux couverts */}
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1.5">
-              Codes postaux couverts par ce hub
-            </label>
-            <textarea
-              value={hubForm.assignedPostalCodes}
-              onChange={(e) => handleHubFormChange('assignedPostalCodes', e.target.value)}
-              placeholder="97400, 97490, 97419, 97417 (séparés par des virgules)"
-              rows={3}
-              className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none resize-none font-mono text-sm"
-            />
-            <p className="text-xs text-slate-500 mt-1.5">
-              Lors de l'import des colis, les adresses seront automatiquement rattachées à ce hub selon leur code postal.
-            </p>
-          </div>
-
-          {/* Boutons */}
-          <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
-            <button
-              onClick={closeHubModal}
-              className="px-5 py-2.5 text-slate-700 font-medium hover:bg-slate-100 rounded-xl transition-colors"
-            >
-              Annuler
-            </button>
-            <button
-              onClick={handleSaveHub}
-              disabled={isSavingHub || !hubForm.name || !hubForm.zone || !hubForm.address || !hubForm.city || !hubForm.postalCode}
-              className="flex items-center gap-2 px-6 py-2.5 bg-brand-500 text-white rounded-xl font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              {isSavingHub ? (
-                <>
-                  <Loader2 size={18} className="animate-spin" />
-                  Enregistrement...
-                </>
-              ) : (
-                <>
-                  <CheckCircle size={18} />
-                  {editingHub ? 'Enregistrer les modifications' : 'Créer le hub'}
-                </>
-              )}
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Modal confirmation suppression */}
-      <Modal
-        isOpen={!!hubToDelete}
-        onClose={() => setHubToDelete(null)}
-        title="Supprimer ce hub ?"
-        size="sm"
-        headerIcon={<AlertTriangle size={20} className="text-red-500" />}
-      >
-        <div className="space-y-4">
-          <p className="text-slate-600">
-            Voulez-vous vraiment supprimer le hub <strong className="text-slate-800">{hubToDelete?.name}</strong> ?
-          </p>
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
-            <p className="text-sm text-amber-800">
-              ⚠️ Cette action est irréversible. Les {hubToDelete?.assignedPostalCodes?.length || 0} codes postaux associés ne seront plus rattachés à aucun hub.
-            </p>
-          </div>
-          <div className="flex justify-end gap-3 pt-2">
-            <button
-              onClick={() => setHubToDelete(null)}
-              className="px-4 py-2 text-slate-700 font-medium hover:bg-slate-100 rounded-xl transition-colors"
-            >
-              Annuler
-            </button>
-            <button
-              onClick={handleDeleteHub}
-              className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-xl font-medium hover:bg-red-600 transition-colors"
-            >
-              <Trash2 size={16} />
-              Supprimer définitivement
-            </button>
-          </div>
-        </div>
-      </Modal>
     </div>
   );
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <Loader2 size={48} className="animate-spin text-brand-500" />
-      </div>
-    );
-  }
+  useEffect(() => {
+    if (!packageSearchTask.current || activeTab !== 'packages') return;
+    if (sourceStates.packages.status === 'ready') {
+      const task = packageSearchTask.current;
+      const frame = requestAnimationFrame(() => { task.finish('success', { items: filteredPackages.length }); if (packageSearchTask.current === task) packageSearchTask.current = null; });
+      return () => cancelAnimationFrame(frame);
+    }
+    if (sourceStates.packages.status === 'error') { packageSearchTask.current.finish('error', { errors: 1 }); packageSearchTask.current = null; }
+  }, [activeTab, searchTerm, sourceStates.packages.status, filteredPackages.length, packageSearchVersion]);
+
+  const neededSources: SourceKey[] = activeTab === 'missions' ? ['missions'] : activeTab === 'packages' ? ['packages'] : activeTab === 'dispatch' ? ['dispatchable', 'hubs'] : activeTab === 'imports' ? ['imports'] : activeTab === 'hubs' ? ['hubs'] : ['missions', 'packages'];
+  const sourceReady = (key: SourceKey) => sourceStates[key].status === 'ready' && (key !== 'missions' || sourceStates[key].scope === selectedDate);
+  const contentReady = neededSources.every(sourceReady);
+  const visibleSources = activeTab === 'missions' ? [...neededSources, 'packages' as const] : neededSources;
 
   return (
     <div className="p-4 md:p-6">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-3">
+        <div className="min-w-0">
+          <h1 className="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">
             <Route className="text-brand-500" />
             Exploitation des livraisons
           </h1>
-          <p className="text-slate-500 text-sm mt-1">
+          <p className="hidden sm:block text-slate-500 text-sm mt-1">
             Colis, préparation des tournées et suivi des livraisons
           </p>
         </div>
-        
-        <div className="flex items-center gap-2">
+
+        <div className="flex flex-wrap items-center gap-2">
+          <label htmlFor="office-working-date" className="text-sm font-semibold text-slate-700">Date de travail</label>
           <input
             type="date"
-            aria-label="Date des tournées" value={selectedDate}
+            id="office-working-date" aria-label="Date des tournées" value={selectedDate}
             onChange={(e) => setSelectedDate(e.target.value)}
             className="px-3 py-2 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 outline-none"
           />
         </div>
       </div>
 
-      <form className="mb-4 flex flex-wrap items-end gap-2" onSubmit={event => { event.preventDefault(); updateUrlParams({ tab: 'packages', scope: null, status: null, mission: null, package: null }); }}>
-        <label className="flex-1 min-w-48 text-sm font-medium text-slate-700">Retrouver un colis
-          <input type="search" value={searchTerm} onChange={event => setSearchTerm(event.target.value)} placeholder="Code colis, commande, destinataire ou adresse" className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" />
-        </label>
-        <button type="submit" className="min-h-11 rounded-xl bg-blue-700 px-4 text-white font-semibold">Rechercher dans les colis</button>
-        <a href="/hub-operations" className="min-h-11 inline-flex items-center rounded-xl border border-slate-300 px-4 text-sm font-semibold">Opérations hub</a>
-      </form>
+      <details className="mb-3 rounded-xl border border-slate-200 bg-white" open={globalSearchOpen} onToggle={event => setGlobalSearchOpen(event.currentTarget.open)}>
+        <summary className="min-h-11 cursor-pointer px-3 py-3 text-sm font-semibold text-slate-700">Retrouver un colis dans tout l’historique</summary>
+        <form className="flex flex-wrap items-end gap-2 px-3 pb-3" onSubmit={event => { event.preventDefault(); packageSearchTask.current?.finish('cancelled'); packageSearchTask.current = startUxTask('find_package', currentUser.role); setPackageSearchVersion(value => value + 1); setSelectedPackageIds(new Set()); updateUrlParams({ tab: 'packages', q: globalPackageSearch.trim() || null, scope: null, status: null, zone: null, mission: null, package: null, edit: null, page: null }); setGlobalSearchOpen(false); }}>
+          <label className="flex-1 min-w-0 basis-64 text-sm font-medium text-slate-700">Code colis, commande, destinataire ou adresse
+            <input type="search" value={globalPackageSearch} onChange={event => setGlobalPackageSearch(event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 px-3 py-2" />
+          </label>
+          <button type="submit" className="min-h-11 rounded-xl bg-blue-700 px-4 text-white font-semibold">Rechercher</button>
+          <a href="/hub-operations" className="min-h-11 inline-flex items-center rounded-xl border border-slate-300 px-4 text-sm font-semibold">Opérations hub</a>
+        </form>
+      </details>
+      {pendingStopJournalError && <p role="alert" className="mb-3 rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-900">{pendingStopJournalError}</p>}
+      {pendingStop && <div role="status" className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+        <p className="font-semibold">Une demande d’arrêt reste à confirmer — tournée du {pendingStop.date}.</p>
+        <p>Reprenez la même demande pour vérifier si elle a été enregistrée.</p>
+        <button type="button" onClick={resumePendingStop} className="mt-2 min-h-11 rounded-lg border border-amber-400 bg-white px-3 font-semibold">Reprendre la demande</button>
+      </div>}
       {linkError && <p role="alert" className="mb-4 rounded-xl bg-amber-50 p-3 text-amber-900">{linkError}</p>}
       {/* Tabs */}
       {renderTabs()}
 
+      {!visibleSources.every(sourceReady) && <div className="mb-4 space-y-3">
+        {visibleSources.filter(key => !sourceReady(key)).map(key => <div key={key} role={sourceStates[key].status === 'error' ? 'alert' : 'status'} className={`rounded-xl border p-4 ${sourceStates[key].status === 'error' ? 'border-red-200 bg-red-50 text-red-900' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+          {sourceStates[key].status === 'error' ? <>
+            <p className="font-semibold">{sourceLabels[key]} : lecture impossible.</p>
+            <p className="mt-1 text-sm">Vérifiez votre connexion et vos droits d’accès, puis réessayez. Ce message ne signifie pas que la liste est vide.</p>
+            {sourceStates[key].receivedAt && <p className="mt-1 text-sm">Dernière réception : {new Date(sourceStates[key].receivedAt!).toLocaleString('fr-FR')}. Les données ne sont plus à jour.</p>}
+            <button type="button" onClick={() => setSourceRetries(previous => ({ ...previous, [key]: previous[key] + 1 }))} className="mt-3 min-h-11 rounded-lg border border-red-300 bg-white px-4 font-semibold">Réessayer — {sourceLabels[key]}</button>
+          </> : <p className="flex items-center gap-2"><Loader2 size={20} className="animate-spin shrink-0" />Chargement : {sourceLabels[key].toLowerCase()}{key === 'missions' ? ` du ${new Date(`${selectedDate}T12:00:00`).toLocaleDateString('fr-FR')}` : ''}…</p>}
+        </div>)}
+      </div>}
       {/* Content */}
-      {activeTab === 'dashboard' && renderDashboard()}
-      {activeTab === 'dispatch' && canDispatch && (
+      {contentReady && activeTab === 'dashboard' && renderDashboard()}
+      {contentReady && activeTab === 'dispatch' && canDispatch && (
         <DispatchManager
           packages={dispatchablePackages}
           hubs={hubs}
@@ -2725,7 +2477,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           onMissionCreated={() => setActiveTab('missions')}
         />
       )}
-      {activeTab === 'imports' && !reviewData && renderImports()}
+      {contentReady && activeTab === 'imports' && !reviewData && renderImports()}
 
       {/* === TABLE DE REVUE POST-IMPORT === */}
       {activeTab === 'imports' && canImport && reviewData && selectedClient && users.find(u => u.id === selectedClient) && (
@@ -2737,7 +2489,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
             setImportResult(result);
             setReviewData(null);
             setShowImportModal(true);
-            
+
             // 🔔 Notifier les admins si import réussi
             if (result.success && result.successCount > 0) {
               const client = users.find(u => u.id === selectedClient);
@@ -2763,14 +2515,16 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           }}
         />
       )}
-      {activeTab === 'missions' && renderMissions()}
-      {activeTab === 'packages' && renderPackages()}
-      {activeTab === 'hubs' && canManageHubs && renderHubs()}
+      {contentReady && activeTab === 'missions' && renderMissions()}
+      {contentReady && activeTab === 'packages' && renderPackages()}
+      {contentReady && activeTab === 'hubs' && canManageHubs && renderHubs()}
 
       {/* Modal Import */}
       <Modal
         isOpen={showImportModal}
         onClose={closeImportModal}
+        preventClose={isImporting}
+        busy={isImporting}
         title="Importer un fichier client"
         size="md"
         headerIcon={<Upload size={20} />}
@@ -2778,10 +2532,10 @@ const MissionManager: React.FC<MissionManagerProps> = ({
         <div className="space-y-4">
           {/* Sélection client */}
           <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1">
+            <label htmlFor="office-field-11" className="block text-sm font-bold text-slate-700 mb-1">
               Client expéditeur <span className="text-red-500">*</span>
             </label>
-            <select
+            <select id="office-field-11"
               value={selectedClient}
               onChange={(e) => setSelectedClient(e.target.value)}
               className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none"
@@ -2797,7 +2551,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
           {/* Upload fichier */}
           <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1">
+            <label htmlFor="excel-upload" className="block text-sm font-bold text-slate-700 mb-1">
               Fichier Excel <span className="text-red-500">*</span>
             </label>
             <div className="border-2 border-dashed border-slate-300 rounded-xl p-6 text-center hover:border-brand-400 transition-colors">
@@ -2844,7 +2598,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                   {importResult.zoneBreakdown && (
                     <div className="mt-2 flex flex-wrap gap-2">
                       {importResult.zoneBreakdown.map((zb: any) => (
-                        <span 
+                        <span
                           key={zb.zone}
                           className={`px-2 py-1 rounded-lg text-xs font-medium ${ZONE_COLORS[zb.zone as Zone].bg} ${ZONE_COLORS[zb.zone as Zone].text}`}
                         >
@@ -2877,7 +2631,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           {/* Actions */}
           <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
             <button
-              onClick={closeImportModal}
+              disabled={isImporting} onClick={closeImportModal}
               className="px-4 py-2 text-slate-700 font-medium hover:bg-slate-100 rounded-xl transition-colors"
             >
               {importResult?.success ? 'Fermer' : 'Annuler'}
@@ -2909,18 +2663,21 @@ const MissionManager: React.FC<MissionManagerProps> = ({
       <Modal
         isOpen={showHubModal}
         onClose={closeHubModal}
+        preventClose={isSavingHub}
+        busy={isSavingHub}
         title={editingHub ? `Modifier ${editingHub.name}` : 'Nouveau hub'}
         size="lg"
         headerIcon={<Building2 size={20} />}
       >
         <div className="space-y-5">
+          {hubError && <p role="alert" className="rounded-lg bg-red-50 p-3 text-red-900">{hubError}</p>}
           {/* Nom et Zone */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1">
+              <label htmlFor="office-field-12" className="block text-sm font-bold text-slate-700 mb-1">
                 Nom du hub <span className="text-red-500">*</span>
               </label>
-              <input
+              <input id="office-field-12" disabled={isSavingHub}
                 type="text"
                 value={hubForm.name}
                 onChange={(e) => handleHubFormChange('name', e.target.value)}
@@ -2929,10 +2686,10 @@ const MissionManager: React.FC<MissionManagerProps> = ({
               />
             </div>
             <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1">
+              <label htmlFor="office-field-13" className="block text-sm font-bold text-slate-700 mb-1">
                 Zone <span className="text-red-500">*</span>
               </label>
-              <select
+              <select id="office-field-13" disabled={isSavingHub}
                 value={hubForm.zone}
                 onChange={(e) => handleHubFormChange('zone', e.target.value)}
                 className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none bg-white"
@@ -2947,10 +2704,10 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
           {/* Adresse */}
           <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1">
+            <label htmlFor="office-field-14" className="block text-sm font-bold text-slate-700 mb-1">
               Adresse <span className="text-red-500">*</span>
             </label>
-            <input
+            <input id="office-field-14" disabled={isSavingHub}
               type="text"
               value={hubForm.address}
               onChange={(e) => handleHubFormChange('address', e.target.value)}
@@ -2962,10 +2719,10 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           {/* Ville et Code postal */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1">
+              <label htmlFor="office-field-15" className="block text-sm font-bold text-slate-700 mb-1">
                 Ville <span className="text-red-500">*</span>
               </label>
-              <input
+              <input id="office-field-15" disabled={isSavingHub}
                 type="text"
                 value={hubForm.city}
                 onChange={(e) => handleHubFormChange('city', e.target.value)}
@@ -2974,10 +2731,10 @@ const MissionManager: React.FC<MissionManagerProps> = ({
               />
             </div>
             <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1">
+              <label htmlFor="office-field-16" className="block text-sm font-bold text-slate-700 mb-1">
                 Code postal <span className="text-red-500">*</span>
               </label>
-              <input
+              <input id="office-field-16" disabled={isSavingHub}
                 type="text"
                 value={hubForm.postalCode}
                 onChange={(e) => handleHubFormChange('postalCode', e.target.value)}
@@ -2990,10 +2747,10 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           {/* Téléphone et Horaires */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1">
+              <label htmlFor="office-field-17" className="block text-sm font-bold text-slate-700 mb-1">
                 Téléphone
               </label>
-              <input
+              <input id="office-field-17" disabled={isSavingHub}
                 type="tel"
                 value={hubForm.contactPhone}
                 onChange={(e) => handleHubFormChange('contactPhone', e.target.value)}
@@ -3002,10 +2759,10 @@ const MissionManager: React.FC<MissionManagerProps> = ({
               />
             </div>
             <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1">
+              <label htmlFor="office-field-18" className="block text-sm font-bold text-slate-700 mb-1">
                 Ouverture
               </label>
-              <input
+              <input id="office-field-18" disabled={isSavingHub}
                 type="time"
                 value={hubForm.openingTime}
                 onChange={(e) => handleHubFormChange('openingTime', e.target.value)}
@@ -3013,10 +2770,10 @@ const MissionManager: React.FC<MissionManagerProps> = ({
               />
             </div>
             <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1">
+              <label htmlFor="office-field-19" className="block text-sm font-bold text-slate-700 mb-1">
                 Fermeture
               </label>
-              <input
+              <input id="office-field-19" disabled={isSavingHub}
                 type="time"
                 value={hubForm.closingTime}
                 onChange={(e) => handleHubFormChange('closingTime', e.target.value)}
@@ -3027,10 +2784,10 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
           {/* Codes postaux assignés */}
           <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1">
+            <label htmlFor="office-field-20" className="block text-sm font-bold text-slate-700 mb-1">
               Codes postaux desservis
             </label>
-            <textarea
+            <textarea id="office-field-20" disabled={isSavingHub}
               value={hubForm.assignedPostalCodes}
               onChange={(e) => handleHubFormChange('assignedPostalCodes', e.target.value)}
               placeholder="97400, 97490, 97419..."
@@ -3046,7 +2803,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           {!editingHub && hubForm.zone && (
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
               <p className="text-blue-800 text-sm">
-                💡 Les codes postaux par défaut de la zone <strong>{hubForm.zone}</strong> ont été pré-remplis. 
+                💡 Les codes postaux par défaut de la zone <strong>{hubForm.zone}</strong> ont été pré-remplis.
                 Vous pouvez les modifier selon vos besoins.
               </p>
             </div>
@@ -3055,7 +2812,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           {/* Actions */}
           <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
             <button
-              onClick={closeHubModal}
+              disabled={isSavingHub} onClick={closeHubModal}
               className="px-4 py-2 text-slate-700 font-medium hover:bg-slate-100 rounded-xl transition-colors"
             >
               Annuler
@@ -3085,12 +2842,16 @@ const MissionManager: React.FC<MissionManagerProps> = ({
       <Modal
         isOpen={!!hubToDelete}
         onClose={() => setHubToDelete(null)}
+        preventClose={isDeletingHub}
+        busy={isDeletingHub}
+        role="alertdialog"
         title="Supprimer ce hub ?"
         size="sm"
         headerIcon={<Trash2 size={20} className="text-red-500" />}
       >
         {hubToDelete && (
           <div className="space-y-4">
+            {hubError && <p role="alert" className="rounded-lg bg-red-50 p-3 text-red-900">{hubError}</p>}
             <div className="bg-red-50 border border-red-200 rounded-xl p-4">
               <p className="text-red-800">
                 Vous êtes sur le point de supprimer le hub <strong>{hubToDelete.name}</strong> (Zone {hubToDelete.zone}).
@@ -3099,15 +2860,16 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                 ⚠️ Cette action est irréversible. Les codes postaux associés ne seront plus rattachés à aucun hub.
               </p>
             </div>
-            
+
             <div className="flex justify-end gap-3 pt-2">
               <button
-                onClick={() => setHubToDelete(null)}
+                disabled={isDeletingHub} onClick={() => setHubToDelete(null)}
                 className="px-4 py-2 text-slate-700 font-medium hover:bg-slate-100 rounded-xl transition-colors"
               >
                 Annuler
               </button>
               <button
+                disabled={isDeletingHub}
                 onClick={handleDeleteHub}
                 className="flex items-center gap-2 px-6 py-2 bg-red-500 text-white rounded-xl font-medium hover:bg-red-600 transition-colors"
               >
@@ -3119,217 +2881,34 @@ const MissionManager: React.FC<MissionManagerProps> = ({
         )}
       </Modal>
 
-      {/* === MODAL ÉDITION STOP === */}
-      {editingStop && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setEditingStop(null)}>
-          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <div className="p-4 border-b border-slate-200 flex items-center justify-between">
-              <div>
-                <h3 className="font-bold text-slate-800">Modifier l’arrêt</h3>
-                <p className="text-xs text-slate-500">Stop #{editingStop.stop.sequence} — {editingStop.mission.zone}</p>
-              </div>
-              <button onClick={() => setEditingStop(null)} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100">
-                <XCircle size={18} />
-              </button>
-            </div>
-            <div className="p-4 space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-medium text-slate-500 block mb-1">Destinataire *</label>
-                  <input type="text" value={editStopForm.contactName || ''} onChange={e => setEditStopForm(f => ({...f, contactName: e.target.value}))}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-slate-500 block mb-1">Téléphone</label>
-                  <input type="text" value={editStopForm.contactPhone || ''} onChange={e => setEditStopForm(f => ({...f, contactPhone: e.target.value}))}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
-                </div>
-              </div>
-              <div>
-                <label className="text-xs font-medium text-slate-500 block mb-1">Adresse *</label>
-                <input type="text" value={editStopForm.address || ''} onChange={e => setEditStopForm(f => ({...f, address: e.target.value}))}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-medium text-slate-500 block mb-1">Code postal *</label>
-                  <input type="text" value={editStopForm.postalCode || ''} onChange={e => setEditStopForm(f => ({...f, postalCode: e.target.value}))}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-slate-500 block mb-1">Ville *</label>
-                  <input type="text" value={editStopForm.city || ''} onChange={e => setEditStopForm(f => ({...f, city: e.target.value}))}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
-                </div>
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="text-xs font-medium text-slate-500 block mb-1">Créneau début</label>
-                  <input type="time" value={editStopForm.timeWindowStart || ''} onChange={e => setEditStopForm(f => ({...f, timeWindowStart: e.target.value}))}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-slate-500 block mb-1">Créneau fin</label>
-                  <input type="time" value={editStopForm.timeWindowEnd || ''} onChange={e => setEditStopForm(f => ({...f, timeWindowEnd: e.target.value}))}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-slate-500 block mb-1">Temps sur place</label>
-                  <input type="number" value={editStopForm.serviceTime || 5} onChange={e => setEditStopForm(f => ({...f, serviceTime: e.target.value}))}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
-                </div>
-              </div>
-              <div>
-                <label className="text-xs font-medium text-slate-500 block mb-1">Notes / Instructions</label>
-                <textarea value={editStopForm.notes || ''} onChange={e => setEditStopForm(f => ({...f, notes: e.target.value}))}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none resize-none h-16" />
-              </div>
-            </div>
-            <div className="p-4 border-t border-slate-100 flex gap-2">
-              <button onClick={() => setEditingStop(null)} className="flex-1 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-600">
-                Annuler
-              </button>
-              <button
-                disabled={isSavingPkg}
-                onClick={handleSaveEditStop}
-                className="flex-1 py-2.5 bg-brand-500 text-white rounded-xl text-sm font-bold hover:bg-brand-600 transition-colors disabled:opacity-50"
-              >
-                {isSavingPkg ? '⏳ Enregistrement...' : '✓ Enregistrer'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {editingStop && <Modal isOpen onClose={closeStopEditor} title="Modifier l’arrêt" subtitle={`Arrêt ${editingStop.stop.sequence} — ${editingStop.mission.zone}`} size="lg" preventClose={isSavingPkg} busy={isSavingPkg}
+        footer={<div className="flex gap-3"><button type="button" disabled={isSavingPkg} onClick={closeStopEditor} className="min-h-11 flex-1 rounded-xl border border-slate-300 bg-white px-3 font-semibold">Annuler</button><button type="submit" form="edit-mission-stop" disabled={isSavingPkg} className="min-h-11 flex-1 rounded-xl bg-blue-700 px-3 font-semibold text-white disabled:opacity-50">{isSavingPkg ? 'Enregistrement…' : stopSaveError ? 'Réessayer' : 'Enregistrer'}</button></div>}>
+        <form id="edit-mission-stop" noValidate onSubmit={event => { event.preventDefault(); void handleSaveEditStop(); }} className="space-y-4">
+          {stopSaveError && <p role="alert" className="rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-900">{stopSaveError}</p>}
+          <p className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">Modifier l’adresse, le créneau ou la durée annule les anciennes estimations. Un nouveau calcul d’itinéraire est nécessaire pour obtenir de nouveaux horaires.</p>
+          <MissionStopFields value={editStopForm} onChange={(field, value) => setEditStopForm(previous => ({ ...previous, [field]: value }))} errors={stopErrors} busy={isSavingPkg} />
+        </form>
+      </Modal>}
 
-      {/* === MODAL SUPPRESSION STOP === */}
-      {deletingStop && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setDeletingStop(null)}>
-          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full" onClick={e => e.stopPropagation()}>
-            <div className="p-5 text-center">
-              <div className="w-14 h-14 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                <Trash2 size={24} className="text-red-600" />
-              </div>
-              <h3 className="font-bold text-slate-800 text-lg mb-1">Supprimer cet arrêt ?</h3>
-              <p className="text-sm text-slate-600 mb-1">
-                <span className="font-bold">{deletingStop.stop.contactName}</span>
-              </p>
-              <p className="text-xs text-slate-500 mb-2">
-                {deletingStop.stop.address}, {deletingStop.stop.postalCode} {deletingStop.stop.city}
-              </p>
-              {deletingStop.stop.packageCount > 0 && (
-                <p className="text-xs text-amber-600 font-medium bg-amber-50 rounded-lg p-2">
-                  ⚠️ {deletingStop.stop.packageCount} colis seront marqués "À retourner" — Le chauffeur devra les ramener au hub
-                </p>
-              )}
-            </div>
-            <div className="p-4 border-t border-slate-100 flex gap-2">
-              <button onClick={() => setDeletingStop(null)} className="flex-1 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-600">
-                Annuler
-              </button>
-              <button
-                disabled={isSavingPkg}
-                onClick={handleDeleteStop}
-                className="flex-1 py-2.5 bg-red-600 text-white rounded-xl text-sm font-bold hover:bg-red-700 transition-colors disabled:opacity-50"
-              >
-                {isSavingPkg ? '⏳ Suppression...' : '🗑 Supprimer'}
-              </button>
-            </div>
-          </div>
+      {deletingStop && <Modal isOpen onClose={() => setDeletingStop(null)} role="alertdialog" title="Supprimer cet arrêt ?" size="sm" preventClose={isSavingPkg} busy={isSavingPkg}
+        footer={<div className="flex gap-3"><button type="button" disabled={isSavingPkg} onClick={() => setDeletingStop(null)} className="min-h-11 flex-1 rounded-xl border border-slate-300 bg-white px-3">Annuler</button><button type="button" disabled={isSavingPkg} onClick={handleDeleteStop} className="min-h-11 flex-1 rounded-xl bg-red-700 px-3 font-bold text-white disabled:opacity-50">{isSavingPkg ? 'Suppression…' : 'Supprimer'}</button></div>}>
+        <div className="space-y-3 text-sm text-slate-700">
+          <p className="font-bold text-base">{deletingStop.stop.contactName}</p><p>{deletingStop.stop.address}, {deletingStop.stop.postalCode} {deletingStop.stop.city}</p>
+          {deletingStop.stop.packageCount > 0 && <p className="rounded-lg bg-amber-50 p-3 text-amber-900">Les colis encore affectés à cet arrêt seront marqués « Retour à remettre ». Le chauffeur devra les remettre au hub. Un colis déjà livré ne peut pas être supprimé par cette action.</p>}
+          <p className="rounded-lg bg-blue-50 p-3 text-blue-900">La suppression annule les anciennes estimations. Recalculez l’itinéraire pour obtenir de nouveaux horaires.</p>
+          {stopSaveError && <p role="alert" className="rounded-lg border border-red-300 bg-red-50 p-3 text-red-900">{stopSaveError}</p>}
         </div>
-      )}
+      </Modal>}
 
-      {/* === MODAL AJOUT STOP === */}
-      {addingStopToMission && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setAddingStopToMission(null)}>
-          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-green-50">
-              <div>
-                <h3 className="font-bold text-green-800">Ajouter un stop</h3>
-                <p className="text-xs text-green-600">Mission {addingStopToMission.zone} — {addingStopToMission.driverName}</p>
-              </div>
-              <button onClick={() => setAddingStopToMission(null)} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-white">
-                <XCircle size={18} />
-              </button>
-            </div>
-            <div className="p-4 space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-medium text-slate-500 block mb-1">Destinataire *</label>
-                  <input type="text" value={newStopForm.contactName || ''} onChange={e => setNewStopForm(f => ({...f, contactName: e.target.value}))}
-                    placeholder="Nom du destinataire"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-green-200 outline-none" />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-slate-500 block mb-1">Téléphone</label>
-                  <input type="text" value={newStopForm.contactPhone || ''} onChange={e => setNewStopForm(f => ({...f, contactPhone: e.target.value}))}
-                    placeholder="0692..."
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-green-200 outline-none" />
-                </div>
-              </div>
-              <div>
-                <label className="text-xs font-medium text-slate-500 block mb-1">Adresse *</label>
-                <input type="text" value={newStopForm.address || ''} onChange={e => setNewStopForm(f => ({...f, address: e.target.value}))}
-                  placeholder="123 rue Example"
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-green-200 outline-none" />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-medium text-slate-500 block mb-1">Code postal *</label>
-                  <input type="text" value={newStopForm.postalCode || ''} onChange={e => setNewStopForm(f => ({...f, postalCode: e.target.value}))}
-                    placeholder="97400"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-green-200 outline-none" />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-slate-500 block mb-1">Ville *</label>
-                  <input type="text" value={newStopForm.city || ''} onChange={e => setNewStopForm(f => ({...f, city: e.target.value}))}
-                    placeholder="Saint-Denis"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-green-200 outline-none" />
-                </div>
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="text-xs font-medium text-slate-500 block mb-1">Créneau début</label>
-                  <input type="time" value={newStopForm.timeWindowStart || ''} onChange={e => setNewStopForm(f => ({...f, timeWindowStart: e.target.value}))}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-green-200 outline-none" />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-slate-500 block mb-1">Créneau fin</label>
-                  <input type="time" value={newStopForm.timeWindowEnd || ''} onChange={e => setNewStopForm(f => ({...f, timeWindowEnd: e.target.value}))}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-green-200 outline-none" />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-slate-500 block mb-1">Temps (min)</label>
-                  <input type="number" value={newStopForm.serviceTime || 5} onChange={e => setNewStopForm(f => ({...f, serviceTime: e.target.value}))}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-green-200 outline-none" />
-                </div>
-              </div>
-              <div>
-                <label className="text-xs font-medium text-slate-500 block mb-1">Notes / Instructions</label>
-                <textarea value={newStopForm.notes || ''} onChange={e => setNewStopForm(f => ({...f, notes: e.target.value}))}
-                  placeholder="Instructions particulières..."
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-green-200 outline-none resize-none h-16" />
-              </div>
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-2">
-                <p className="text-xs text-amber-700">
-                  💡 Cet arrêt sera ajouté à la fin de la tournée. Utilisez les flèches ↑↓ pour le repositionner ensuite.
-                </p>
-              </div>
-            </div>
-            <div className="p-4 border-t border-slate-100 flex gap-2">
-              <button onClick={() => setAddingStopToMission(null)} className="flex-1 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-600">
-                Annuler
-              </button>
-              <button
-                disabled={isSavingPkg || !newStopForm.contactName || !newStopForm.address || !newStopForm.city || !newStopForm.postalCode}
-                onClick={handleAddNewStop}
-                className="flex-1 py-2.5 bg-green-600 text-white rounded-xl text-sm font-bold hover:bg-green-700 transition-colors disabled:opacity-50"
-              >
-                {isSavingPkg ? '⏳ Ajout...' : '+ Ajouter l’arrêt'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {addingStopToMission && <Modal isOpen onClose={closeNewStop} title="Ajouter un arrêt" subtitle={`${addingStopToMission.zone} — ${addingStopToMission.driverName || 'Non affecté'}`} size="lg" preventClose={isSavingPkg} busy={isSavingPkg}
+        footer={<div className="flex gap-3"><button type="button" disabled={isSavingPkg} onClick={closeNewStop} className="min-h-11 flex-1 rounded-xl border border-slate-300 bg-white px-3 font-semibold">Annuler</button><button type="submit" form="add-mission-stop" disabled={isSavingPkg} className="min-h-11 flex-1 rounded-xl bg-green-700 px-3 font-semibold text-white disabled:opacity-50">{isSavingPkg ? 'Vérification…' : pendingStop?.requestId === newStopRequestId.current ? 'Vérifier cette demande' : 'Ajouter l’arrêt'}</button></div>}>
+        <form id="add-mission-stop" noValidate onSubmit={event => { event.preventDefault(); void handleAddNewStop(); }} className="space-y-4">
+          {stopSaveError && <p role="alert" className="rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-900">{stopSaveError}</p>}
+          {pendingStop?.requestId === newStopRequestId.current && <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-900">Les champs sont verrouillés pour vérifier la demande initiale sans créer un deuxième arrêt. Après confirmation, vous pourrez modifier l’arrêt dans la tournée.</p>}
+          <MissionStopFields value={newStopForm} onChange={(field, value) => setNewStopForm(previous => ({ ...previous, [field]: value }))} errors={stopErrors} busy={isSavingPkg || pendingStop?.requestId === newStopRequestId.current} />
+          <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-900">Cet arrêt est ajouté à la fin de la tournée. La commande Réordonner permet ensuite de choisir sa position.</p>
+        </form>
+      </Modal>}
 
       {/* POD VIEWER */}
       {viewingPOD && (
@@ -3359,12 +2938,12 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                 {selectedPackageIds.size} colis sélectionné{selectedPackageIds.size > 1 ? 's' : ''}, dont {selectedOutsideFilter} hors filtre — {selectedDate}
               </p>
             </div>
-            
+
             <div className="p-4 space-y-4">
               {/* Hub de départ */}
               <div>
-                <label className="text-sm font-bold text-slate-700 block mb-1">Hub de départ</label>
-                <select
+                <label htmlFor="office-field-21" className="text-sm font-bold text-slate-700 block mb-1">Hub de départ</label>
+                <select id="office-field-21"
                   value={quickDispatchHubId}
                   onChange={(e) => setQuickDispatchHubId(e.target.value)}
                   className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none"
@@ -3377,11 +2956,11 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                   ))}
                 </select>
               </div>
-              
+
               {/* Chauffeur */}
               <div>
-                <label className="text-sm font-bold text-slate-700 block mb-1">Chauffeur</label>
-                <select
+                <label htmlFor="office-field-22" className="text-sm font-bold text-slate-700 block mb-1">Chauffeur</label>
+                <select id="office-field-22"
                   value={quickDispatchDriverId}
                   onChange={(e) => setQuickDispatchDriverId(e.target.value)}
                   className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none"
@@ -3401,18 +2980,18 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                   })}
                 </select>
               </div>
-              
+
               {/* Heure de départ */}
               <div>
-                <label className="text-sm font-bold text-slate-700 block mb-1">Heure de départ</label>
-                <input
+                <label htmlFor="office-field-23" className="text-sm font-bold text-slate-700 block mb-1">Heure de départ</label>
+                <input id="office-field-23"
                   type="time"
                   value={quickDispatchTime}
                   onChange={(e) => setQuickDispatchTime(e.target.value)}
                   className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm font-mono focus:ring-2 focus:ring-brand-200 outline-none"
                 />
               </div>
-              
+
               {/* Récapitulatif colis */}
               <div className="bg-slate-50 rounded-lg p-3">
                 <p className="text-xs font-bold text-slate-600 mb-2">Colis à dispatcher :</p>
@@ -3433,7 +3012,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                 </div>
               </div>
             </div>
-            
+
             <div className="p-4 border-t border-slate-200 flex justify-end gap-2">
               <button
                 onClick={closeQuickDispatch}
@@ -3471,7 +3050,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                       setIsQuickDispatching(false);
                       return;
                     }
-                    
+
                     if (selectedPkgs.some(pkg => ![PackageStatus.AT_HUB, PackageStatus.SORTED].includes(pkg.status) || pkg.missionId || pkg.currentDriverId || pkg.stopId)) {
                       notifyError('Tous les colis sélectionnés doivent être au hub ou triés, sans affectation à une tournée. Actualisez la sélection.');
                       return;
@@ -3480,22 +3059,22 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                     const driver = users.find(u => u.id === quickDispatchDriverId);
                     const vehicle = vehicles.find(v => v.driverId === quickDispatchDriverId || v.assignedDriverId === quickDispatchDriverId);
                     const hub = hubs.find(h => h.id === quickDispatchHubId);
-                    
+
                     if (!driver || !hub) {
                       notifyError('Chauffeur ou hub non trouvé');
                       setIsQuickDispatching(false);
                       return;
                     }
-                    
+
                     // Déterminer la zone (prendre celle du premier colis)
                     const zone = selectedPkgs[0].zone;
-                    
+
                     // Préparer le driver/vehicle pour GMPRO
                     const driversVehicles: DriverVehicle[] = [{
                       driver,
                       vehicle
                     }];
-                    
+
                     // Optimiser avec GMPRO
                     const apiKey = getGoogleMapsApiKey();
                     const result = await optimizeMultiVehicle(
@@ -3506,13 +3085,13 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                       apiKey,
                       quickDispatchTime
                     );
-                    
+
                     if (!result.success || result.tours.length !== 1 || result.skippedShipments > 0) {
                       notifyError(`Erreur d'optimisation: ${result.error || 'Certains colis n’ont pas pu être planifiés. Vérifiez les adresses et les créneaux avant l’affectation.'}`);
                       setIsQuickDispatching(false);
                       return;
                     }
-                    
+
                     // Créer la mission
                     const tour = result.tours[0];
                     const mission: Omit<Mission, 'id' | 'createdAt' | 'updatedAt'> = {
@@ -3541,7 +3120,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                       dispatchedByName: `${currentUser.firstName} ${currentUser.lastName}`,
                       dispatchedAt: new Date().toISOString()
                     };
-                    
+
                     const request = { requestId: crypto.randomUUID(), missions: [mission] };
                     quickDispatchAttempt.current = { key: requestKey, request };
                     await dispatchMissionsCF(request);
@@ -3552,9 +3131,9 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                     setShowQuickDispatch(false);
                     setSelectedPackageIds(new Set());
                     setQuickDispatchDriverId('');
-                    
+
                     notifySuccess(`Tournée créée avec ${tour.stops.length} arrêts et ${packageIds.length} colis !`);
-                    
+
                   } catch (error) {
                     console.error('Erreur dispatch rapide:', error);
                     notifyError(error instanceof Error ? error.message : 'L’affectation n’a pas pu être confirmée. Réessayez la même demande sans risque de doublon.');
@@ -3585,6 +3164,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
       {/* Modal Réordonnancement des stops */}
       {reorderingMission && (
         <StopReorderModal
+          recalculationNotice
           isOpen={!!reorderingMission}
           onClose={() => setReorderingMission(null)}
           mission={reorderingMission}

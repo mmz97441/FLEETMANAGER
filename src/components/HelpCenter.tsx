@@ -19,6 +19,9 @@ import {
 } from 'lucide-react';
 import { User, UserRole } from '../types';
 import { roleKey } from '../utils/role';
+import SupportRequest from './SupportRequest';
+import DeviceDiagnostics from './DeviceDiagnostics';
+import UxMetricsPanel from './UxMetricsPanel';
 import { useUrlParam } from '../hooks/useUrlState';
 
 export const buildSupportMailto = (subject: string, message: string, sender: string) =>
@@ -47,13 +50,10 @@ interface GuideItem {
 }
 
 const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
-  const [activeTab, setActiveTab] = useUrlParam<'guide' | 'faq' | 'contact'>('tab', 'guide', ['guide', 'faq', 'contact']);
+  const [activeTab, setActiveTab] = useUrlParam<'guide' | 'faq' | 'contact' | 'diagnostic'>('tab', 'guide', ['guide', 'faq', 'contact', 'diagnostic']);
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useUrlParam<string>('q', '');
   const [expandedFaq, setExpandedFaq] = useState<number | null>(null);
-  const [contactSubject, setContactSubject] = useState("Question sur l'application");
-  const [contactMessage, setContactMessage] = useState('');
-  const [contactOpened, setContactOpened] = useState(false);
 
   // Déterminer le profil utilisateur
   const userRoleNorm = roleKey(currentUser.role).replace(/[^a-z]/g, '');
@@ -108,7 +108,7 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
         {
           title: 'Confirmer un retour au hub',
           description: 'Un échec de livraison et un retour au hub sont deux opérations distinctes.',
-          steps: ['Dans la tournée, ouvrez le colis indiqué À retourner.', 'Au hub, prenez au moins une photo du retour ; ajoutez la signature si elle est disponible.', 'Confirmez et attendez la réussite de l’enregistrement. Le colis devient Retourné.'],
+          steps: ['Dans la tournée, ouvrez le colis indiqué Retour à remettre.', 'Au hub, prenez au moins une photo du retour ; ajoutez la signature si elle est disponible.', 'Confirmez et attendez la réussite de l’enregistrement. Le statut devient Retour reçu.'],
         },
         {
           title: 'Terminer la tournée',
@@ -789,6 +789,7 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-indigo-300" size={20} />
           <input
             type="text"
+            aria-label="Rechercher dans l’aide"
             placeholder="Rechercher dans l'aide..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
@@ -965,46 +966,7 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
       {/* Contenu Contact */}
       {activeTab === 'contact' && (
         <div className="grid md:grid-cols-2 gap-6">
-          {/* Formulaire de contact */}
-          <div className="bg-white rounded-2xl p-6 border border-slate-200">
-            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-              <Mail className="text-indigo-600" size={20} />
-              Nous contacter
-            </h3>
-            <form className="space-y-4" onSubmit={event => {
-              event.preventDefault();
-              window.location.href = buildSupportMailto(contactSubject, contactMessage, `${currentUser.firstName} ${currentUser.lastName} — ${currentUser.email || ''}`);
-              setContactOpened(true);
-            }}>
-              <p className="text-sm text-slate-600">Préparez votre demande ici, puis relisez et envoyez l’email dans votre application de messagerie.</p>
-              <div>
-                <label htmlFor="help-contact-subject" className="block text-sm font-bold text-slate-600 mb-1">Sujet</label>
-                <select id="help-contact-subject" value={contactSubject} onChange={event => setContactSubject(event.target.value)} className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
-                  <option>Question sur l'application</option>
-                  <option>Problème technique</option>
-                  <option>Demande de fonctionnalité</option>
-                  <option>Autre</option>
-                </select>
-              </div>
-              <div>
-                <label htmlFor="help-contact-message" className="block text-sm font-bold text-slate-600 mb-1">Message</label>
-                <textarea
-                  id="help-contact-message" required value={contactMessage} onChange={event => setContactMessage(event.target.value)}
-                  rows={5}
-                  placeholder="Décrivez votre demande..."
-                  className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
-                />
-              </div>
-              <button
-                type="submit" disabled={!contactMessage.trim()}
-                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors"
-              >
-                <Send size={18} />
-                Ouvrir mon application email
-              </button>
-              {contactOpened && <p role="status" className="text-sm text-indigo-800">Finalisez l’envoi dans votre messagerie. Si elle ne s’est pas ouverte, copiez votre texte et écrivez à direction@delivrex.io. Votre texte reste affiché ici.</p>}
-            </form>
-          </div>
+          <SupportRequest />
 
           {/* Infos de contact */}
           <div className="space-y-4">
@@ -1043,6 +1005,11 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
           </div>
         </div>
       )}
+
+      <section className="space-y-4">
+        <button type="button" aria-expanded={activeTab === 'diagnostic'} onClick={() => setActiveTab(activeTab === 'diagnostic' ? 'guide' : 'diagnostic')} className="min-h-11 w-full rounded-xl border border-slate-300 bg-white p-3 font-bold text-slate-800">Diagnostic de l’appareil et séance terrain</button>
+        {activeTab === 'diagnostic' && <><DeviceDiagnostics /><UxMetricsPanel /></>}
+      </section>
 
       {/* Version */}
       <div className="text-center text-sm text-slate-400">

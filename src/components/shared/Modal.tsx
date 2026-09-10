@@ -37,6 +37,8 @@ export interface ModalProps {
   footerClassName?: string;
   // Pour les formulaires - empêche la fermeture accidentelle
   preventClose?: boolean;
+  /** An operation in progress; distinct from a mandatory, non-dismissable dialog. */
+  busy?: boolean;
   dirty?: boolean;
   ariaLabel?: string;
   role?: 'dialog' | 'alertdialog';
@@ -69,6 +71,7 @@ const Modal: React.FC<ModalProps> = ({
   bodyClassName = '',
   footerClassName = '',
   preventClose = false,
+  busy = preventClose,
   dirty = false,
   ariaLabel,
   role = 'dialog',
@@ -76,9 +79,10 @@ const Modal: React.FC<ModalProps> = ({
 }) => {
   const titleId = useId();
   const subtitleId = useId();
-  const requestClose = useUnsavedChanges(isOpen && dirty, isOpen && preventClose);
-  const handleClose = useCallback(() => { void requestClose(onClose); }, [requestClose, onClose]);
-  const layerRef = useDialogLayer(isOpen, () => { if (closeOnEscape && !preventClose) handleClose(); });
+  const blocked = preventClose || busy;
+  const requestClose = useUnsavedChanges(isOpen && dirty, isOpen && busy);
+  const handleClose = useCallback(() => { if (!blocked) void requestClose(onClose); }, [requestClose, onClose, blocked]);
+  const layerRef = useDialogLayer(isOpen, () => { if (closeOnEscape && !blocked) handleClose(); });
 
   if (!isOpen) return null;
 
@@ -93,7 +97,7 @@ const Modal: React.FC<ModalProps> = ({
       aria-labelledby={title ? titleId : undefined}
       aria-label={!title ? ariaLabel || 'Fenêtre' : undefined}
       aria-describedby={subtitle ? subtitleId : undefined}
-      aria-busy={preventClose || undefined}
+      aria-busy={busy || undefined}
     >
       {/* Overlay */}
       <div 
@@ -128,7 +132,7 @@ const Modal: React.FC<ModalProps> = ({
                   </h3>
                 )}
                 {subtitle && (
-                  <p id={subtitleId} className="text-sm text-slate-600">
+                  <p id={subtitleId} className="text-sm text-slate-600 break-words">
                     {subtitle}
                   </p>
                 )}
@@ -137,7 +141,7 @@ const Modal: React.FC<ModalProps> = ({
             {showCloseButton && (
               <button 
                 type="button"
-                disabled={preventClose}
+                disabled={blocked}
                 onClick={handleClose}
                 className="min-h-11 min-w-11 flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-slate-200 rounded-full transition-colors flex-shrink-0 ml-2 disabled:opacity-50"
                 aria-label="Fermer"

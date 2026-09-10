@@ -1,0 +1,343 @@
+{
+  "checkedAt": "2026-09-10T17:13:51.037Z",
+  "method": "Current component mounted, orderNumber ascending, with 1000/10000 synthetic packages; fixed 30ms source timers; warm local Vite; one first-page sample per configuration from component mount to 50 rows (excludes module/network download and dataset construction); 10 exact searches each measured through two requestAnimationFrame callbacks; final-page link then Next button; no production Firestore or before/after gain claim.",
+  "results": [
+    {
+      "count": 1000,
+      "width": 1365,
+      "cpuRate": 1,
+      "firstPageMs": 75.10000014305115,
+      "rows": 50,
+      "samples": [
+        {
+          "index": 0,
+          "durationMs": 19.200000047683716,
+          "rows": [
+            "package-UX-P0"
+          ]
+        },
+        {
+          "index": 111,
+          "durationMs": 32.700000047683716,
+          "rows": [
+            "package-UX-P111"
+          ]
+        },
+        {
+          "index": 222,
+          "durationMs": 32.90000009536743,
+          "rows": [
+            "package-UX-P222"
+          ]
+        },
+        {
+          "index": 333,
+          "durationMs": 33.200000047683716,
+          "rows": [
+            "package-UX-P333"
+          ]
+        },
+        {
+          "index": 444,
+          "durationMs": 31.5,
+          "rows": [
+            "package-UX-P444"
+          ]
+        },
+        {
+          "index": 555,
+          "durationMs": 32.59999990463257,
+          "rows": [
+            "package-UX-P555"
+          ]
+        },
+        {
+          "index": 666,
+          "durationMs": 33.799999952316284,
+          "rows": [
+            "package-UX-P666"
+          ]
+        },
+        {
+          "index": 777,
+          "durationMs": 31.700000047683716,
+          "rows": [
+            "package-UX-P777"
+          ]
+        },
+        {
+          "index": 888,
+          "durationMs": 33.09999990463257,
+          "rows": [
+            "package-UX-P888"
+          ]
+        },
+        {
+          "index": 999,
+          "durationMs": 33.5,
+          "rows": [
+            "package-UX-P999"
+          ]
+        }
+      ],
+      "searchMedianMs": 32.800000071525574,
+      "searchP95Ms": 33.799999952316284,
+      "lastPackageSearchable": true,
+      "lastPageReachable": true,
+      "noDocumentOverflow": true
+    },
+    {
+      "count": 10000,
+      "width": 1365,
+      "cpuRate": 1,
+      "firstPageMs": 55,
+      "rows": 50,
+      "samples": [
+        {
+          "index": 0,
+          "durationMs": 13.399999856948853,
+          "rows": [
+            "package-UX-P0"
+          ]
+        },
+        {
+          "index": 1111,
+          "durationMs": 33.39999985694885,
+          "rows": [
+            "package-UX-P1111"
+          ]
+        },
+        {
+          "index": 2222,
+          "durationMs": 32.59999990463257,
+          "rows": [
+            "package-UX-P2222"
+          ]
+        },
+        {
+          "index": 3333,
+          "durationMs": 33.299999952316284,
+          "rows": [
+            "package-UX-P3333"
+          ]
+        },
+        {
+          "index": 4444,
+          "durationMs": 31.90000009536743,
+          "rows": [
+            "package-UX-P4444"
+          ]
+        },
+        {
+          "index": 5555,
+          "durationMs": 32.09999990463257,
+          "rows": [
+            "package-UX-P5555"
+          ]
+        },
+        {
+          "index": 6666,
+          "durationMs": 31.899999856948853,
+          "rows": [
+            "package-UX-P6666"
+          ]
+        },
+        {
+          "index": 7777,
+          "durationMs": 34.39999985694885,
+          "rows": [
+            "package-UX-P7777"
+          ]
+        },
+        {
+          "index": 8888,
+          "durationMs": 33.299999952316284,
+          "rows": [
+            "package-UX-P8888"
+          ]
+        },
+        {
+          "index": 9999,
+          "durationMs": 32.700000047683716,
+          "rows": [
+            "package-UX-P9999"
+          ]
+        }
+      ],
+      "searchMedianMs": 32.64999997615814,
+      "searchP95Ms": 34.39999985694885,
+      "lastPackageSearchable": true,
+      "lastPageReachable": true,
+      "noDocumentOverflow": true
+    },
+    {
+      "count": 1000,
+      "width": 390,
+      "cpuRate": 4,
+      "firstPageMs": 109.80000019073486,
+      "rows": 50,
+      "samples": [
+        {
+          "index": 0,
+          "durationMs": 29.40000009536743,
+          "rows": [
+            "package-UX-P0"
+          ]
+        },
+        {
+          "index": 111,
+          "durationMs": 20.09999990463257,
+          "rows": [
+            "package-UX-P111"
+          ]
+        },
+        {
+          "index": 222,
+          "durationMs": 32.5,
+          "rows": [
+            "package-UX-P222"
+          ]
+        },
+        {
+          "index": 333,
+          "durationMs": 34.30000019073486,
+          "rows": [
+            "package-UX-P333"
+          ]
+        },
+        {
+          "index": 444,
+          "durationMs": 31.899999856948853,
+          "rows": [
+            "package-UX-P444"
+          ]
+        },
+        {
+          "index": 555,
+          "durationMs": 31.700000047683716,
+          "rows": [
+            "package-UX-P555"
+          ]
+        },
+        {
+          "index": 666,
+          "durationMs": 33.10000014305115,
+          "rows": [
+            "package-UX-P666"
+          ]
+        },
+        {
+          "index": 777,
+          "durationMs": 32.700000047683716,
+          "rows": [
+            "package-UX-P777"
+          ]
+        },
+        {
+          "index": 888,
+          "durationMs": 31.5,
+          "rows": [
+            "package-UX-P888"
+          ]
+        },
+        {
+          "index": 999,
+          "durationMs": 32.40000009536743,
+          "rows": [
+            "package-UX-P999"
+          ]
+        }
+      ],
+      "searchMedianMs": 32.14999997615814,
+      "searchP95Ms": 34.30000019073486,
+      "lastPackageSearchable": true,
+      "lastPageReachable": true,
+      "noDocumentOverflow": true
+    },
+    {
+      "count": 10000,
+      "width": 390,
+      "cpuRate": 4,
+      "firstPageMs": 121.09999990463257,
+      "rows": 50,
+      "samples": [
+        {
+          "index": 0,
+          "durationMs": 67.89999985694885,
+          "rows": [
+            "package-UX-P0"
+          ]
+        },
+        {
+          "index": 1111,
+          "durationMs": 36.89999985694885,
+          "rows": [
+            "package-UX-P1111"
+          ]
+        },
+        {
+          "index": 2222,
+          "durationMs": 30.09999990463257,
+          "rows": [
+            "package-UX-P2222"
+          ]
+        },
+        {
+          "index": 3333,
+          "durationMs": 27.299999952316284,
+          "rows": [
+            "package-UX-P3333"
+          ]
+        },
+        {
+          "index": 4444,
+          "durationMs": 34.200000047683716,
+          "rows": [
+            "package-UX-P4444"
+          ]
+        },
+        {
+          "index": 5555,
+          "durationMs": 32.59999990463257,
+          "rows": [
+            "package-UX-P5555"
+          ]
+        },
+        {
+          "index": 6666,
+          "durationMs": 33.700000047683716,
+          "rows": [
+            "package-UX-P6666"
+          ]
+        },
+        {
+          "index": 7777,
+          "durationMs": 30.59999990463257,
+          "rows": [
+            "package-UX-P7777"
+          ]
+        },
+        {
+          "index": 8888,
+          "durationMs": 32.700000047683716,
+          "rows": [
+            "package-UX-P8888"
+          ]
+        },
+        {
+          "index": 9999,
+          "durationMs": 37,
+          "rows": [
+            "package-UX-P9999"
+          ]
+        }
+      ],
+      "searchMedianMs": 33.200000047683716,
+      "searchP95Ms": 67.89999985694885,
+      "lastPackageSearchable": true,
+      "lastPageReachable": true,
+      "noDocumentOverflow": true
+    }
+  ],
+  "exceptions": []
+}

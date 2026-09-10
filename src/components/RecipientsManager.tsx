@@ -1,3 +1,4 @@
+import { useClientAccess } from './client/ClientAccessContext';
 /**
  * MES DESTINATAIRES (client self-service)
  *
@@ -72,6 +73,7 @@ const RecipientsManager: React.FC<RecipientsManagerProps> = ({
   onDelete,
   onImport,
 }) => {
+  const access = useClientAccess();
   const [search, setSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [editingAddress, setEditingAddress] = useState<SavedAddress | null>(null);
@@ -100,6 +102,7 @@ const RecipientsManager: React.FC<RecipientsManagerProps> = ({
   }, [addresses, search]);
 
   const openAdd = () => {
+    if (access.readOnly) return;
     setEditingAddress(null);
     setForm(emptyForm);
     setError(null);
@@ -107,6 +110,7 @@ const RecipientsManager: React.FC<RecipientsManagerProps> = ({
   };
 
   const openEdit = (address: SavedAddress) => {
+    if (access.readOnly) return;
     setEditingAddress(address);
     setForm({
       contactName: address.contactName,
@@ -142,6 +146,7 @@ const RecipientsManager: React.FC<RecipientsManagerProps> = ({
     form.contactPhone.trim() !== '';
 
   const handleSave = async () => {
+    if (access.readOnly) return;
     if (saving) return;
     if (!isValid) {
       setError('Complétez le nom, l’adresse, la ville et le téléphone du destinataire.');
@@ -179,6 +184,7 @@ const RecipientsManager: React.FC<RecipientsManagerProps> = ({
   };
 
   const handleDelete = async (id: string) => {
+    if (access.readOnly) return;
     setDeletingId(id);
     setDeleteError(null);
     try {
@@ -209,7 +215,7 @@ const RecipientsManager: React.FC<RecipientsManagerProps> = ({
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={openAdd}
+            disabled={access.readOnly} onClick={openAdd}
             className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl transition-colors"
           >
             <Plus className="w-4 h-4" />
@@ -217,7 +223,7 @@ const RecipientsManager: React.FC<RecipientsManagerProps> = ({
           </button>
           <button
             type="button"
-            onClick={onImport}
+            disabled={access.readOnly} onClick={onImport}
             className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 text-sm font-semibold rounded-xl border border-slate-300 transition-colors"
           >
             <Upload className="w-4 h-4" />
@@ -258,7 +264,7 @@ const RecipientsManager: React.FC<RecipientsManagerProps> = ({
               <div className="flex items-center justify-center gap-2">
                 <button
                   type="button"
-                  onClick={openAdd}
+                  disabled={access.readOnly} onClick={openAdd}
                   className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl transition-colors"
                 >
                   <Plus className="w-4 h-4" />
@@ -266,7 +272,7 @@ const RecipientsManager: React.FC<RecipientsManagerProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={onImport}
+                  disabled={access.readOnly} onClick={onImport}
                   className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 text-sm font-semibold rounded-xl border border-slate-300 transition-colors"
                 >
                   <Upload className="w-4 h-4" />
@@ -356,7 +362,7 @@ const RecipientsManager: React.FC<RecipientsManagerProps> = ({
                       <>
                         <button
                           type="button"
-                          onClick={() => openEdit(a)}
+                          disabled={access.readOnly} onClick={() => openEdit(a)}
                           aria-label="Modifier"
                           className="p-2.5 rounded-xl text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
                         >
@@ -364,7 +370,7 @@ const RecipientsManager: React.FC<RecipientsManagerProps> = ({
                         </button>
                         <button
                           type="button"
-                          onClick={() => {
+                          disabled={access.readOnly} onClick={() => {
                             setConfirmingId(a.id);
                             setDeleteError(null);
                           }}
@@ -383,7 +389,7 @@ const RecipientsManager: React.FC<RecipientsManagerProps> = ({
         </div>
       )}
 
-      <Modal isOpen={modalOpen} onClose={() => void requestClose(closeModal)} title={editingAddress ? 'Modifier le destinataire' : 'Ajouter un destinataire'} size="lg" preventClose={saving}>
+      <Modal subtitle={access.contextLabel} isOpen={modalOpen} onClose={() => void requestClose(closeModal)} title={editingAddress ? 'Modifier le destinataire' : 'Ajouter un destinataire'} size="lg" preventClose={saving}>
         <form onSubmit={event => { event.preventDefault(); void handleSave(); }} noValidate aria-busy={saving} className="space-y-4">
           <p className="text-sm text-slate-600">Les champs marqués * sont obligatoires.</p>
           <fieldset disabled={saving} className="space-y-3">

@@ -6,7 +6,7 @@ Ce document décrit les composants présents dans le dépôt et les règles à s
 
 Importer `Modal` depuis `src/components/shared/Modal.tsx`. Fournir un `title` visible ; pour une interface sans en-tête, fournir `ariaLabel`. Le composant attribue des identifiants de titre uniques et utilise `useDialogLayer` pour le focus initial, Tab/Shift+Tab, le fond inerte, les fenêtres imbriquées et la restauration du focus.
 
-- `preventClose={busy}` empêche les fermetures du cadre pendant une opération. Désactiver également les actions internes concernées.
+- `busy={busy}` empêche les fermetures pendant une opération et expose `aria-busy`. Désactiver également les actions internes concernées. `preventClose` sert aussi aux étapes obligatoires : fournir alors `busy={false}` si aucune opération ne tourne, pour ne pas annoncer une attente fictive. Sans `busy` explicite, le comportement historique de `preventClose` est conservé.
 - `dirty={dirty}` protège les fermetures assurées par le cadre : croix, fond et Échap. Les boutons internes qui appellent directement `onClose` doivent utiliser la même protection ; voir l’exemple ci-dessous.
 - `role="alertdialog"` convient à une confirmation exigeant une décision. Le rôle normal est `dialog`.
 - `footer` conserve les actions hors de la zone défilante. Préférer cet emplacement lorsqu’un formulaire est long.
@@ -36,7 +36,7 @@ Le libellé reste visible et relié au champ ; `error` et `hint` sont reliés pa
 
 ## Saisie non enregistrée : `useUnsavedChanges`
 
-`useUnsavedChanges(dirty, busy)` renvoie une fonction asynchrone qui exécute la fermeture après confirmation, ou la refuse pendant `busy`. Il ajoute aussi un avertissement `beforeunload` lorsque nécessaire. `ConfirmationHost`, monté une seule fois par l’application, présente la confirmation accessible ; les aperçus de composants doivent aussi le monter pour tester ce comportement.
+`useUnsavedChanges(dirty, busy)` renvoie une fonction asynchrone qui exécute la fermeture après confirmation, ou la refuse pendant `busy`. Il ajoute aussi un avertissement `beforeunload` lorsque nécessaire et inscrit le formulaire dans le registre global des brouillons. `ConfirmationHost`, monté une seule fois par l’application, présente la confirmation accessible ; les aperçus de composants doivent aussi le monter pour tester ce comportement.
 
 Pour protéger à la fois le cadre et un bouton Annuler, utiliser un seul chemin de fermeture :
 
@@ -52,7 +52,7 @@ const close = () => { void requestClose(onClose); };
 
 Dans cet exemple, ne pas ajouter aussi `dirty` au `Modal` : cela demanderait deux confirmations. Après un enregistrement effectivement réussi, la fermeture peut appeler directement `onClose`. Calculer `dirty` par comparaison avec les valeurs initiales, pas avec la seule présence d’une fenêtre ouverte.
 
-Le hook ne sauvegarde pas un brouillon et n’intercepte pas automatiquement toute navigation React ou tout changement de paramètres URL. Brancher `requestClose` sur les sorties qui peuvent abandonner la saisie : Annuler, retour à la liste, changement d’élément ou de vue. Vérifier explicitement le bouton Retour du navigateur dans les écrans concernés.
+Le hook ne sauvegarde pas le contenu à lui seul. `App` installe `installNavigationGuard` une fois et passe les changements de vue, la déconnexion et les sorties du passage obligatoire Documents par `requestNavigation`. Le registre protège également Retour/Avancer dans la SPA, en restaurant l’entrée courante avant la confirmation ; son marquage survit au rechargement. Une navigation locale qui démonte un formulaire doit encore appeler `requestClose` ou `requestNavigation`. Ne pas multiplier les confirmations entre parent et enfant. Tester aussi les fenêtres imbriquées, Retour après rechargement et les changements de paramètres URL qui détruisent une saisie.
 
 ## Messages : `ToastHost` et `logService`
 
@@ -96,3 +96,19 @@ Définir une politique explicite pour les paramètres `mission` et `package` lor
 - Tester à 320 et 390 px. Comparer `scrollWidth` et `innerWidth` à la largeur attendue de l’appareil : un navigateur mobile peut élargir son viewport de mise en page pour cacher un débordement. Dans une ligne flex contenant un texte long, prévoir `min-w-0`, le retour à la ligne et une hauteur suffisante.
 
 Le protocole d’usage sur appareils réels se trouve dans [UX_VALIDATION_TERRAIN.md](./UX_VALIDATION_TERRAIN.md).
+
+## Consultation et intervention client
+
+`ViewAsSwitcher` commence en lecture seule. Transmettre `readOnly` et le contexte d’intervention aux sous-formulaires ; masquer un bouton ne suffit pas : les handlers utilisent également `runClientMutation`. L’acteur authentifié et le client cible restent visibles dans l’en-tête fixe. L’audit d’intention doit être confirmé avant l’écriture ; un échec de l’audit final ne doit pas transformer une écriture réussie en invitation à la rejouer. Les règles et permissions serveur restent obligatoires.
+
+## Chargement, reprise et mesures
+
+Distinguer première lecture, liste vide confirmée, erreur et ancien résultat affiché. Une union de plusieurs requêtes attend toutes ses sources métier ; le GPS facultatif ne termine pas le chargement des colis. Une erreur de lecture conserve son message et une reprise explicite.
+
+Avant une création susceptible d’être rejouée, conserver une référence stable et son payload. Réutiliser exactement cette référence après réponse perdue ou rechargement. Un échec du journal local empêche le premier envoi. Réserver et libérer le journal par référence, en tenant compte des autres onglets. Ne pas annoncer un succès après une simple écriture locale.
+
+`operationalLabels.ts` porte les libellés visibles sans migration des enums stockés. `ShipmentReference` présente une référence complète et restitue sa valeur exacte à la copie. Une estimation reste une estimation ; une correction du parcours retire les anciennes prévisions.
+
+`startUxTask` mesure une opération précise avec tâche/rôle/résultat et compteurs numériques autorisés. Aucun nom, adresse, code colis, photo, signature ou coordonnée ne doit entrer dans les métriques. La collecte est locale à la session, désactivable et exportable volontairement. Son temps technique ne constitue pas une durée de tâche utilisateur ni une preuve de gain avant/après.
+
+La couverture vérifiée pour la version 4.26.0 est détaillée dans [UX28_COVERAGE.md](./UX28_COVERAGE.md). La présence du composant commun ne suffit pas à déclarer un écran entier validé.

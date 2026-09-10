@@ -39,7 +39,7 @@ const DocumentAlertModal: React.FC<DocumentAlertModalProps> = ({
   const hasUrgent = urgentCount > 0;
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={blocking ? "Documents obligatoires à consulter" : "Documents en attente"} size="lg" preventClose={blocking} showCloseButton={!blocking} closeOnOverlay={!blocking} closeOnEscape={!blocking} bodyClassName="!p-0">
+    <Modal isOpen={isOpen} onClose={onClose} title={blocking ? "Documents obligatoires à consulter" : "Documents en attente"} size="lg" preventClose={blocking} busy={false} showCloseButton={!blocking} closeOnOverlay={!blocking} closeOnEscape={!blocking} bodyClassName="!p-0">
       <div className={`bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden transform transition-all ${
         hasUrgent ? 'ring-4 ring-red-500/50' : 'ring-4 ring-amber-500/50'
       }`}>
