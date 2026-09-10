@@ -33,7 +33,11 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.interpretAnalytics = exports.acceptQuote = exports.getTeamDirectory = exports.notifyPackageStatus = exports.returnPackage = exports.deleteAbsence = exports.deleteVehicle = exports.importPackages = exports.assignVehicle = exports.askFleetGenius = exports.sendBusinessNotification = exports.transferPackages = exports.saveAbsence = exports.revokeOwnSessions = exports.linkAuthToProfile = exports.createInvitation = exports.activateAccount = exports.validateInvitationToken = exports.forcePasswordReset = exports.toggleUserStatus = exports.cleanupExpiredInvitations = exports.deleteUserCompletely = exports.optimizeTours = void 0;
+exports.interpretAnalytics = exports.acceptQuote = exports.getTeamDirectory = exports.notifyPackageStatus = exports.returnPackage = exports.deleteAbsence = exports.deleteVehicle = exports.importPackages = exports.assignVehicle = exports.askFleetGenius = exports.sendBusinessNotification = exports.transferPackages = exports.dispatchMissions = exports.finishMission = exports.receivePackagesAtHub = exports.saveAbsence = exports.revokeOwnSessions = exports.linkAuthToProfile = exports.createInvitation = exports.activateAccount = exports.validateInvitationToken = exports.forcePasswordReset = exports.toggleUserStatus = exports.cleanupExpiredInvitations = exports.deleteUserCompletely = exports.optimizeTours = void 0;
+const hubReception_1 = require("./hubReception");
+const missionLifecycle_1 = require("./missionLifecycle");
+const deliveryAddress_1 = require("./deliveryAddress");
+const dispatchMissions_1 = require("./dispatchMissions");
 const firestore_1 = require("firebase-admin/firestore");
 const auth_1 = require("firebase-admin/auth");
 const crypto_1 = require("crypto");
@@ -1118,13 +1122,25 @@ exports.saveAbsence = functions
         return { success: true };
     });
 });
+exports.receivePackagesAtHub = functions.region('europe-west1').https.onCall((data, context) => (0, hubReception_1.receivePackagesAtHubHandler)(data, context, { db, requireActiveCaller, isAdminCaller }));
+exports.finishMission = functions.region('europe-west1').https.onCall((data, context) => (0, missionLifecycle_1.finishMissionHandler)(data, context, { db, requireActiveCaller, isAdminCaller }));
+exports.dispatchMissions = functions
+    .region('europe-west1')
+    .https.onCall(async (data, context) => {
+    const caller = await requireActiveCaller(context);
+    if (!isAdminCaller(caller.role))
+        throw new functions.https.HttpsError('permission-denied', 'Dispatch réservé à l’exploitation.');
+    return (0, dispatchMissions_1.dispatchMissionsTransaction)(db, data, caller);
+});
 exports.transferPackages = functions
     .region('europe-west1')
     .https.onCall(async (data, context) => {
     const caller = await requireActiveCaller(context), isAdmin = isAdminCaller(caller.role);
-    if (!isAdmin && normalizeRole(caller.role) !== 'chauffeur')
+    if (!isAdmin && !['chauffeur', 'chauffeuse'].includes(normalizeRole(caller.role)))
         throw new functions.https.HttpsError('permission-denied', 'Transfert non autorisé.');
-    const ids = [...new Set(data?.packageIds || [])];
+    if (!Array.isArray(data?.packageIds) || typeof data?.missionId !== 'string' || !data.missionId || data.missionId.includes('/'))
+        throw new functions.https.HttpsError('invalid-argument', 'Tournée ou liste de colis invalide.');
+    const ids = [...new Set(data.packageIds)];
     if (!ids.length ||
         ids.length > 150 ||
         ids.some((id) => typeof id !== 'string' || id.includes('/')))
@@ -1148,6 +1164,12 @@ exports.transferPackages = functions
                 .filter((mid) => mid && mid !== toRef.id)),
         ];
         const sourceSnaps = await Promise.all(origins.map((id) => tx.get(db.collection('missions').doc(id))));
+        const sources = new Map([[toRef.id, to], ...sourceSnaps.filter(s => s.exists).map(s => [s.id, s.data()])]);
+        for (const pkg of packages) {
+            const source = sources.get(pkg.missionId);
+            if (source?.stops?.some((stop) => stop.proofSyncPending === true && (stop.id === pkg.stopId || stop.packageIds?.includes(pkg.id))))
+                throw new functions.https.HttpsError('failed-precondition', 'Synchronisez la preuve de cet arrêt avant de déplacer ce colis.');
+        }
         const toStops = (to.stops || []).map((s) => ({
             ...s,
             packageIds: [...s.packageIds],
@@ -1155,8 +1177,9 @@ exports.transferPackages = functions
         const inTour = new Set(toStops.flatMap((s) => s.packageIds));
         const add = packages.filter((p) => !inTour.has(p.id));
         const added = new Set(add.map((p) => p.id));
-        const counts = (stops) => ({
-            totalPackages: stops.reduce((n, s) => n + s.packageIds.length, 0),
+        const counts = (stops, previous) => ({
+            totalPackages: Math.max(stops.reduce((n, s) => n + s.packageIds.length, 0), (previous.deliveredPackages || 0) + (previous.failedPackages || 0) +
+                new Set(stops.filter(s => !['Terminé', 'Échec', 'Passé'].includes(s.status)).flatMap(s => s.packageIds)).size),
             completedStops: stops.filter((s) => s.status === 'Terminé').length,
             failedStops: stops.filter((s) => ['Échec', 'Passé'].includes(s.status))
                 .length,
@@ -1164,14 +1187,10 @@ exports.transferPackages = functions
         const now = new Date().toISOString();
         let seq = Math.max(0, ...toStops.map((s) => s.sequence || 0));
         for (const p of add) {
-            const key = (p.address + '|' + p.postalCode + '|' + p.city)
-                .trim()
-                .toLowerCase();
+            const key = (0, deliveryAddress_1.placeKey)(p);
             let stop = toStops.find((s) => s.type === 'DELIVERY' &&
                 !['Terminé', 'Échec', 'Passé'].includes(s.status) &&
-                (s.address + '|' + s.postalCode + '|' + s.city)
-                    .trim()
-                    .toLowerCase() === key);
+                (0, deliveryAddress_1.placeKey)(s) === key);
             if (!stop) {
                 stop = {
                     id: 'transfer-' + (0, crypto_1.randomBytes)(10).toString('hex'),
@@ -1219,8 +1238,8 @@ exports.transferPackages = functions
                 const packageIds = s.packageIds.filter((id) => !added.has(id));
                 return { ...s, packageIds, packageCount: packageIds.length };
             })
-                .filter((s) => s.packageIds.length > 0 || s.status === 'Terminé');
-            tx.update(source.ref, { stops, ...counts(stops), updatedAt: now });
+                .filter((s) => s.packageIds.length > 0 || ['Terminé', 'Échec', 'Passé'].includes(s.status));
+            tx.update(source.ref, { stops, ...counts(stops, source.data()), updatedAt: now });
             const moved = add
                 .filter((p) => p.missionId === source.id)
                 .map((p) => p.id);
@@ -1239,7 +1258,7 @@ exports.transferPackages = functions
                     createdBy: caller.id,
                 });
         }
-        tx.update(toRef, { stops: toStops, ...counts(toStops), updatedAt: now });
+        tx.update(toRef, { stops: toStops, ...counts(toStops, to), updatedAt: now });
         return { count: add.length };
     });
 });
@@ -1635,6 +1654,8 @@ exports.returnPackage = functions
         const mission = missionRef ? await tx.get(missionRef) : null;
         const now = new Date().toISOString();
         if (mission?.exists) {
+            if (mission.data()?.stops?.some((stop) => stop.proofSyncPending === true && (stop.id === pkg.stopId || stop.packageIds?.includes(id))))
+                throw new functions.https.HttpsError('failed-precondition', 'Synchronisez la preuve de cet arrêt avant de déplacer ce colis.');
             const stops = (mission.data()?.stops || [])
                 .map((s) => {
                 const packageIds = s.packageIds.filter((pid) => pid !== id);
@@ -1642,7 +1663,9 @@ exports.returnPackage = functions
             })
                 .filter((s) => s.packageIds.length ||
                 ['Terminé', 'Échec', 'Passé'].includes(s.status));
-            tx.update(mission.ref, { stops, updatedAt: now });
+            const totalPackages = Math.max(stops.reduce((sum, stop) => sum + stop.packageIds.length, 0), (mission.data()?.deliveredPackages || 0) + (mission.data()?.failedPackages || 0) +
+                new Set(stops.filter((stop) => !['Terminé', 'Échec', 'Passé'].includes(stop.status)).flatMap((stop) => stop.packageIds)).size);
+            tx.update(mission.ref, { stops, totalPackages, updatedAt: now });
         }
         tx.update(ref, {
             status: 'Retourné',

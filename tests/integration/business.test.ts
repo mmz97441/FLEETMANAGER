@@ -47,6 +47,7 @@ import { setDoc, doc, getDoc, deleteDoc, terminate } from 'firebase/firestore';
 import {
   commitStopOutcome,
   updatePackageStatus,
+  startDriverMission,
   deleteMission,
   publishLiveTrackingForMission,
 } from '../../src/services/missionService';
@@ -77,6 +78,65 @@ beforeEach(async () => {
 });
 afterAll(() => terminate(db));
 describe('Production invariants against real services and isolated Firestore', () => {
+  it('rejects a stale validation after a parcel was added to the stop', async () => {
+    await setDoc(doc(db, 'packages', 'p1'), {status: PackageStatus.IN_DELIVERY, missionId: 'test', stopId: 's', currentDriverId: 'driverA'});
+    await expect(commitStopOutcome({missionId: 'test', stopId: 's', stopPatch: {status: StopStatus.COMPLETED},
+      packageOutcomes: [{packageId: 'p1', status: PackageStatus.DELIVERED, movement: {action: 'DELIVERED'}}]
+    })).rejects.toThrow('La liste des colis');
+    expect((await getDoc(doc(db, 'missions', 'test'))).data()?.stops[0].status).toBe(StopStatus.PENDING);
+    expect((await getDoc(doc(db, 'packages', 'p1'))).data()?.status).toBe(PackageStatus.IN_DELIVERY);
+  });
+  it('persists assignment fields for an already sorted parcel and deduplicates the exact retry', async () => {
+    const ref = doc(db, 'packages', 'already-sorted');
+    await setDoc(ref, {status: PackageStatus.SORTED, movements: []});
+    const fields = {missionId: 'test', stopId: 's', currentDriverId: 'driverA'};
+    await updatePackageStatus('already-sorted', PackageStatus.SORTED, {action: 'SORTED'}, fields);
+    await updatePackageStatus('already-sorted', PackageStatus.SORTED, {action: 'SORTED'}, fields);
+    const saved = (await getDoc(ref)).data()!;
+    expect(saved).toMatchObject(fields);
+    expect(saved.movements).toHaveLength(1);
+  });
+  it('does not reopen a delivered parcel on a late loading request', async () => {
+    const ref = doc(db, 'packages', 'already-delivered');
+    await setDoc(ref, {status: PackageStatus.DELIVERED, movements: []});
+    await expect(updatePackageStatus('already-delivered', PackageStatus.IN_DELIVERY, {action: 'LOADING_COMPLETE'})).rejects.toThrow();
+    expect((await getDoc(ref)).data()?.status).toBe(PackageStatus.DELIVERED);
+  });
+  it('starts all parcels atomically using travel times and preserves the first departure on retry', async () => {
+    await setDoc(doc(db, 'missions', 'test'), mission({status: MissionStatus.DISPATCHED, date: '2026-09-10', plannedDepartureTime: '08:00',
+      stops: [stop({durationFromPrevious: 30, serviceTime: 10})]}));
+    for (const id of ['p1', 'p2']) await setDoc(doc(db, 'packages', id), {
+      status: PackageStatus.SORTED, missionId: 'test', currentDriverId: 'driverA', movements: []
+    });
+    const params = {driverId: 'driverA', driverName: 'Test', startedAt: '2026-09-10T08:00:00+04:00', coordinates: {lat: -20.9, lng: 55.5}};
+    await startDriverMission('test', params);
+    await startDriverMission('test', {...params, startedAt: '2026-09-10T09:00:00+04:00'});
+    const saved = (await getDoc(doc(db, 'missions', 'test'))).data()!;
+    expect(saved.startedAt).toBe(params.startedAt);
+    expect(saved.stops[0].estimatedArrival).toBe('2026-09-10T04:30:00.000Z');
+    for (const id of ['p1', 'p2']) {
+      const p = (await getDoc(doc(db, 'packages', id))).data()!;
+      expect(p.status).toBe(PackageStatus.IN_DELIVERY);
+      expect(p.movements).toHaveLength(1);
+    }
+  });
+  it('does not partially start a tour when one parcel was reassigned', async () => {
+    await setDoc(doc(db, 'missions', 'test'), mission({status: MissionStatus.DISPATCHED}));
+    await setDoc(doc(db, 'packages', 'p1'), {status: PackageStatus.SORTED, missionId: 'test', currentDriverId: 'driverA'});
+    await setDoc(doc(db, 'packages', 'p2'), {status: PackageStatus.SORTED, missionId: 'another', currentDriverId: 'driverB'});
+    await expect(startDriverMission('test', {driverId: 'driverA', driverName: 'Test', startedAt: '2026-09-10T08:00:00+04:00', coordinates: {lat: -20.9, lng: 55.5}})).rejects.toThrow();
+    expect((await getDoc(doc(db, 'missions', 'test'))).data()?.status).toBe(MissionStatus.DISPATCHED);
+    expect((await getDoc(doc(db, 'packages', 'p1'))).data()?.status).toBe(PackageStatus.SORTED);
+  });
+  it('can start an assigned pickup without prematurely declaring its uncollected parcels in delivery', async () => {
+    await setDoc(doc(db, 'missions', 'test'), mission({status: MissionStatus.DISPATCHED,
+      stops: [stop({type: 'PICKUP'})]}));
+    for (const id of ['p1', 'p2']) await setDoc(doc(db, 'packages', id), {
+      status: PackageStatus.PENDING, missionId: 'test', currentDriverId: null, movements: []
+    });
+    await startDriverMission('test', {driverId: 'driverA', driverName: 'Test', startedAt: '2026-09-10T08:00:00+04:00', coordinates: {lat: -20.9, lng: 55.5}});
+    expect((await getDoc(doc(db, 'packages', 'p1'))).data()).toMatchObject({status: PackageStatus.PENDING, currentDriverId: 'driverA'});
+  });
   it('must reject a nonexistent stop instead of incrementing counters', async () => {
     await expect(
       commitStopOutcome({

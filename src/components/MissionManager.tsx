@@ -5,7 +5,7 @@ import { escapeHtml } from '../utils/html';
  * Composant principal pour la gestion des missions et tournées
  */
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   Mission, MissionStatus, MissionType, MissionStop, StopStatus, Package, PackageStatus,
   ImportBatch, ImportBatchStatus, Hub, Zone, User, UserRole, Vehicle,
@@ -40,9 +40,9 @@ import { notifySuccess, notifyError, notifyInfo } from '../services/logService';
 import { importExcelFile, validateExcelFormat, parseExcelForReview, ReviewResult } from '../services/importService';
 import { geocodeAddress, getGoogleMapsApiKey, optimizeMultiVehicle, DriverVehicle } from '../services/gmproService';
 import { logActivity } from '../services/activityLogService';
-import { notifyImportCompleted, notifyMissionAssigned } from '../services/notificationService';
+import { notifyImportCompleted } from '../services/notificationService';
 import { ActivityAction } from '../types';
-import { addMission } from '../services/missionService';
+import { dispatchMissionsCF } from '../services/cloudFunctions';
 import { usePermissions, Permission } from '../usePermissions';
 import Modal from './shared/Modal';
 import DispatchManager from './DispatchManager';
@@ -152,14 +152,12 @@ const MissionManager: React.FC<MissionManagerProps> = ({
     const minutes = now.getMinutes();
     const roundedMinutes = Math.ceil(minutes / 15) * 15;
     now.setMinutes(roundedMinutes, 0, 0);
-    if (roundedMinutes >= 60) {
-      now.setHours(now.getHours() + 1);
-      now.setMinutes(0);
-    }
     return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
   });
   const [quickDispatchHubId, setQuickDispatchHubId] = useState<string>('');
   const [isQuickDispatching, setIsQuickDispatching] = useState(false);
+  const quickDispatchLock = useRef(false);
+  const quickDispatchAttempt = useRef<{ key: string; request: Parameters<typeof dispatchMissionsCF>[0] } | null>(null);
   
   // Edit/Delete stops dans tournée (admin)
   const [editingStop, setEditingStop] = useState<{ mission: Mission; stop: MissionStop } | null>(null);
@@ -278,13 +276,15 @@ const MissionManager: React.FC<MissionManagerProps> = ({
     try {
       const res = await resyncPackageStatusesFromStops();
       if (res.fixedDelivered > 0) {
-        notifySuccess(`${res.fixedDelivered} colis repassé(s) en "Livré" (arrêt déjà terminé par le chauffeur).`);
+        notifySuccess(`${res.fixedDelivered} statut(s) rétabli(s) en "Livré" à partir des preuves de remise enregistrées.`);
       } else if (res.completedStopPackages === 0) {
-        notifyInfo("Aucun arrêt terminé à resynchroniser : les livraisons concernées n'ont pas encore été validées par les chauffeurs.");
-      } else {
+        notifyInfo('Aucun colis d’un arrêt terminé à vérifier.');
+      } else if (!res.skippedUnproven && !res.skippedReassigned && !res.failed) {
         notifySuccess('Statuts déjà à jour, rien à corriger.');
       }
-      if (res.failed > 0) notifyError(`${res.failed} colis n'ont pas pu être mis à jour (voir Journal d'erreurs).`);
+      if (res.skippedUnproven > 0) notifyInfo(`${res.skippedUnproven} colis conservé(s) sans changement : preuve de remise absente ou incomplète. Vérifiez les preuves avant toute correction.`);
+      if (res.skippedReassigned > 0) notifyInfo(`${res.skippedReassigned} colis conservé(s) sans changement : affectation différente de l’ancien arrêt.`);
+      if (res.failed > 0) notifyError(`${res.failed} tournée(s) n’ont pas pu être vérifiées (voir Journal d’erreurs).`);
     } catch (e) {
       notifyError(e instanceof Error ? e.message : 'Échec de la resynchronisation');
     }
@@ -1571,7 +1571,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           <button
             onClick={handleResyncStatuses}
             disabled={isResyncing}
-            title="Répare les colis restés 'En livraison' alors que le chauffeur a terminé l'arrêt"
+            title="Vérifie les statuts et les rétablit uniquement à partir d’une preuve de remise existante"
             className="px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition-colors flex items-center gap-1.5 disabled:opacity-50"
           >
             <RefreshCw size={13} className={isResyncing ? 'animate-spin' : ''} />
@@ -1673,10 +1673,6 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                 const minutes = now.getMinutes();
                 const roundedMinutes = Math.ceil(minutes / 15) * 15;
                 now.setMinutes(roundedMinutes, 0, 0);
-                if (roundedMinutes >= 60) {
-                  now.setHours(now.getHours() + 1);
-                  now.setMinutes(0);
-                }
                 setQuickDispatchTime(`${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`);
                 setShowQuickDispatch(true);
               }}
@@ -3357,16 +3353,26 @@ const MissionManager: React.FC<MissionManagerProps> = ({
               <button
                 disabled={!quickDispatchDriverId || !quickDispatchHubId || isQuickDispatching}
                 onClick={async () => {
-                  if (!quickDispatchDriverId || !quickDispatchHubId) return;
+                  if (!quickDispatchDriverId || !quickDispatchHubId || quickDispatchLock.current) return;
                   // Sécurité : refuser un chauffeur en congé validé sur la date
                   if (isDriverOnLeave(quickDispatchDriverId, selectedDate)) {
                     alert('Ce chauffeur est en congé validé à cette date. Choisissez un autre chauffeur.');
                     return;
                   }
 
+                  quickDispatchLock.current = true;
                   setIsQuickDispatching(true);
-                  
+                  const requestKey = JSON.stringify([selectedDate, quickDispatchDriverId, quickDispatchHubId, quickDispatchTime, [...selectedPackageIds].sort()]);
                   try {
+                    if (quickDispatchAttempt.current?.key === requestKey) {
+                      const result = await dispatchMissionsCF(quickDispatchAttempt.current.request);
+                      quickDispatchAttempt.current = null;
+                      setShowQuickDispatch(false);
+                      setSelectedPackageIds(new Set());
+                      setQuickDispatchDriverId('');
+                      alert(`Mission confirmée avec ${result.packageCount} colis.`);
+                      return;
+                    }
                     // Récupérer les colis sélectionnés
                     const selectedPkgs = packages.filter(p => selectedPackageIds.has(p.id));
                     if (selectedPkgs.length === 0) {
@@ -3375,6 +3381,10 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                       return;
                     }
                     
+                    if (selectedPkgs.some(pkg => ![PackageStatus.AT_HUB, PackageStatus.SORTED].includes(pkg.status) || pkg.missionId || pkg.currentDriverId || pkg.stopId)) {
+                      alert('Tous les colis sélectionnés doivent être au hub ou triés, sans affectation à une tournée. Actualisez la sélection.');
+                      return;
+                    }
                     // Récupérer le chauffeur et son véhicule
                     const driver = users.find(u => u.id === quickDispatchDriverId);
                     const vehicle = vehicles.find(v => v.driverId === quickDispatchDriverId || v.assignedDriverId === quickDispatchDriverId);
@@ -3406,8 +3416,8 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                       quickDispatchTime
                     );
                     
-                    if (!result.success || result.tours.length === 0) {
-                      alert(`Erreur d'optimisation: ${result.error || 'Aucune tournée générée'}`);
+                    if (!result.success || result.tours.length !== 1 || result.skippedShipments > 0) {
+                      alert(`Erreur d'optimisation: ${result.error || 'Certains colis n’ont pas pu être planifiés. Vérifiez les adresses et les créneaux avant le dispatch.'}`);
                       setIsQuickDispatching(false);
                       return;
                     }
@@ -3441,53 +3451,12 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                       dispatchedAt: new Date().toISOString()
                     };
                     
-                    const missionId = await addMission(mission);
-                    
-                    // Mettre à jour les colis
+                    const request = { requestId: crypto.randomUUID(), missions: [mission] };
+                    quickDispatchAttempt.current = { key: requestKey, request };
+                    await dispatchMissionsCF(request);
+                    quickDispatchAttempt.current = null;
                     const packageIds = tour.stops.flatMap(s => s.packageIds);
-                    for (const pkgId of packageIds) {
-                      const stop = tour.stops.find(s => s.packageIds.includes(pkgId));
-                      const extraFields: Record<string, string | undefined> = {
-                        missionId,
-                        stopId: stop?.id,
-                        currentDriverId: driver.id
-                      };
-                      if (vehicle?.id) {
-                        extraFields.currentVehicleId = vehicle.id;
-                      }
-                      
-                      await updatePackageStatus(pkgId, PackageStatus.SORTED, {
-                        action: 'SORTED',
-                        driverId: driver.id,
-                        driverName: `${driver.firstName} ${driver.lastName}`,
-                        notes: `Dispatch rapide — ${driver.firstName} ${driver.lastName}`
-                      }, extraFields);
-                    }
-                    
-                    // Log activité
-                    logActivity(currentUser, ActivityAction.MISSION_DISPATCHED, {
-                      targetType: 'mission',
-                      targetId: missionId,
-                      targetName: `Mission ${zone} — ${driver.firstName} ${driver.lastName}`,
-                      details: {
-                        metadata: {
-                          zone,
-                          driver: `${driver.firstName} ${driver.lastName}`,
-                          stops: tour.stops.length,
-                          packages: packageIds.length,
-                          distance: tour.totalDistance
-                        }
-                      }
-                    });
-                    
-                    // Notifier le chauffeur
-                    notifyMissionAssigned(
-                      driver.id,
-                      zone,
-                      tour.stops.length,
-                      vehicle?.plate || ''
-                    ).catch(e => console.warn('[Notif] Erreur:', e));
-                    
+
                     // Reset
                     setShowQuickDispatch(false);
                     setSelectedPackageIds(new Set());
@@ -3497,10 +3466,11 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                     
                   } catch (error) {
                     console.error('Erreur dispatch rapide:', error);
-                    alert('Erreur lors du dispatch. Voir la console pour plus de détails.');
+                    alert(error instanceof Error ? error.message : 'Le dispatch n’a pas pu être confirmé. Réessayez la même demande sans risque de doublon.');
+                  } finally {
+                    quickDispatchLock.current = false;
+                    setIsQuickDispatching(false);
                   }
-                  
-                  setIsQuickDispatching(false);
                 }}
                 className="flex items-center gap-2 px-4 py-2 text-sm font-bold bg-gradient-to-r from-brand-500 to-blue-500 text-white rounded-lg hover:from-brand-600 hover:to-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               >

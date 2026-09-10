@@ -39,6 +39,7 @@ import { cleanUndefined } from '../utils/firestore';
 import { haversineKm } from '../utils/geo';
 import { geocodeAddress, getGoogleMapsApiKey } from './gmproService';
 import { reportError } from './logService';
+import { recalculateStopEtas } from '../utils/routeTiming';
 
 // Collections Firestore
 const HUBS_COLLECTION = 'hubs';
@@ -448,11 +449,20 @@ export const updatePackageStatus = async (
     const snap = await tx.get(ref);
     if (!snap.exists()) throw new Error('Colis introuvable');
     const current = snap.data() as Package;
-    if (current.status === status) return null; // replay: no duplicate movement/notification
+    const fields = cleanUndefined(extraFields || {});
+    const unchanged = Object.entries(fields).every(([key, value]) =>
+      current[key as keyof Package] === value
+    );
+    // Same status can still carry a new hub, assignment or ETA. Only an exact
+    // replay is a no-op; dropping its fields left sorted parcels unassigned.
+    if (current.status === status && unchanged) return null;
+    if ([PackageStatus.DELIVERED, PackageStatus.RETURNED].includes(current.status) && current.status !== status) {
+      throw new Error('Ce colis est déjà livré ou retourné. Son statut ne peut pas être réouvert.');
+    }
     const now = new Date().toISOString();
     tx.update(ref, cleanUndefined({
       status, movements: [...(current.movements || []), { ...movement, timestamp: now }],
-      ...(extraFields || {}), updatedAt: now
+      ...fields, updatedAt: now
     }));
     return current;
   });
@@ -462,101 +472,129 @@ export const updatePackageStatus = async (
 };
 
 /**
- * RESYNCHRONISATION DES STATUTS COLIS ↔ ARRÊTS.
- *
- * Répare les colis restés "En livraison" alors que leur arrêt a été marqué
- * TERMINÉ par le chauffeur (cause : échec d'upload des preuves qui interrompait
- * la mise à jour du colis). On ne passe un colis en "Livré" QUE si son arrêt de
- * livraison est COMPLETED → c'est la preuve que le chauffeur a bien validé.
- *
- * S'il n'y a rien à corriger, c'est que les livraisons n'ont pas été validées
- * (chauffeur encore en tournée), pas un bug.
+ * Répare un statut actif uniquement à partir d'une preuve SUCCESS publiée,
+ * couvrant explicitement le colis et son affectation actuelle. Un arrêt terminé
+ * seul ne prouve jamais la remise (livraison partielle, transfert, ancien arrêt).
+ * La transaction relit preuves, mission et colis avant toute réparation ; les
+ * compteurs reflètent ces mêmes lectures, sans écraser une livraison concurrente.
  */
 export interface StatusResyncResult {
-  completedStopPackages: number; // colis rattachés à un arrêt terminé
-  fixedDelivered: number;        // colis repassés en "Livré"
-  failed: number;                // échecs de mise à jour
+  completedStopPackages: number;
+  fixedDelivered: number;
+  skippedUnproven: number;
+  skippedReassigned: number;
+  failed: number; // tournées dont la vérification transactionnelle a échoué
   details: { packageId: string; orderNumber: string; from: string }[];
 }
 
 export const resyncPackageStatusesFromStops = async (): Promise<StatusResyncResult> => {
-  const result: StatusResyncResult = { completedStopPackages: 0, fixedDelivered: 0, failed: 0, details: [] };
-
-  // 1. Parcourir toutes les missions → colis dont l'arrêt DELIVERY est TERMINÉ.
-  //    On restreint à `type === 'DELIVERY'` (et NON `!== 'PICKUP'`) : un arrêt HUB
-  //    (retour dépôt) terminé ne doit pas faire passer ses colis en « Livré » ni
-  //    notifier le client à tort.
-  const missionsSnap = await getDocs(collection(db, MISSIONS_COLLECTION));
-  const deliveredStopMeta = new Map<string, { missionId: string; driverId?: string; driverName?: string; vehicleId?: string; vehiclePlate?: string }>();
-  for (const mDoc of missionsSnap.docs) {
-    const m = mDoc.data() as Mission;
-    for (const s of (m.stops || [])) {
-      if (s.type === 'DELIVERY' && s.status === StopStatus.COMPLETED) {
-        for (const id of (s.packageIds || [])) {
-          deliveredStopMeta.set(id, {
-            missionId: mDoc.id,
-            driverId: m.driverId, driverName: m.driverName,
-            vehicleId: m.vehicleId, vehiclePlate: m.vehiclePlate
-          });
-        }
-      }
-    }
-  }
-
-  if (deliveredStopMeta.size === 0) return result;
-
-  // 2. Colis correspondants qui ne sont PAS encore "Livré" → réparer.
-  // On lit les colis PAR LEURS IDs (plus de plafond 500 qui laissait des colis
-  // anciens non réparables), et on NE ressuscite JAMAIS un colis dans un état
-  // terminal non-livré (Retourné / À retourner / Échec) : le resync ne fait que
-  // MONTER un colis « en cours » vers Livré, jamais écraser une vérité terrain.
-  const NON_RESURRECT = new Set<PackageStatus>([
-    PackageStatus.DELIVERED, PackageStatus.RETURNED, PackageStatus.RETURN_REQUESTED, PackageStatus.FAILED
+  const result: StatusResyncResult = {
+    completedStopPackages: 0, fixedDelivered: 0, skippedUnproven: 0,
+    skippedReassigned: 0, failed: 0, details: [],
+  };
+  const activeStatuses = new Set<PackageStatus>([
+    PackageStatus.PENDING, PackageStatus.COLLECTED, PackageStatus.AT_HUB,
+    PackageStatus.SORTED, PackageStatus.IN_TRANSIT, PackageStatus.LOADED,
+    PackageStatus.IN_DELIVERY,
   ]);
-  const pkgs = await getPackagesByIds([...deliveredStopMeta.keys()]);
-  // Nb de colis livrés par mission (colis d'arrêts terminés dont le statut FINAL est
-  // Livré) + missions effectivement réparées → pour réconcilier leurs compteurs.
-  const deliveredByMission = new Map<string, number>();
-  const repairedMissions = new Set<string>();
-  for (const pkg of pkgs) {
-    const meta = deliveredStopMeta.get(pkg.id);
-    if (!meta) continue;
-    result.completedStopPackages++;
-    if (NON_RESURRECT.has(pkg.status)) {
-      // Déjà Livré → compte déjà comme livré pour sa mission (les autres états
-      // terminaux — Échec/Retour — ne comptent pas).
-      if (pkg.status === PackageStatus.DELIVERED)
-        deliveredByMission.set(meta.missionId, (deliveredByMission.get(meta.missionId) || 0) + 1);
-      continue;
-    }
-
+  const completedIds = new Set<string>();
+  const unprovenIds = new Set<string>();
+  const reassignedIds = new Set<string>();
+  const fixedIds = new Set<string>();
+  const missions = await getDocs(collection(db, MISSIONS_COLLECTION));
+  for (const candidate of missions.docs) {
+    if (!(candidate.data().stops || []).some((s: MissionStop) => s.type === 'DELIVERY' && s.status === StopStatus.COMPLETED)) continue;
     try {
-      await updatePackageStatus(pkg.id, PackageStatus.DELIVERED, {
-        action: 'DELIVERED',
-        driverId: meta.driverId || pkg.currentDriverId || '',
-        driverName: meta.driverName || '',
-        vehicleId: meta.vehicleId,
-        vehiclePlate: meta.vehiclePlate,
-        notes: 'Statut resynchronisé (arrêt marqué terminé par le chauffeur)'
+      const checked = await runTransaction(db, async tx => {
+        const missionRef = doc(db, MISSIONS_COLLECTION, candidate.id);
+        const snapshot = await tx.get(missionRef);
+        const outcome = { seen: [] as string[], unproven: [] as string[], reassigned: [] as string[], details: [] as StatusResyncResult['details'] };
+        if (!snapshot.exists()) return outcome;
+        const mission = snapshot.data() as Mission;
+        const stops = (mission.stops || []).filter(s => s.type === 'DELIVERY' && s.status === StopStatus.COMPLETED);
+        if (!stops.length) return outcome;
+        const ids = [...new Set(mission.stops.flatMap(s => s.packageIds || []))];
+        // Leave oversized/inconsistent historical tours for an explicit audit.
+        if (ids.length > 450 || ids.some(id => !id || id.includes('/')) || stops.some(s => !s.id || s.id.includes('/'))) {
+          throw new Error('Cette ancienne tournée doit être vérifiée individuellement par le bureau.');
+        }
+        const packages = await Promise.all(ids.map(id => tx.get(doc(db, PACKAGES_COLLECTION, id))));
+        const proofs = await Promise.all(stops.map(stop => tx.get(doc(db, 'proofs_of_delivery', `${candidate.id}_${stop.id}`))));
+        const byId = new Map(packages.filter(p => p.exists()).map(p => [p.id, p]));
+        const repairs = new Map<string, { parcel: typeof packages[number]; pkg: Package; proof: Record<string, any> }>();
+        const https = (value: unknown) => typeof value === 'string' && value.startsWith('https://');
+        for (let index = 0; index < stops.length; index++) {
+          const stop = stops[index];
+          const proof = proofs[index].data();
+          const validProof = proof?.type === 'SUCCESS' && proof.missionId === candidate.id && proof.stopId === stop.id &&
+            !!mission.driverId && proof.driverId === mission.driverId && Array.isArray(proof.packageIds) &&
+            Array.isArray(proof.photoUrls) && proof.photoUrls.length > 0 && proof.photoUrls.every(https) && https(proof.signatureUrl) &&
+            typeof proof.recipientName === 'string' && !!proof.recipientName.trim() &&
+            Number.isFinite(proof.coordinates?.lat) && Math.abs(proof.coordinates.lat) <= 90 &&
+            Number.isFinite(proof.coordinates?.lng) && Math.abs(proof.coordinates.lng) <= 180 &&
+            typeof proof.timestamp === 'string' && Number.isFinite(Date.parse(proof.timestamp));
+          for (const id of stop.packageIds || []) {
+            const parcel = byId.get(id);
+            if (!parcel) continue;
+            outcome.seen.push(id);
+            const pkg = parcel.data() as Package;
+            // Delivered, failed and return decisions are never rewritten.
+            if (!activeStatuses.has(pkg.status)) continue;
+            if (pkg.missionId !== candidate.id || pkg.stopId !== stop.id || pkg.currentDriverId !== mission.driverId ||
+              (pkg.pod && (pkg.pod.missionId !== candidate.id || pkg.pod.stopId !== stop.id || pkg.pod.packageId !== id))) {
+              outcome.reassigned.push(id);
+              continue;
+            }
+            if (!validProof || !proof!.packageIds.includes(id)) {
+              outcome.unproven.push(id);
+              continue;
+            }
+            repairs.set(id, { parcel, pkg, proof: proof! });
+          }
+        }
+        if (!repairs.size) return outcome;
+        const now = new Date().toISOString();
+        for (const [id, { parcel, pkg, proof }] of repairs) {
+          tx.update(parcel.ref, cleanUndefined({
+            status: PackageStatus.DELIVERED,
+            ...(!pkg.pod ? { pod: { ...proof, packageId: id } } : {}),
+            movements: [...(pkg.movements || []), {
+              timestamp: now, action: 'DELIVERED', driverId: proof.driverId,
+              driverName: proof.driverName || mission.driverName || '',
+              notes: `Statut rétabli à partir de la preuve de remise du ${proof.timestamp}`,
+            }], updatedAt: now,
+          }));
+          outcome.details.push({ packageId: id, orderNumber: pkg.orderNumber || pkg.externalId || id, from: String(pkg.status) });
+        }
+        // Count the latest parcels for this mission; a concurrent transaction
+        // changes the read mission/parcels and triggers a complete retry.
+        const deliveredStopIds = new Set(stops.flatMap(stop => stop.packageIds || []));
+        const deliveredPackages = packages.filter(parcel => {
+          if (!parcel.exists()) return false;
+          const pkg = parcel.data() as Package;
+          const belongs = deliveredStopIds.has(parcel.id) && (!pkg.missionId || pkg.missionId === candidate.id) &&
+            (!pkg.currentDriverId || pkg.currentDriverId === mission.driverId);
+          return belongs && (pkg.status === PackageStatus.DELIVERED || repairs.has(parcel.id));
+        }).length;
+        tx.update(missionRef, { deliveredPackages, updatedAt: now });
+        return outcome;
       });
-      result.fixedDelivered++;
-      deliveredByMission.set(meta.missionId, (deliveredByMission.get(meta.missionId) || 0) + 1);
-      repairedMissions.add(meta.missionId);
-      result.details.push({ packageId: pkg.id, orderNumber: pkg.orderNumber || pkg.externalId || pkg.id, from: String(pkg.status) });
-    } catch (e) {
+      checked.seen.forEach(id => completedIds.add(id));
+      checked.unproven.forEach(id => unprovenIds.add(id));
+      checked.reassigned.forEach(id => reassignedIds.add(id));
+      for (const detail of checked.details) {
+        if (!fixedIds.has(detail.packageId)) result.details.push(detail);
+        fixedIds.add(detail.packageId);
+      }
+    } catch (error) {
       result.failed++;
-      reportError('resync.package', e, { silent: true, extra: { packageId: pkg.id } });
+      reportError('resync.mission', error, { silent: true, extra: { missionId: candidate.id } });
     }
   }
-
-  // #11 : réconcilier deliveredPackages des missions RÉPARÉES (sinon les widgets par
-  // mission sous-comptent définitivement après un resync). Valeur autoritaire = nombre
-  // de colis livrés dans les arrêts de livraison terminés de la mission.
-  for (const mid of repairedMissions) {
-    try { await updateMissionFields(mid, { deliveredPackages: deliveredByMission.get(mid) || 0 }); }
-    catch (e) { reportError('resync.missionCounter', e, { silent: true, extra: { missionId: mid } }); }
-  }
-
+  result.completedStopPackages = completedIds.size;
+  result.fixedDelivered = fixedIds.size;
+  result.skippedUnproven = [...unprovenIds].filter(id => !fixedIds.has(id)).length;
+  result.skippedReassigned = [...reassignedIds].filter(id => !fixedIds.has(id)).length;
   return result;
 };
 
@@ -881,20 +919,32 @@ export const commitStopOutcome = async (params: {
     if (new Set(outcomes.map(o => o.packageId)).size !== outcomes.length || outcomes.length > 450) {
       throw new Error('Liste de colis invalide ou trop volumineuse.');
     }
+    if (outcomes.length && params.stopPatch.status && terminal(params.stopPatch.status) &&
+      (outcomes.length !== prev.packageIds.length || prev.packageIds.some(id => !outcomes.some(o => o.packageId === id)))) {
+      throw new Error('La liste des colis de cet arrêt a changé. Actualisez et vérifiez tous les colis avant de valider.');
+    }
     const pkgSnaps = await Promise.all(outcomes.map(o => tx.get(doc(db, PACKAGES_COLLECTION, o.packageId))));
     for (let i=0; i<outcomes.length; i++) {
       const p = pkgSnaps[i];
       if (!p.exists() || !prev.packageIds.includes(p.id)) throw new Error('Un colis ne fait plus partie de cet arrêt.');
       const data = p.data() as Package;
       if ((data.missionId && data.missionId !== params.missionId) ||
+          (data.stopId && data.stopId !== params.stopId) ||
           (data.currentDriverId && m.driverId && data.currentDriverId !== m.driverId)) {
         throw new Error('Un colis a été transféré à un autre chauffeur. Actualisez la tournée.');
+      }
+      if ([PackageStatus.DELIVERED, PackageStatus.RETURNED].includes(data.status) && data.status !== outcomes[i].status) {
+        throw new Error('Un colis a déjà été livré ou retourné. Actualisez la tournée.');
       }
     }
     const delivered = outcomes.length ? outcomes.filter(o => o.status === PackageStatus.DELIVERED).length : (params.deliveredDelta || 0);
     const failed = outcomes.length ? outcomes.filter(o => o.status === PackageStatus.FAILED).length : (params.failedDelta || 0);
     if (delivered < 0 || failed < 0 || delivered + failed > prev.packageIds.length) throw new Error('Comptage des colis incohérent.');
-    const cleanPatch = cleanUndefined(params.stopPatch) as Partial<MissionStop>;
+    const cleanPatch = cleanUndefined({
+      ...params.stopPatch,
+      ...(outcomes.length && params.stopPatch.status && terminal(params.stopPatch.status)
+        ? { proofSyncPending: true } : {})
+    }) as Partial<MissionStop>;
     const stops = m.stops.map(s => s.id === params.stopId ? { ...s, ...cleanPatch } : s);
     for (let i=0; i<outcomes.length; i++) {
       const outcome=outcomes[i], p=pkgSnaps[i].data() as Package;
@@ -916,15 +966,78 @@ export const commitStopOutcome = async (params: {
 };
 
 export const updateMissionStatus = async (missionId: string, status: MissionStatus): Promise<void> => {
+  if (status === MissionStatus.COMPLETED) {
+    await httpsCallable(getFunctions(app, 'europe-west1'), 'finishMission')({ missionId });
+    return;
+  }
   const updates: any = { status, updatedAt: new Date().toISOString() };
   
   if (status === MissionStatus.IN_PROGRESS) {
     updates.startedAt = new Date().toISOString();
-  } else if (status === MissionStatus.COMPLETED) {
-    updates.completedAt = new Date().toISOString();
   }
   
   await updateDoc(doc(db, MISSIONS_COLLECTION, missionId), updates);
+};
+
+/** Start from fresh server state so a transfer or one failed package update
+ * cannot leave half of a tour loaded or restore its previous stop list. */
+export const startDriverMission = async (
+  missionId: string,
+  params: { driverId: string; driverName: string; startedAt: string; coordinates: { lat: number; lng: number } }
+): Promise<MissionStop[]> => {
+  const missionRef = doc(db, MISSIONS_COLLECTION, missionId);
+  return runTransaction(db, async tx => {
+    const snap = await tx.get(missionRef);
+    if (!snap.exists()) throw new Error('Tournée introuvable.');
+    const mission = snap.data() as Mission;
+    if (mission.driverId !== params.driverId) throw new Error('Cette tournée ne vous est pas affectée.');
+    if ([MissionStatus.COMPLETED, MissionStatus.CANCELLED].includes(mission.status)) {
+      throw new Error('Cette tournée est clôturée.');
+    }
+    if (mission.loadedAt && mission.status === MissionStatus.IN_PROGRESS) return mission.stops;
+    const parcelIds = mission.stops.flatMap(s => s.packageIds || []);
+    if (new Set(parcelIds).size !== parcelIds.length || parcelIds.length > 450) {
+      throw new Error('La liste des colis doit être vérifiée par le bureau avant le départ.');
+    }
+    if (mission.stops.some(s => [StopStatus.COMPLETED, StopStatus.FAILED, StopStatus.SKIPPED].includes(s.status))) {
+      throw new Error('Cette tournée a déjà des arrêts traités. Actualisez la tournée.');
+    }
+    const parcels = await Promise.all(parcelIds.map(id => tx.get(doc(db, PACKAGES_COLLECTION, id))));
+    for (const parcel of parcels) {
+      if (!parcel.exists()) throw new Error('Un colis de la tournée est introuvable. Contactez le bureau.');
+      const p = parcel.data() as Package;
+      if (p.missionId !== missionId || (p.currentDriverId && p.currentDriverId !== params.driverId) ||
+        [PackageStatus.DELIVERED, PackageStatus.RETURNED, PackageStatus.FAILED, PackageStatus.RETURN_REQUESTED].includes(p.status)) {
+        throw new Error('Un colis a été transféré ou traité. Actualisez la tournée avant de partir.');
+      }
+    }
+    const plannedDeparture = mission.plannedDepartureTime
+      ? `${mission.date}T${mission.plannedDepartureTime}:00+04:00` : undefined;
+    const stops = recalculateStopEtas(mission.stops, params.startedAt, plannedDeparture);
+    const byId = new Map(parcels.map(p => [p.id, p]));
+    for (const stop of stops) {
+      for (const id of stop.packageIds) {
+        const parcel = byId.get(id)!;
+        const p = parcel.data() as Package;
+        // A pickup is still awaiting collection until it is actually scanned.
+        const status = stop.type === 'PICKUP' ? p.status : PackageStatus.IN_DELIVERY;
+        tx.update(parcel.ref, cleanUndefined({
+          status, missionId, stopId: stop.id, currentDriverId: params.driverId,
+          currentVehicleId: mission.vehicleId || null, estimatedDeliveryAt: stop.estimatedArrival || null,
+          movements: [...(p.movements || []), {
+            timestamp: params.startedAt, action: 'LOADING_COMPLETE',
+            driverId: params.driverId, driverName: params.driverName,
+            location: params.coordinates, notes: 'Chargement terminé — départ de tournée'
+          }], updatedAt: params.startedAt
+        }));
+      }
+    }
+    tx.update(missionRef, cleanUndefined({
+      status: MissionStatus.IN_PROGRESS, loadedAt: params.startedAt,
+      startedAt: params.startedAt, stops, updatedAt: params.startedAt
+    }));
+    return stops;
+  });
 };
 
 export const deleteMission = async (id: string): Promise<void> => {
@@ -1385,63 +1498,83 @@ export const optimizeDriverMission = async (
   missionId: string,
   startCoords: { lat: number; lng: number }
 ): Promise<number> => {
-  const snap = await getDoc(doc(db, MISSIONS_COLLECTION, missionId));
+  const missionRef = doc(db, MISSIONS_COLLECTION, missionId);
+  const snap = await getDoc(missionRef);
   if (!snap.exists()) throw new Error('Tournée introuvable');
-  const mission = { id: snap.id, ...snap.data() } as Mission;
-  const apiKey = getGoogleMapsApiKey();
-
-  const done = mission.stops.filter(s => s.status === StopStatus.COMPLETED || s.status === StopStatus.FAILED || s.status === StopStatus.SKIPPED);
-  const pending = mission.stops.filter(s => !done.includes(s));
+  const mission = snap.data() as Mission;
+  const isDone = (stop: MissionStop) => [StopStatus.COMPLETED, StopStatus.FAILED, StopStatus.SKIPPED].includes(stop.status);
+  const assertCanReorder = (current: Mission) => {
+    if ([MissionStatus.COMPLETED, MissionStatus.CANCELLED].includes(current.status)) {
+      throw new Error('Cette tournée est clôturée.');
+    }
+    if (current.stops.some(stop => !isDone(stop) && (stop.timeWindowStart || stop.timeWindowEnd))) {
+      throw new Error('Cette tournée contient des créneaux clients. Demandez au bureau de recalculer la tournée pour respecter ces horaires.');
+    }
+  };
+  assertCanReorder(mission);
+  const pending = mission.stops.filter(stop => !isDone(stop)).map(stop => ({ ...stop }));
   if (pending.length <= 1) return 0;
-
-  // Géocoder les arrêts sans coordonnées
-  for (const s of pending) {
-    if (!s.coordinates && apiKey) {
-      const c = await geocodeAddress(s.address, s.city, s.postalCode, apiKey);
-      if (c) s.coordinates = c;
+  const apiKey = getGoogleMapsApiKey();
+  for (const stop of pending) {
+    if (!stop.coordinates && apiKey) {
+      const coords = await geocodeAddress(stop.address, stop.city, stop.postalCode, apiKey);
+      if (coords) stop.coordinates = coords;
     }
   }
-  const withCoords = pending.filter(s => s.coordinates);
-  if (withCoords.length < 2) return -1; // géocodage indisponible → optimisation impossible
+  if (pending.filter(stop => stop.coordinates).length < 2) return -1;
 
-  // Plus-proche-voisin depuis le point de départ
   const remaining = [...pending];
   const ordered: MissionStop[] = [];
   let cursor = startCoords;
-  while (remaining.length > 0) {
-    let bestIdx = 0;
-    let bestDist = Infinity;
-    for (let i = 0; i < remaining.length; i++) {
-      const c = remaining[i].coordinates;
-      const d = c ? haversineKm(cursor, c) : Infinity; // sans coords → repoussé en fin
-      if (d < bestDist) { bestDist = d; bestIdx = i; }
-    }
-    const next = remaining.splice(bestIdx, 1)[0];
+  while (remaining.length) {
+    let bestIndex = 0;
+    let bestDistance = Infinity;
+    remaining.forEach((stop, index) => {
+      const distance = stop.coordinates ? haversineKm(cursor, stop.coordinates) : Infinity;
+      if (distance < bestDistance) { bestDistance = distance; bestIndex = index; }
+    });
+    const next = remaining.splice(bestIndex, 1)[0];
     ordered.push(next);
     if (next.coordinates) cursor = next.coordinates;
   }
+  const order = new Map(ordered.map((stop, index) => [stop.id, index]));
+  const coords = new Map(pending.filter(stop => stop.coordinates).map(stop => [stop.id, stop.coordinates!]));
 
-  // Ordre calculé (map id → rang). Réappliqué dans une transaction sur les
-  // stops ACTUELS pour ne pas écraser un arrêt ajouté entre-temps.
-  const orderMap = new Map<string, number>();
-  [...done, ...ordered].forEach((s, i) => orderMap.set(s.id, i + 1));
-  const coordsMap = new Map(pending.filter(s => s.coordinates).map(s => [s.id, s.coordinates!]));
-
-  await runTransaction(db, async (tx) => {
-    const snap = await tx.get(doc(db, MISSIONS_COLLECTION, missionId));
-    if (!snap.exists()) throw new Error('Tournée introuvable');
-    const m = { id: snap.id, ...snap.data() } as Mission;
-    let extra = orderMap.size;
-    const finalStops = m.stops
-      .map(s => ({
-        ...s,
-        coordinates: s.coordinates || coordsMap.get(s.id),
-        sequence: orderMap.has(s.id) ? orderMap.get(s.id)! : ++extra // stops ajoutés entre-temps → à la fin
-      }))
-      .sort((a, b) => a.sequence - b.sequence);
-    tx.update(doc(db, MISSIONS_COLLECTION, missionId), { stops: finalStops, updatedAt: new Date().toISOString() });
+  return runTransaction(db, async tx => {
+    const latest = await tx.get(missionRef);
+    if (!latest.exists()) throw new Error('Tournée introuvable');
+    const current = latest.data() as Mission;
+    assertCanReorder(current);
+    // A stop completed during geocoding remains terminal, with its proof and
+    // historical timing untouched. Stops added meanwhile remain in the tour.
+    const done = current.stops.filter(isDone).sort((a, b) => a.sequence - b.sequence);
+    const todo = current.stops.filter(stop => !isDone(stop))
+      .sort((a, b) => (order.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (order.get(b.id) ?? Number.MAX_SAFE_INTEGER));
+    if (todo.length <= 1) return 0;
+    const parcelIds = [...new Set(todo.flatMap(stop => stop.packageIds || []))];
+    if (parcelIds.length > 450) throw new Error('Trop de colis pour un recalcul local. Demandez une planification au bureau.');
+    const parcels = await Promise.all(parcelIds.map(id => tx.get(doc(db, PACKAGES_COLLECTION, id))));
+    for (const parcel of parcels) {
+      if (!parcel.exists() || parcel.data().missionId !== missionId) {
+        throw new Error('L’affectation d’un colis a changé. Actualisez la tournée avant de la réordonner.');
+      }
+    }
+    const finalStops = [...done, ...todo.map(stop => {
+      const {
+        estimatedArrival: _arrival, estimatedDeparture: _departure,
+        durationFromPrevious: _duration, distanceFromPrevious: _distance, ...rest
+      } = stop;
+      return { ...rest, coordinates: stop.coordinates || coords.get(stop.id) };
+    })].map((stop, index) => ({ ...stop, sequence: index + 1 }));
+    const now = new Date().toISOString();
+    for (const parcel of parcels) {
+      tx.update(parcel.ref, { estimatedDeliveryAt: null, updatedAt: now });
+    }
+    tx.update(missionRef, cleanUndefined({
+      stops: finalStops, totalDistance: null, estimatedDuration: null, updatedAt: now,
+    }));
+    return todo.length;
   });
-  return ordered.length;
 };
 
 /**

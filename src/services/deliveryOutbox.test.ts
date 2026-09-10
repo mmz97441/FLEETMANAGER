@@ -1,5 +1,6 @@
 import { beforeEach, it, expect, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
+import { StopStatus } from '../types';
 const calls = vi.hoisted(() => ({
   auth: { currentUser: { uid: 'driver' } },
   commit: vi.fn(),
@@ -20,6 +21,7 @@ beforeEach(() => {
   vi.stubGlobal('navigator', { onLine: true });
   calls.commit.mockReset().mockResolvedValue({ allDone: true, stops: [] });
   calls.proof.mockReset().mockResolvedValue({ id: 'proof' });
+  calls.failure.mockReset().mockResolvedValue(true);
 });
 const entry = () => ({
   id: 'driver/mission/stop',
@@ -53,6 +55,7 @@ it('keeps photos and signatures across reload after upload failure', async () =>
   expect(await reloaded.pendingDeliveries('another-driver')).toEqual([]);
   await reloaded.syncDeliveries('driver');
   expect(await reloaded.pendingDeliveries('driver')).toEqual([]);
+  expect(calls.proof).toHaveBeenLastCalledWith(expect.objectContaining({ recordedAt: entry().createdAt }));
 });
 it('persists the full action without starting network writes offline', async () => {
   vi.stubGlobal('navigator', { onLine: false });
@@ -86,4 +89,68 @@ it('preserves the first pending intention across concurrent tabs',async()=>{
  const rows=await firstTab.pendingDeliveries('driver');
  expect(rows).toHaveLength(1);expect(rows[0].proof.photosBase64).toEqual(['photo-data']);
  expect(calls.commit).not.toHaveBeenCalled();
+});
+
+it('blocks closing while the delivery is local and while its photos await upload', async () => {
+  const outbox = await import('./deliveryOutbox');
+  vi.stubGlobal('navigator', { onLine: false });
+  await expect(outbox.submitDelivery(entry())).rejects.toThrow();
+  await expect(outbox.assertMissionReadyToClose('driver', 'mission', [
+    { status: StopStatus.ARRIVED },
+  ])).rejects.toThrow('attendent encore leur envoi');
+
+  vi.stubGlobal('navigator', { onLine: true });
+  calls.proof.mockResolvedValueOnce(null);
+  await outbox.syncDeliveries('driver');
+  expect((await outbox.pendingDeliveries('driver', 'mission'))[0].committed).toBe(true);
+  await expect(outbox.assertMissionReadyToClose('driver', 'mission', [
+    { status: StopStatus.COMPLETED, proofSyncPending: true },
+  ])).rejects.toThrow('attendent encore leur envoi');
+
+  await outbox.syncDeliveries('driver');
+  await expect(outbox.assertMissionReadyToClose('driver', 'mission', [
+    { status: StopStatus.COMPLETED, proofSyncPending: false },
+  ])).resolves.toBeUndefined();
+});
+
+it('scopes the local closure check to the current driver and mission', async () => {
+  const outbox = await import('./deliveryOutbox');
+  calls.proof.mockResolvedValue(null);
+  await expect(outbox.submitDelivery(entry())).rejects.toThrow();
+  await expect(outbox.assertMissionReadyToClose('driver', 'other-mission', [
+    { status: StopStatus.FAILED },
+  ])).resolves.toBeUndefined();
+  await expect(outbox.assertMissionReadyToClose('other-driver', 'mission', [
+    { status: StopStatus.COMPLETED },
+  ])).resolves.toBeUndefined();
+  expect(await outbox.pendingDeliveries('driver', 'other-mission')).toEqual([]);
+});
+
+it.each([StopStatus.PENDING, StopStatus.ARRIVED])('blocks closing an untreated stop (%s)', async (status) => {
+  const outbox = await import('./deliveryOutbox');
+  await expect(outbox.assertMissionReadyToClose('driver', 'mission', [
+    { status }, { status: StopStatus.COMPLETED },
+  ])).rejects.toThrow('1 arrêt(s) restent à traiter');
+});
+
+it('blocks closing when a proof from another device is pending', async () => {
+  const outbox = await import('./deliveryOutbox');
+  await expect(outbox.assertMissionReadyToClose('driver', 'mission', [
+    { status: StopStatus.FAILED, proofSyncPending: true },
+  ])).rejects.toThrow('Synchronisez l’appareil');
+});
+
+it('requires a connection and a readable outbox before closing', async () => {
+  const outbox = await import('./deliveryOutbox');
+  vi.stubGlobal('navigator', { onLine: false });
+  await expect(outbox.assertMissionReadyToClose('driver', 'mission', [
+    { status: StopStatus.COMPLETED },
+  ])).rejects.toThrow('Une connexion est nécessaire');
+
+  vi.resetModules();
+  vi.stubGlobal('indexedDB', { open: () => { throw new Error('Storage unavailable'); } });
+  const unavailable = await import('./deliveryOutbox');
+  await expect(unavailable.assertMissionReadyToClose('driver', 'mission', [
+    { status: StopStatus.COMPLETED },
+  ])).rejects.toThrow('Impossible de vérifier les envois');
 });

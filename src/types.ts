@@ -1032,6 +1032,7 @@ export interface MissionStop {
   arrivalTime?: string;
   completionTime?: string;
   arrivalCoordinates?: { lat: number; lng: number };
+  proofSyncPending?: boolean;      // La clôture attend l'envoi complet des preuves.
   
   // ETA calculé par GMPRO
   estimatedArrival?: string;
@@ -1155,7 +1156,8 @@ export interface ReturnProof {
   signatureUrl?: string;           // Signature de réception au hub
   
   // Localisation
-  coordinates: { lat: number; lng: number };
+  coordinates: { lat: number; lng: number } | null;
+  locationStatus?: 'captured' | 'unavailable';
   
   // Horodatage
   timestamp: string;

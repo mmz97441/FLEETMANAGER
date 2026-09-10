@@ -647,6 +647,8 @@ const check = async (name, fn) => {
       }
     },
   );
+  await require('./test-dispatch.cjs')({ service, db, context, check });
+  await require('./test-hub-reception.cjs')({ service, db, context, check });
   console.log('SERVER TESTS PASSED', passed);
   await req('firebase-admin/app').deleteApp(req('firebase-admin/app').getApp());
 })().catch((e) => {

@@ -7,20 +7,17 @@
  * 4. Dispatcher toutes les tournées d'un coup
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   Package, PackageStatus, Zone, Hub, User, UserRole, Vehicle, VehicleStatus,
-  Mission, MissionStatus, MissionType, MissionStop, StopStatus,
+  Mission, MissionStatus, MissionType,
   ZONE_COLORS
 } from '../types';
-import { optimizeMultiVehicle, isGMPROConfigured, getGoogleMapsApiKey, TourResult, OptimizationResult, DriverVehicle } from '../services/gmproService';
+import { optimizeMultiVehicle, isGMPROConfigured, getGoogleMapsApiKey, OptimizationResult, DriverVehicle } from '../services/gmproService';
 import { todayISO } from '../utils/date';
 import { formatDistance, formatDuration } from '../utils/format';
-import { addMission, updatePackageStatus } from '../services/missionService';
-import { notifyMissionAssigned } from '../services/notificationService';
-import { logActivity } from '../services/activityLogService';
-import { reportError } from '../services/logService';
-import { ActivityAction } from '../types';
+import { dispatchMissionsCF } from '../services/cloudFunctions';
+import { placeKey } from '../utils/address';
 import Modal from './shared/Modal';
 import {
   Route, Package as PackageIcon, MapPin, Users, Truck, Play,
@@ -67,10 +64,6 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
     const minutes = now.getMinutes();
     const roundedMinutes = Math.ceil(minutes / 15) * 15;
     now.setMinutes(roundedMinutes, 0, 0);
-    if (roundedMinutes >= 60) {
-      now.setHours(now.getHours() + 1);
-      now.setMinutes(0);
-    }
     return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
   };
   
@@ -80,6 +73,9 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
   const [optimResult, setOptimResult] = useState<OptimizationResult | null>(null);
   const [expandedTour, setExpandedTour] = useState<number | null>(null);
   const [showDispatchModal, setShowDispatchModal] = useState(false);
+  const dispatchLock = useRef(false);
+  const optimizationVersion = useRef(0);
+  const dispatchAttempt = useRef<{ result: OptimizationResult; requestId: string; missions: Array<Omit<Mission, 'id' | 'createdAt' | 'updatedAt'>> } | null>(null);
   
   // Créneaux de livraison modifiés (packageId → { start, end })
   const [packageTimeWindows, setPackageTimeWindows] = useState<Record<string, { start: string; end: string }>>({});
@@ -87,6 +83,12 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
   // Option pour ignorer les créneaux (force inclusion de tous les stops)
   const [ignoreTimeWindows, setIgnoreTimeWindows] = useState(false);
   
+  useEffect(() => {
+    optimizationVersion.current++;
+    setOptimResult(null);
+    dispatchAttempt.current = null;
+  }, [selectedDate, selectedZone, selectedDriverIds, selectedHubId, plannedDepartureTime, ignoreTimeWindows, packageTimeWindows]);
+
   // Filtrer les colis au hub — prêts à être dispatchés
   // FIX v3.7.10: Exclure les colis déjà assignés à une mission (anti-double dispatch)
   const pendingPackages = useMemo(() => 
@@ -104,7 +106,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
     
     for (const zone of Object.values(Zone)) {
       const zonePackages = pendingPackages.filter(p => p.zone === zone);
-      const uniqueStops = new Set(zonePackages.map(p => `${p.address}|${p.postalCode}`));
+      const uniqueStops = new Set(zonePackages.map(placeKey));
       
       let hub = hubs.find(h => h.zone === zone && h.isActive) || null;
       if (!hub) {
@@ -214,6 +216,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
       }
     }
     
+    const optimizationRun = optimizationVersion.current;
     setIsOptimizing(true);
     setOptimResult(null);
     setExpandedTour(null);
@@ -234,8 +237,8 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
         const tw = packageTimeWindows[pkg.id];
         return {
           ...pkg,
-          timeWindowStart: tw?.start || undefined,
-          timeWindowEnd: tw?.end || undefined
+          timeWindowStart: tw ? tw.start || undefined : pkg.timeWindowStart,
+          timeWindowEnd: tw ? tw.end || undefined : pkg.timeWindowEnd
         };
       });
       
@@ -248,7 +251,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
         plannedDepartureTime  // Utiliser l'heure de départ du formulaire
       );
       
-      setOptimResult(result);
+      if (optimizationVersion.current === optimizationRun) setOptimResult(result);
       
       // Ouvrir le premier tour par défaut
       if (result.tours.length > 0) {
@@ -257,7 +260,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
       
     } catch (error) {
       console.error('Optimization error:', error);
-      setOptimResult({
+      if (optimizationVersion.current === optimizationRun) setOptimResult({
         success: false,
         tours: [],
         totalDistance: 0,
@@ -279,121 +282,44 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
   const handleDispatchAll = async () => {
     if (!optimResult || optimResult.tours.length === 0 || !selectedZoneStats) return;
     
-    // Empêcher double-clic
-    if (isDispatching) return;
-    
+    if (dispatchLock.current || !departureHub || !selectedZone) return;
+    dispatchLock.current = true;
     setIsDispatching(true);
-    let dispatchSkipped = 0; // colis introuvables sautés (supprimés entre-temps)
-
     try {
-      for (const tour of optimResult.tours) {
-        const hub = selectedZoneStats.hub || departureHub;
-        
-        const mission: Omit<Mission, 'id' | 'createdAt' | 'updatedAt'> = {
-          date: selectedDate,
-          zone: selectedZone!,
-          hubId: hub?.id || '',
-          hubName: hub?.name || 'Départ direct',
-          type: MissionType.DELIVERY,
-          status: MissionStatus.DISPATCHED,
-          plannedDepartureTime,
-          driverId: tour.driverId,
-          driverName: tour.driverName,
-          vehicleId: tour.vehicleId,
-          vehiclePlate: tour.vehiclePlate,
-          stops: tour.stops,
-          totalPackages: tour.packageCount,
-          completedStops: 0,
-          failedStops: 0,
-          deliveredPackages: 0,
-          failedPackages: 0,
-          totalDistance: tour.totalDistance,
-          estimatedDuration: tour.estimatedDuration,
-          createdBy: currentUser.id,
-          createdByName: `${currentUser.firstName} ${currentUser.lastName}`,
-          dispatchedBy: currentUser.id,
-          dispatchedByName: `${currentUser.firstName} ${currentUser.lastName}`,
-          dispatchedAt: new Date().toISOString()
+      if (dispatchAttempt.current?.result !== optimResult) {
+        dispatchAttempt.current = {
+          result: optimResult,
+          requestId: crypto.randomUUID(),
+          missions: optimResult.tours.map(tour => ({
+            date: selectedDate, zone: selectedZone, hubId: departureHub.id, hubName: departureHub.name,
+            type: MissionType.DELIVERY, status: MissionStatus.DISPATCHED, plannedDepartureTime,
+            driverId: tour.driverId, driverName: tour.driverName,
+            ...(tour.vehicleId ? { vehicleId: tour.vehicleId, vehiclePlate: tour.vehiclePlate || '' } : {}),
+            stops: tour.stops, totalPackages: tour.packageCount,
+            completedStops: 0, failedStops: 0, deliveredPackages: 0, failedPackages: 0,
+            totalDistance: tour.totalDistance, estimatedDuration: tour.estimatedDuration,
+            createdBy: currentUser.id, createdByName: `${currentUser.firstName} ${currentUser.lastName}`,
+          })),
         };
-        
-        const missionId = await addMission(mission);
-
-        // Mettre à jour le statut des colis. CHAQUE colis est isolé : un colis
-        // supprimé entre l'affichage et le dispatch (updatePackageStatus lève
-        // « Package not found ») ne doit PAS interrompre le dispatch et laisser les
-        // tournées suivantes non créées / des colis en double. On saute et on compte.
-        const packageIds = tour.stops.flatMap(s => s.packageIds);
-        for (const pkgId of packageIds) {
-          const stop = tour.stops.find(s => s.packageIds.includes(pkgId));
-
-          // Construire extraFields sans les valeurs undefined
-          const extraFields: Record<string, string | undefined> = {
-            missionId,
-            stopId: stop?.id,
-            currentDriverId: tour.driverId
-          };
-          // N'ajouter currentVehicleId que s'il existe
-          if (tour.vehicleId) {
-            extraFields.currentVehicleId = tour.vehicleId;
-          }
-
-          try {
-            await updatePackageStatus(pkgId, PackageStatus.SORTED, {
-              action: 'SORTED',
-              driverId: tour.driverId,
-              driverName: tour.driverName,
-              notes: `Dispatché mission ${selectedZone} - ${tour.driverName}`
-            }, extraFields);
-          } catch (e) {
-            dispatchSkipped++;
-            reportError('dispatch.package', e, { silent: true, extra: { pkgId, missionId } });
-          }
-        }
-        
-        logActivity(currentUser, ActivityAction.ITEM_CREATED, {
-          targetType: 'mission',
-          targetId: missionId,
-          targetName: `Mission ${selectedZone} — ${tour.driverName}`,
-          details: {
-            metadata: {
-              zone: selectedZone,
-              driver: tour.driverName,
-              stops: tour.stops.length,
-              packages: packageIds.length,
-              distance: tour.totalDistance
-            }
-          }
-        });
-        
-        // 🔔 Notifier le chauffeur
-        notifyMissionAssigned(
-          tour.driverId,
-          selectedZone!,
-          tour.stops.length,
-          tour.vehiclePlate ?? ''
-        ).catch(() => {});
       }
-      
-      // Reset et fermer
-      setIsDispatching(false);
+      const attempt = dispatchAttempt.current;
+      await dispatchMissionsCF({ requestId: attempt.requestId, missions: attempt.missions });
+      dispatchAttempt.current = null;
       setShowDispatchModal(false);
       setSelectedZone(null);
       setSelectedDriverIds(new Set());
       setSelectedHubId('');
       setOptimResult(null);
-      
       onMissionCreated();
-      if (dispatchSkipped > 0) {
-        alert(`Dispatch terminé, mais ${dispatchSkipped} colis introuvable(s) ont été ignorés (supprimés entre-temps ?). Vérifiez la liste.`);
-      }
-
     } catch (error) {
       console.error('Dispatch error:', error);
-      alert('Erreur lors du dispatch. Vérifiez la console pour plus de détails.');
+      alert(error instanceof Error ? error.message : 'Le dispatch n’a pas pu être confirmé. Réessayez : la même demande ne créera pas de doublon.');
+    } finally {
+      dispatchLock.current = false;
       setIsDispatching(false);
     }
   };
-  
+
   // Ouvrir le modal
   const openDispatchModal = (zone: Zone) => {
     setSelectedZone(zone);
@@ -541,13 +467,13 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
       {/* Modal Dispatch Multi-tournées */}
       <Modal
         isOpen={showDispatchModal}
-        onClose={() => setShowDispatchModal(false)}
+        onClose={() => { if (!isDispatching && !isOptimizing) setShowDispatchModal(false); }}
         title={`Dispatch — Zone ${selectedZone}`}
         size="lg"
         headerIcon={<Route size={20} />}
       >
         {selectedZoneStats && (
-          <div className="space-y-5">
+          <fieldset disabled={isOptimizing || isDispatching} className="space-y-5">
             {/* Résumé zone */}
             <div className="grid grid-cols-3 gap-3">
               <div className="bg-slate-50 rounded-xl p-3 text-center">
@@ -973,7 +899,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
                 )}
               </button>
             </div>
-          </div>
+          </fieldset>
         )}
       </Modal>
     </div>

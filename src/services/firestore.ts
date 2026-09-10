@@ -23,19 +23,9 @@ import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { Vehicle, FuelLog, MaintenanceLog, Issue, VehicleStatus, User, UserRole, LeaveRequest, QuoteRequest, CompanyDocument, DocumentAcknowledgment, SavedAddress } from "../types";
 import { reportError } from "./logService";
 import { cleanUndefined } from "../utils/firestore";
+import { mapDbStatusToApp } from '../utils/vehicleStatus';
 
 // --- HELPER UTILS ---
-const mapDbStatusToApp = (dbStatus: any): VehicleStatus => {
-  if (!dbStatus) return VehicleStatus.ACTIVE;
-  const normalized = String(dbStatus).toLowerCase();
-  
-  if (normalized.includes('actif') || normalized.includes('service')) return VehicleStatus.ACTIVE;
-  if (normalized.includes('maintenance') || normalized.includes('garage')) return VehicleStatus.MAINTENANCE;
-  if (normalized.includes('panne') || normalized.includes('problème') || normalized.includes('issue')) return VehicleStatus.ISSUE;
-  if (normalized.includes('disponible') || normalized.includes('idle')) return VehicleStatus.IDLE;
-  
-  return VehicleStatus.ACTIVE; // Fallback sûr
-};
 
 // Retire les champs undefined (non supportés par Firestore). Délègue à la source
 // de vérité unique `cleanUndefined` (utils/firestore) : nettoyage RÉCURSIF, donc

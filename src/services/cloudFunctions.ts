@@ -192,9 +192,20 @@ export interface GMPROModel {
 
 export interface GMPROResult {
   routes?: Array<{
-    vehicleIndex: number;
+    vehicleIndex?: number;
+    vehicleStartTime?: string;
+    vehicleEndTime?: string;
+    transitions?: Array<{
+      travelDuration?: string;
+      totalDuration?: string;
+      waitDuration?: string;
+      delayDuration?: string;
+      breakDuration?: string;
+      travelDistanceMeters?: number;
+      startTime?: string;
+    }>;
     visits?: Array<{
-      shipmentIndex: number;
+      shipmentIndex?: number;
       startTime?: string;
       detour?: string;
     }>;
@@ -202,6 +213,10 @@ export interface GMPROResult {
       totalDuration?: string;
       travelDuration?: string;
       travelDistanceMeters?: number;
+      waitDuration?: string;
+      visitDuration?: string;
+      delayDuration?: string;
+      breakDuration?: string;
     };
     routeTotalCost?: number;
   }>;
@@ -411,4 +426,23 @@ export const sendLeaveDecisionEmail = async (
     console.error('[CF] Erreur email décision congés:', error);
     throw error;
   }
+};
+
+/** Crée toutes les tournées et leurs affectations dans une transaction serveur. */
+export const dispatchMissionsCF = async (
+  request: { requestId: string; missions: Array<Omit<import('../types').Mission, 'id' | 'createdAt' | 'updatedAt'>> },
+): Promise<{ missionIds: string[]; packageCount: number; replayed: boolean }> => {
+  const call = httpsCallable<typeof request, { missionIds: string[]; packageCount: number; replayed: boolean }>(functions, 'dispatchMissions');
+  // Callable encoding turns undefined object fields into null; optional stop
+  // fields must stay absent for server validation and Firestore writes.
+  return (await call(JSON.parse(JSON.stringify(request)))).data;
+};
+
+export const receivePackagesAtHubCF = async (hubId: string, packageIds: string[]): Promise<{
+  receivedCount: number; alreadyReceivedCount: number; receivedPackageIds: string[]; confirmedPackageIds: string[];
+}> => {
+  const call = httpsCallable<{ hubId: string; packageIds: string[] }, {
+    receivedCount: number; alreadyReceivedCount: number; receivedPackageIds: string[]; confirmedPackageIds: string[];
+  }>(functions, 'receivePackagesAtHub');
+  return (await call({ hubId, packageIds })).data;
 };
