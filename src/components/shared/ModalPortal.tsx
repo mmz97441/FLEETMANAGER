@@ -9,7 +9,8 @@
  * - Centre le contenu sur le viewport
  */
 
-import React, { useEffect, useCallback } from 'react';
+import React from 'react';
+import { useDialogLayer } from '../../hooks/useDialogLayer';
 import { createPortal } from 'react-dom';
 
 interface ModalPortalProps {
@@ -27,49 +28,17 @@ const ModalPortal: React.FC<ModalPortalProps> = ({
   closeOnEscape = true,
   zIndex = 99999
 }) => {
-  // Gérer Escape
-  const handleEscape = useCallback((e: KeyboardEvent) => {
-    if (e.key === 'Escape' && closeOnEscape && onClose) {
-      onClose();
-    }
-  }, [onClose, closeOnEscape]);
-
-  // Bloquer le scroll et écouter Escape
-  useEffect(() => {
-    if (isOpen) {
-      // Sauvegarder la position de scroll
-      const scrollY = window.scrollY;
-      
-      // Bloquer le scroll
-      document.body.style.position = 'fixed';
-      document.body.style.top = `-${scrollY}px`;
-      document.body.style.left = '0';
-      document.body.style.right = '0';
-      document.body.style.overflow = 'hidden';
-      
-      // Écouter Escape
-      if (closeOnEscape && onClose) {
-        document.addEventListener('keydown', handleEscape);
-      }
-      
-      return () => {
-        // Restaurer le scroll
-        document.body.style.position = '';
-        document.body.style.top = '';
-        document.body.style.left = '';
-        document.body.style.right = '';
-        document.body.style.overflow = '';
-        window.scrollTo(0, scrollY);
-        
-        document.removeEventListener('keydown', handleEscape);
-      };
-    }
-  }, [isOpen, handleEscape, closeOnEscape, onClose]);
+  const layerRef = useDialogLayer(isOpen, () => { if (closeOnEscape) onClose?.(); });
 
   if (!isOpen) return null;
 
   const content = (
     <div
+      ref={layerRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Fenêtre de détail"
+      tabIndex={-1}
       style={{
         position: 'fixed',
         top: 0,

@@ -100,7 +100,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
       permissions: [Permission.DASHBOARD_VIEW, Permission.PRESIDENT_OVERVIEW_VIEW, Permission.FLEET_MAP_VIEW],
       items: [
         { id: 'dashboard', label: 'Tableau de bord', icon: LayoutDashboard, permission: Permission.DASHBOARD_VIEW },
-        { id: 'president_overview', label: 'Vue de dieu', icon: Eye, permission: Permission.PRESIDENT_OVERVIEW_VIEW },
+        { id: 'president_overview', label: 'Vue d’ensemble direction', icon: Eye, permission: Permission.PRESIDENT_OVERVIEW_VIEW },
         { id: 'fleet_map', label: 'Carte chauffeurs', icon: MapPin, permission: Permission.FLEET_MAP_VIEW },
       ]
     },
@@ -115,10 +115,10 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
       permissions: [Permission.MISSIONS_VIEW, Permission.MISSIONS_VIEW_OWN, Permission.QUOTES_VIEW],
       badgeKey: 'quotes',
       items: [
-        { id: 'missions', label: 'Missions', icon: Route, permission: Permission.MISSIONS_VIEW },
+        { id: 'missions', label: 'Préparer les tournées', icon: Route, permission: Permission.MISSIONS_VIEW },
         { id: 'tours_overview', label: 'Suivi des tournées', icon: ClipboardList, permission: Permission.MISSIONS_VIEW },
-        { id: 'hub_operations', label: 'Opérations Hub', icon: Package, permission: Permission.MISSIONS_VIEW },
-        { id: 'quotes', label: 'Demandes & Devis', icon: FileCheck, permission: Permission.QUOTES_VIEW, badgeKey: 'quotes' },
+        { id: 'hub_operations', label: 'Réception et chargement', icon: Package, permission: Permission.MISSIONS_VIEW },
+        { id: 'quotes', label: 'Demandes de devis', icon: FileCheck, permission: Permission.QUOTES_VIEW, badgeKey: 'quotes' },
         { id: 'driver_tour', label: 'Ma Tournée', icon: Navigation, permission: Permission.MISSIONS_VIEW_OWN },
       ]
     },
@@ -315,7 +315,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 py-4 space-y-1 overflow-y-auto custom-scrollbar">
+      <nav aria-label="Navigation principale" className="flex-1 py-4 space-y-1 overflow-y-auto custom-scrollbar">
         {menuStructure.map((item) => {
           if (!checkAccess(item)) return null;
 
@@ -349,6 +349,9 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
               <div key={item.id} className="px-3">
                 {!isCollapsed ? (
                   <button
+                    type="button"
+                    aria-expanded={isOpen}
+                    aria-controls={`navigation-${item.id}`}
                     onClick={() => toggleGroup(item.id)}
                     className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-colors mb-1 ${
                       isActiveGroup ? 'text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'
@@ -382,7 +385,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
                 )}
 
                 {/* Sub Items */}
-                <div className={`space-y-1 overflow-hidden transition-all duration-300 ${isOpen || isCollapsed ? 'max-h-[500px] opacity-100' : 'max-h-0 opacity-0'}`}>
+                <div id={`navigation-${item.id}`} hidden={!isOpen && !isCollapsed} className={`space-y-1 overflow-hidden transition-all duration-300 ${isOpen || isCollapsed ? 'max-h-[500px] opacity-100' : 'max-h-0 opacity-0'}`}>
                   {visibleSubItems.map(subItem => {
                     const isActive = currentView === subItem.id;
                     const itemBadge = getBadgeCount(subItem.badgeKey, subItem.id);
@@ -390,9 +393,12 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
                     return (
                       <button
                         key={subItem.id}
+                        type="button"
+                        aria-label={subItem.label}
+                        aria-current={isActive ? 'page' : undefined}
                         onClick={() => onChangeView(subItem.id)}
                         title={isCollapsed ? subItem.label : ''}
-                        className={`w-full flex items-center justify-between gap-3 px-3 py-2 rounded-lg transition-all duration-200 group relative
+                        className={`w-full flex items-center justify-between gap-3 px-3 py-3 min-h-11 rounded-lg transition-all duration-200 group relative
                           ${!isCollapsed ? 'pl-10' : 'justify-center'} 
                           ${isActive 
                             ? 'bg-brand-600 text-white shadow-lg shadow-brand-900/50' 
@@ -437,6 +443,9 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
           return (
             <div key={item.id} className="px-3">
               <button
+                type="button"
+                aria-label={item.label}
+                aria-current={isActive ? 'page' : undefined}
                 onClick={() => onChangeView(item.id)}
                 title={isCollapsed ? item.label : ''}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group
@@ -483,7 +492,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
         <button
           onClick={onLogout}
           title={isCollapsed ? 'Déconnexion' : ''}
-          className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-slate-400 hover:bg-red-600/20 hover:text-red-400 transition-all ${isCollapsed ? 'justify-center' : ''}`}
+          className={`w-full flex items-center gap-2 px-3 py-3 min-h-11 rounded-lg text-slate-400 hover:bg-red-600/20 hover:text-red-400 transition-all ${isCollapsed ? 'justify-center' : ''}`}
         >
           <LogOut size={18} />
           {!isCollapsed && <span className="text-sm font-medium">Déconnexion</span>}

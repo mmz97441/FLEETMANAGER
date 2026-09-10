@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { createPortal } from 'react-dom';
+import Modal from './shared/Modal';
 import { User, Package as PackageType } from '../types';
 import {
   X,
@@ -76,6 +76,7 @@ const AccountHub: React.FC<AccountHubProps> = ({
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (pwdLoading) return;
     setPwdError('');
     setPwdSuccess(false);
 
@@ -110,11 +111,15 @@ const AccountHub: React.FC<AccountHubProps> = ({
   const [companyLoading, setCompanyLoading] = useState(false);
   const [companyError, setCompanyError] = useState('');
   const [companySuccess, setCompanySuccess] = useState(false);
+  const [savedCompany, setSavedCompany] = useState(JSON.stringify([companyName, companyAddress, companyPhone, companySiret]));
+  const companyDirty = JSON.stringify([companyName, companyAddress, companyPhone, companySiret]) !== savedCompany;
+  const dirty = Boolean(currentPassword || newPassword || confirmPassword || companyDirty);
 
   const showCompanyHint = !companyName.trim() || !companyAddress.trim();
 
   const handleSaveCompany = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (companyLoading) return;
     setCompanyError('');
     setCompanySuccess(false);
     setCompanyLoading(true);
@@ -125,6 +130,7 @@ const AccountHub: React.FC<AccountHubProps> = ({
         companyPhone: companyPhone.trim(),
         companySiret: companySiret.trim(),
       });
+      setSavedCompany(JSON.stringify([companyName, companyAddress, companyPhone, companySiret]));
       setCompanySuccess(true);
     } catch (err: any) {
       setCompanyError(err?.message || 'Une erreur est survenue.');
@@ -144,40 +150,8 @@ const AccountHub: React.FC<AccountHubProps> = ({
     return list.slice(0, 20);
   }, [packages]);
 
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[120] bg-black/50 flex items-center justify-center p-4"
-      onClick={onClose}
-    >
-      <div
-        className="max-w-3xl w-full max-h-[90vh] rounded-2xl bg-white flex flex-col overflow-hidden shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-slate-100">
-          <div className="flex items-center gap-3 min-w-0">
-            <div
-              className="w-11 h-11 rounded-full bg-indigo-600 text-white flex items-center justify-center font-semibold text-sm flex-shrink-0"
-              title={`${currentUser.firstName} ${currentUser.lastName}`}
-            >
-              {getInitials(currentUser.firstName, currentUser.lastName, currentUser.email)}
-            </div>
-            <div className="min-w-0">
-              <h2 className="text-lg font-bold text-slate-900 leading-tight">Mon compte</h2>
-              <p className="text-xs text-slate-500 truncate">{currentUser.email}</p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            title="Fermer"
-            aria-label="Fermer"
-            className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors flex-shrink-0"
-          >
-            <X size={20} />
-          </button>
-        </div>
-
+  return (
+    <Modal isOpen onClose={onClose} title="Mon compte" subtitle={currentUser.email} size="3xl" dirty={dirty} preventClose={pwdLoading || companyLoading} bodyClassName="p-0 sm:p-0">
         {/* Corps : rail vertical (desktop) + onglets horizontaux (mobile) */}
         <div className="flex flex-col md:flex-row flex-1 min-h-0">
           {/* Rail vertical desktop */}
@@ -189,6 +163,8 @@ const AccountHub: React.FC<AccountHubProps> = ({
                 <button
                   key={tab.id}
                   type="button"
+                  aria-current={active ? 'page' : undefined}
+                  disabled={pwdLoading || companyLoading}
                   onClick={() => setActiveTab(tab.id)}
                   className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-left transition-colors ${
                     active
@@ -213,7 +189,9 @@ const AccountHub: React.FC<AccountHubProps> = ({
                   <button
                     key={tab.id}
                     type="button"
-                    onClick={() => setActiveTab(tab.id)}
+                    aria-current={active ? 'page' : undefined}
+                  disabled={pwdLoading || companyLoading}
+                  onClick={() => setActiveTab(tab.id)}
                     className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-colors ${
                       active
                         ? 'bg-indigo-50 text-indigo-700'
@@ -271,12 +249,14 @@ const AccountHub: React.FC<AccountHubProps> = ({
                   </h3>
                   <div className="space-y-3">
                     <div>
-                      <label className="block text-xs font-medium text-slate-600 mb-1">
+                      <label htmlFor="account-currentPassword" className="block text-xs font-medium text-slate-600 mb-1">
                         Mot de passe actuel
                       </label>
                       <input
                         type="password"
                         autoComplete="current-password"
+                        id="account-currentPassword"
+                        disabled={pwdLoading || companyLoading}
                         value={currentPassword}
                         onChange={(e) => setCurrentPassword(e.target.value)}
                         className={inputClass}
@@ -284,12 +264,14 @@ const AccountHub: React.FC<AccountHubProps> = ({
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-slate-600 mb-1">
+                      <label htmlFor="account-newPassword" className="block text-xs font-medium text-slate-600 mb-1">
                         Nouveau mot de passe
                       </label>
                       <input
                         type="password"
                         autoComplete="new-password"
+                        id="account-newPassword"
+                        disabled={pwdLoading || companyLoading}
                         value={newPassword}
                         onChange={(e) => setNewPassword(e.target.value)}
                         className={inputClass}
@@ -297,12 +279,14 @@ const AccountHub: React.FC<AccountHubProps> = ({
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-slate-600 mb-1">
+                      <label htmlFor="account-confirmPassword" className="block text-xs font-medium text-slate-600 mb-1">
                         Confirmer le nouveau mot de passe
                       </label>
                       <input
                         type="password"
                         autoComplete="new-password"
+                        id="account-confirmPassword"
+                        disabled={pwdLoading || companyLoading}
                         value={confirmPassword}
                         onChange={(e) => setConfirmPassword(e.target.value)}
                         className={inputClass}
@@ -312,10 +296,10 @@ const AccountHub: React.FC<AccountHubProps> = ({
                   </div>
 
                   {pwdError && (
-                    <p className="mt-3 text-sm text-red-600 font-medium">{pwdError}</p>
+                    <p role="alert" className="mt-3 text-sm text-red-700 font-medium">{pwdError}</p>
                   )}
                   {pwdSuccess && (
-                    <p className="mt-3 text-sm text-green-600 font-medium">
+                    <p role="status" className="mt-3 text-sm text-green-700 font-medium">
                       ✅ Mot de passe mis à jour
                     </p>
                   )}
@@ -347,17 +331,19 @@ const AccountHub: React.FC<AccountHubProps> = ({
 
                   {showCompanyHint && (
                     <div className="mb-4 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2.5 text-sm text-amber-700">
-                      ⚠️ Raison sociale et adresse figurent sur vos BL — complétez-les.
+                      ⚠️ Raison sociale et adresse figurent sur vos bons de livraison — complétez-les.
                     </div>
                   )}
 
                   <div className="space-y-3">
                     <div>
-                      <label className="block text-xs font-medium text-slate-600 mb-1">
+                      <label htmlFor="account-companyName" className="block text-xs font-medium text-slate-600 mb-1">
                         Raison sociale
                       </label>
                       <input
                         type="text"
+                        id="account-companyName" autoComplete="organization"
+                        disabled={pwdLoading || companyLoading}
                         value={companyName}
                         readOnly
                         title="Nom de société géré par votre responsable"
@@ -367,11 +353,13 @@ const AccountHub: React.FC<AccountHubProps> = ({
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-slate-600 mb-1">
+                      <label htmlFor="account-companyAddress" className="block text-xs font-medium text-slate-600 mb-1">
                         Adresse complète
                       </label>
                       <input
                         type="text"
+                        id="account-companyAddress" autoComplete="street-address"
+                        disabled={pwdLoading || companyLoading}
                         value={companyAddress}
                         onChange={(e) => setCompanyAddress(e.target.value)}
                         className={inputClass}
@@ -380,24 +368,28 @@ const AccountHub: React.FC<AccountHubProps> = ({
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-xs font-medium text-slate-600 mb-1">
+                        <label htmlFor="account-companyPhone" className="block text-xs font-medium text-slate-600 mb-1">
                           Téléphone
                         </label>
                         <input
                           type="tel"
-                          value={companyPhone}
+                          id="account-companyPhone" autoComplete="tel"
+                        disabled={pwdLoading || companyLoading}
+                        value={companyPhone}
                           onChange={(e) => setCompanyPhone(e.target.value)}
                           className={inputClass}
                           placeholder="06 12 34 56 78"
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-slate-600 mb-1">
+                        <label htmlFor="account-companySiret" className="block text-xs font-medium text-slate-600 mb-1">
                           N° SIRET
                         </label>
                         <input
                           type="text"
-                          value={companySiret}
+                          id="account-companySiret" autoComplete="off"
+                        disabled={pwdLoading || companyLoading}
+                        value={companySiret}
                           onChange={(e) => setCompanySiret(e.target.value)}
                           className={inputClass}
                           placeholder="123 456 789 00012"
@@ -407,10 +399,10 @@ const AccountHub: React.FC<AccountHubProps> = ({
                   </div>
 
                   {companyError && (
-                    <p className="mt-3 text-sm text-red-600 font-medium">{companyError}</p>
+                    <p role="alert" className="mt-3 text-sm text-red-700 font-medium">{companyError}</p>
                   )}
                   {companySuccess && (
-                    <p className="mt-3 text-sm text-green-600 font-medium">✅ Enregistré</p>
+                    <p role="status" className="mt-3 text-sm text-green-700 font-medium">✅ Enregistré</p>
                   )}
 
                   <div className="mt-4 flex justify-end">
@@ -525,9 +517,7 @@ const AccountHub: React.FC<AccountHubProps> = ({
             )}
           </div>
         </div>
-      </div>
-    </div>,
-    document.body
+    </Modal>
   );
 };
 

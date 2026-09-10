@@ -1,3 +1,4 @@
+import ConfirmationHost from './components/ConfirmationHost';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
@@ -16,5 +17,6 @@ root.render(
     {/* Affichage global des messages + gardes window.onerror / unhandledrejection.
         Monté hors de <App/> pour rester actif même si l'ErrorBoundary bascule. */}
     <ToastHost />
+      <ConfirmationHost />
   </React.StrictMode>
 );

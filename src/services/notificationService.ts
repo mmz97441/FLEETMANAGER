@@ -185,7 +185,8 @@ export const createBatchNotifications = async (
 export const subscribeToNotifications = (
   userId: string,
   callback: (notifications: AppNotification[]) => void,
-  maxResults: number = 50
+  maxResults: number = 50,
+  onError?: (error: Error) => void
 ) => {
   const q = query(
     collection(db, NOTIFICATIONS_COLLECTION),
@@ -200,7 +201,7 @@ export const subscribeToNotifications = (
       ...d.data()
     })) as AppNotification[];
     callback(notifs);
-  });
+  }, onError);
 };
 
 /**

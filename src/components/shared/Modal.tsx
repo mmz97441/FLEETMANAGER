@@ -12,7 +12,9 @@
  * </Modal>
  */
 
-import React, { useEffect, useCallback } from 'react';
+import React, { useCallback, useId } from 'react';
+import { useDialogLayer } from '../../hooks/useDialogLayer';
+import { useUnsavedChanges } from '../../hooks/useUnsavedChanges';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
@@ -35,6 +37,10 @@ export interface ModalProps {
   footerClassName?: string;
   // Pour les formulaires - empêche la fermeture accidentelle
   preventClose?: boolean;
+  dirty?: boolean;
+  ariaLabel?: string;
+  role?: 'dialog' | 'alertdialog';
+  className?: string;
 }
 
 const sizeClasses: Record<ModalSize, string> = {
@@ -62,61 +68,32 @@ const Modal: React.FC<ModalProps> = ({
   headerClassName = '',
   bodyClassName = '',
   footerClassName = '',
-  preventClose = false
+  preventClose = false,
+  dirty = false,
+  ariaLabel,
+  role = 'dialog',
+  className = ''
 }) => {
-  // Handler pour fermeture
-  const handleClose = useCallback(() => {
-    if (!preventClose) {
-      onClose();
-    }
-  }, [onClose, preventClose]);
-
-  // Fermer avec Escape
-  const handleEscape = useCallback((e: KeyboardEvent) => {
-    if (e.key === 'Escape' && closeOnEscape && !preventClose) {
-      onClose();
-    }
-  }, [onClose, closeOnEscape, preventClose]);
-
-  // Gérer le scroll du body et les événements
-  useEffect(() => {
-    if (isOpen) {
-      // Sauvegarder la position de scroll
-      const scrollY = window.scrollY;
-      
-      // Bloquer le scroll
-      document.body.style.position = 'fixed';
-      document.body.style.top = `-${scrollY}px`;
-      document.body.style.left = '0';
-      document.body.style.right = '0';
-      document.body.style.overflow = 'hidden';
-      
-      // Écouter Escape
-      document.addEventListener('keydown', handleEscape);
-      
-      return () => {
-        // Restaurer le scroll
-        document.body.style.position = '';
-        document.body.style.top = '';
-        document.body.style.left = '';
-        document.body.style.right = '';
-        document.body.style.overflow = '';
-        window.scrollTo(0, scrollY);
-        
-        document.removeEventListener('keydown', handleEscape);
-      };
-    }
-  }, [isOpen, handleEscape]);
+  const titleId = useId();
+  const subtitleId = useId();
+  const requestClose = useUnsavedChanges(isOpen && dirty, isOpen && preventClose);
+  const handleClose = useCallback(() => { void requestClose(onClose); }, [requestClose, onClose]);
+  const layerRef = useDialogLayer(isOpen, () => { if (closeOnEscape && !preventClose) handleClose(); });
 
   if (!isOpen) return null;
 
   const modalContent = (
     <div 
-      className="fixed inset-0 flex items-center justify-center p-2 sm:p-4"
-      style={{ zIndex: 99999 }}
-      role="dialog"
+      className={`fixed inset-0 flex items-end sm:items-center justify-center p-2 sm:p-4 ${className}`}
+      ref={layerRef}
+      tabIndex={-1}
+      style={{ zIndex: 10010 }}
+      role={role}
       aria-modal="true"
-      aria-labelledby={title ? 'modal-title' : undefined}
+      aria-labelledby={title ? titleId : undefined}
+      aria-label={!title ? ariaLabel || 'Fenêtre' : undefined}
+      aria-describedby={subtitle ? subtitleId : undefined}
+      aria-busy={preventClose || undefined}
     >
       {/* Overlay */}
       <div 
@@ -130,7 +107,7 @@ const Modal: React.FC<ModalProps> = ({
         className={`
           relative bg-white rounded-2xl shadow-2xl 
           w-full ${sizeClasses[size]} 
-          max-h-[90vh] overflow-hidden flex flex-col
+          max-h-[calc(100dvh-1rem)] sm:max-h-[90dvh] overflow-hidden flex flex-col
           animate-fade-in
         `}
         onClick={(e) => e.stopPropagation()}
@@ -146,12 +123,12 @@ const Modal: React.FC<ModalProps> = ({
               )}
               <div className="min-w-0">
                 {title && (
-                  <h3 id="modal-title" className="text-lg sm:text-xl font-bold text-slate-800 truncate">
+                  <h3 id={titleId} className="text-lg sm:text-xl font-bold text-slate-800 break-words">
                     {title}
                   </h3>
                 )}
                 {subtitle && (
-                  <p className="text-xs sm:text-sm text-slate-500 truncate">
+                  <p id={subtitleId} className="text-sm text-slate-600">
                     {subtitle}
                   </p>
                 )}
@@ -159,8 +136,10 @@ const Modal: React.FC<ModalProps> = ({
             </div>
             {showCloseButton && (
               <button 
+                type="button"
+                disabled={preventClose}
                 onClick={handleClose}
-                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-full transition-colors flex-shrink-0 ml-2"
+                className="min-h-11 min-w-11 flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-slate-200 rounded-full transition-colors flex-shrink-0 ml-2 disabled:opacity-50"
                 aria-label="Fermer"
               >
                 <X size={20} />
@@ -170,13 +149,13 @@ const Modal: React.FC<ModalProps> = ({
         )}
         
         {/* Body */}
-        <div className={`flex-1 overflow-y-auto p-4 sm:p-6 custom-scrollbar ${bodyClassName}`}>
+        <div className={`min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6 custom-scrollbar ${bodyClassName}`}>
           {children}
         </div>
 
         {/* Footer */}
         {footer && (
-          <div className={`px-4 py-3 sm:px-6 sm:py-4 border-t border-slate-100 bg-slate-50 flex-shrink-0 ${footerClassName}`}>
+          <div className={`px-4 py-3 sm:px-6 sm:py-4 border-t border-slate-100 bg-slate-50 flex-shrink-0 pb-[max(1rem,env(safe-area-inset-bottom))] ${footerClassName}`}>
             {footer}
           </div>
         )}

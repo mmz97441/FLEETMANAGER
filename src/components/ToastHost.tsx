@@ -9,7 +9,9 @@
  * À monter une seule fois, au sommet de l'app (dans App).
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
+import { getTopDialogNode, subscribeDialogLayers } from '../hooks/useDialogLayer';
 import { CheckCircle2, AlertTriangle, XCircle, Info, X } from 'lucide-react';
 import { onUserMessage, reportError, UserMessage, LogLevel } from '../services/logService';
 
@@ -22,6 +24,7 @@ const STYLES: Record<LogLevel, { bg: string; border: string; text: string; icon:
 
 const ToastHost: React.FC = () => {
   const [toasts, setToasts] = useState<UserMessage[]>([]);
+  const activeDialog = useSyncExternalStore(subscribeDialogLayers, getTopDialogNode, () => null);
 
   const dismiss = useCallback((id: string) => {
     setToasts(prev => prev.filter(t => t.id !== id));
@@ -36,7 +39,7 @@ const ToastHost: React.FC = () => {
         // garde au plus 4 toasts visibles
         return [...prev.slice(-3), msg];
       });
-      if (msg.durationMs > 0) {
+      if (msg.durationMs > 0 && msg.level !== 'error' && msg.level !== 'warning') {
         window.setTimeout(() => dismiss(msg.id), msg.durationMs);
       }
     });
@@ -63,21 +66,21 @@ const ToastHost: React.FC = () => {
 
   if (toasts.length === 0) return null;
 
-  return (
-    <div className="fixed top-4 right-4 z-[9999] flex flex-col gap-2 w-[calc(100vw-2rem)] max-w-sm pointer-events-none">
+  return createPortal(
+    <div aria-label="Messages de l’application" className="fixed top-4 right-4 z-[9999] flex flex-col gap-2 w-[calc(100vw-2rem)] max-w-sm pointer-events-none">
       {toasts.map(t => {
         const s = STYLES[t.level];
         return (
           <div
             key={t.id}
-            role="alert"
+            role={t.level === 'error' ? 'alert' : 'status'}
             className={`pointer-events-auto flex items-start gap-3 rounded-xl border ${s.bg} ${s.border} p-3 shadow-lg animate-[fadeIn_0.15s_ease-out]`}
           >
             <span className="mt-0.5 flex-shrink-0">{s.icon}</span>
             <p className={`flex-1 text-sm font-medium ${s.text} break-words`}>{t.message}</p>
             <button
               onClick={() => dismiss(t.id)}
-              className={`flex-shrink-0 ${s.text} opacity-60 hover:opacity-100 transition-opacity`}
+              className={`flex-shrink-0 min-h-11 min-w-11 flex items-center justify-center rounded-lg ${s.text} hover:bg-white transition-colors`}
               aria-label="Fermer"
             >
               <X size={16} />
@@ -85,7 +88,8 @@ const ToastHost: React.FC = () => {
           </div>
         );
       })}
-    </div>
+    </div>,
+    activeDialog || document.body
   );
 };
 

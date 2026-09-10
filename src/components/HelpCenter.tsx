@@ -19,6 +19,10 @@ import {
 } from 'lucide-react';
 import { User, UserRole } from '../types';
 import { roleKey } from '../utils/role';
+import { useUrlParam } from '../hooks/useUrlState';
+
+export const buildSupportMailto = (subject: string, message: string, sender: string) =>
+  `mailto:direction@delivrex.io?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(`${message.trim()}\n\n${sender}`)}`;
 
 interface HelpCenterProps {
   currentUser: User;
@@ -43,10 +47,13 @@ interface GuideItem {
 }
 
 const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
-  const [activeTab, setActiveTab] = useState<'guide' | 'faq' | 'contact'>('guide');
+  const [activeTab, setActiveTab] = useUrlParam<'guide' | 'faq' | 'contact'>('tab', 'guide', ['guide', 'faq', 'contact']);
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useUrlParam<string>('q', '');
   const [expandedFaq, setExpandedFaq] = useState<number | null>(null);
+  const [contactSubject, setContactSubject] = useState("Question sur l'application");
+  const [contactMessage, setContactMessage] = useState('');
+  const [contactOpened, setContactOpened] = useState(false);
 
   // Déterminer le profil utilisateur
   const userRoleNorm = roleKey(currentUser.role).replace(/[^a-z]/g, '');
@@ -84,6 +91,32 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
   // GUIDE SECTIONS - ADAPTÉES PAR RÔLE
   // ============================================
   const allGuideSections: GuideSection[] = [
+    {
+      id: 'delivery', title: 'Livraison, preuves et retours', icon: Truck,
+      color: 'text-indigo-700 bg-indigo-100', roles: ['driver', 'manager', 'admin'],
+      content: [
+        {
+          title: 'Remettre une partie des colis',
+          description: 'Un arrêt peut regrouper plusieurs colis. Chaque colis conserve son propre résultat.',
+          steps: ['Scannez les colis réellement remis.', 'Si des colis manquent, choisissez la remise partielle et vérifiez la liste avant de confirmer.', 'Renseignez le réceptionnaire, la photo et la signature ; les colis non remis sont enregistrés en échec.'],
+        },
+        {
+          title: 'Comprendre les preuves en attente',
+          description: 'Après une coupure réseau, la validation et les photos restent conservées sur le téléphone utilisé.',
+          steps: ['Gardez ce compte connecté et rétablissez la connexion.', 'Consultez les envois en attente et utilisez Réessayer.', 'Attendez la confirmation de synchronisation avant de clôturer. Ne refaites pas la livraison et ne videz pas le stockage du navigateur.'],
+        },
+        {
+          title: 'Confirmer un retour au hub',
+          description: 'Un échec de livraison et un retour au hub sont deux opérations distinctes.',
+          steps: ['Dans la tournée, ouvrez le colis indiqué À retourner.', 'Au hub, prenez au moins une photo du retour ; ajoutez la signature si elle est disponible.', 'Confirmez et attendez la réussite de l’enregistrement. Le colis devient Retourné.'],
+        },
+        {
+          title: 'Terminer la tournée',
+          description: 'La clôture vérifie les arrêts, les retours demandés et les preuves.',
+          steps: ['Traitez les arrêts restants : livraison, échec ou réaffectation avec le bureau.', 'Confirmez les retours demandés et synchronisez les preuves.', 'Consultez le bilan puis terminez la tournée. Un arrêt terminé ne signifie pas que tous ses colis ont été remis.'],
+        },
+      ],
+    },
     // === SECTION DASHBOARD ===
     {
       id: 'dashboard',
@@ -938,10 +971,15 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
               <Mail className="text-indigo-600" size={20} />
               Nous contacter
             </h3>
-            <form className="space-y-4">
+            <form className="space-y-4" onSubmit={event => {
+              event.preventDefault();
+              window.location.href = buildSupportMailto(contactSubject, contactMessage, `${currentUser.firstName} ${currentUser.lastName} — ${currentUser.email || ''}`);
+              setContactOpened(true);
+            }}>
+              <p className="text-sm text-slate-600">Préparez votre demande ici, puis relisez et envoyez l’email dans votre application de messagerie.</p>
               <div>
-                <label className="block text-sm font-bold text-slate-600 mb-1">Sujet</label>
-                <select className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+                <label htmlFor="help-contact-subject" className="block text-sm font-bold text-slate-600 mb-1">Sujet</label>
+                <select id="help-contact-subject" value={contactSubject} onChange={event => setContactSubject(event.target.value)} className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
                   <option>Question sur l'application</option>
                   <option>Problème technique</option>
                   <option>Demande de fonctionnalité</option>
@@ -949,20 +987,22 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-bold text-slate-600 mb-1">Message</label>
+                <label htmlFor="help-contact-message" className="block text-sm font-bold text-slate-600 mb-1">Message</label>
                 <textarea
+                  id="help-contact-message" required value={contactMessage} onChange={event => setContactMessage(event.target.value)}
                   rows={5}
                   placeholder="Décrivez votre demande..."
                   className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
                 />
               </div>
               <button
-                type="button"
+                type="submit" disabled={!contactMessage.trim()}
                 className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors"
               >
                 <Send size={18} />
-                Envoyer
+                Ouvrir mon application email
               </button>
+              {contactOpened && <p role="status" className="text-sm text-indigo-800">Finalisez l’envoi dans votre messagerie. Si elle ne s’est pas ouverte, copiez votre texte et écrivez à direction@delivrex.io. Votre texte reste affiché ici.</p>}
             </form>
           </div>
 
@@ -973,8 +1013,8 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
                 <Phone className="text-emerald-600" size={20} />
                 Par téléphone
               </h3>
-              <p className="text-2xl font-bold text-slate-800 mb-2">0692 303 333</p>
-              <p className="text-slate-500 text-sm">Lun-Ven : 8h-17h (Heure Réunion)</p>
+              <a href="tel:+262692303333" className="inline-flex min-h-11 items-center text-2xl font-bold text-slate-800 mb-2 underline">0692 303 333</a>
+              <p className="text-slate-600 text-sm">Horaires indiqués : lun–ven, 8 h–17 h, heure de La Réunion. Confirmez les disponibilités avec l’exploitation.</p>
             </div>
 
             <div className="bg-white rounded-2xl p-6 border border-slate-200">
@@ -989,7 +1029,7 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
 
             <div className="bg-gradient-to-r from-red-50 to-orange-50 rounded-2xl p-6 border border-red-100">
               <h3 className="text-lg font-bold text-red-800 mb-2">
-                🚨 Urgence 24/7
+                🚨 Contact exploitation urgent
               </h3>
               <p className="text-red-700 text-sm mb-4">
                 Pour tout problème critique concernant un transport<br/>
@@ -997,7 +1037,7 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
               </p>
               <div className="bg-white/80 rounded-xl p-4 text-center">
                 <p className="text-xs text-slate-500 mb-1">Numéro d'urgence exploitation</p>
-                <p className="text-2xl font-bold text-red-600">0692 826 551</p>
+                <a href="tel:+262692826551" className="inline-flex min-h-11 items-center text-2xl font-bold text-red-700 underline">0692 826 551</a>
               </div>
             </div>
           </div>
@@ -1006,7 +1046,7 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
 
       {/* Version */}
       <div className="text-center text-sm text-slate-400">
-        FleetGenius v2.37.0 • Guide adapté à votre profil {getProfileName()}
+        FleetGenius v{__APP_VERSION__} • Guide adapté à votre profil {getProfileName()}
       </div>
     </div>
   );

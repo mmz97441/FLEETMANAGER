@@ -19,6 +19,7 @@ import { formatDistance, formatDuration } from '../utils/format';
 import { dispatchMissionsCF } from '../services/cloudFunctions';
 import { placeKey } from '../utils/address';
 import Modal from './shared/Modal';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import {
   Route, Package as PackageIcon, MapPin, Users, Truck, Play,
   CheckCircle, Loader2, AlertTriangle, Zap, Clock, Navigation,
@@ -73,6 +74,10 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
   const [optimResult, setOptimResult] = useState<OptimizationResult | null>(null);
   const [expandedTour, setExpandedTour] = useState<number | null>(null);
   const [showDispatchModal, setShowDispatchModal] = useState(false);
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [planError, setPlanError] = useState('');
+  const requestClose = useUnsavedChanges(showDispatchModal, isOptimizing || isDispatching);
+  const closePreparation = () => void requestClose(() => setShowDispatchModal(false));
   const dispatchLock = useRef(false);
   const optimizationVersion = useRef(0);
   const dispatchAttempt = useRef<{ result: OptimizationResult; requestId: string; missions: Array<Omit<Mission, 'id' | 'createdAt' | 'updatedAt'>> } | null>(null);
@@ -80,12 +85,13 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
   // Créneaux de livraison modifiés (packageId → { start, end })
   const [packageTimeWindows, setPackageTimeWindows] = useState<Record<string, { start: string; end: string }>>({});
   
-  // Option pour ignorer les créneaux (force inclusion de tous les stops)
+  // Option pour ignorer les créneaux (force inclusion de tous les arrêts)
   const [ignoreTimeWindows, setIgnoreTimeWindows] = useState(false);
   
   useEffect(() => {
     optimizationVersion.current++;
     setOptimResult(null);
+    setStep(previous => previous === 3 ? 2 : previous);
     dispatchAttempt.current = null;
   }, [selectedDate, selectedZone, selectedDriverIds, selectedHubId, plannedDepartureTime, ignoreTimeWindows, packageTimeWindows]);
 
@@ -210,13 +216,14 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
     if (isToday) {
       const minTime = getMinDepartureTime();
       if (plannedDepartureTime < minTime) {
-        alert(`L'heure de départ (${plannedDepartureTime}) est dans le passé. Minimum: ${minTime}`);
+        setPlanError(`L’heure de départ (${plannedDepartureTime}) est passée. Choisissez ${minTime} ou une heure ultérieure.`);
         setPlannedDepartureTime(minTime);
         return;
       }
     }
     
     const optimizationRun = optimizationVersion.current;
+    setPlanError('');
     setIsOptimizing(true);
     setOptimResult(null);
     setExpandedTour(null);
@@ -251,7 +258,11 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
         plannedDepartureTime  // Utiliser l'heure de départ du formulaire
       );
       
-      if (optimizationVersion.current === optimizationRun) setOptimResult(result);
+      if (optimizationVersion.current === optimizationRun) {
+        setOptimResult(result);
+        if (result.success && result.tours.length) setStep(3);
+        else setPlanError(result.error || 'Aucune tournée calculée. Vérifiez les adresses, créneaux et chauffeurs.');
+      }
       
       // Ouvrir le premier tour par défaut
       if (result.tours.length > 0) {
@@ -260,7 +271,9 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
       
     } catch (error) {
       console.error('Optimization error:', error);
-      if (optimizationVersion.current === optimizationRun) setOptimResult({
+      if (optimizationVersion.current === optimizationRun) {
+        setPlanError(error instanceof Error ? error.message : 'Le calcul a échoué. Vérifiez la connexion, puis réessayez.');
+        setOptimResult({
         success: false,
         tours: [],
         totalDistance: 0,
@@ -269,7 +282,8 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
         skippedShipments: 0,
         error: error instanceof Error ? error.message : 'Erreur inconnue',
         method: 'fallback'
-      });
+        });
+      }
     }
     
     setIsOptimizing(false);
@@ -313,7 +327,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
       onMissionCreated();
     } catch (error) {
       console.error('Dispatch error:', error);
-      alert(error instanceof Error ? error.message : 'Le dispatch n’a pas pu être confirmé. Réessayez : la même demande ne créera pas de doublon.');
+      setPlanError(error instanceof Error ? error.message : 'L’affectation n’a pas pu être confirmée. Réessayez : la même demande ne créera pas de doublon.');
     } finally {
       dispatchLock.current = false;
       setIsDispatching(false);
@@ -322,6 +336,8 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
 
   // Ouvrir le modal
   const openDispatchModal = (zone: Zone) => {
+    setStep(1);
+    setPlanError('');
     setSelectedZone(zone);
     const zStat = zoneStats.find(s => s.zone === zone);
     // Pré-sélectionner tous les chauffeurs
@@ -351,6 +367,12 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
     setShowDispatchModal(true);
   };
   
+  const routedIds = new Set(optimResult?.tours.flatMap(tour => tour.stops.flatMap(stop => stop.packageIds)) || []);
+  const excludedPackages = optimResult ? (selectedZoneStats?.packages || []).filter(pkg => !routedIds.has(pkg.id)) : [];
+  const cannotPlan = !departureHub ? 'Choisissez un hub de départ actif.'
+    : !selectedDriverIds.size ? 'Sélectionnez au moins un chauffeur.'
+    : !selectedZoneStats?.packages.length ? 'Aucun colis disponible dans cette sélection.' : '';
+
   // ============================================================================
   // RENDU
   // ============================================================================
@@ -360,7 +382,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-bold text-slate-800">Dispatch multi-tournées</h2>
+          <h2 className="text-lg font-bold text-slate-800">Préparer les tournées</h2>
           <p className="text-sm text-slate-500">
             Optimisez et répartissez les livraisons sur plusieurs chauffeurs par secteur
           </p>
@@ -371,9 +393,9 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
       {zoneStats.length === 0 ? (
         <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
           <PackageIcon size={48} className="mx-auto text-slate-300 mb-3" />
-          <p className="text-slate-500 mb-2">Aucun colis au hub prêt à être dispatché</p>
+          <p className="text-slate-500 mb-2">Aucun colis au hub prêt à être affecté</p>
           <p className="text-sm text-slate-400">
-            Réceptionnez les colis au hub pour les dispatcher
+            Réceptionnez les colis au hub pour préparer leur livraison
           </p>
         </div>
       ) : (
@@ -392,7 +414,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
                     ? 'border-slate-200 hover:border-brand-300 hover:shadow-lg cursor-pointer' 
                     : 'border-slate-200 opacity-60'
                 }`}
-                onClick={() => canDispatch && openDispatchModal(stat.zone)}
+
               >
                 <div className={`${colors.bg} px-4 py-3 border-b ${colors.border}`}>
                   <div className="flex items-center justify-between">
@@ -416,7 +438,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
                   <div className="flex justify-between items-center">
                     <div className="flex items-center gap-2 text-slate-600">
                       <MapPin size={16} />
-                      <span className="text-sm">Stops</span>
+                      <span className="text-sm">Arrêts</span>
                     </div>
                     <span className="text-lg font-bold text-slate-700">{stat.stopCount}</span>
                   </div>
@@ -452,9 +474,9 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
                 
                 {canDispatch && (
                   <div className="px-4 py-3 bg-slate-50 border-t border-slate-100">
-                    <button className="w-full flex items-center justify-center gap-2 text-brand-600 font-medium text-sm hover:text-brand-700">
+                    <button onClick={() => openDispatchModal(stat.zone)} className="w-full min-h-11 flex items-center justify-center gap-2 text-brand-700 font-medium text-sm hover:text-brand-800">
                       <Zap size={16} />
-                      Optimiser {stat.availableDrivers.length} tournées
+                      Sélectionner ce secteur
                     </button>
                   </div>
                 )}
@@ -467,13 +489,28 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
       {/* Modal Dispatch Multi-tournées */}
       <Modal
         isOpen={showDispatchModal}
-        onClose={() => { if (!isDispatching && !isOptimizing) setShowDispatchModal(false); }}
-        title={`Dispatch — Zone ${selectedZone}`}
-        size="lg"
+        onClose={closePreparation}
+        preventClose={isDispatching || isOptimizing}
+        title={`Préparer les tournées — ${selectedZone}`}
+        size="2xl"
         headerIcon={<Route size={20} />}
       >
         {selectedZoneStats && (
           <fieldset disabled={isOptimizing || isDispatching} className="space-y-5">
+            <nav aria-label="Étapes de préparation" className="grid grid-cols-3 gap-2">
+              {(['Sélectionner', 'Planifier', 'Vérifier et affecter'] as const).map((label, index) => <button
+                key={label} type="button" aria-current={step === index + 1 ? 'step' : undefined}
+                disabled={(index === 1 && !!cannotPlan) || (index === 2 && !optimResult?.tours.length)}
+                onClick={() => setStep((index + 1) as 1 | 2 | 3)}
+                className={`rounded-xl px-2 py-3 text-sm font-semibold disabled:opacity-50 ${step === index + 1 ? 'bg-blue-700 text-white' : 'bg-slate-100 text-slate-700'}`}
+              >{index + 1}. {label}</button>)}
+            </nav>
+            <div className="sticky top-0 z-10 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950">
+              <strong>{selectedDate} · {departureHub?.name || 'Hub à choisir'} · {selectedZoneStats.packageCount} colis sélectionnés</strong>
+              <p>Départ prévu : {plannedDepartureTime} · {selectedDriverIds.size} chauffeur(s) · {ignoreTimeWindows ? 'Créneaux demandés ignorés' : 'Créneaux demandés conservés'}</p>
+              {step === 3 && <p>{routedIds.size} colis à affecter · {excludedPackages.length} colis exclus, conservés dans la liste des colis disponibles.</p>}
+            </div>
+            {planError && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-900">{planError}</p>}
             {/* Résumé zone */}
             <div className="grid grid-cols-3 gap-3">
               <div className="bg-slate-50 rounded-xl p-3 text-center">
@@ -484,7 +521,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
               <div className="bg-slate-50 rounded-xl p-3 text-center">
                 <MapPin size={20} className="mx-auto text-slate-400 mb-1" />
                 <p className="text-2xl font-bold text-slate-800">{selectedZoneStats.stopCount}</p>
-                <p className="text-xs text-slate-500">Stops</p>
+                <p className="text-xs text-slate-500">Arrêts</p>
               </div>
               <div className="bg-slate-50 rounded-xl p-3 text-center">
                 <Users size={20} className="mx-auto text-slate-400 mb-1" />
@@ -493,6 +530,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
               </div>
             </div>
             
+            {step === 1 && <>
             {/* Hub de départ */}
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-2">
@@ -505,7 +543,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
                 </div>
               ) : (
                 <select
-                  value={selectedHubId}
+                  aria-label="Hub de départ" value={selectedHubId}
                   onChange={(e) => { setSelectedHubId(e.target.value); setOptimResult(null); }}
                   className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none bg-white text-sm"
                 >
@@ -571,6 +609,10 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
               </div>
             </div>
             
+            {cannotPlan && <p className="text-sm text-amber-900" role="status">{cannotPlan}</p>}
+            <button type="button" disabled={!!cannotPlan} onClick={() => setStep(2)} className="w-full min-h-11 rounded-xl bg-blue-700 px-4 text-white font-bold disabled:opacity-50">Continuer : planifier</button>
+            </>}
+            {step === 2 && <>
             {/* Heure de départ prévue */}
             <div className="bg-white border border-slate-200 rounded-xl p-4">
               <label className="flex items-center gap-2 text-sm font-bold text-slate-700 mb-2">
@@ -586,7 +628,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
                   <>
                     <input
                       type="time"
-                      value={plannedDepartureTime}
+                      aria-label="Heure de départ prévue" value={plannedDepartureTime}
                       min={minTime}
                       onChange={(e) => {
                         const newTime = e.target.value;
@@ -608,7 +650,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
                     )}
                     {!isPastTime && (
                       <p className="text-xs text-slate-400 mt-1">
-                        {isToday ? `Minimum: ${minTime} (heure actuelle)` : 'Les ETAs seront calculées à partir de cette heure'}
+                        {isToday ? `Minimum: ${minTime} (heure actuelle)` : 'Les arrivées estimées seront calculées à partir de cette heure'}
                       </p>
                     )}
                   </>
@@ -629,7 +671,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
               </label>
               {ignoreTimeWindows && (
                 <p className="text-xs text-amber-600 mt-1 ml-6">
-                  ⚠️ Tous les stops seront inclus sans contrainte horaire
+                  ⚠️ Les créneaux demandés ne seront pas pris en compte. Des adresses peuvent encore être exclues.
                 </p>
               )}
             </div>
@@ -662,6 +704,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
                     <div className="flex items-center gap-1.5">
                       <input
                         type="time"
+                        id={`dispatch-window-${pkg.id}`} aria-label={`Début du créneau demandé pour ${pkg.contactName}`}
                         value={packageTimeWindows[pkg.id]?.start || ''}
                         onChange={(e) => setPackageTimeWindows(prev => ({
                           ...prev,
@@ -673,6 +716,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
                       <span className="text-slate-400 text-xs">→</span>
                       <input
                         type="time"
+                        aria-label={`Fin du créneau demandé pour ${pkg.contactName}`}
                         value={packageTimeWindows[pkg.id]?.end || ''}
                         onChange={(e) => setPackageTimeWindows(prev => ({
                           ...prev,
@@ -719,8 +763,9 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
               )}
             </button>
             
+            </>}
             {/* Résultats multi-tournées */}
-            {optimResult && (
+            {step === 3 && optimResult && (
               <div className="space-y-3">
                 {/* Résumé global */}
                 <div className={`p-4 rounded-xl ${
@@ -746,7 +791,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
                         ? 'bg-green-200 text-green-800' 
                         : 'bg-amber-200 text-amber-800'
                     }`}>
-                      {optimResult.method === 'gmpro' ? 'GMPRO' : 'Fallback'}
+                      {optimResult.method === 'gmpro' ? 'Itinéraires calculés' : 'Répartition simplifiée'}
                     </span>
                   </div>
                   
@@ -780,25 +825,23 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
                   
                   {/* Warning si colis manquants */}
                   {optimResult.totalPackages < (selectedZoneStats?.packages.length || 0) && (
-                    <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+                    <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg" role="status">
                       <p className="text-sm font-bold text-red-700 flex items-center gap-2">
                         <AlertTriangle size={16} />
                         {(selectedZoneStats?.packages.length || 0) - optimResult.totalPackages} colis non inclus !
                       </p>
-                      {optimResult.skippedStopNames && optimResult.skippedStopNames.length > 0 && (
-                        <div className="mt-2 text-xs text-red-600">
-                          <p className="font-medium">Stops non routés :</p>
-                          <ul className="list-disc list-inside mt-1">
-                            {optimResult.skippedStopNames.map((name, i) => (
-                              <li key={i}>{name}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                      <p className="text-xs text-red-600 mt-2">
-                        <strong>Solutions :</strong> Sélectionnez plus de chauffeurs, étendez la plage horaire,
-                        ou retirez les créneaux de livraison.
-                      </p>
+                      <ul className="mt-3 space-y-3">
+                        {excludedPackages.map(pkg => <li key={pkg.id} className="rounded-lg bg-white p-3 text-sm text-slate-800">
+                          <strong>{pkg.externalId || pkg.orderNumber || pkg.id} — {pkg.contactName}</strong>
+                          <p>{!pkg.address || !pkg.city || !pkg.postalCode ? 'Adresse incomplète.' : 'Ce colis ne figure dans aucune tournée calculée. Vérifiez son adresse et son créneau, ou prévoyez une prise en charge séparée.'}</p>
+                          <div className="mt-2 flex flex-wrap gap-3">
+                            <a className="font-semibold text-blue-800 underline" target="_blank" rel="noopener noreferrer" href={`/missions?tab=packages&package=${encodeURIComponent(pkg.id)}&edit=1`}>Corriger l’adresse (nouvel onglet)</a>
+                            <button type="button" className="font-semibold text-blue-800 underline" onClick={() => { setIgnoreTimeWindows(false); setStep(2); requestAnimationFrame(() => document.getElementById(`dispatch-window-${pkg.id}`)?.focus()); }}>Adapter le créneau</button>
+                            <a className="font-semibold text-blue-800 underline" target="_blank" rel="noopener noreferrer" href={`/missions?tab=packages&package=${encodeURIComponent(pkg.id)}`}>Traiter séparément (nouvel onglet)</a>
+                          </div>
+                        </li>)}
+                      </ul>
+                      <p className="mt-2 text-sm text-red-800">Vous pouvez revenir aux étapes précédentes : vos choix restent conservés. Après une correction, recalculez les tournées.</p>
                     </div>
                   )}
                   
@@ -824,7 +867,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
                             {tour.driverName}
                           </p>
                           <p className="text-xs text-slate-500">
-                            {tour.vehiclePlate || 'Sans véhicule'} • {tour.stops.length} stops • {tour.packageCount} colis
+                            {tour.vehiclePlate || 'Sans véhicule'} • {tour.stops.length} arrêts • {tour.packageCount} colis
                           </p>
                         </div>
                         <div className="text-right shrink-0">
@@ -838,7 +881,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
                         )}
                       </div>
                       
-                      {/* Détail des stops */}
+                      {/* Détail des arrêts */}
                       {expandedTour === idx && (
                         <div className="bg-slate-50 border-t border-slate-100">
                           {/* Départ hub */}
@@ -874,14 +917,16 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
             )}
             
             {/* Actions */}
-            <div className="flex justify-end gap-3 pt-3 border-t border-slate-200">
+            <div className="flex flex-wrap justify-end gap-3 pt-3 border-t border-slate-200">
+              {step > 1 && <button type="button" onClick={() => setStep(step === 3 ? 2 : 1)} className="min-h-11 rounded-xl border border-slate-300 px-4 text-sm font-semibold">Revenir à l’étape précédente</button>}
+              {step === 3 && <span className="self-center text-sm font-medium">{routedIds.size} à affecter · {excludedPackages.length} exclus</span>}
               <button
-                onClick={() => setShowDispatchModal(false)}
+                onClick={closePreparation}
                 className="px-4 py-2 text-slate-700 font-medium hover:bg-slate-100 rounded-xl transition-colors"
               >
                 Annuler
               </button>
-              <button
+              {step === 3 && <button
                 onClick={handleDispatchAll}
                 disabled={!optimResult || optimResult.tours.length === 0 || isDispatching}
                 className="flex items-center gap-2 px-6 py-2 bg-green-500 text-white rounded-xl font-medium hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
@@ -889,15 +934,15 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
                 {isDispatching ? (
                   <>
                     <Loader2 size={18} className="animate-spin" />
-                    Dispatch en cours...
+                    Affectation en cours...
                   </>
                 ) : (
                   <>
                     <Play size={18} />
-                    Dispatcher {optimResult?.tours.length || 0} tournée{(optimResult?.tours.length || 0) > 1 ? 's' : ''}
+                    Affecter {optimResult?.tours.length || 0} tournée{(optimResult?.tours.length || 0) > 1 ? 's' : ''}
                   </>
                 )}
-              </button>
+              </button>}
             </div>
           </fieldset>
         )}

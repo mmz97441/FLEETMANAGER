@@ -5,12 +5,13 @@
  * l'application dans la peau d'un CLIENT, pour voir exactement son portail et sa
  * traçabilité. Rendu dans un overlay isolé, avec sa PROPRE PermissionsProvider
  * (les permissions affichées sont celles du client prévisualisé) et des
- * handlers de mutation neutralisés → aperçu en LECTURE SEULE.
+ * Les callbacks de devis sont neutralisés ; les actions du portail qui passent
+ * directement par les services conservent leur comportement réel et l’annoncent.
  *
  * Volontairement autonome : n'altère pas le currentUser global de l'app.
  */
 import React, { useState, useMemo, lazy, Suspense } from 'react';
-import { createPortal } from 'react-dom';
+import Modal from './shared/Modal';
 import { User, QuoteRequest, ViewState } from '../types';
 import { PermissionsProvider } from '../usePermissions';
 import { Eye, X, Search, Building2 } from 'lucide-react';
@@ -62,70 +63,50 @@ const ViewAsSwitcher: React.FC<ViewAsSwitcherProps> = ({ currentUser, users, quo
       <button
         onClick={() => setPickerOpen(true)}
         title="Voir en tant que client"
-        className="flex items-center gap-1.5 bg-white px-3 py-2 rounded-lg shadow-sm border border-slate-200 text-slate-600 hover:text-indigo-600 hover:border-indigo-200 transition-colors text-sm font-semibold"
+        aria-label="Ouvrir l’aperçu d’un client"
+        aria-haspopup="dialog"
+        aria-expanded={pickerOpen || !!previewClient}
+        className="min-h-11 min-w-11 flex items-center justify-center gap-1.5 bg-white px-3 py-2 rounded-lg shadow-sm border border-slate-200 text-slate-600 hover:text-indigo-600 hover:border-indigo-200 transition-colors text-sm font-semibold"
       >
         <Eye size={16} />
         <span className="hidden sm:inline">Voir en tant que</span>
       </button>
 
-      {/* Sélecteur de client (portail → au-dessus de la sidebar) */}
-      {pickerOpen && !previewClient && createPortal(
-        <div className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-4" onClick={() => setPickerOpen(false)}>
-          <div className="bg-white rounded-2xl max-w-md w-full max-h-[80vh] flex flex-col p-4" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-bold text-slate-800 flex items-center gap-2"><Eye size={18} className="text-indigo-600" /> Voir en tant que client</h3>
-              <button onClick={() => setPickerOpen(false)} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
-            </div>
-            <div className="relative">
-              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                placeholder="Rechercher un client…"
-                className="w-full pl-9 pr-3 py-2.5 border border-slate-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-                autoFocus
-              />
-            </div>
-            <div className="overflow-y-auto mt-2 divide-y divide-slate-100">
-              {filtered.map(c => (
-                <button
-                  key={c.id}
-                  onClick={() => { setPreviewClient(c); setPreviewView('client_dashboard'); setPickerOpen(false); }}
-                  className="w-full text-left py-2.5 px-1 hover:bg-slate-50 rounded-lg flex items-center gap-3"
-                >
-                  <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0"><Building2 size={16} /></div>
-                  <div className="min-w-0">
-                    <div className="font-semibold text-slate-800 truncate">{clientLabel(c)}</div>
-                    <div className="text-xs text-slate-500 truncate">{c.email}</div>
-                  </div>
-                </button>
-              ))}
-              {filtered.length === 0 && (
-                <p className="text-sm text-slate-400 py-8 text-center">Aucun client trouvé</p>
-              )}
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
+      {/* Sélecteur de client : focus, fond inerte et retour au déclencheur partagés. */}
+      <Modal isOpen={pickerOpen && !previewClient} onClose={() => setPickerOpen(false)} title="Voir en tant que client" headerIcon={<Eye size={20} />} size="lg">
+        <label htmlFor="view-as-client-search" className="block text-sm font-semibold text-slate-700 mb-2">Rechercher un client</label>
+        <div className="relative">
+          <Search size={18} aria-hidden="true" className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+          <input id="view-as-client-search" type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Entreprise, nom ou email" className="w-full min-h-11 pl-10 pr-3 py-3 border border-slate-300 rounded-xl text-base focus:ring-2 focus:ring-indigo-600 outline-none" autoComplete="off" data-autofocus />
+        </div>
+        <p role="status" className="my-3 text-sm text-slate-600">{filtered.length} client{filtered.length > 1 ? 's' : ''} disponible{filtered.length > 1 ? 's' : ''}</p>
+        <ul className="divide-y divide-slate-100">
+          {filtered.map(client => <li key={client.id}><button type="button" onClick={() => { setPreviewClient(client); setPreviewView('client_dashboard'); setPickerOpen(false); }} className="w-full min-h-12 text-left p-3 hover:bg-slate-50 rounded-xl flex items-center gap-3" aria-label={`Ouvrir l’aperçu de ${clientLabel(client)}`}>
+            <Building2 size={20} aria-hidden="true" className="text-indigo-700 shrink-0" />
+            <span className="min-w-0"><span className="block font-semibold text-base text-slate-900 break-words">{clientLabel(client)}</span><span className="block text-sm text-slate-600 break-all">{client.email}</span></span>
+          </button></li>)}
+        </ul>
+        {filtered.length === 0 && <p className="text-sm text-slate-600 py-6 text-center">{clients.length ? 'Aucun client ne correspond. Essayez un autre nom ou email.' : 'Aucun compte client disponible pour cet aperçu.'}</p>}
+      </Modal>
 
       {/* Overlay d'aperçu (lecture seule) — portail → au-dessus de la sidebar */}
-      {previewClient && createPortal(
-        <div className="fixed inset-0 z-[100] bg-slate-50 flex flex-col">
-          <div className="bg-amber-500 text-white px-4 py-2 flex items-center justify-between shrink-0">
+      {previewClient && (
+        <Modal isOpen onClose={() => setPreviewClient(null)} title={`Aperçu de ${clientLabel(previewClient)}`} size="full" closeOnOverlay={false} bodyClassName="!p-0 bg-slate-50">
+        <div className="min-w-0 bg-slate-50 flex flex-col">
+          <div className="bg-amber-100 text-amber-950 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
             <span className="font-bold text-sm flex items-center gap-2 min-w-0">
               <Eye size={16} className="shrink-0" />
-              <span className="truncate">Tu agis en tant que : {clientLabel(previewClient)} — mode test (actions réelles)</span>
+              <span>Les actions disponibles dans cet aperçu peuvent modifier les données réelles du client.</span>
             </span>
             <button
               onClick={() => setPreviewClient(null)}
-              className="bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg text-sm font-bold flex items-center gap-1 shrink-0"
+              className="min-h-11 bg-white hover:bg-amber-50 border border-amber-300 px-3 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-1 shrink-0"
             >
-              <X size={14} /> Revenir président
+              <X size={18} /> Fermer l’aperçu
             </button>
           </div>
           {/* Barre de navigation de l'aperçu (le portail n'a pas la sidebar) */}
-          <div className="bg-white border-b border-slate-200 px-3 py-2 flex items-center gap-1 overflow-x-auto shrink-0">
+          <nav aria-label="Navigation de l’aperçu client" className="bg-white border-b border-slate-200 px-3 py-2 flex items-center gap-1 overflow-x-auto shrink-0">
             {([
               { v: 'client_dashboard', label: '🏠 Accueil' },
               { v: 'client_shipments', label: '📦 Mes Colis' },
@@ -139,15 +120,16 @@ const ViewAsSwitcher: React.FC<ViewAsSwitcherProps> = ({ currentUser, users, quo
               <button
                 key={t.v}
                 onClick={() => setPreviewView(t.v)}
-                className={`px-3 py-1.5 rounded-lg text-sm font-bold whitespace-nowrap transition-colors ${previewView === t.v ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+                aria-current={previewView === t.v ? 'page' : undefined}
+                className={`min-h-11 px-3 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-colors ${previewView === t.v ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
               >
                 {t.label}
               </button>
             ))}
-          </div>
-          <div className="flex-1 overflow-y-auto p-4 lg:p-8">
+          </nav>
+          <div className="min-w-0 flex-1 p-4 lg:p-8">
             <div className="max-w-7xl mx-auto">
-              <Suspense fallback={<div className="p-10 text-center text-slate-400">Chargement de l'aperçu…</div>}>
+              <Suspense fallback={<div role="status" className="p-10 text-center text-slate-600">Chargement de l'aperçu…</div>}>
                 <PermissionsProvider currentUser={previewClient}>
                   <ClientPortal
                     activeView={previewView}
@@ -163,8 +145,8 @@ const ViewAsSwitcher: React.FC<ViewAsSwitcherProps> = ({ currentUser, users, quo
               </Suspense>
             </div>
           </div>
-        </div>,
-        document.body
+        </div>
+        </Modal>
       )}
     </>
   );

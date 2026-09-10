@@ -1,3 +1,4 @@
+import { indexImportedPackageIds } from '../utils/importedPackageIds';
 /**
  * SERVICE D'IMPORT EXCEL
  * 
@@ -379,11 +380,9 @@ export const importExcelFile = async (
       const packageIds = await addPackagesBatch(result.packages);
       
       // Mettre à jour les packageIds dans zoneBreakdown
-      let idIndex = 0;
+      const idsByZone = indexImportedPackageIds(result.packages, packageIds);
       for (const breakdown of result.zoneBreakdown) {
-        const zoneCount = zonePackages[breakdown.zone].length;
-        breakdown.packageIds = packageIds.slice(idIndex, idIndex + zoneCount);
-        idIndex += zoneCount;
+        breakdown.packageIds = idsByZone.get(breakdown.zone) || [];
       }
       
       // Créer le batch d'import
@@ -851,12 +850,9 @@ export const confirmReviewedImport = async (
   // Sauvegarder les colis
   if (result.packages.length > 0) {
     const packageIds = await addPackagesBatch(result.packages);
-
-    let idIndex = 0;
+    const idsByZone = indexImportedPackageIds(result.packages, packageIds);
     for (const breakdown of result.zoneBreakdown) {
-      const zoneCount = zonePackages[breakdown.zone].length;
-      breakdown.packageIds = packageIds.slice(idIndex, idIndex + zoneCount);
-      idIndex += zoneCount;
+      breakdown.packageIds = idsByZone.get(breakdown.zone) || [];
     }
 
     const importBatch: Omit<ImportBatch, 'id'> = {

@@ -1,0 +1,506 @@
+{
+  "version": "4.25.0",
+  "date": "2026-09-10",
+  "unit": 158,
+  "integration": 32,
+  "firestoreRules": 31,
+  "server": 54,
+  "storageRules": 10,
+  "total": 285,
+  "sharedBrowser": {
+    "checks": 46,
+    "allPassed": true,
+    "exceptions": []
+  },
+  "login": [
+    {
+      "width": 320,
+      "height": 568,
+      "scroll": 320,
+      "submit": {
+        "x": 28,
+        "y": 345.5,
+        "width": 264,
+        "height": 48,
+        "top": 345.5,
+        "right": 292,
+        "bottom": 393.5,
+        "left": 28
+      },
+      "inputs": [
+        {
+          "labels": 1,
+          "font": "16px"
+        },
+        {
+          "labels": 1,
+          "font": "16px"
+        }
+      ],
+      "eye": {
+        "x": 244,
+        "y": 287.5,
+        "width": 44,
+        "height": 44,
+        "top": 287.5,
+        "right": 288,
+        "bottom": 331.5,
+        "left": 244
+      }
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "scroll": 390,
+      "submit": {
+        "x": 28,
+        "y": 483.5,
+        "width": 334,
+        "height": 48,
+        "top": 483.5,
+        "right": 362,
+        "bottom": 531.5,
+        "left": 28
+      },
+      "inputs": [
+        {
+          "labels": 1,
+          "font": "16px"
+        },
+        {
+          "labels": 1,
+          "font": "16px"
+        }
+      ],
+      "eye": {
+        "x": 314,
+        "y": 425.5,
+        "width": 44,
+        "height": 44,
+        "top": 425.5,
+        "right": 358,
+        "bottom": 469.5,
+        "left": 314
+      }
+    },
+    {
+      "width": 1365,
+      "height": 900,
+      "scroll": 1365,
+      "submit": {
+        "x": 722.5,
+        "y": 475.5,
+        "width": 368,
+        "height": 48,
+        "top": 475.5,
+        "right": 1090.5,
+        "bottom": 523.5,
+        "left": 722.5
+      },
+      "inputs": [
+        {
+          "labels": 1,
+          "font": "14px"
+        },
+        {
+          "labels": 1,
+          "font": "14px"
+        }
+      ],
+      "eye": {
+        "x": 1042.5,
+        "y": 413.5,
+        "width": 44,
+        "height": 44,
+        "top": 413.5,
+        "right": 1086.5,
+        "bottom": 457.5,
+        "left": 1042.5
+      }
+    }
+  ],
+  "deliveryBrowser": {
+    "checks": [
+      {
+        "name": "La fermeture d’un échec saisi demande confirmation",
+        "passed": true
+      },
+      {
+        "name": "Le focus passe dans la confirmation",
+        "passed": true
+      },
+      {
+        "name": "Tab reste dans la confirmation imbriquée",
+        "passed": true
+      },
+      {
+        "name": "Continuer la saisie conserve le commentaire",
+        "passed": true
+      },
+      {
+        "name": "Le focus revient dans l’échec",
+        "passed": true
+      },
+      {
+        "name": "Abandonner ferme volontairement le formulaire",
+        "passed": true
+      }
+    ],
+    "exceptions": []
+  },
+  "shipmentRecoveryBrowser": {
+    "results": [
+      {
+        "name": "stored-before-failed-call",
+        "requestId": "e3751565-01bd-497b-abe7-1d9382a33b1a",
+        "callMatches": true
+      },
+      {
+        "name": "reopen-restores",
+        "nameValue": "Pharmacie reprise",
+        "frozen": true,
+        "sameUuid": true
+      },
+      {
+        "name": "reload-restores",
+        "nameValue": "Pharmacie reprise",
+        "sameUuid": true
+      },
+      {
+        "name": "retry-confirms-same-request",
+        "samePayload": true,
+        "journalCleared": true,
+        "noDuplicateCarnet": true
+      },
+      {
+        "name": "blocked-storage-prevents-send",
+        "createCalls": 0,
+        "journalAbsent": true,
+        "message": "La demande n’a pas pu être conservée sur cet appareil. Aucun nouvel envoi n’a été lancé. Storage blocked for fixture Autorisez le stockage du site puis réessayez, ou reprenez la demande déjà en attente. Vos saisies sont conservées."
+      },
+      {
+        "name": "conflict-preserves-other-request",
+        "createCalls": 0,
+        "preserved": true
+      },
+      {
+        "name": "abandon-gated-by-verification",
+        "disabledBefore": true
+      },
+      {
+        "name": "abandon-warning",
+        "message": "Abandonner la reprise de cette demande ?\n\nVous confirmez avoir vérifié Mes colis. Cette action efface uniquement le rappel sur cet appareil : elle ne supprime aucun colis déjà enregistré. Créer ensuite un nouvel envoi peut produire un doublon si cette demande avait déjà abouti. En cas de doute, conservez la demande et contactez votre responsable.\n\nConserver et reprendre\nJ’ai vérifié, abandonner la reprise"
+      },
+      {
+        "name": "abandon-cancel-keeps-record",
+        "kept": true
+      },
+      {
+        "name": "explicit-abandon-clears-matching-record",
+        "cleared": true
+      }
+    ],
+    "exceptions": [],
+    "externalRequests": [
+      "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap",
+      "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap",
+      "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap",
+      "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap",
+      "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+    ]
+  },
+  "labels": {
+    "results": [
+      {
+        "format": "A6",
+        "tracking": "CL-026370202784665455451253344278233420630101",
+        "natural": {
+          "width": 990,
+          "height": 220,
+          "darkPixels": 75840
+        },
+        "decoded": "CL-026370202784665455451253344278233420630101",
+        "printDecode": [
+          {
+            "dpi": 203,
+            "width": 639,
+            "height": 176,
+            "value": "CL-026370202784665455451253344278233420630101"
+          },
+          {
+            "dpi": 300,
+            "width": 945,
+            "height": 260,
+            "value": "CL-026370202784665455451253344278233420630101"
+          }
+        ],
+        "pageCount": 2,
+        "labels": [
+          {
+            "box": {
+              "x": 0,
+              "y": 0,
+              "width": 359.046875,
+              "height": 521.5625,
+              "top": 0,
+              "right": 359.046875,
+              "bottom": 521.5625,
+              "left": 0
+            },
+            "scrollWidth": 355,
+            "clientWidth": 355,
+            "scrollHeight": 518,
+            "clientHeight": 518,
+            "overflow": []
+          },
+          {
+            "box": {
+              "x": 0,
+              "y": 521.5625,
+              "width": 359.046875,
+              "height": 521.5625,
+              "top": 521.5625,
+              "right": 359.046875,
+              "bottom": 1043.125,
+              "left": 0
+            },
+            "scrollWidth": 355,
+            "clientWidth": 355,
+            "scrollHeight": 518,
+            "clientHeight": 518,
+            "overflow": []
+          }
+        ],
+        "images": [
+          {
+            "complete": true,
+            "width": 990,
+            "height": 220,
+            "rendered": {
+              "x": 28.34375,
+              "y": 70.28125,
+              "width": 302.359375,
+              "height": 83.140625,
+              "top": 70.28125,
+              "right": 330.703125,
+              "bottom": 153.421875,
+              "left": 28.34375
+            }
+          },
+          {
+            "complete": true,
+            "width": 990,
+            "height": 220,
+            "rendered": {
+              "x": 28.34375,
+              "y": 591.84375,
+              "width": 302.359375,
+              "height": 83.140625,
+              "top": 591.84375,
+              "right": 330.703125,
+              "bottom": 674.984375,
+              "left": 28.34375
+            }
+          }
+        ],
+        "pdfPages": 2
+      },
+      {
+        "format": "A4",
+        "tracking": "CL-026370202784665455451253344278233420630101",
+        "natural": {
+          "width": 990,
+          "height": 220,
+          "darkPixels": 75840
+        },
+        "decoded": "CL-026370202784665455451253344278233420630101",
+        "printDecode": [
+          {
+            "dpi": 203,
+            "width": 639,
+            "height": 176,
+            "value": "CL-026370202784665455451253344278233420630101"
+          },
+          {
+            "dpi": 300,
+            "width": 945,
+            "height": 260,
+            "value": "CL-026370202784665455451253344278233420630101"
+          }
+        ],
+        "pageCount": 2,
+        "labels": [
+          {
+            "box": {
+              "x": 0,
+              "y": 0,
+              "width": 359.046875,
+              "height": 529.125,
+              "top": 0,
+              "right": 359.046875,
+              "bottom": 529.125,
+              "left": 0
+            },
+            "scrollWidth": 355,
+            "clientWidth": 355,
+            "scrollHeight": 525,
+            "clientHeight": 525,
+            "overflow": []
+          },
+          {
+            "box": {
+              "x": 385.546875,
+              "y": 0,
+              "width": 359.046875,
+              "height": 529.125,
+              "top": 0,
+              "right": 744.59375,
+              "bottom": 529.125,
+              "left": 385.546875
+            },
+            "scrollWidth": 355,
+            "clientWidth": 355,
+            "scrollHeight": 525,
+            "clientHeight": 525,
+            "overflow": []
+          },
+          {
+            "box": {
+              "x": 0,
+              "y": 544.234375,
+              "width": 359.046875,
+              "height": 529.125,
+              "top": 544.234375,
+              "right": 359.046875,
+              "bottom": 1073.359375,
+              "left": 0
+            },
+            "scrollWidth": 355,
+            "clientWidth": 355,
+            "scrollHeight": 525,
+            "clientHeight": 525,
+            "overflow": []
+          },
+          {
+            "box": {
+              "x": 385.546875,
+              "y": 544.234375,
+              "width": 359.046875,
+              "height": 529.125,
+              "top": 544.234375,
+              "right": 744.59375,
+              "bottom": 1073.359375,
+              "left": 385.546875
+            },
+            "scrollWidth": 355,
+            "clientWidth": 355,
+            "scrollHeight": 525,
+            "clientHeight": 525,
+            "overflow": []
+          },
+          {
+            "box": {
+              "x": 0,
+              "y": 1073.359375,
+              "width": 359.046875,
+              "height": 529.125,
+              "top": 1073.359375,
+              "right": 359.046875,
+              "bottom": 1602.484375,
+              "left": 0
+            },
+            "scrollWidth": 355,
+            "clientWidth": 355,
+            "scrollHeight": 525,
+            "clientHeight": 525,
+            "overflow": []
+          }
+        ],
+        "images": [
+          {
+            "complete": true,
+            "width": 990,
+            "height": 220,
+            "rendered": {
+              "x": 28.34375,
+              "y": 70.28125,
+              "width": 302.359375,
+              "height": 83.140625,
+              "top": 70.28125,
+              "right": 330.703125,
+              "bottom": 153.421875,
+              "left": 28.34375
+            }
+          },
+          {
+            "complete": true,
+            "width": 990,
+            "height": 220,
+            "rendered": {
+              "x": 413.890625,
+              "y": 70.28125,
+              "width": 302.359375,
+              "height": 83.140625,
+              "top": 70.28125,
+              "right": 716.25,
+              "bottom": 153.421875,
+              "left": 413.890625
+            }
+          },
+          {
+            "complete": true,
+            "width": 990,
+            "height": 220,
+            "rendered": {
+              "x": 28.34375,
+              "y": 614.515625,
+              "width": 302.359375,
+              "height": 83.140625,
+              "top": 614.515625,
+              "right": 330.703125,
+              "bottom": 697.65625,
+              "left": 28.34375
+            }
+          },
+          {
+            "complete": true,
+            "width": 990,
+            "height": 220,
+            "rendered": {
+              "x": 413.890625,
+              "y": 614.515625,
+              "width": 302.359375,
+              "height": 83.140625,
+              "top": 614.515625,
+              "right": 716.25,
+              "bottom": 697.65625,
+              "left": 413.890625
+            }
+          },
+          {
+            "complete": true,
+            "width": 990,
+            "height": 220,
+            "rendered": {
+              "x": 28.34375,
+              "y": 1143.640625,
+              "width": 302.359375,
+              "height": 83.140625,
+              "top": 1143.640625,
+              "right": 330.703125,
+              "bottom": 1226.78125,
+              "left": 28.34375
+            }
+          }
+        ],
+        "pdfPages": 2
+      }
+    ],
+    "exceptions": []
+  },
+  "limitations": [
+    "Chrome simulation only; physical Android/iOS and printers remain to be tried using the provided protocol.",
+    "Synthetic data; no production business mutation performed.",
+    "No measured backend/network speedup claimed."
+  ]
+}

@@ -12,6 +12,7 @@
  * PAS confondre « scanner ne lit pas l'étiquette » et « colis réellement absent ».
  */
 import React, { useState } from 'react';
+import Modal from './shared/Modal';
 import { AlertTriangle, ScanLine, PackageX } from 'lucide-react';
 
 interface ScanGateDialogProps {
@@ -40,7 +41,7 @@ const ScanGateDialog: React.FC<ScanGateDialogProps> = ({
   // ÉCRAN DE CONFIRMATION « colis absents » (2ᵉ étape, destructive).
   if (confirmAbsent) {
     return (
-      <div className="fixed inset-0 z-[60] bg-black/60 flex items-end sm:items-center justify-center sm:p-4" onClick={onCancel}>
+      <Modal isOpen onClose={onCancel} title={confirmAbsent ? "Confirmer les colis absents" : "Colis non scannés"} size="md" closeOnOverlay={false} bodyClassName="!p-0">
         <div className="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-md animate-slide-up" onClick={e => e.stopPropagation()}>
           <div className="p-4 flex items-start gap-3 border-b border-slate-100">
             <div className="w-11 h-11 rounded-full bg-red-100 flex items-center justify-center shrink-0">
@@ -48,7 +49,7 @@ const ScanGateDialog: React.FC<ScanGateDialogProps> = ({
             </div>
             <div>
               <h3 className="font-bold text-slate-800">Déclarer {missingCodes.length} colis absent{missingCodes.length > 1 ? 's' : ''} ?</h3>
-              <p className="text-xs text-slate-500 mt-0.5">
+              <p className="text-sm text-slate-500 mt-0.5">
                 Uniquement si ces colis ne sont <b>physiquement pas là</b>. Si l'étiquette
                 est juste illisible, revenez et scannez-les.
               </p>
@@ -57,36 +58,36 @@ const ScanGateDialog: React.FC<ScanGateDialogProps> = ({
           <div className="p-4 space-y-3">
             <div className="flex flex-wrap gap-1.5">
               {missingCodes.map(code => (
-                <span key={code} className="px-2 py-1 rounded-lg text-[11px] font-mono font-bold bg-red-50 border border-red-200 text-red-700">
+                <span key={code} className="px-2 py-1 rounded-lg text-sm font-mono font-bold bg-red-50 border border-red-200 text-red-700">
                   {code}
                 </span>
               ))}
             </div>
-            <p className="text-xs text-red-600 font-semibold">
+            <p className="text-sm text-red-600 font-semibold">
               Le client sera notifié d'un échec pour ces colis. Action tracée (chauffeur, heure, GPS).
             </p>
           </div>
           <div className="p-4 border-t border-slate-100 flex flex-col gap-2">
             <button
               onClick={() => setConfirmAbsent(false)}
-              className="w-full flex items-center justify-center gap-2 py-3.5 bg-brand-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform"
+              className="min-h-11 w-full flex items-center justify-center gap-2 py-3.5 bg-brand-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform"
             >
               <ScanLine size={18} /> Non, je continue le scan
             </button>
             <button
               onClick={() => { setConfirmAbsent(false); onDeliverScannedOnly?.(); }}
-              className="w-full py-3 bg-red-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform"
+              className="min-h-11 w-full py-3 bg-red-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform"
             >
               Oui, ces {missingCodes.length} colis sont absents — livrer les {scannedCount} autres
             </button>
           </div>
         </div>
-      </div>
+      </Modal>
     );
   }
 
   return (
-    <div className="fixed inset-0 z-[60] bg-black/60 flex items-end sm:items-center justify-center sm:p-4" onClick={onCancel}>
+    <Modal isOpen onClose={onCancel} title={confirmAbsent ? "Confirmer les colis absents" : "Colis non scannés"} size="md" closeOnOverlay={false} bodyClassName="!p-0">
       <div className="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-md animate-slide-up" onClick={e => e.stopPropagation()}>
         <div className="p-4 flex items-start gap-3 border-b border-slate-100">
           <div className="w-11 h-11 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
@@ -94,7 +95,7 @@ const ScanGateDialog: React.FC<ScanGateDialogProps> = ({
           </div>
           <div>
             <h3 className="font-bold text-slate-800">Colis non scannés</h3>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-sm text-slate-500 mt-0.5">
               Il reste <b>{missingCodes.length}</b> colis sur <b>{total}</b> non scannés pour <b>{clientName}</b>.
             </p>
           </div>
@@ -103,12 +104,12 @@ const ScanGateDialog: React.FC<ScanGateDialogProps> = ({
         <div className="p-4 space-y-3">
           <div className="flex flex-wrap gap-1.5">
             {missingCodes.map(code => (
-              <span key={code} className="px-2 py-1 rounded-lg text-[11px] font-mono font-bold bg-red-50 border border-red-200 text-red-700">
+              <span key={code} className="px-2 py-1 rounded-lg text-sm font-mono font-bold bg-red-50 border border-red-200 text-red-700">
                 {code}
               </span>
             ))}
           </div>
-          <p className="text-xs text-slate-500">
+          <p className="text-sm text-slate-500">
             Scannez-les pour continuer. Le mieux : tout scanner. Les exceptions ci-dessous
             sont <b>tracées dans l'historique</b>.
           </p>
@@ -117,27 +118,27 @@ const ScanGateDialog: React.FC<ScanGateDialogProps> = ({
         <div className="p-4 border-t border-slate-100 flex flex-col gap-2">
           <button
             onClick={onCancel}
-            className="w-full flex items-center justify-center gap-2 py-3.5 bg-brand-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform"
+            className="min-h-11 w-full flex items-center justify-center gap-2 py-3.5 bg-brand-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform"
           >
             <ScanLine size={18} /> Continuer le scan
           </button>
           {canDeclareAbsent && (
             <button
               onClick={() => setConfirmAbsent(true)}
-              className="w-full py-3 bg-white border border-red-300 text-red-700 rounded-xl font-bold text-sm active:scale-95 transition-transform"
+              className="min-h-11 w-full py-3 bg-white border border-red-300 text-red-700 rounded-xl font-bold text-sm active:scale-95 transition-transform"
             >
               Déclarer {missingCodes.length} colis absent{missingCodes.length > 1 ? 's' : ''} (livrer les {scannedCount} scanné{scannedCount > 1 ? 's' : ''})
             </button>
           )}
           <button
             onClick={onForce}
-            className="w-full py-3 bg-white border border-amber-300 text-amber-700 rounded-xl font-bold text-sm active:scale-95 transition-transform"
+            className="min-h-11 w-full py-3 bg-white border border-amber-300 text-amber-700 rounded-xl font-bold text-sm active:scale-95 transition-transform"
           >
             {actionLabel}
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 };
 

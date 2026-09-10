@@ -23,6 +23,7 @@ import {
 } from '../types';
 import { subscribeToMissions } from '../services/missionService';
 import { getDeliveryStopStats } from '../utils/missionProgress';
+import { useUrlParam, updateUrlParams } from '../hooks/useUrlState';
 
 interface ToursOverviewProps {
   users: User[];
@@ -115,6 +116,11 @@ const MissionStatusBadge: React.FC<{ status: MissionStatus }> = ({ status }) => 
 const ToursOverview: React.FC<ToursOverviewProps> = ({ users }) => {
   const [missions, setMissions] = useState<Mission[]>([]);
   const [openIds, setOpenIds] = useState<Record<string, boolean>>({});
+  const [selectedDate, setSelectedDate] = useUrlParam<string>('date', '');
+  const [search, setSearch] = useUrlParam<string>('q', '');
+  const [linkedMission, setLinkedMission] = useUrlParam<string>('mission', '');
+  const [, refreshAge] = useState(0);
+  useEffect(() => { const timer = window.setInterval(() => refreshAge(value => value + 1), 30000); return () => window.clearInterval(timer); }, []);
 
   // Abonnement temps réel (nettoyé au démontage)
   useEffect(() => {
@@ -132,8 +138,9 @@ const ToursOverview: React.FC<ToursOverviewProps> = ({ users }) => {
   const tours = useMemo<TourVM[]>(() => {
     const active = missions.filter(
       (m) =>
-        m.status === MissionStatus.IN_PROGRESS ||
-        m.status === MissionStatus.DISPATCHED
+        (m.status === MissionStatus.IN_PROGRESS || m.status === MissionStatus.DISPATCHED) &&
+        (!selectedDate || m.date === selectedDate) &&
+        (!search.trim() || [resolveDriverName(m, usersById), m.vehiclePlate, m.hubName, m.id].some(value => (value || '').toLowerCase().includes(search.toLowerCase().trim())))
     );
 
     const vms = active.map<TourVM>((mission) => {
@@ -160,7 +167,7 @@ const ToursOverview: React.FC<ToursOverviewProps> = ({ users }) => {
       if (byStatus !== 0) return byStatus;
       return a.driverName.localeCompare(b.driverName);
     });
-  }, [missions, usersById]);
+  }, [missions, usersById, selectedDate, search]);
 
   const inProgressCount = tours.filter(
     (t) => t.mission.status === MissionStatus.IN_PROGRESS
@@ -169,8 +176,11 @@ const ToursOverview: React.FC<ToursOverviewProps> = ({ users }) => {
     (t) => t.mission.status === MissionStatus.DISPATCHED
   ).length;
 
-  const toggle = (id: string) =>
-    setOpenIds((prev) => ({ ...prev, [id]: !prev[id] }));
+  const toggle = (id: string) => {
+    const isOpen = !!openIds[id] || linkedMission === id;
+    setOpenIds(previous => ({ ...previous, [id]: !isOpen }));
+    setLinkedMission(isOpen ? '' : id);
+  };
 
   // -------------------------------------------------------------------------
   // RENDER
@@ -194,6 +204,12 @@ const ToursOverview: React.FC<ToursOverviewProps> = ({ users }) => {
         </div>
       </div>
 
+      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-3">
+        <label className="text-sm font-medium text-slate-700">Date des tournées (vide : toutes)<input type="date" value={selectedDate} onChange={event => setSelectedDate(event.target.value)} className="mt-1 block min-h-11 rounded-lg border border-slate-300 px-3" /></label>
+        <label className="flex-1 text-sm font-medium text-slate-700">Chauffeur, véhicule ou tournée<input type="search" value={search} onChange={event => setSearch(event.target.value, true)} className="mt-1 block min-h-11 w-full rounded-lg border border-slate-300 px-3" /></label>
+        <a href="/missions?tab=packages" className="min-h-11 inline-flex items-center px-3 text-sm font-semibold text-blue-800 underline">Retrouver un colis</a>
+      </div>
+      <p className="text-sm text-slate-600">Périmètre : tournées actives, {selectedDate || 'toutes dates'}. Les arrivées estimées proviennent de la planification et peuvent évoluer ; elles ne garantissent pas une heure de remise.</p>
       {/* Contenu */}
       {tours.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-200 bg-white px-6 py-12 text-center">
@@ -209,7 +225,7 @@ const ToursOverview: React.FC<ToursOverviewProps> = ({ users }) => {
             <TourCard
               key={tour.mission.id}
               tour={tour}
-              open={!!openIds[tour.mission.id]}
+              open={!!openIds[tour.mission.id] || linkedMission === tour.mission.id}
               onToggle={() => toggle(tour.mission.id)}
             />
           ))}
@@ -282,7 +298,7 @@ const TourCard: React.FC<TourCardProps> = ({ tour, open, onToggle }) => {
                   {nextStop.contactName || 'Destinataire'}
                   {nextStop.city && <span> — {nextStop.city}</span>}
                   {formatEta(nextStop.estimatedArrival) && (
-                    <span> · ETA {formatEta(nextStop.estimatedArrival)}</span>
+                    <span> · Arrivée estimée : {formatEta(nextStop.estimatedArrival)}</span>
                   )}
                 </span>
               ) : total > 0 ? (
@@ -341,7 +357,7 @@ const TourCard: React.FC<TourCardProps> = ({ tour, open, onToggle }) => {
                       <StopStatusBadge status={s.status} />
                       {formatEta(s.estimatedArrival) && (
                         <span className="text-[11px] text-slate-400">
-                          {formatEta(s.estimatedArrival)}
+                          Arrivée estimée : {formatEta(s.estimatedArrival)}
                         </span>
                       )}
                     </div>
@@ -353,12 +369,14 @@ const TourCard: React.FC<TourCardProps> = ({ tour, open, onToggle }) => {
 
           {/* Bas de carte : contexte tournée (lecture seule) */}
           <div className="mt-3 pt-2 border-t border-slate-100 text-[11px] text-slate-400 flex flex-wrap gap-x-3 gap-y-1">
-            <span>Hub {mission.hubName}</span>
+            <span>Hub {mission.hubName} · {mission.date}</span>
+            <a href={`/missions?tab=missions&date=${encodeURIComponent(mission.date)}&mission=${encodeURIComponent(mission.id)}`} className="text-blue-800 underline">Ouvrir cette tournée dans l’exploitation</a>
+            <a href={`/carte-chauffeurs?mission=${encodeURIComponent(mission.id)}&date=${encodeURIComponent(mission.date)}`} className="text-blue-800 underline">Voir le chauffeur sur la carte</a>
             {mission.startedAt && <span>· démarrée {timeAgo(mission.startedAt)}</span>}
             {mission.dispatchedAt && !mission.startedAt && (
-              <span>· dispatchée {timeAgo(mission.dispatchedAt)}</span>
+              <span>· affectée {timeAgo(mission.dispatchedAt)}</span>
             )}
-            <span>· maj {timeAgo(mission.updatedAt)}</span>
+            <span>· Données actualisées {timeAgo(mission.updatedAt)}</span>
           </div>
         </div>
       )}

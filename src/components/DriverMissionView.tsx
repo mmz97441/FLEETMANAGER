@@ -1,4 +1,4 @@
-import { assertMissionReadyToClose, submitDelivery } from '../services/deliveryOutbox';
+import { assertMissionReadyToClose, submitDelivery, pendingDeliveries, outboxChangeEvent } from '../services/deliveryOutbox';
 /**
  * DRIVER MISSION VIEW — Interface Mobile Chauffeur
  * 
@@ -41,6 +41,10 @@ import { finalizePickup } from '../services/pickupService';
 import { reportError } from '../services/logService';
 import { logActivity } from '../services/activityLogService';
 import PickupScanView from './PickupScanView';
+import Modal from './shared/Modal';
+import { FormInput } from './shared/FormInput';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import { useUrlParam } from '../hooks/useUrlState';
 import TransferReceiveModal from './TransferReceiveModal';
 import ClaimScanModal from './ClaimScanModal';
 import ScanGateDialog from './ScanGateDialog';
@@ -213,15 +217,15 @@ const SignaturePad: React.FC<{
   };
 
   return (
-    <div className="bg-white rounded-xl border-2 border-amber-300 overflow-hidden shadow-lg">
-      <div className="px-3 py-2.5 bg-amber-50 border-b border-amber-200 flex items-center justify-between">
+    <div className="min-w-0 max-w-full bg-white rounded-xl border-2 border-amber-300 overflow-hidden shadow-lg">
+      <div className="px-3 py-2.5 bg-amber-50 border-b border-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
         <span className="text-sm font-bold text-amber-800">✍️ Signature du destinataire</span>
         <div className="flex gap-2">
           <button onClick={undo} disabled={strokesRef.current.length === 0}
-            className="text-xs text-slate-500 hover:text-amber-600 disabled:opacity-30 font-medium">
+            className="min-h-11 text-sm text-slate-500 hover:text-amber-600 disabled:opacity-30 font-medium">
             ↩ Annuler
           </button>
-          <button onClick={clear} className="text-xs text-red-500 hover:text-red-700 font-medium">
+          <button onClick={clear} className="min-h-11 text-sm text-red-500 hover:text-red-700 font-medium">
             Effacer tout
           </button>
         </div>
@@ -231,7 +235,7 @@ const SignaturePad: React.FC<{
           ref={canvasRef}
           width={800}
           height={280}
-          className="w-full h-[160px] touch-none bg-white cursor-crosshair"
+          aria-label="Zone de signature manuscrite du destinataire" className="block max-w-full w-full h-[160px] touch-none bg-white cursor-crosshair"
           onTouchStart={startDrawing}
           onTouchMove={draw}
           onTouchEnd={stopDrawing}
@@ -242,18 +246,18 @@ const SignaturePad: React.FC<{
         />
         {!hasContent && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <p className="text-slate-300 text-sm">Signez ici avec le doigt</p>
+            <p className="text-slate-600 text-sm">Signez ici avec le doigt</p>
           </div>
         )}
       </div>
       <div className="p-3 bg-slate-50 border-t border-slate-200 flex gap-2">
-        <button onClick={onCancel} className="flex-1 py-2.5 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-lg">
+        <button onClick={onCancel} className="min-h-11 flex-1 py-2.5 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-lg">
           Annuler
         </button>
         <button
           onClick={save}
           disabled={!hasContent}
-          className="flex-1 py-2.5 text-sm font-bold text-white bg-green-600 rounded-lg disabled:opacity-40"
+          className="min-h-11 flex-1 py-2.5 text-sm font-bold text-white bg-green-600 rounded-lg disabled:opacity-40"
         >
           ✓ Valider signature
         </button>
@@ -272,6 +276,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   const [loading, setLoading] = useState(true);
   const [activeMissionId, setActiveMissionId] = useState<string | null>(null);
   const [activeStopIndex, setActiveStopIndex] = useState(0);
+  const [linkedMission] = useUrlParam<string>('mission', '');
+  const [linkedPackage] = useUrlParam<string>('package', '');
+  const appliedLink = useRef('');
   const hasAutoSelectedRef = useRef(false); // FIX BUG 3: empêche la re-sélection forcée
 
   // UI state
@@ -323,6 +330,17 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   const [issueSubmitting, setIssueSubmitting] = useState(false);
   const [showFinishBlocked, setShowFinishBlocked] = useState(false);
   const [finishError, setFinishError] = useState('');
+  const [pendingProofs, setPendingProofs] = useState<string[]>([]);
+  const [pendingProofError, setPendingProofError] = useState('');
+  const notificationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const stopCardRef = useRef<HTMLDivElement>(null);
+  const [stepAnnouncement, setStepAnnouncement] = useState('');
+  const [online, setOnline] = useState(navigator.onLine);
+  useEffect(() => {
+    const refresh = () => setOnline(navigator.onLine);
+    window.addEventListener('online', refresh); window.addEventListener('offline', refresh);
+    return () => { window.removeEventListener('online', refresh); window.removeEventListener('offline', refresh); };
+  }, []);
   useEffect(() => {
     setShowFinishBlocked(false);
     setFinishError('');
@@ -339,6 +357,22 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   const [returnSignature, setReturnSignature] = useState<string | null>(null);
   const [showReturnSignature, setShowReturnSignature] = useState(false);
   const returnPhotoInputRef = useRef<HTMLInputElement>(null);
+
+  const closeManual = useUnsavedChanges(showManualStop && Object.values(manualStop).some(Boolean), isProcessing);
+  const closeIssue = useUnsavedChanges(showIssue && (!!issueForm.description.trim() || issueForm.category !== 'Véhicule / panne' || issueForm.priority !== 'Medium'), issueSubmitting);
+  const closeFailure = useUnsavedChanges(showFailureModal && (!!failureNotes || failurePhotos.length > 0 || failureReason !== FailureReason.ABSENT), isProcessing);
+  const closeReturn = useUnsavedChanges(showReturnModal && (returnPhotos.length > 0 || !!returnSignature), isProcessing);
+  const changeStop = useUnsavedChanges(!!signatureData || capturedPhotos.length > 0 || !!recipientName || !!reservesNote || scannedBarcodes.length > 0, isProcessing);
+  useEffect(() => () => clearTimeout(notificationTimer.current), []);
+  useEffect(() => {
+    let active = true;
+    const refresh = () => pendingDeliveries(currentUser.id, activeMissionId || undefined).then(rows => {
+      if (active) { setPendingProofs(rows.map(row => row.action.stopId)); setPendingProofError(''); }
+    }).catch(() => { if (active) setPendingProofError('Impossible de vérifier les preuves conservées sur ce téléphone.'); });
+    void refresh();
+    window.addEventListener(outboxChangeEvent, refresh);
+    return () => { active = false; window.removeEventListener(outboxChangeEvent, refresh); };
+  }, [currentUser.id, activeMissionId]);
 
   const today = todayISO();
 
@@ -378,6 +412,22 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
     }, { date: today, driverId: currentUser.id });
     return unsub;
   }, [currentUser.id, today]);
+
+  useEffect(() => {
+    const key = `${linkedMission}/${linkedPackage}`;
+    if (!linkedMission && !linkedPackage) { appliedLink.current = ''; return; }
+    if (loading || appliedLink.current === key) return;
+    const target = missions.find(mission => (!linkedMission || mission.id === linkedMission) && (!linkedPackage || mission.stops.some(stop => stop.packageIds.includes(linkedPackage))));
+    if (!target) { setNotification('La tournée ou le colis de ce lien n’est pas présent dans vos tournées du jour. Vérifiez la date avec le bureau.'); return; }
+    appliedLink.current = key;
+    void changeStop(() => {
+      setActiveMissionId(target.id);
+      const ordered = [...target.stops].sort((a, b) => a.sequence - b.sequence);
+      const index = linkedPackage ? ordered.findIndex(stop => stop.packageIds.includes(linkedPackage)) : ordered.findIndex(stop => ![StopStatus.COMPLETED, StopStatus.FAILED, StopStatus.SKIPPED].includes(stop.status));
+      setActiveStopIndex(Math.max(0, index));
+      if (target.status === MissionStatus.COMPLETED) setDriverTab('historique');
+    });
+  }, [linkedMission, linkedPackage, loading, missions, changeStop]);
 
   // === Données dérivées ===
   const activeMission = useMemo(() =>
@@ -460,6 +510,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
     setShowScanner(false);
     setScanBypass(false);
     setDeliveryStep(0);
+    setStepAnnouncement('');
     setMerchandiseGood(true);
     setReservesNote('');
     setShowReserves(false);
@@ -510,8 +561,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
 
   // === Notifications éphémères ===
   const showNotif = (msg: string) => {
+    clearTimeout(notificationTimer.current);
     setNotification(msg);
-    setTimeout(() => setNotification(null), 3000);
+    if (!/❌|⚠️|impossible|Erreur/i.test(msg)) notificationTimer.current = setTimeout(() => setNotification(null), 7000);
   };
 
   // « Livraison » : aller livrer — sélectionne la tournée du jour et se place sur le
@@ -529,38 +581,38 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
     }
     // Pas de tournée EN COURS : une tournée dispatchée existe ? → la démarrer via sa carte.
     if (missions.some(m => m.status === MissionStatus.DISPATCHED)) {
-      showNotif('Ta tournée est prête — appuie sur « Commencer le chargement »');
+      showNotif('Votre tournée est prête — appuyez sur « Commencer le chargement »');
     } else {
-      showNotif('Aucune tournée à livrer — récupère d’abord des colis');
+      showNotif('Aucune tournée à livrer — récupérez d’abord des colis');
     }
   };
 
   // Modale de choix au scan : Enlèvement (charger, transfert auto) ou Livraison (livrer).
   const renderScanChoice = () => showScanChoice && (
-    <div className="fixed inset-0 z-[55] bg-black/60 flex items-end sm:items-center justify-center sm:p-4" onClick={() => setShowScanChoice(false)}>
+    <Modal isOpen onClose={() => setShowScanChoice(false)} title="Choisir une opération" bodyClassName="!p-0">
       <div className="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-md animate-slide-up" onClick={e => e.stopPropagation()}>
         <div className="p-4 border-b border-slate-100">
-          <h3 className="font-black text-lg text-slate-800">Tu fais quoi ?</h3>
+          <h3 className="font-black text-lg text-slate-800">Quelle opération souhaitez-vous effectuer ?</h3>
         </div>
         <div className="p-4 grid grid-cols-1 gap-3">
           <button
             onClick={() => { setShowScanChoice(false); setShowClaimModal(true); }}
-            className="w-full text-left p-4 rounded-2xl bg-green-600 text-white active:scale-95 transition-transform"
+            className="min-h-11 w-full text-left p-4 rounded-2xl bg-green-700 text-white active:scale-95 transition-transform"
           >
             <div className="font-black text-base flex items-center gap-2">📥 Récupérer des colis</div>
-            <div className="text-xs text-white/90 mt-1">Scanne les colis à récupérer (les tiens ou chez un client) — ils rejoignent ta tournée. Un colis déjà chez un collègue = transfert automatique.</div>
+            <div className="text-sm text-white/90 mt-1">Scannez les colis à récupérer : ils rejoignent votre tournée. Un colis déjà chez un collègue = transfert automatique.</div>
           </button>
           <button
             onClick={() => { setShowScanChoice(false); goToDelivery(); }}
-            className="w-full text-left p-4 rounded-2xl bg-blue-600 text-white active:scale-95 transition-transform"
+            className="min-h-11 w-full text-left p-4 rounded-2xl bg-blue-600 text-white active:scale-95 transition-transform"
           >
             <div className="font-black text-base flex items-center gap-2">📤 Livraison — remettre au client</div>
-            <div className="text-xs text-white/90 mt-1">Va livrer ta tournée, arrêt par arrêt (scan, photo, signature).</div>
+            <div className="text-sm text-white/90 mt-1">Ouvrez votre tournée, arrêt par arrêt (scan, photo, signature).</div>
           </button>
-          <button onClick={() => setShowScanChoice(false)} className="w-full py-3 text-slate-500 font-medium text-sm">Annuler</button>
+          <button onClick={() => setShowScanChoice(false)} className="min-h-11 w-full py-3 text-slate-500 font-medium text-sm">Annuler</button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 
   // Rattacher à l'arrêt courant les colis détectés au MÊME point de livraison mais
@@ -616,10 +668,10 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
     if (code === 1) // PERMISSION_DENIED
       return { msg: `${hi}autorise la localisation pour ce site dans les réglages du navigateur stp 🙏`, isPermission: true };
     if (code === 2) // POSITION_UNAVAILABLE (GPS OS coupé)
-      return { msg: `${hi}active le GPS de ton téléphone pour continuer stp 🙏`, isPermission: false };
+      return { msg: `${hi}active le GPS de votre téléphone pour continuer stp 🙏`, isPermission: false };
     if (code === 3) // TIMEOUT
       return { msg: `${hi}impossible de te localiser — vérifie que le GPS est bien activé, puis réessaie stp 🙏`, isPermission: false };
-    return { msg: `${hi}active ta localisation pour continuer stp 🙏`, isPermission: false };
+    return { msg: `${hi}activez votre localisation pour continuer`, isPermission: false };
   };
 
   // Garde GPS réutilisable : renvoie la position, ou déclenche la modale bloquante
@@ -832,10 +884,14 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   ).length;
 
   // Les arrêts non traités doivent être résolus avant toute clôture.
-  const requestFinishTour = () => {
-    if (isProcessing) return;
-    if (remainingStops > 0) { setShowFinishBlocked(true); return; }
-    void handleFinishTour();
+  const activeReturns = returnPackages.filter(pkg => pkg.missionId === activeMission?.id || sortedStops.some(stop => stop.packageIds.includes(pkg.id)));
+  const proofStopIds = new Set([...pendingProofs, ...sortedStops.filter(stop => stop.proofSyncPending).map(stop => stop.id)]);
+  const closureNeedsAttention = remainingStops > 0 || activeReturns.length > 0 || proofStopIds.size > 0 || !!pendingProofError;
+  const requestFinishTour = () => { if (!isProcessing) setShowFinishBlocked(true); };
+  const openStop = (index: number) => { void changeStop(() => { setActiveStopIndex(index); setShowFinishBlocked(false); window.setTimeout(() => stopCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0); }); };
+  const openPendingProofs = () => {
+    setShowFinishBlocked(false);
+    window.dispatchEvent(new CustomEvent('fleet-show-pending-sync', { detail: { missionId: activeMission?.id } }));
   };
 
   const handleFinishTour = async () => {
@@ -902,6 +958,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
       autoAdvancedRef.current.add(0);
       if (showScanner) setShowScanner(false);
       setDeliveryStep(1);
+      setStepAnnouncement('Tous les colis sont scannés. Étape 2 sur 5 : état de la marchandise.');
     }
   }, [deliveryScannedCount, expectedStopCount, deliveryStep, currentStop?.status, isPickupStop, showScanner]);
 
@@ -1006,7 +1063,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
       setShowReserves(false);
 
       const nonRemis = okFailed.length > 0 ? ` (${okFailed.length} non remis)` : '';
-      showNotif(allDone ? `✅ Dernier arrêt livré${nonRemis} — clôture ta tournée` : `✅ Stop ${currentStop.sequence} livré !${nonRemis}`);
+      showNotif(allDone ? `✅ Dernier arrêt livré${nonRemis} — terminez votre tournée` : `✅ Arrêt ${currentStop.sequence} livré !${nonRemis}`);
     } catch (err) {
       // Ne PAS conserver une intention partielle après une erreur : elle pourrait
       // « fuiter » sur une prochaine livraison. Le chauffeur repart propre.
@@ -1039,7 +1096,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
           failureReason,failureNotes,photosBase64:failurePhotos,coordinates:coords ?? null}
       });
 
-      // FIX BUG 2: Prochain stop dans l'ORDRE TRIÉ
+      // FIX BUG 2: Prochain arrêt dans l'ORDRE TRIÉ
       const updatedSorted = [...updatedStops].sort((a, b) => a.sequence - b.sequence);
       const nextSortedIdx = updatedSorted.findIndex(s =>
         s.status === StopStatus.PENDING || s.status === StopStatus.ARRIVED
@@ -1053,7 +1110,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
       setFailurePhotos([]);
       setUploadProgress(null);
 
-      showNotif(allDone ? '✅ Dernier arrêt traité — clôture ta tournée' : `⚠️ Stop ${currentStop.sequence} — échec enregistré`);
+      showNotif(allDone ? '✅ Dernier arrêt traité — terminez votre tournée' : `⚠️ Arrêt ${currentStop.sequence} — échec enregistré`);
     } catch (err) {
       reportError('driver.markFailed', err, { silent: true });
       showNotif(`❌ Erreur${err instanceof Error ? ` — ${err.message}` : ''}`);
@@ -1228,7 +1285,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
         deliveredDelta: scannedIds.length
       });
 
-      // 3. Prochain stop
+      // 3. Prochain arrêt
       const updatedSorted = [...updatedStops].sort((a, b) => a.sequence - b.sequence);
       const nextIdx = updatedSorted.findIndex(s =>
         s.status === StopStatus.PENDING || s.status === StopStatus.ARRIVED
@@ -1241,7 +1298,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
 
       showNotif(
         allDone 
-          ? '✅ Dernier enlèvement traité — clôture ta tournée'
+          ? '✅ Dernier enlèvement traité — terminez votre tournée'
           : `✅ Enlèvement terminé — ${scannedIds.length}/${currentStop.packageIds.length} colis collectés`
       );
     } catch (err) {
@@ -1289,10 +1346,10 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
     return (
       <div className="max-w-lg mx-auto px-6 pt-10 pb-6 text-center space-y-5">
         {notification && (
-          <div className="fixed top-4 left-4 right-4 z-50 bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg text-center text-sm font-medium animate-fade-in">{notification}</div>
+          <div role="status" className="bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg text-center text-sm font-medium animate-fade-in">{notification}</div>
         )}
         <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mx-auto">
-          <Truck size={36} className="text-slate-400" />
+          <Truck size={36} className="text-slate-600" />
         </div>
         <div>
           <h2 className="text-xl font-bold text-slate-700 mb-2">Aucune tournée aujourd'hui</h2>
@@ -1303,7 +1360,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
         {/* Le chauffeur peut charger des colis même sans tournée pré-dispatchée */}
         <button
           onClick={() => setShowScanChoice(true)}
-          className="w-full flex items-center justify-center gap-2 py-4 bg-green-600 text-white rounded-2xl text-base font-black active:scale-95 transition-transform"
+          className="min-h-11 w-full flex items-center justify-center gap-2 py-4 bg-green-700 text-white rounded-2xl text-base font-black active:scale-95 transition-transform"
         >
           📷 Scanner des colis
         </button>
@@ -1338,31 +1395,28 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
       <div className="max-w-lg mx-auto pb-6 space-y-3 animate-fade-in">
         {/* Notification toast */}
         {notification && (
-          <div className="fixed top-4 left-4 right-4 z-50 bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg text-center text-sm font-medium animate-fade-in">
-            {notification}
+          <div role="status" className="bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg text-center text-sm font-medium animate-fade-in">
+            {notification}<button type="button" onClick={() => setNotification(null)} className="min-h-11 ml-2 px-3 underline font-bold">Masquer</button>
           </div>
         )}
 
-        {/* === CLÔTURE BLOQUÉE : chaque arrêt doit avoir un résultat === */}
-        {showFinishBlocked && (
-          <div className="fixed inset-0 z-[60] bg-black/60 flex items-end sm:items-center justify-center sm:p-4" onClick={() => setShowFinishBlocked(false)}>
-            <div className="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-md p-5 animate-slide-up" onClick={e => e.stopPropagation()}>
-              <h3 className="font-black text-lg text-slate-800">Des arrêts restent à traiter</h3>
-              <p className="text-sm text-slate-600 mt-2">
-                Il te reste <b>{remainingStops} arrêt{remainingStops > 1 ? 's' : ''}</b> non terminé{remainingStops > 1 ? 's' : ''}.
-                Enregistrez la livraison ou son échec, ou demandez au bureau de réaffecter les colis avant de clôturer.
-              </p>
-              <div className="mt-4 flex flex-col gap-2">
-                <button
-                  onClick={() => setShowFinishBlocked(false)}
-                  className="w-full py-3.5 bg-slate-800 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-60"
-                >
-                  Continuer ma tournée
-                </button>
-              </div>
-            </div>
+        <Modal isOpen={showFinishBlocked} onClose={() => setShowFinishBlocked(false)} title="Bilan avant de terminer la tournée" size="lg" preventClose={isProcessing}>
+          <p className="text-sm text-slate-600 mb-4">Vérifiez les arrêts, les retours au hub et l’envoi des preuves. La clôture est confirmée après vérification du serveur.</p>
+          <div className="space-y-4">
+            <section><h4 className="font-bold text-base">{remainingStops} arrêt{remainingStops > 1 ? 's' : ''} à traiter</h4>
+              {sortedStops.map((stop, index) => ![StopStatus.COMPLETED, StopStatus.FAILED, StopStatus.SKIPPED].includes(stop.status) && <button key={stop.id} type="button" onClick={() => openStop(index)} className="mt-2 min-h-12 w-full rounded-xl border border-slate-200 p-3 text-left text-base"><b>Arrêt {stop.sequence}</b> · {stop.contactName || stop.address}<span className="block text-sm text-slate-600">{stop.address} · {stop.status} → Ouvrir l’arrêt</span></button>)}
+            </section>
+            <section><h4 className="font-bold text-base">{activeReturns.length} colis à remettre au hub</h4>
+              {activeReturns.map(pkg => <button type="button" key={pkg.id} onClick={() => { setShowFinishBlocked(false); openReturnModal(pkg); }} className="mt-2 min-h-12 w-full rounded-xl border border-amber-300 bg-amber-50 p-3 text-left text-base">{packageDisplayCode(pkg)} · {pkg.contactName}<span className="block text-sm">Confirmer la remise au hub →</span></button>)}
+            </section>
+            <section><h4 className="font-bold text-base">{proofStopIds.size} arrêt{proofStopIds.size > 1 ? 's' : ''} avec un envoi en attente</h4>
+              {pendingProofError && <p role="alert" className="text-sm text-red-800 mt-2">{pendingProofError}</p>}
+              <button type="button" onClick={openPendingProofs} className="min-h-11 mt-2 px-3 py-2 rounded-lg border border-slate-300 font-bold text-sm">Voir les preuves et réessayer l’envoi</button>
+            </section>
+            {!online && <p role="status" className="rounded-lg bg-amber-50 p-3 text-amber-950">Reconnectez le téléphone pour demander la clôture. Vos preuves restent conservées sur cet appareil.</p>}
+            {closureNeedsAttention ? <p className="text-sm text-slate-700">Ouvrez les éléments ci-dessus pour terminer ce qui reste à faire.</p> : <button type="button" disabled={isProcessing || !online} onClick={handleFinishTour} className="min-h-11 min-h-12 w-full rounded-xl bg-green-700 px-4 py-3 text-white font-bold disabled:opacity-50">{isProcessing ? 'Vérification de la tournée…' : 'Confirmer la fin de ma tournée'}</button>}
           </div>
-        )}
+        </Modal>
 
         {finishError && (
           <div role="alert" className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
@@ -1373,132 +1427,21 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
         {/* === FIN DE TOURNÉE : tous les arrêts sont faits → clôturer explicitement === */}
         {allStopsDone && (
           <div className="bg-green-600 rounded-2xl p-4 text-white shadow-sm text-center space-y-3">
-            <p className="text-lg font-black">🎉 Tous tes arrêts sont faits !</p>
-            <p className="text-sm text-white/90">Clôture ta tournée après l’envoi de toutes les preuves.</p>
+            <p className="text-lg font-black">Tous les arrêts sont traités</p>
+            <p className="text-sm text-white/90">Vérifiez les retours et les preuves avant de terminer la tournée.</p>
             <button
-              onClick={handleFinishTour}
+              onClick={requestFinishTour}
               disabled={isProcessing}
-              className="w-full py-4 bg-white text-green-700 rounded-xl font-black text-base active:scale-95 transition-transform disabled:opacity-60"
+              className="min-h-11 w-full py-4 bg-white text-green-700 rounded-xl font-black text-base active:scale-95 transition-transform disabled:opacity-60"
             >
-              {isProcessing ? <Loader2 size={18} className="animate-spin inline" /> : '🏁 Terminer ma tournée'}
+              {isProcessing ? <Loader2 size={18} className="animate-spin inline" /> : closureNeedsAttention ? 'Voir ce qu’il reste à faire' : 'Vérifier et terminer ma tournée'}
             </button>
           </div>
         )}
 
-        {/* === ALERTE COLIS À RETOURNER === */}
-        {returnPackages.length > 0 && (
-          <div className="bg-yellow-50 border-2 border-yellow-400 rounded-2xl p-4 shadow-sm">
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 bg-yellow-100 rounded-full flex items-center justify-center flex-shrink-0">
-                <span className="text-xl">⚠️</span>
-              </div>
-              <div className="flex-1">
-                <h3 className="font-bold text-yellow-800 text-sm">
-                  {returnPackages.length} colis à retourner au hub
-                </h3>
-                <p className="text-xs text-yellow-700 mt-0.5">
-                  Ces colis ont été retirés de votre tournée. Ramenez-les au hub.
-                </p>
-                <div className="mt-2 space-y-1.5">
-                  {returnPackages.map(pkg => (
-                    <div key={pkg.id} className="flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-yellow-200">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-bold text-slate-800 truncate">{pkg.orderNumber}</p>
-                        <p className="text-xs text-slate-500 truncate">{pkg.contactName}</p>
-                      </div>
-                      <button
-                        onClick={() => openReturnModal(pkg)}
-                        className="ml-2 px-3 py-1.5 bg-yellow-500 text-white rounded-lg text-xs font-bold hover:bg-yellow-600 active:scale-95 transition-all"
-                      >
-                        Retour hub
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* === HEADER PROGRESSION === */}
-        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-          <div className="p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <h2 className="text-lg font-bold text-slate-800">Ma tournée — {activeMission.zone}</h2>
-                <p className="text-xs text-slate-500">
-                  {activeMission.vehiclePlate} • {activeMission.hubName}
-                </p>
-              </div>
-              <div className="text-right">
-                <p className="text-2xl font-extrabold text-slate-800">{missionProgress}%</p>
-                <p className="text-[10px] text-slate-500 uppercase font-medium">
-                  {activeMission.completedStops || 0}/{sortedStops.length} stops
-                </p>
-              </div>
-            </div>
-            <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
-              <div
-                className="h-full rounded-full transition-all duration-500"
-                style={{
-                  width: `${missionProgress}%`,
-                  background: missionProgress >= 90 ? '#22c55e' : missionProgress >= 50 ? '#f59e0b' : '#3b82f6'
-                }}
-              />
-            </div>
-            <div className="flex items-center justify-between mt-2 text-xs text-slate-500">
-              <span>✅ {activeMission.deliveredPackages || 0} livrés</span>
-              {(activeMission.failedPackages || 0) > 0 && (
-                <span className="text-red-500">❌ {activeMission.failedPackages} échecs</span>
-              )}
-              <span>📦 {activeMission.totalPackages} total</span>
-            </div>
-          </div>
-
-          {/* Mini liste stops scrollable */}
-          <div className="border-t border-slate-100 px-2 py-2 flex gap-1.5 overflow-x-auto">
-            {sortedStops.map((stop, idx) => (
-              <button
-                key={stop.id}
-                onClick={() => setActiveStopIndex(idx)}
-                className={`flex-shrink-0 w-9 h-9 rounded-full text-xs font-bold flex items-center justify-center transition-all ${
-                  idx === activeStopIndex
-                    ? 'bg-blue-600 text-white ring-2 ring-blue-300 scale-110'
-                    : stop.status === StopStatus.COMPLETED
-                      ? 'bg-green-100 text-green-700'
-                      : stop.status === StopStatus.FAILED || stop.status === StopStatus.SKIPPED
-                        ? 'bg-red-100 text-red-700'
-                        : stop.status === StopStatus.ARRIVED
-                          ? 'bg-blue-100 text-blue-700'
-                          : 'bg-slate-100 text-slate-600'
-                }`}
-              >
-                {stop.status === StopStatus.COMPLETED ? '✓' :
-                 stop.status === StopStatus.FAILED ? '✗' :
-                 stop.sequence}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* === TERMINER MA TOURNÉE — toujours accessible === */}
-        {/* Quand tout est fait, la grande bannière verte s'affiche déjà (en haut).
-            Ici on garantit un accès PERMANENT à la clôture même s'il reste des
-            arrêts (ex. un arrêt coincé en « Arrivé » qui empêchait de finir) :
-            le chauffeur n'est jamais bloqué « en tournée » sans pouvoir la clore. */}
-        {!allStopsDone && deliveryStep === 0 && (
-          <button
-            onClick={requestFinishTour}
-            disabled={isProcessing}
-            className="w-full py-3.5 bg-slate-800 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-60 flex items-center justify-center gap-2"
-          >
-            🏁 Terminer ma tournée{remainingStops > 0 ? ` (${remainingStops} arrêt${remainingStops > 1 ? 's' : ''} restant${remainingStops > 1 ? 's' : ''})` : ''}
-          </button>
-        )}
-
         {/* === STOP ACTIF === */}
         {currentStop && (
-          <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+          <div ref={stopCardRef} className="scroll-mt-4 bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
             {/* Header stop */}
             <div className={`p-4 ${
               currentStop.status === StopStatus.COMPLETED ? 'bg-green-50' :
@@ -1508,9 +1451,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
             }`}>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm font-bold text-slate-500">
-                  STOP {currentStop.sequence}/{sortedStops.length}
+                  ARRÊT {currentStop.sequence}/{sortedStops.length}
                 </span>
-                <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
+                <span className={`px-2 py-0.5 rounded-full text-sm font-bold ${
                   currentStop.status === StopStatus.COMPLETED ? 'bg-green-100 text-green-700' :
                   currentStop.status === StopStatus.FAILED ? 'bg-red-100 text-red-700' :
                   currentStop.status === StopStatus.ARRIVED ? 'bg-blue-100 text-blue-700' :
@@ -1522,21 +1465,21 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
 
               {/* Contact + type badge */}
               <div className="flex items-center gap-2 mb-1 min-w-0">
-                <h3 className="text-xl font-bold text-slate-800 truncate min-w-0">{currentStop.contactName || 'Sans contact'}</h3>
+                <h3 className="text-xl font-bold text-slate-800 min-w-0 break-words">{currentStop.contactName || 'Sans contact'}</h3>
                 {isPickupStop && (
-                  <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-[10px] font-bold uppercase tracking-wide flex-shrink-0 whitespace-nowrap">
+                  <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-sm font-bold uppercase tracking-wide flex-shrink-0 whitespace-nowrap">
                     📦 Enlèvement
                   </span>
                 )}
               </div>
 
               {/* Adresse */}
-              <p className="text-sm text-slate-600 mb-2">
+              <p className="text-base text-slate-700 mb-2">
                 📍 {currentStop.address}, {currentStop.postalCode} {currentStop.city}
               </p>
 
               {/* Info rapides */}
-              <div className="flex flex-wrap gap-2 text-xs">
+              <div className="flex flex-wrap gap-2 text-sm">
                 <span className="px-2 py-1 bg-white rounded-lg border border-slate-200 font-medium">
                   📦 {currentStop.packageCount} colis
                 </span>
@@ -1548,9 +1491,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                     🏢 Étage {currentStop.floor} {currentStop.hasElevator ? '(asc.)' : ''}
                   </span>
                 )}
-                {currentStop.timeWindowStart && currentStop.timeWindowEnd && (
+                {(currentStop.timeWindowStart || currentStop.timeWindowEnd) && (
                   <span className="px-2 py-1 bg-amber-50 border border-amber-200 rounded-lg font-medium text-amber-700">
-                    🕐 {currentStop.timeWindowStart} - {currentStop.timeWindowEnd}
+                    🕐 {currentStop.timeWindowStart && currentStop.timeWindowEnd ? `${currentStop.timeWindowStart} – ${currentStop.timeWindowEnd}` : currentStop.timeWindowStart ? `À partir de ${currentStop.timeWindowStart}` : `Avant ${currentStop.timeWindowEnd}`}
                   </span>
                 )}
               </div>
@@ -1558,14 +1501,14 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
               {/* Liste des colis à remettre — MASQUÉE quand l'arrêt est déjà livré/traité. */}
               {!isPickupStop && !currentStopDone && stopPackages.length > 0 && (
                 <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded-lg">
-                  <p className="text-[10px] font-bold text-blue-700 uppercase tracking-wide mb-1.5">
+                  <p className="text-sm font-bold text-blue-700 uppercase tracking-wide mb-1.5">
                     {stopPackages.length > 1 ? `${stopPackages.length} colis à remettre` : 'Colis à remettre'}
                   </p>
                   <div className="flex flex-wrap gap-1.5">
                     {stopPackages.map((p, i) => (
                       <span
                         key={p.id}
-                        className="px-2 py-1 bg-white border border-blue-200 rounded-lg text-[11px] font-mono font-bold text-blue-800"
+                        className="px-2 py-1 bg-white border border-blue-200 rounded-lg text-sm font-mono font-bold text-blue-800"
                       >
                         {p.externalId || p.barcode}
                         {stopPackages.length > 1 && (
@@ -1581,16 +1524,16 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                   Masqué si l'arrêt est déjà terminé (on n'y rattache plus rien). */}
               {!isPickupStop && currentStop.status !== StopStatus.COMPLETED && otherAtAddress.length > 0 && (
                 <div className="mt-2 p-3 bg-red-50 border-2 border-red-300 rounded-lg">
-                  <p className="text-xs font-black text-red-700 flex items-center gap-1.5">
+                  <p className="text-sm font-black text-red-700 flex items-center gap-1.5">
                     <XCircle size={14} />
                     ATTENTION — {otherAtAddress.length} autre{otherAtAddress.length > 1 ? 's' : ''} colis à cette adresse !
                   </p>
-                  <p className="text-[11px] text-red-600 mt-1">
-                    {stopPackages.length + otherAtAddress.length} colis semblent destinés à ce client, tu n'en as que <b>{stopPackages.length}</b> dans cet arrêt. Vérifie avec le client avant de repartir.
+                  <p className="text-sm text-red-600 mt-1">
+                    {stopPackages.length + otherAtAddress.length} colis semblent destinés à ce client, vous n’en avez que <b>{stopPackages.length}</b> dans cet arrêt. Vérifiez avec le client avant de repartir.
                   </p>
                   <div className="flex flex-wrap gap-1.5 mt-1.5">
                     {otherAtAddress.map(p => (
-                      <span key={p.id} className="px-2 py-1 bg-white border border-red-200 rounded-lg text-[11px] font-mono font-bold text-red-700">
+                      <span key={p.id} className="px-2 py-1 bg-white border border-red-200 rounded-lg text-sm font-mono font-bold text-red-700">
                         {p.externalId || p.barcode}
                       </span>
                     ))}
@@ -1599,7 +1542,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                     <button
                       onClick={handleClaimOthersToStop}
                       disabled={isClaimingOthers}
-                      className="mt-2 w-full flex items-center justify-center gap-2 py-2.5 bg-red-600 text-white rounded-lg font-bold text-xs active:scale-95 transition-transform disabled:opacity-50"
+                      className="min-h-11 mt-2 w-full flex items-center justify-center gap-2 py-2.5 bg-red-600 text-white rounded-lg font-bold text-sm active:scale-95 transition-transform disabled:opacity-50"
                     >
                       {isClaimingOthers ? <Loader2 size={14} className="animate-spin" /> : <PackageIcon size={14} />}
                       Ajouter {claimableOthers.length} colis à cet arrêt
@@ -1609,7 +1552,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
               )}
 
               {!currentStopDone && currentStop.notes && (
-                <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+                <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
                   📝 {currentStop.notes}
                 </div>
               )}
@@ -1623,7 +1566,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
               {currentStop.status !== StopStatus.ARRIVED && (
                 <button
                   onClick={() => openNavigation(currentStop)}
-                  className="flex-1 flex items-center justify-center gap-2 py-3 bg-blue-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform"
+                  className="min-h-11 flex-1 flex items-center justify-center gap-2 py-3 bg-blue-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform"
                 >
                   <Navigation size={18} />
                   Naviguer
@@ -1633,10 +1576,10 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
               {/* Appeler */}
               {currentStop.contactPhone && (
                 <button
-                  onClick={() => callContact(currentStop.contactPhone!)}
+                  onClick={() => callContact(currentStop.contactPhone!)} aria-label={`Appeler ${currentStop.contactName || 'le destinataire'}`}
                   className="flex items-center justify-center w-12 h-12 bg-green-50 border border-green-200 rounded-xl text-green-700 active:scale-95 transition-transform"
                 >
-                  <Phone size={20} />
+                  <Phone size={20} /><span className="sr-only">Appeler</span>
                 </button>
               )}
             </div>
@@ -1650,7 +1593,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                   <button
                     onClick={handleArriveAtStop}
                     disabled={isProcessing}
-                    className="w-full flex items-center justify-center gap-2 py-3.5 bg-blue-50 border-2 border-blue-200 text-blue-700 rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-50"
+                    className="min-h-11 w-full flex items-center justify-center gap-2 py-3.5 bg-blue-50 border-2 border-blue-200 text-blue-700 rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-50"
                   >
                     {isProcessing ? <Loader2 size={18} className="animate-spin" /> : <MapPinned size={18} />}
                     Je suis arrivé
@@ -1685,11 +1628,13 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                 {currentStop.status === StopStatus.ARRIVED && !isPickupStop && (
                   <>
                     {/* Progression de l'assistant de livraison */}
-                    <div className="flex items-center gap-1 px-1 pb-1">
+                    <p role="status" aria-live="polite" className="text-base font-bold text-slate-900 px-1">Étape {deliveryStep + 1} sur {DELIVERY_STEPS.length} · {DELIVERY_STEPS[deliveryStep]}</p>
+                    <p className="sr-only" aria-live="polite">{stepAnnouncement}</p>
+                    <div aria-hidden="true" className="flex items-start gap-1 px-1 pb-1">
                       {DELIVERY_STEPS.map((label, i) => (
-                        <div key={label} className="flex-1 flex flex-col items-center gap-1">
+                        <div key={label} className="min-w-0 flex-1 flex flex-col items-center gap-1 text-center">
                           <div className={`w-full h-1.5 rounded-full ${i <= deliveryStep ? 'bg-green-500' : 'bg-slate-200'}`} />
-                          <span className={`text-[9px] font-bold ${i === deliveryStep ? 'text-green-700' : 'text-slate-400'}`}>{label}</span>
+                          <span className={`text-sm font-bold ${i === deliveryStep ? 'text-green-700' : 'text-slate-600'}`}>{label}</span>
                         </div>
                       ))}
                     </div>
@@ -1697,16 +1642,16 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                     {/* ===== ÉTAPE 1 · COLIS ===== */}
                     {deliveryStep === 0 && (
                       <div className="space-y-2">
-                        <p className="text-lg font-black text-slate-800 px-1">Scanne {stopPackages.length > 1 ? `les ${stopPackages.length} colis` : 'le colis'}</p>
+                        <p className="text-lg font-black text-slate-800 px-1">Scannez {stopPackages.length > 1 ? `les ${stopPackages.length} colis` : 'le colis'}</p>
                         {stopPackages.length > 0 ? (
                           <div className="bg-white border border-slate-200 rounded-xl p-3 space-y-2">
                             <div className="flex items-center justify-between">
-                              <p className="text-xs font-bold text-slate-700">
+                              <p className="text-sm font-bold text-slate-700">
                                 📷 Colis scannés : {deliveryScannedCount}/{stopPackages.length}
                               </p>
                               <button
                                 onClick={() => setShowScanner(true)}
-                                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold active:scale-95 transition-transform"
+                                className="min-h-11 flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-bold active:scale-95 transition-transform"
                               >
                                 <Camera size={14} />
                                 Scanner
@@ -1720,7 +1665,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                                   <span
                                     key={p.id}
                                     title={noCode ? 'Ce colis n’a pas de code scannable — à valider en « Forcer »' : undefined}
-                                    className={`px-2 py-1 rounded-lg text-[11px] font-mono font-bold border ${
+                                    className={`px-2 py-1 rounded-lg text-sm font-mono font-bold border ${
                                       ok
                                         ? 'bg-green-50 border-green-300 text-green-700'
                                         : noCode
@@ -1734,13 +1679,13 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                               })}
                             </div>
                             {!allStopScanned && (
-                              <p className="text-[11px] text-amber-600 font-medium">
-                                ⚠️ {missingStopCodes.length} colis non scanné{missingStopCodes.length > 1 ? 's' : ''} — scanne-les, ou « Continuer » proposera de forcer / déclarer absents
+                              <p className="text-sm text-amber-600 font-medium">
+                                ⚠️ {missingStopCodes.length} colis non scanné{missingStopCodes.length > 1 ? 's' : ''} — scannez-les, ou « Continuer » proposera de forcer / déclarer absents
                               </p>
                             )}
                           </div>
                         ) : (
-                          <p className="text-xs text-slate-500 px-1">Aucun colis listé pour ce point.</p>
+                          <p className="text-sm text-slate-500 px-1">Aucun colis listé pour ce point.</p>
                         )}
                       </div>
                     )}
@@ -1753,13 +1698,13 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                           <div className="grid grid-cols-2 gap-2.5">
                             <button
                               onClick={() => { setMerchandiseGood(true); setReservesNote(''); setShowReserves(false); setDeliveryStep(2); }}
-                              className="flex flex-col items-center justify-center gap-1.5 py-5 bg-green-600 text-white rounded-2xl font-black text-base active:scale-95 transition-transform"
+                              className="min-h-11 flex flex-col items-center justify-center gap-1.5 py-5 bg-green-700 text-white rounded-2xl font-black text-base active:scale-95 transition-transform"
                             >
                               <CheckCircle size={26} /> Oui, bon état
                             </button>
                             <button
                               onClick={() => { setMerchandiseGood(false); setShowReserves(true); }}
-                              className="flex flex-col items-center justify-center gap-1.5 py-5 bg-white border-2 border-amber-400 text-amber-700 rounded-2xl font-black text-base active:scale-95 transition-transform"
+                              className="min-h-11 flex flex-col items-center justify-center gap-1.5 py-5 bg-white border-2 border-amber-400 text-amber-700 rounded-2xl font-black text-base active:scale-95 transition-transform"
                             >
                               <AlertTriangle size={26} /> Non, réserves
                             </button>
@@ -1767,31 +1712,31 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                         ) : (
                           <div className="space-y-2 px-1">
                             <div className="flex items-center justify-between">
-                              <label className="text-xs font-bold text-amber-700 block">⚠️ Décris la réserve :</label>
+                              <label htmlFor="delivery-reserves" className="text-sm font-bold text-amber-700 block">⚠️ Décrivez la réserve :</label>
                               {/* Revenir au choix Oui/Non (corriger un tap « Non » par erreur) */}
                               <button
                                 onClick={() => { setShowReserves(false); setMerchandiseGood(true); setReservesNote(''); }}
-                                className="text-xs text-slate-500 underline font-medium"
+                                className="min-h-11 text-sm text-slate-500 underline font-medium"
                               >
                                 ← Changer
                               </button>
                             </div>
-                            <textarea
+                            <textarea id="delivery-reserves"
                               value={reservesNote}
                               onChange={(e) => setReservesNote(e.target.value)}
                               placeholder="Colis manquant, emballage endommagé, contenu non conforme…"
                               rows={3}
-                              className="w-full px-3 py-2.5 border border-amber-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-200 outline-none"
+                              className="w-full px-3 py-2.5 border border-amber-300 rounded-lg text-base focus:ring-2 focus:ring-amber-200 outline-none"
                             />
                             <button
                               onClick={() => setDeliveryStep(2)}
                               disabled={!reservesNote.trim()}
-                              className="w-full py-4 bg-amber-600 text-white rounded-2xl font-black text-base active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
+                              className="min-h-11 w-full py-4 bg-amber-600 text-white rounded-2xl font-black text-base active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
                             >
                               Continuer →
                             </button>
                             {!reservesNote.trim() && (
-                              <p className="text-[11px] text-amber-600 font-medium text-center">Décris la réserve pour continuer</p>
+                              <p className="text-sm text-amber-600 font-medium text-center">Décrivez la réserve pour continuer</p>
                             )}
                           </div>
                         )}
@@ -1804,21 +1749,21 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                         <p className="text-lg font-black text-slate-800 px-1">Qui réceptionne le colis ?</p>
                         {/* Nom réceptionnaire */}
                         <div className="px-1">
-                          <label className="text-xs font-medium text-slate-500 mb-1 block">
+                          <label htmlFor="delivery-recipient" className="text-sm font-medium text-slate-500 mb-1 block">
                             Nom du réceptionnaire
                             <span className="text-red-400 ml-1">*</span>
                           </label>
-                          <input
+                          <input id="delivery-recipient" autoComplete="name"
                             type="text"
                             value={recipientName}
                             onChange={(e) => setRecipientName(e.target.value)}
                             placeholder="Nom de la personne qui réceptionne"
-                            className="w-full px-3 py-3 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-green-200 focus:border-green-400 outline-none"
+                            className="w-full px-3 py-3 border border-slate-200 rounded-lg text-base focus:ring-2 focus:ring-green-200 focus:border-green-400 outline-none"
                           />
                         </div>
                         {/* Lieu de remise */}
                         <div className="px-1">
-                          <label className="text-xs font-medium text-slate-500 mb-1 block">
+                          <label className="text-sm font-medium text-slate-500 mb-1 block">
                             📍 Lieu de remise
                           </label>
                           <div className="grid grid-cols-2 gap-1.5">
@@ -1826,7 +1771,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                               <button
                                 key={loc}
                                 onClick={() => setDeliveryLocation(loc as DeliveryLocation)}
-                                className={`px-2 py-2.5 rounded-lg text-xs font-medium transition-colors text-left ${
+                                className={`px-2 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
                                   deliveryLocation === loc
                                     ? 'bg-green-100 border-2 border-green-400 text-green-800'
                                     : 'bg-slate-50 border border-slate-200 text-slate-600 hover:bg-slate-100'
@@ -1848,12 +1793,12 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                         <button
                           onClick={() => setDeliveryStep(3)}
                           disabled={!recipientName.trim()}
-                          className="w-full py-4 bg-green-600 text-white rounded-2xl font-black text-base active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
+                          className="min-h-11 w-full py-4 bg-green-700 text-white rounded-2xl font-black text-base active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           C'est bon →
                         </button>
                         {!recipientName.trim() && (
-                          <p className="text-[11px] text-amber-600 font-medium text-center px-2">Saisis le nom pour continuer</p>
+                          <p className="text-sm text-amber-600 font-medium text-center px-2">Saisis le nom pour continuer</p>
                         )}
                       </div>
                     )}
@@ -1866,7 +1811,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                         {!showSignature && !signatureData && (
                           <button
                             onClick={() => setShowSignature(true)}
-                            className="w-full flex items-center justify-center gap-2 py-3.5 bg-amber-50 border-2 border-dashed border-amber-300 text-amber-700 rounded-xl font-bold text-sm"
+                            className="min-h-11 w-full flex items-center justify-center gap-2 py-3.5 bg-amber-50 border-2 border-dashed border-amber-300 text-amber-700 rounded-xl font-bold text-sm"
                           >
                             <PenTool size={16} />
                             ✍️ Capturer la signature *
@@ -1884,8 +1829,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                         {signatureData && (
                           <div className="flex items-center gap-2 px-3 py-2.5 bg-green-50 border border-green-200 rounded-xl">
                             <CheckCircle size={16} className="text-green-600" />
-                            <span className="text-xs text-green-700 font-bold flex-1">Signature enregistrée ✓</span>
-                            <button onClick={() => { setSignatureData(null); setShowSignature(true); }} className="text-xs text-green-600 underline font-medium">
+                            <span className="text-sm text-green-700 font-bold flex-1">Signature enregistrée ✓</span>
+                            <button onClick={() => { setSignatureData(null); setShowSignature(true); }} className="min-h-11 text-sm text-green-600 underline font-medium">
                               Refaire
                             </button>
                           </div>
@@ -1893,9 +1838,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
 
                         {/* Photos — 1 minimum, max 5 */}
                         <div className="px-1">
-                          <label className="text-xs font-medium text-slate-500 mb-1.5 block">
+                          <label className="text-sm font-medium text-slate-500 mb-1.5 block">
                             📸 Photos de la livraison <span className="text-red-500">*</span>
-                            <span className="block text-[11px] text-slate-400 font-normal mt-0.5">
+                            <span className="block text-sm text-slate-600 font-normal mt-0.5">
                               1 photo minimum. Tu peux en ajouter d'autres (jusqu'à {MAX_PHOTOS}) en réappuyant sur le bouton.
                             </span>
                           </label>
@@ -1932,12 +1877,13 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                               <div key={i} className="relative flex-shrink-0">
                                 <img src={photo} alt={`Photo ${i+1}`} className="w-20 h-20 rounded-lg object-cover border-2 border-slate-200" />
                                 <button
+                                  aria-label={`Supprimer la photo de livraison ${i + 1}`}
                                   onClick={() => setCapturedPhotos(prev => prev.filter((_, idx) => idx !== i))}
-                                  className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-[10px] shadow-md"
+                                  className="absolute -top-1.5 -right-1.5 w-11 h-11 bg-red-700 text-white rounded-full flex items-center justify-center text-sm shadow-md"
                                 >
                                   ✕
                                 </button>
-                                <span className="absolute bottom-0.5 left-0.5 bg-black/50 text-white text-[9px] px-1 rounded">
+                                <span className="absolute bottom-0.5 left-0.5 bg-black/50 text-white text-sm px-1 rounded">
                                   {i + 1}/{capturedPhotos.length}
                                 </span>
                               </div>
@@ -1946,12 +1892,12 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                         )}
 
                         {!signatureData && (
-                          <p className="text-[11px] text-amber-600 font-medium text-center px-2">
+                          <p className="text-sm text-amber-600 font-medium text-center px-2">
                             ⚠️ Signature obligatoire pour valider la livraison
                           </p>
                         )}
                         {capturedPhotos.length === 0 && (
-                          <p className="text-[11px] text-amber-600 font-medium text-center px-2">
+                          <p className="text-sm text-amber-600 font-medium text-center px-2">
                             ⚠️ Au moins 1 photo obligatoire (une seule photo du lot suffit)
                           </p>
                         )}
@@ -1967,7 +1913,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                           <div className="flex justify-between"><span className="text-slate-500">Colis</span><span className="font-bold">{stopPackages.length}</span></div>
                           <div className="flex justify-between"><span className="text-slate-500">État marchandise</span><span className={`font-bold ${merchandiseGood ? 'text-green-700' : 'text-amber-700'}`}>{merchandiseGood ? 'Bon état' : 'Réserves'}</span></div>
                           {!merchandiseGood && reservesNote.trim() && (
-                            <div className="text-[11px] text-amber-700 bg-amber-50 rounded-lg px-2 py-1.5">{reservesNote.trim()}</div>
+                            <div className="text-sm text-amber-700 bg-amber-50 rounded-lg px-2 py-1.5">{reservesNote.trim()}</div>
                           )}
                           <div className="flex justify-between"><span className="text-slate-500">Réceptionné par</span><span className="font-bold">{recipientName || '—'}</span></div>
                           <div className="flex justify-between"><span className="text-slate-500">Lieu de remise</span><span className="font-bold">{deliveryLocation}</span></div>
@@ -1980,7 +1926,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                           <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
                             <div className="flex items-center gap-2">
                               <Loader2 size={14} className="animate-spin text-blue-600" />
-                              <span className="text-xs font-bold text-blue-700">{uploadProgress.message}</span>
+                              <span className="text-sm font-bold text-blue-700">{uploadProgress.message}</span>
                             </div>
                             <div className="w-full bg-blue-100 rounded-full h-2">
                               <div
@@ -1994,7 +1940,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                         <button
                           onClick={() => { if (scanRequirementMet) { handleDeliverySuccess(); } else { setScanGateFrom('final'); setShowScanGate(true); } }}
                           disabled={isProcessing || !signatureData || !recipientName.trim() || capturedPhotos.length === 0}
-                          className="w-full flex items-center justify-center gap-2 py-4 bg-green-600 text-white rounded-xl font-bold text-base active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
+                          className="min-h-11 w-full flex items-center justify-center gap-2 py-4 bg-green-700 text-white rounded-xl font-bold text-base active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           {isProcessing ? <Loader2 size={18} className="animate-spin" /> : <CheckCircle size={18} />}
                           Livré ✓
@@ -2015,7 +1961,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                         <button
                           onClick={() => setDeliveryStep(s => Math.max(0, s - 1))}
                           disabled={isProcessing}
-                          className="px-4 py-3 bg-slate-100 text-slate-700 rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-40"
+                          className="min-h-11 px-4 py-3 bg-slate-100 text-slate-700 rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-40"
                         >
                           ← Retour
                         </button>
@@ -2034,7 +1980,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                             }
                           }}
                           disabled={deliveryStep === 3 && (!signatureData || capturedPhotos.length === 0)}
-                          className="flex-1 flex items-center justify-center gap-2 py-3 bg-green-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
+                          className="min-h-11 flex-1 flex items-center justify-center gap-2 py-3 bg-green-700 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           Continuer →
                         </button>
@@ -2045,7 +1991,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                     <button
                       onClick={() => setShowFailureModal(true)}
                       disabled={isProcessing}
-                      className="w-full flex items-center justify-center gap-1.5 py-2.5 text-red-600 text-xs font-bold disabled:opacity-50"
+                      className="min-h-11 w-full flex items-center justify-center gap-1.5 py-2.5 text-red-600 text-sm font-bold disabled:opacity-50"
                     >
                       <XCircle size={14} />
                       Signaler un échec de livraison
@@ -2064,7 +2010,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                     : '❌ Échec enregistré'}
                 </p>
                 {currentStop.completionTime && (
-                  <p className="text-xs text-center text-slate-500 mt-1">
+                  <p className="text-sm text-center text-slate-500 mt-1">
                     {new Date(currentStop.completionTime).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
                   </p>
                 )}
@@ -2078,29 +2024,146 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
         {currentStop?.status !== StopStatus.ARRIVED && (
         <div className="flex gap-2">
           <button
-            onClick={() => setActiveStopIndex(Math.max(0, activeStopIndex - 1))}
+            onClick={() => openStop(Math.max(0, activeStopIndex - 1))}
             disabled={activeStopIndex === 0}
-            className="flex-1 flex items-center justify-center gap-1 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 disabled:opacity-30"
+            className="min-h-11 flex-1 flex items-center justify-center gap-1 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 disabled:opacity-30"
           >
             <ArrowLeft size={16} /> Précédent
           </button>
           {nextPendingStopIndex >= 0 && nextPendingStopIndex !== activeStopIndex && (
             <button
-              onClick={() => setActiveStopIndex(nextPendingStopIndex)}
-              className="flex-1 flex items-center justify-center gap-1 py-3 bg-blue-600 text-white rounded-xl text-sm font-bold"
+              onClick={() => openStop(nextPendingStopIndex)}
+              className="min-h-11 flex-1 flex items-center justify-center gap-1 py-3 bg-blue-600 text-white rounded-xl text-sm font-bold"
             >
-              Prochain stop <ChevronRight size={16} />
+              Prochain arrêt <ChevronRight size={16} />
             </button>
           )}
           <button
-            onClick={() => setActiveStopIndex(Math.min(sortedStops.length - 1, activeStopIndex + 1))}
+            onClick={() => openStop(Math.min(sortedStops.length - 1, activeStopIndex + 1))}
             disabled={activeStopIndex >= sortedStops.length - 1}
-            className="flex-1 flex items-center justify-center gap-1 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 disabled:opacity-30"
+            className="min-h-11 flex-1 flex items-center justify-center gap-1 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 disabled:opacity-30"
           >
             Suivant <ChevronRight size={16} />
           </button>
         </div>
         )}
+
+        <details className="rounded-2xl border border-slate-200 bg-white p-4" open={allStopsDone || undefined}>
+          <summary className="min-h-11 cursor-pointer text-base font-bold text-slate-800">Bilan et arrêts de la tournée · {missionProgress}%{returnPackages.length ? ` · ${returnPackages.length} retour(s) au hub` : ''}</summary>
+          <div className="mt-3 space-y-4">
+        {/* === ALERTE COLIS À RETOURNER === */}
+        {returnPackages.length > 0 && (
+          <div className="bg-yellow-50 border-2 border-yellow-400 rounded-2xl p-4 shadow-sm">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 bg-yellow-100 rounded-full flex items-center justify-center flex-shrink-0">
+                <span className="text-xl">⚠️</span>
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="font-bold text-yellow-800 text-sm">
+                  {returnPackages.length} colis à retourner au hub
+                </h3>
+                <p className="text-sm text-yellow-700 mt-0.5">
+                  Ces colis ont été retirés de votre tournée. Ramenez-les au hub.
+                </p>
+                <div className="mt-2 space-y-1.5">
+                  {returnPackages.map(pkg => (
+                    <div key={pkg.id} className="flex flex-wrap gap-2 items-center justify-between bg-white rounded-lg px-3 py-2 border border-yellow-200">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-slate-800 truncate">{pkg.orderNumber}</p>
+                        <p className="text-sm text-slate-500 truncate">{pkg.contactName}</p>
+                      </div>
+                      <button
+                        onClick={() => openReturnModal(pkg)}
+                        className="min-h-11 ml-2 px-3 py-1.5 bg-yellow-700 text-white rounded-lg text-sm font-bold hover:bg-yellow-600 active:scale-95 transition-all"
+                      >
+                        Retour hub
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* === HEADER PROGRESSION === */}
+        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+          <div className="p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h2 className="text-lg font-bold text-slate-800">Ma tournée — {activeMission.zone}</h2>
+                <p className="text-sm text-slate-500">
+                  {activeMission.vehiclePlate} • {activeMission.hubName}
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-2xl font-extrabold text-slate-800">{missionProgress}%</p>
+                <p className="text-sm text-slate-500 uppercase font-medium">
+                  {activeMission.completedStops || 0}/{sortedStops.length} arrêts
+                </p>
+              </div>
+            </div>
+            <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all duration-500"
+                style={{
+                  width: `${missionProgress}%`,
+                  background: missionProgress >= 90 ? '#22c55e' : missionProgress >= 50 ? '#f59e0b' : '#3b82f6'
+                }}
+              />
+            </div>
+            <div className="flex items-center justify-between mt-2 text-sm text-slate-500">
+              <span>✅ {activeMission.deliveredPackages || 0} livrés</span>
+              {(activeMission.failedPackages || 0) > 0 && (
+                <span className="text-red-500">❌ {activeMission.failedPackages} échecs</span>
+              )}
+              <span>📦 {activeMission.totalPackages} total</span>
+            </div>
+          </div>
+
+          {/* Mini liste stops scrollable */}
+          <div className="border-t border-slate-100 px-2 py-2 flex gap-1.5 overflow-x-auto">
+            {sortedStops.map((stop, idx) => (
+              <button
+                key={stop.id}
+                onClick={() => openStop(idx)} aria-label={`Ouvrir l’arrêt ${stop.sequence}, ${stop.contactName || stop.address}, ${stop.status}`} aria-current={idx === activeStopIndex ? 'step' : undefined}
+                className={`flex-shrink-0 w-11 h-11 rounded-full text-sm font-bold flex items-center justify-center transition-all ${
+                  idx === activeStopIndex
+                    ? 'bg-blue-600 text-white ring-2 ring-blue-300 scale-110'
+                    : stop.status === StopStatus.COMPLETED
+                      ? 'bg-green-100 text-green-700'
+                      : stop.status === StopStatus.FAILED || stop.status === StopStatus.SKIPPED
+                        ? 'bg-red-100 text-red-700'
+                        : stop.status === StopStatus.ARRIVED
+                          ? 'bg-blue-100 text-blue-700'
+                          : 'bg-slate-100 text-slate-600'
+                }`}
+              >
+                {stop.status === StopStatus.COMPLETED ? '✓' :
+                 stop.status === StopStatus.FAILED ? '✗' :
+                 stop.sequence}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* === TERMINER MA TOURNÉE — toujours accessible === */}
+        {/* Quand tout est fait, la grande bannière verte s'affiche déjà (en haut).
+            Ici on garantit un accès PERMANENT à la clôture même s'il reste des
+            arrêts (ex. un arrêt coincé en « Arrivé » qui empêchait de finir) :
+            le chauffeur n'est jamais bloqué « en tournée » sans pouvoir la clore. */}
+        {!allStopsDone && deliveryStep === 0 && (
+          <button
+            onClick={requestFinishTour}
+            disabled={isProcessing}
+            className="min-h-11 w-full py-3.5 bg-slate-800 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-60 flex items-center justify-center gap-2"
+          >
+            Voir ce qu’il reste à faire · {remainingStops} arrêt{remainingStops > 1 ? 's' : ''}, {activeReturns.length} retour{activeReturns.length > 1 ? 's' : ''}, {proofStopIds.size} preuve{proofStopIds.size > 1 ? 's' : ''}
+          </button>
+        )}
+
+          </div>
+        </details>
 
         {/* Actions de GESTION (charger, optimiser, réorganiser, ajouter, signaler) :
             seulement sur un arrêt EN ATTENTE (ni pendant le guide, ni sur un arrêt fait). */}
@@ -2110,7 +2173,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
             Remplace les 2 boutons séparés (transfert / prise en charge) qui perdaient le chauffeur. */}
         <button
           onClick={() => setShowScanChoice(true)}
-          className="w-full flex items-center justify-center gap-2 py-3.5 bg-green-600 text-white rounded-xl text-base font-black active:scale-95 transition-transform"
+          className="min-h-11 w-full flex items-center justify-center gap-2 py-3.5 bg-green-700 text-white rounded-xl text-base font-black active:scale-95 transition-transform"
         >
           📷 Scanner des colis
         </button>
@@ -2120,20 +2183,20 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
           <button
             onClick={handleOptimizeTour}
             disabled={isOptimizing}
-            className="flex items-center justify-center gap-2 py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold active:scale-95 transition-transform disabled:opacity-50"
+            className="min-h-11 flex items-center justify-center gap-2 py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold active:scale-95 transition-transform disabled:opacity-50"
           >
             {isOptimizing ? <Loader2 size={16} className="animate-spin" /> : '🧭'} Optimiser
           </button>
           <button
             onClick={() => setShowReorder(true)}
-            className="flex items-center justify-center gap-2 py-3 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-700 active:scale-95 transition-transform"
+            className="min-h-11 flex items-center justify-center gap-2 py-3 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-700 active:scale-95 transition-transform"
           >
             ↕️ Réorganiser
           </button>
         </div>
         <button
           onClick={() => setShowManualStop(true)}
-          className="w-full flex items-center justify-center gap-2 py-3 bg-white border border-amber-300 rounded-xl text-sm font-medium text-amber-700 active:scale-95 transition-transform"
+          className="min-h-11 w-full flex items-center justify-center gap-2 py-3 bg-white border border-amber-300 rounded-xl text-sm font-medium text-amber-700 active:scale-95 transition-transform"
         >
           ➕ Ajouter un arrêt manuel
         </button>
@@ -2141,7 +2204,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
         {/* Signaler un problème au bureau (incident) */}
         <button
           onClick={() => setShowIssue(true)}
-          className="w-full flex items-center justify-center gap-2 py-3 bg-white border border-red-200 rounded-xl text-sm font-medium text-red-600 active:scale-95 transition-transform"
+          className="min-h-11 w-full flex items-center justify-center gap-2 py-3 bg-white border border-red-200 rounded-xl text-sm font-medium text-red-600 active:scale-95 transition-transform"
         >
           🛠️ Signaler un problème
         </button>
@@ -2151,8 +2214,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
         {/* Retour liste : visible sauf pendant la livraison guidée. */}
         {currentStop?.status !== StopStatus.ARRIVED && (
         <button
-          onClick={() => setActiveMissionId(null)}
-          className="w-full flex items-center justify-center gap-2 py-3 text-slate-500 text-sm"
+          onClick={() => { void changeStop(() => setActiveMissionId(null)); }}
+          className="min-h-11 w-full flex items-center justify-center gap-2 py-3 text-slate-500 text-sm"
         >
           <ArrowLeft size={14} /> Voir toutes mes tournées
         </button>
@@ -2200,44 +2263,44 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
 
         {/* === MODAL GPS OBLIGATOIRE (action bloquée sans localisation) === */}
         {gpsBlocked && (
-          <div className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4">
+          <Modal isOpen onClose={() => { setGpsBlocked(false); setGpsRetry(null); deliverIntentRef.current = null; }} title="Localisation requise pour cette action" closeOnOverlay={false} bodyClassName="!p-0">
             <div className="bg-white rounded-2xl max-w-sm w-full p-5 text-center space-y-3">
               <div className="text-5xl">📍</div>
               <h3 className="font-bold text-lg text-slate-900">Localisation obligatoire</h3>
               <p className="text-sm font-semibold text-slate-800">
-                {gpsErrorMsg || `${currentUser.firstName ? currentUser.firstName + ', ' : ''}active ta localisation pour continuer stp 🙏`}
+                {gpsErrorMsg || `${currentUser.firstName ? currentUser.firstName + ', ' : ''}activez votre localisation pour continuer`}
               </p>
-              <div className="text-left text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1.5">
+              <div className="text-left text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1.5">
                 {gpsIsPermission ? (
                   <>
-                    <p>1️⃣ Ouvre le <b>menu du navigateur</b> (cadenas 🔒 dans la barre d'adresse)</p>
-                    <p>2️⃣ <b>Autorise la localisation</b> pour ce site</p>
-                    <p>3️⃣ Reviens ici et appuie sur <b>Réessayer</b></p>
+                    <p>1️⃣ Ouvrez le <b>menu du navigateur</b> (cadenas 🔒 dans la barre d'adresse)</p>
+                    <p>2️⃣ <b>Autorisez la localisation</b> pour ce site</p>
+                    <p>3️⃣ Revenez ici et appuyez sur <b>Réessayer</b></p>
                   </>
                 ) : (
                   <>
-                    <p>1️⃣ Ouvre les <b>réglages</b> de ton téléphone</p>
-                    <p>2️⃣ Active la <b>localisation / GPS</b></p>
-                    <p>3️⃣ Reviens ici et appuie sur <b>Réessayer</b></p>
+                    <p>1️⃣ Ouvrez les <b>réglages</b> de votre téléphone</p>
+                    <p>2️⃣ Activez la <b>localisation / GPS</b></p>
+                    <p>3️⃣ Revenez ici et appuyez sur <b>Réessayer</b></p>
                   </>
                 )}
               </div>
               <div className="flex gap-2 pt-1">
                 <button
                   onClick={() => { setGpsBlocked(false); setGpsRetry(null); deliverIntentRef.current = null; }}
-                  className="flex-1 py-3 bg-slate-100 text-slate-700 rounded-xl font-bold text-sm active:scale-95 transition-transform"
+                  className="min-h-11 flex-1 py-3 bg-slate-100 text-slate-700 rounded-xl font-bold text-sm active:scale-95 transition-transform"
                 >
                   Annuler
                 </button>
                 <button
                   onClick={() => { setGpsBlocked(false); (gpsRetry || handleDeliverySuccess)(); }}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-3 bg-green-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform"
+                  className="min-h-11 flex-1 flex items-center justify-center gap-1.5 py-3 bg-green-700 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform"
                 >
                   <MapPin size={16} /> Réessayer
                 </button>
               </div>
             </div>
-          </div>
+          </Modal>
         )}
 
         {/* === MODAL PRISE EN CHARGE PAR SCAN === */}
@@ -2253,7 +2316,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
             onClose={() => setShowClaimModal(false)}
             onDone={(count) => {
               setShowClaimModal(false);
-              if (count > 0) showNotif(`📦 ${count} colis ajouté${count > 1 ? 's' : ''} à ta tournée`);
+              if (count > 0) showNotif(`📦 ${count} colis ajouté${count > 1 ? 's' : ''} à votre tournée`);
             }}
           />
         )}
@@ -2276,62 +2339,52 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
 
         {/* === MODAL AJOUT ARRÊT MANUEL === */}
         {showManualStop && (
-          <div className="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center sm:p-4" onClick={() => setShowManualStop(false)}>
+          <Modal isOpen onClose={() => { void closeManual(() => setShowManualStop(false)); }} title="Ajouter un arrêt manuel" preventClose={isProcessing} bodyClassName="!p-0">
             <div className="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-md animate-slide-up" onClick={e => e.stopPropagation()}>
               <div className="p-4 border-b border-slate-200 flex items-center justify-between">
                 <h3 className="font-bold text-slate-800">➕ Ajouter un arrêt manuel</h3>
-                <button onClick={() => setShowManualStop(false)} className="p-2 rounded-full hover:bg-slate-100"><XCircle size={20} className="text-slate-400" /></button>
+                <button onClick={() => { void closeManual(() => setShowManualStop(false)); }} aria-label="Fermer cette fenêtre" className="min-h-11 min-w-11 p-2 rounded-full hover:bg-slate-100"><XCircle size={20} className="text-slate-600" /></button>
               </div>
               <div className="p-4 space-y-3">
                 <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl">
                   <span className="text-lg">⚠️</span>
-                  <p className="text-xs text-amber-800">
+                  <p className="text-sm text-amber-800">
                     Cet arrêt n'a <b>pas de colis rattaché</b> et ne provient pas d'un import client. Il ne sera pas suivi dans le portail client. À utiliser uniquement pour un passage exceptionnel.
                   </p>
                 </div>
-                <input type="text" placeholder="Nom du destinataire (optionnel)" value={manualStop.contactName}
-                  onChange={e => setManualStop(s => ({ ...s, contactName: e.target.value }))}
-                  className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 outline-none" />
-                <input type="text" placeholder="Adresse *" value={manualStop.address}
-                  onChange={e => setManualStop(s => ({ ...s, address: e.target.value }))}
-                  className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 outline-none" />
-                <div className="flex gap-2">
-                  <input type="text" inputMode="numeric" placeholder="Code postal" value={manualStop.postalCode}
-                    onChange={e => setManualStop(s => ({ ...s, postalCode: e.target.value }))}
-                    className="w-1/3 px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 outline-none" />
-                  <input type="text" placeholder="Ville *" value={manualStop.city}
-                    onChange={e => setManualStop(s => ({ ...s, city: e.target.value }))}
-                    className="flex-1 px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 outline-none" />
+                <FormInput label="Nom du destinataire" value={manualStop.contactName} onChange={event => setManualStop(previous => ({ ...previous, contactName: event.target.value }))} placeholder="Optionnel" />
+                <FormInput label="Adresse" required value={manualStop.address} onChange={event => setManualStop(previous => ({ ...previous, address: event.target.value }))} />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <FormInput label="Code postal" inputMode="numeric" autoComplete="postal-code" value={manualStop.postalCode} onChange={event => setManualStop(previous => ({ ...previous, postalCode: event.target.value }))} />
+                  <FormInput label="Ville" required value={manualStop.city} onChange={event => setManualStop(previous => ({ ...previous, city: event.target.value }))} />
                 </div>
-                <input type="tel" placeholder="Téléphone (optionnel)" value={manualStop.contactPhone}
-                  onChange={e => setManualStop(s => ({ ...s, contactPhone: e.target.value }))}
-                  className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 outline-none" />
+                <FormInput label="Téléphone" type="tel" autoComplete="tel" value={manualStop.contactPhone} onChange={event => setManualStop(previous => ({ ...previous, contactPhone: event.target.value }))} placeholder="Optionnel" />
               </div>
               <div className="p-4 border-t border-slate-200 flex gap-2">
-                <button onClick={handleAddManualStop} className="flex-1 py-3 bg-amber-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform">
+                <button onClick={handleAddManualStop} className="min-h-11 flex-1 py-3 bg-amber-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform">
                   Ajouter l'arrêt
                 </button>
-                <button onClick={() => setShowManualStop(false)} className="px-5 py-3 bg-slate-100 text-slate-700 rounded-xl font-medium text-sm">
+                <button onClick={() => { void closeManual(() => setShowManualStop(false)); }} className="min-h-11 px-5 py-3 bg-slate-100 text-slate-700 rounded-xl font-medium text-sm">
                   Annuler
                 </button>
               </div>
             </div>
-          </div>
+          </Modal>
         )}
 
         {/* === MODAL SIGNALER UN PROBLÈME === */}
         {showIssue && (
-          <div className="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center sm:p-4" onClick={() => setShowIssue(false)}>
+          <Modal isOpen onClose={() => { void closeIssue(() => setShowIssue(false)); }} title="Signaler un problème" preventClose={issueSubmitting} bodyClassName="!p-0">
             <div className="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-md animate-slide-up" onClick={e => e.stopPropagation()}>
               <div className="p-4 border-b border-slate-200 flex items-center justify-between">
                 <h3 className="font-bold text-slate-800">🛠️ Signaler un problème</h3>
-                <button onClick={() => setShowIssue(false)} className="p-2 rounded-full hover:bg-slate-100"><XCircle size={20} className="text-slate-400" /></button>
+                <button onClick={() => { void closeIssue(() => setShowIssue(false)); }} aria-label="Fermer cette fenêtre" className="min-h-11 min-w-11 p-2 rounded-full hover:bg-slate-100"><XCircle size={20} className="text-slate-600" /></button>
               </div>
               <div className="p-4 space-y-3">
                 <div>
-                  <label className="text-xs font-bold text-slate-500 block mb-1">Type de problème</label>
-                  <select value={issueForm.category} onChange={e => setIssueForm(f => ({ ...f, category: e.target.value }))}
-                    className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 outline-none">
+                  <label htmlFor="driver-issue-category" className="text-sm font-bold text-slate-500 block mb-1">Type de problème</label>
+                  <select id="driver-issue-category" value={issueForm.category} onChange={e => setIssueForm(f => ({ ...f, category: e.target.value }))}
+                    className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-base focus:ring-2 focus:ring-brand-500 outline-none">
                     <option>Véhicule / panne</option>
                     <option>Accident</option>
                     <option>Colis abîmé / manquant</option>
@@ -2341,17 +2394,17 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-slate-500 block mb-1">Description *</label>
-                  <textarea value={issueForm.description} onChange={e => setIssueForm(f => ({ ...f, description: e.target.value }))}
+                  <label htmlFor="driver-issue-description" className="text-sm font-bold text-slate-500 block mb-1">Description *</label>
+                  <textarea id="driver-issue-description" value={issueForm.description} onChange={e => setIssueForm(f => ({ ...f, description: e.target.value }))}
                     rows={3} placeholder="Décrivez le problème…"
-                    className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 outline-none" />
+                    className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-base focus:ring-2 focus:ring-brand-500 outline-none" />
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-slate-500 block mb-1">Urgence</label>
+                  <label className="text-sm font-bold text-slate-500 block mb-1">Urgence</label>
                   <div className="flex gap-2">
                     {([['Low', 'Basse'], ['Medium', 'Moyenne'], ['High', 'Haute']] as const).map(([val, label]) => (
                       <button key={val} onClick={() => setIssueForm(f => ({ ...f, priority: val }))}
-                        className={`flex-1 py-2 rounded-lg text-sm font-bold border ${issueForm.priority === val ? (val === 'High' ? 'bg-red-600 text-white border-red-600' : val === 'Medium' ? 'bg-amber-500 text-white border-amber-500' : 'bg-slate-600 text-white border-slate-600') : 'bg-white text-slate-600 border-slate-300'}`}>
+                        className={`flex-1 py-2 rounded-lg text-sm font-bold border ${issueForm.priority === val ? (val === 'High' ? 'bg-red-600 text-white border-red-600' : val === 'Medium' ? 'bg-amber-700 text-white border-amber-500' : 'bg-slate-600 text-white border-slate-600') : 'bg-white text-slate-600 border-slate-300'}`}>
                         {label}
                       </button>
                     ))}
@@ -2359,24 +2412,24 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                 </div>
               </div>
               <div className="p-4 border-t border-slate-200 flex gap-2">
-                <button onClick={handleSubmitIssue} disabled={issueSubmitting} className="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-50">
+                <button onClick={handleSubmitIssue} disabled={issueSubmitting} className="min-h-11 flex-1 py-3 bg-red-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-50">
                   {issueSubmitting ? 'Envoi…' : 'Envoyer au bureau'}
                 </button>
-                <button onClick={() => setShowIssue(false)} className="px-5 py-3 bg-slate-100 text-slate-700 rounded-xl font-medium text-sm">
+                <button onClick={() => { void closeIssue(() => setShowIssue(false)); }} className="min-h-11 px-5 py-3 bg-slate-100 text-slate-700 rounded-xl font-medium text-sm">
                   Annuler
                 </button>
               </div>
             </div>
-          </div>
+          </Modal>
         )}
 
         {/* === MODAL ÉCHEC === */}
         {showFailureModal && (
-          <div className="fixed inset-0 z-50 bg-black/50 flex items-end justify-center p-0 sm:items-center sm:p-4">
+          <Modal isOpen onClose={() => { void closeFailure(() => setShowFailureModal(false)); }} title="Déclarer un échec de livraison" preventClose={isProcessing} closeOnOverlay={false} bodyClassName="!p-0">
             <div className="bg-white w-full max-w-md rounded-t-2xl sm:rounded-2xl overflow-hidden animate-slide-up max-h-[85vh] overflow-y-auto">
               <div className="p-4 bg-red-50 border-b border-red-100">
                 <h3 className="text-lg font-bold text-red-800">Raison de l'échec</h3>
-                <p className="text-xs text-red-600">Stop {currentStop?.sequence} — {currentStop?.contactName}</p>
+                <p className="text-sm text-red-600">Arrêt {currentStop?.sequence} — {currentStop?.contactName}</p>
               </div>
               <div className="p-4 space-y-3">
                 {Object.values(FailureReason).map(reason => (
@@ -2392,20 +2445,21 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                     {reason}
                   </button>
                 ))}
-                <textarea
+                <label htmlFor="failure-notes" className="block text-sm font-medium text-slate-700">Commentaire de l’échec (optionnel)</label>
+                <textarea id="failure-notes"
                   value={failureNotes}
                   onChange={(e) => setFailureNotes(e.target.value)}
                   placeholder="Commentaire supplémentaire (optionnel)"
-                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm resize-none h-20"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-base resize-none h-20"
                 />
 
                 {/* Photo preuve d'échec */}
                 <div className="border-t border-slate-100 pt-3">
-                  <p className="text-xs font-bold text-slate-500 mb-2">📷 Photo preuve <span className="text-red-500">obligatoire</span></p>
+                  <p className="text-sm font-bold text-slate-500 mb-2">📷 Photo preuve <span className="text-red-500">obligatoire</span></p>
                   <button
                     onClick={() => failurePhotoInputRef.current?.click()}
                     disabled={failurePhotos.length >= MAX_PHOTOS}
-                    className="w-full flex items-center justify-center gap-2 py-2.5 bg-slate-50 border border-slate-200 text-slate-600 rounded-xl text-sm font-medium disabled:opacity-40"
+                    className="min-h-11 w-full flex items-center justify-center gap-2 py-2.5 bg-slate-50 border border-slate-200 text-slate-600 rounded-xl text-sm font-medium disabled:opacity-40"
                   >
                     <Camera size={14} />
                     Photo porte / boîte aux lettres ({failurePhotos.length}/{MAX_PHOTOS})
@@ -2419,7 +2473,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                     onChange={handleFailurePhotoCapture}
                   />
                   {failurePhotos.length === 0 && (
-                    <p className="text-[11px] text-red-500 font-medium mt-1.5 text-center">
+                    <p className="text-sm text-red-500 font-medium mt-1.5 text-center">
                       ⚠️ Au moins 1 photo requise pour confirmer l'échec
                     </p>
                   )}
@@ -2429,8 +2483,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                         <div key={i} className="relative flex-shrink-0">
                           <img src={photo} alt={`Échec ${i+1}`} className="w-16 h-16 rounded-lg object-cover border border-red-200" />
                           <button
+                            aria-label={`Supprimer la photo d’échec ${i + 1}`}
                             onClick={() => setFailurePhotos(prev => prev.filter((_, idx) => idx !== i))}
-                            className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white rounded-full flex items-center justify-center text-[9px]"
+                            className="absolute -top-1 -right-1 w-11 h-11 bg-red-700 text-white rounded-full flex items-center justify-center text-sm"
                           >✕</button>
                         </div>
                       ))}
@@ -2443,28 +2498,28 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                   <div className="bg-red-50 border border-red-200 rounded-xl p-2">
                     <div className="flex items-center gap-2">
                       <Loader2 size={12} className="animate-spin text-red-600" />
-                      <span className="text-xs text-red-700">{uploadProgress.message}</span>
+                      <span className="text-sm text-red-700">{uploadProgress.message}</span>
                     </div>
                   </div>
                 )}
               </div>
               <div className="p-4 border-t border-slate-100 flex gap-2">
                 <button
-                  onClick={() => { setShowFailureModal(false); setFailureNotes(''); setFailurePhotos([]); }}
-                  className="flex-1 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-600"
+                  onClick={() => { void closeFailure(() => { setShowFailureModal(false); setFailureNotes(''); setFailurePhotos([]); }); }}
+                  className="min-h-11 flex-1 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-600"
                 >
                   Annuler
                 </button>
                 <button
                   onClick={handleDeliveryFailure}
                   disabled={isProcessing || failurePhotos.length === 0}
-                  className="flex-1 py-3 bg-red-600 text-white rounded-xl text-sm font-bold disabled:opacity-50"
+                  className="min-h-11 flex-1 py-3 bg-red-600 text-white rounded-xl text-sm font-bold disabled:opacity-50"
                 >
                   {isProcessing ? 'Envoi...' : failurePhotos.length === 0 ? '📷 Photo requise' : 'Confirmer échec'}
                 </button>
               </div>
             </div>
-          </div>
+          </Modal>
         )}
 
         {/* Scanner code-barres (plein écran, lazy-loaded) */}
@@ -2493,27 +2548,13 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
 
         {/* === MODAL RETOUR HUB === */}
         {showReturnModal && returningPackage && (
-          <div className="fixed inset-0 z-50 bg-black/60 flex items-end justify-center">
+          <Modal isOpen onClose={() => { void closeReturn(() => setShowReturnModal(false)); }} title="Confirmer un retour au hub" size="lg" preventClose={isProcessing} bodyClassName="!p-0">
             <div className="bg-white rounded-t-3xl w-full max-w-lg max-h-[90vh] overflow-y-auto animate-slide-up">
-              {/* Header */}
-              <div className="p-4 border-b border-slate-200 bg-yellow-50">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="font-bold text-slate-800">Retour hub</h3>
-                    <p className="text-xs text-yellow-700">{returningPackage.orderNumber} — {returningPackage.contactName}</p>
-                  </div>
-                  <button 
-                    onClick={() => setShowReturnModal(false)}
-                    className="p-2 rounded-full hover:bg-yellow-100"
-                  >
-                    <XCircle size={20} className="text-slate-400" />
-                  </button>
-                </div>
-              </div>
+              <p className="p-4 text-base font-semibold text-slate-800 break-words">{returningPackage.orderNumber} · {returningPackage.contactName}</p>
 
               {/* Raison du retour */}
               <div className="p-4 bg-amber-50 border-b border-amber-200">
-                <p className="text-xs text-amber-800 font-medium">
+                <p className="text-sm text-amber-800 font-medium">
                   ⚠️ {returningPackage.returnReason || 'Ce colis a été retiré de votre tournée'}
                 </p>
               </div>
@@ -2522,7 +2563,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
               <div className="p-4 space-y-4">
                 {/* Photos (obligatoire) */}
                 <div>
-                  <label className="text-xs font-bold text-slate-700 flex items-center gap-1 mb-2">
+                  <label className="text-sm font-bold text-slate-700 flex items-center gap-1 mb-2">
                     📷 Photo du colis <span className="text-red-500">*</span>
                   </label>
                   <input
@@ -2538,8 +2579,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                       <div key={idx} className="relative w-16 h-16 rounded-lg overflow-hidden border border-slate-200">
                         <img src={photo} alt="" className="w-full h-full object-cover" />
                         <button
+                          aria-label={`Supprimer la photo de retour ${idx + 1}`}
                           onClick={() => setReturnPhotos(prev => prev.filter((_, i) => i !== idx))}
-                          className="absolute top-0.5 right-0.5 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center"
+                          className="absolute top-0.5 right-0.5 w-11 h-11 bg-red-700 text-white rounded-full text-sm flex items-center justify-center"
                         >
                           ✕
                         </button>
@@ -2547,29 +2589,29 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                     ))}
                     {returnPhotos.length < 5 && (
                       <button
-                        onClick={() => returnPhotoInputRef.current?.click()}
-                        className="w-16 h-16 rounded-lg border-2 border-dashed border-slate-300 flex items-center justify-center text-slate-400 hover:border-yellow-400 hover:text-yellow-500"
+                        aria-label="Prendre une photo du colis retourné" onClick={() => returnPhotoInputRef.current?.click()}
+                        className="w-16 h-16 rounded-lg border-2 border-dashed border-slate-300 flex items-center justify-center text-slate-600 hover:border-yellow-400 hover:text-yellow-500"
                       >
                         <Camera size={24} />
                       </button>
                     )}
                   </div>
                   {returnPhotos.length === 0 && (
-                    <p className="text-xs text-red-500 mt-1">⚠️ Au moins 1 photo obligatoire</p>
+                    <p className="text-sm text-red-500 mt-1">⚠️ Au moins 1 photo obligatoire</p>
                   )}
                 </div>
 
                 {/* Signature (optionnelle) */}
                 <div>
-                  <label className="text-xs font-bold text-slate-700 flex items-center gap-1 mb-2">
-                    ✍️ Signature réception hub <span className="text-slate-400">(optionnel)</span>
+                  <label className="text-sm font-bold text-slate-700 flex items-center gap-1 mb-2">
+                    ✍️ Signature réception hub <span className="text-slate-600">(optionnel)</span>
                   </label>
                   {returnSignature ? (
                     <div className="relative">
                       <img src={returnSignature} alt="Signature" className="w-full h-20 object-contain border border-slate-200 rounded-lg bg-white" />
                       <button
-                        onClick={() => setReturnSignature(null)}
-                        className="absolute top-1 right-1 w-6 h-6 bg-red-500 text-white rounded-full text-xs flex items-center justify-center"
+                        aria-label="Supprimer la signature de réception au hub" onClick={() => setReturnSignature(null)}
+                        className="absolute top-1 right-1 w-11 h-11 bg-red-700 text-white rounded-full text-sm flex items-center justify-center"
                       >
                         ✕
                       </button>
@@ -2577,7 +2619,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                   ) : (
                     <button
                       onClick={() => setShowReturnSignature(true)}
-                      className="w-full py-3 border-2 border-dashed border-slate-300 rounded-lg text-slate-500 text-sm flex items-center justify-center gap-2 hover:border-yellow-400"
+                      className="min-h-11 w-full py-3 border-2 border-dashed border-slate-300 rounded-lg text-slate-500 text-sm flex items-center justify-center gap-2 hover:border-yellow-400"
                     >
                       <PenTool size={16} />
                       Ajouter signature
@@ -2587,7 +2629,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
 
                 {/* Info géoloc */}
                 <div className="bg-slate-50 rounded-lg p-3">
-                  <p className="text-xs text-slate-500">
+                  <p className="text-sm text-slate-500">
                     📍 Votre position GPS sera enregistrée automatiquement pour confirmer la remise au hub.
                   </p>
                 </div>
@@ -2598,7 +2640,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                 <button
                   onClick={handleConfirmReturn}
                   disabled={isProcessing || returnPhotos.length === 0}
-                  className="w-full py-3.5 bg-yellow-500 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50 active:scale-95 transition-all"
+                  className="min-h-11 w-full py-3.5 bg-yellow-700 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50 active:scale-95 transition-all"
                 >
                   {isProcessing ? (
                     <>
@@ -2613,26 +2655,20 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                   )}
                 </button>
                 <button
-                  onClick={() => setShowReturnModal(false)}
+                  onClick={() => { void closeReturn(() => setShowReturnModal(false)); }}
                   disabled={isProcessing}
-                  className="w-full py-2 text-slate-500 text-sm"
+                  className="min-h-11 w-full py-2 text-slate-500 text-sm"
                 >
                   Annuler
                 </button>
               </div>
             </div>
-          </div>
+          </Modal>
         )}
 
         {/* Modal signature retour */}
         {showReturnSignature && (
-          <div className="fixed inset-0 z-[60] bg-black flex flex-col">
-            <div className="bg-slate-800 px-4 py-3 flex items-center justify-between">
-              <h3 className="text-white font-bold">Signature réception hub</h3>
-              <button onClick={() => setShowReturnSignature(false)} className="text-white p-1">
-                <XCircle size={24} />
-              </button>
-            </div>
+          <Modal isOpen onClose={() => setShowReturnSignature(false)} title="Signature de réception au hub" size="lg" closeOnOverlay={false} bodyClassName="!p-0">
             <div className="flex-1 bg-white relative">
               <SignaturePad
                 onSave={(data) => {
@@ -2643,7 +2679,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                 driverName={`${currentUser.firstName} ${currentUser.lastName}`}
               />
             </div>
-          </div>
+          </Modal>
         )}
       </div>
     );
@@ -2657,7 +2693,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
     <div className="max-w-lg mx-auto pb-6 space-y-4 animate-fade-in">
       {/* Notification toast */}
       {notification && (
-        <div className="fixed top-4 left-4 right-4 z-50 bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg text-center text-sm font-medium animate-fade-in">
+        <div role="status" className="bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg text-center text-sm font-medium animate-fade-in">
           {notification}
         </div>
       )}
@@ -2673,7 +2709,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
       {/* Point d'entrée scan unique : Enlèvement / Livraison */}
       <button
         onClick={() => setShowScanChoice(true)}
-        className="w-full flex items-center justify-center gap-2 py-3.5 bg-green-600 text-white rounded-xl text-base font-black active:scale-95 transition-transform shadow-sm"
+        className="min-h-11 w-full flex items-center justify-center gap-2 py-3.5 bg-green-700 text-white rounded-xl text-base font-black active:scale-95 transition-transform shadow-sm"
       >
         📷 Scanner des colis
       </button>
@@ -2726,7 +2762,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
               </button>
             </div>
             {list.length === 0 && (
-              <div className="text-center text-slate-400 text-sm py-8">
+              <div className="text-center text-slate-600 text-sm py-8">
                 {driverTab === 'encours' ? 'Aucune tournée en cours. Scanne des colis pour démarrer.' : 'Aucune tournée terminée pour l’instant.'}
               </div>
             )}
@@ -2756,32 +2792,32 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                 <div>
                   <div className="flex items-center gap-2 mb-1">
                     <h3 className="text-lg font-bold text-slate-800">Tournée {mission.zone}</h3>
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${statusColors.bg} ${statusColors.text}`}>
+                    <span className={`px-2 py-0.5 rounded-full text-sm font-bold ${statusColors.bg} ${statusColors.text}`}>
                       {mission.status}
                     </span>
                   </div>
                   <p className="text-sm text-slate-500">
-                    {mission.vehiclePlate} • {mission.hubName} • {mission.stops.length} stops
+                    {mission.vehiclePlate} • {mission.hubName} • {mission.stops.length} arrêts
                   </p>
                 </div>
                 <div className="text-right">
                   <p className="text-2xl font-extrabold text-slate-800">{mission.totalPackages}</p>
-                  <p className="text-[10px] text-slate-500 uppercase">colis</p>
+                  <p className="text-sm text-slate-500 uppercase">colis</p>
                 </div>
               </div>
 
               {/* Métriques */}
               <div className="grid grid-cols-3 gap-2 mb-3">
                 <div className="bg-slate-50 rounded-lg p-2 text-center">
-                  <p className="text-xs text-slate-500">Distance</p>
+                  <p className="text-sm text-slate-500">Distance</p>
                   <p className="text-sm font-bold text-slate-800">{formatDistance(mission.totalDistance) || '-'}</p>
                 </div>
                 <div className="bg-slate-50 rounded-lg p-2 text-center">
-                  <p className="text-xs text-slate-500">Durée est.</p>
+                  <p className="text-sm text-slate-500">Durée est.</p>
                   <p className="text-sm font-bold text-slate-800">{formatDuration(mission.estimatedDuration) || '-'}</p>
                 </div>
                 <div className="bg-slate-50 rounded-lg p-2 text-center">
-                  <p className="text-xs text-slate-500">Livrés</p>
+                  <p className="text-sm text-slate-500">Livrés</p>
                   <p className="text-sm font-bold text-green-600">{mission.deliveredPackages || 0}</p>
                 </div>
               </div>
@@ -2795,7 +2831,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                       style={{ width: `${progress}%` }}
                     />
                   </div>
-                  <p className="text-xs text-slate-500 mt-1 text-right">{progress}%</p>
+                  <p className="text-sm text-slate-500 mt-1 text-right">{progress}%</p>
                 </div>
               )}
 
@@ -2803,7 +2839,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
               {mission.plannedDepartureTime && mission.status === MissionStatus.DISPATCHED && (
                 <div className="flex items-center gap-2 mb-2 px-3 py-2 bg-blue-50 border border-blue-100 rounded-xl">
                   <Clock size={14} className="text-blue-500" />
-                  <span className="text-xs text-blue-700 font-medium">Départ prévu : </span>
+                  <span className="text-sm text-blue-700 font-medium">Départ prévu : </span>
                   <span className="text-sm font-bold text-blue-800 font-mono">{mission.plannedDepartureTime}</span>
                 </div>
               )}
@@ -2813,7 +2849,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                 <button
                   onClick={() => handleStartLoading(mission)}
                   disabled={isProcessing}
-                  className="w-full flex items-center justify-center gap-2 py-3.5 bg-blue-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-50"
+                  className="min-h-11 w-full flex items-center justify-center gap-2 py-3.5 bg-blue-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-50"
                 >
                   {isProcessing ? <Loader2 size={18} className="animate-spin" /> : <Play size={18} />}
                   📦 Commencer le chargement
@@ -2828,8 +2864,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                       <Loader2 size={14} className="animate-spin text-amber-600" />
                       <span className="text-sm font-bold text-amber-800">Chargement en cours...</span>
                     </div>
-                    <p className="text-xs text-amber-600">
-                      {mission.totalPackages} colis • {mission.stops.length} stops à charger
+                    <p className="text-sm text-amber-600">
+                      {mission.totalPackages} colis • {mission.stops.length} arrêts à charger
                     </p>
                   </div>
                   {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
@@ -2838,7 +2874,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                   <button
                     onClick={() => setShowClaimModal(true)}
                     disabled={isProcessing}
-                    className="w-full flex items-center justify-center gap-2 py-3 bg-blue-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-50"
+                    className="min-h-11 w-full flex items-center justify-center gap-2 py-3 bg-blue-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-50"
                   >
                     <Camera size={18} />
                     📷 Scanner les colis à l'embarquement
@@ -2846,7 +2882,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                   <button
                     onClick={() => handleLoadingComplete(mission)}
                     disabled={isProcessing}
-                    className="w-full flex items-center justify-center gap-2 py-3.5 bg-green-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-50"
+                    className="min-h-11 w-full flex items-center justify-center gap-2 py-3.5 bg-green-700 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-50"
                   >
                     {isProcessing ? (
                       <>
@@ -2863,7 +2899,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                   <button
                     onClick={handleCancelLoading}
                     disabled={isProcessing}
-                    className="w-full flex items-center justify-center gap-2 py-2 text-slate-500 text-xs font-medium"
+                    className="min-h-11 w-full flex items-center justify-center gap-2 py-2 text-slate-500 text-sm font-medium"
                   >
                     Annuler
                   </button>
@@ -2881,7 +2917,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                     setActiveMissionId(mission.id);
                     setActiveStopIndex(pendingIdx >= 0 ? pendingIdx : 0);
                   }}
-                  className="w-full flex items-center justify-center gap-2 py-3.5 bg-orange-500 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform"
+                  className="min-h-11 w-full flex items-center justify-center gap-2 py-3.5 bg-orange-500 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform"
                 >
                   <Navigation size={18} />
                   Continuer la tournée

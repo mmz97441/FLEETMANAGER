@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { Mission, MissionStop, MissionStatus } from '../types';
 import Modal from './shared/Modal';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { 
   GripVertical, ArrowUp, ArrowDown, MapPin, Package as PackageIcon, 
   Clock, Save, RotateCcw, AlertTriangle, CheckCircle, Building2,
@@ -28,6 +29,9 @@ const StopReorderModal: React.FC<StopReorderModalProps> = ({
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const requestClose = useUnsavedChanges(hasChanges, isSaving);
+  const closeEditor = () => void requestClose(onClose);
 
   // Reset quand la mission change
   React.useEffect(() => {
@@ -112,6 +116,7 @@ const StopReorderModal: React.FC<StopReorderModalProps> = ({
 
   // Sauvegarder
   const handleSave = async () => {
+    setSaveError('');
     setIsSaving(true);
     try {
       await onSave(mission, stops);
@@ -119,7 +124,7 @@ const StopReorderModal: React.FC<StopReorderModalProps> = ({
       onClose();
     } catch (error) {
       console.error('Erreur sauvegarde:', error);
-      alert('Erreur lors de la sauvegarde. Veuillez réessayer.');
+      setSaveError('L’ordre des arrêts n’a pas été enregistré. Vos modifications sont conservées ; réessayez.');
     } finally {
       setIsSaving(false);
     }
@@ -131,12 +136,14 @@ const StopReorderModal: React.FC<StopReorderModalProps> = ({
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
-      title={`Réordonner les stops — ${mission.driverName || 'Non assigné'}`}
+      onClose={closeEditor}
+      preventClose={isSaving}
+      title={`Réordonner les arrêts — ${mission.driverName || 'Non assigné'}`}
       size="lg"
       headerIcon={<GripVertical size={20} />}
     >
       <div className="space-y-4">
+        {saveError && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-900">{saveError}</p>}
         {/* Warning si mission en cours */}
         {mission.status === MissionStatus.IN_PROGRESS && (
           <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3">
@@ -160,7 +167,7 @@ const StopReorderModal: React.FC<StopReorderModalProps> = ({
         {/* Instructions */}
         <div className="text-sm text-slate-500 flex items-center gap-2">
           <GripVertical size={16} />
-          <span>Glissez-déposez les stops pour changer l'ordre, ou utilisez les flèches ↑↓</span>
+          <span>Glissez-déposez les arrêts pour changer l'ordre, ou utilisez les flèches ↑↓</span>
         </div>
 
         {/* Départ Hub */}
@@ -236,7 +243,7 @@ const StopReorderModal: React.FC<StopReorderModalProps> = ({
                       )}
                       {stop.estimatedArrival && (
                         <span className="text-brand-600">
-                          ETA: {new Date(stop.estimatedArrival).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                          Arrivée estimée : {new Date(stop.estimatedArrival).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
                         </span>
                       )}
                     </div>
@@ -262,7 +269,7 @@ const StopReorderModal: React.FC<StopReorderModalProps> = ({
                             ? 'text-slate-300 cursor-not-allowed' 
                             : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'
                         }`}
-                        title="Monter"
+                        title="Monter" aria-label={`Monter l’arrêt ${stop.sequence}`}
                       >
                         <ArrowUp size={16} />
                       </button>
@@ -274,7 +281,7 @@ const StopReorderModal: React.FC<StopReorderModalProps> = ({
                             ? 'text-slate-300 cursor-not-allowed' 
                             : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'
                         }`}
-                        title="Descendre"
+                        title="Descendre" aria-label={`Descendre l’arrêt ${stop.sequence}`}
                       >
                         <ArrowDown size={16} />
                       </button>
@@ -299,7 +306,7 @@ const StopReorderModal: React.FC<StopReorderModalProps> = ({
 
           <div className="flex items-center gap-3">
             <button
-              onClick={onClose}
+              onClick={closeEditor}
               className="px-5 py-2.5 text-slate-600 hover:bg-slate-100 rounded-xl font-medium transition-colors"
             >
               Annuler
