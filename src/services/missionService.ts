@@ -1,5 +1,7 @@
+import { listenClientPackages } from './clientPackageSubscription';
 import { getFunctions, httpsCallable } from "firebase/functions";
 import app from "../firebaseConfig";
+import { editMissionStop, deleteMissionStop, reorderStops } from './missionStopEditor';
 /**
  * SERVICE DE GESTION DES MISSIONS
  * 
@@ -338,7 +340,8 @@ export const subscribeToPackages = (
  * affecté » reste côté client (missionId/currentDriverId).
  */
 export const subscribeToDispatchablePackages = (
-  callback: (packages: Package[]) => void
+  callback: (packages: Package[]) => void,
+  onError?: (error: Error) => void
 ) => {
   const q = query(
     collection(db, PACKAGES_COLLECTION),
@@ -346,7 +349,7 @@ export const subscribeToDispatchablePackages = (
   );
   return onSnapshot(q, (snapshot) => {
     callback(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Package)));
-  });
+  }, onError);
 };
 
 /**
@@ -358,49 +361,7 @@ export const subscribeToDispatchablePackages = (
  * par `clientId` ET par `clientName` (requêtes d'égalité → index simples, pas de
  * limite globale), puis on fusionne. Le client voit ainsi TOUS ses colis.
  */
-export const subscribeToClientPackages = (
-  client: { id: string; companyName?: string },
-  callback: (packages: Package[]) => void
-) => {
-  const trackingById = new Map<string, any[]>();
-  let byId: Package[] = [];
-  let byName: Package[] = [];
-  const emit = () => {
-    const map = new Map<string, Package>();
-    [...byId, ...byName].forEach(p => map.set(p.id, p));
-    const merged = Array.from(map.values())
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    const tracks = Array.from(trackingById.values()).flat();
-    callback(merged.map(pkg => {
-      if (pkg.status !== PackageStatus.IN_DELIVERY) return pkg;
-      const track = tracks.find(t=>t.missionId===pkg.missionId && t.ranks?.[pkg.id]!==undefined);
-      return track ? {...pkg,liveDriver:track.liveDriver,remainingBeforeMine:track.ranks[pkg.id]} : pkg;
-    }));
-  };
-
-  const qId = query(collection(db, PACKAGES_COLLECTION), where('clientId', '==', client.id));
-  const unsub1 = onSnapshot(qId, snap => {
-    byId = snap.docs.map(d => ({ id: d.id, ...d.data() } as Package));
-    emit();
-  });
-
-  let unsub2: () => void = () => {};
-  const company = (client.companyName || '').trim();
-  if (company) {
-    const qName = query(collection(db, PACKAGES_COLLECTION), where('clientName', '==', company));
-    unsub2 = onSnapshot(qName, snap => {
-      byName = snap.docs.map(d => ({ id: d.id, ...d.data() } as Package));
-      emit();
-    });
-  }
-
-  const trackingQueries = [query(collection(db,'client_tracking'),where('clientId','==',client.id))];
-  if (company) trackingQueries.push(query(collection(db,'client_tracking'),where('clientName','==',company)));
-  const trackingUnsubs = trackingQueries.map((q,i)=>onSnapshot(q,snap=>{
-    trackingById.set(String(i),snap.docs.map(d=>d.data())); emit();
-  },error=>reportError('tracking.subscribe',error,{silent:true})));
-  return () => { unsub1(); unsub2(); trackingUnsubs.forEach(unsub=>unsub()); };
-};
+export const subscribeToClientPackages = listenClientPackages;
 
 export const getPackagesByMission = async (missionId: string): Promise<Package[]> => {
   const q = query(collection(db, PACKAGES_COLLECTION), where('missionId', '==', missionId));
@@ -806,7 +767,9 @@ export const subscribeToMissions = (
   // à ses tournées) au lieu de récupérer les 100 dernières puis filtrer côté client.
   const q = filters?.driverId
     ? query(collection(db, MISSIONS_COLLECTION), where('driverId', '==', filters.driverId))
-    : query(collection(db, MISSIONS_COLLECTION), orderBy('date', 'desc'));
+    : filters?.date
+      ? query(collection(db, MISSIONS_COLLECTION), where('date', '==', filters.date))
+      : query(collection(db, MISSIONS_COLLECTION), orderBy('date', 'desc'));
 
   return onSnapshot(q, (snapshot) => {
     let missions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Mission));
@@ -878,6 +841,11 @@ export const updateMissionFields = async (
     updatedAt: new Date().toISOString()
   }));
 };
+
+/** Office edits always read fresh stops and preserve concurrent delivery data. */
+export const updateMissionStopFields = editMissionStop;
+export const removeMissionStop = deleteMissionStop;
+export const reorderMissionStops = reorderStops;
 
 /**
  * Valide l'issue d'UN arrêt (livré / échoué / arrivé) de façon ATOMIQUE.
@@ -1058,14 +1026,15 @@ export const deleteMission = async (id: string): Promise<void> => {
 
 export const subscribeToImportBatches = (
   callback: (batches: ImportBatch[]) => void,
-  limitCount: number = 50
+  limitCount: number = 50,
+  onError?: (error: Error) => void
 ) => {
   const q = query(collection(db, IMPORTS_COLLECTION), orderBy('importedAt', 'desc'), limit(limitCount));
   
   return onSnapshot(q, (snapshot) => {
     const batches = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ImportBatch));
     callback(batches);
-  });
+  }, onError);
 };
 
 export const addImportBatch = async (batch: Omit<ImportBatch, 'id'>): Promise<string> => {
@@ -1593,8 +1562,10 @@ export const addManualStopToMission = async (
     contactName: string; address: string; postalCode: string; city: string;
     contactPhone?: string; notes?: string;
     timeWindowStart?: string; timeWindowEnd?: string; serviceTime?: number;
-  }
+  },
+  requestId: string = crypto.randomUUID()
 ): Promise<void> => {
+  if (!/^[a-zA-Z0-9-]{8,80}$/.test(requestId)) throw new Error('Référence de demande invalide. Rouvrez le formulaire.');
   const ref = doc(db, MISSIONS_COLLECTION, missionId);
   const now = new Date().toISOString();
   await runTransaction(db, async (tx) => {
@@ -1603,7 +1574,7 @@ export const addManualStopToMission = async (
     const mission = { id: snap.id, ...snap.data() } as Mission;
     const seq = mission.stops.reduce((m, s) => Math.max(m, s.sequence), 0) + 1;
     const stop = buildDeliveryStop({
-      id: makeStopId('manual', seq, now),
+      id: `manual-${requestId}`,
       sequence: seq,
       address: stopData.address, city: stopData.city, postalCode: stopData.postalCode,
       contactName: stopData.contactName, contactPhone: stopData.contactPhone,
@@ -1611,6 +1582,13 @@ export const addManualStopToMission = async (
       serviceTime: stopData.serviceTime,
       notes: `⚠️ Arrêt ajouté manuellement${stopData.notes ? ' — ' + stopData.notes : ''}`,
     });
+    const existing = mission.stops.find(s => s.id === stop.id);
+    if (existing) {
+      const fields = ['address', 'city', 'postalCode', 'contactName', 'contactPhone', 'timeWindowStart', 'timeWindowEnd', 'serviceTime', 'notes'] as const;
+      if (fields.some(key => String(existing[key] ?? '') !== String(stop[key] ?? ''))) throw new Error('Cette demande a déjà créé un arrêt avec d’autres informations. Vérifiez la tournée avant de créer une nouvelle demande.');
+      return;
+    }
+    if ([MissionStatus.COMPLETED, MissionStatus.CANCELLED].includes(mission.status)) throw new Error('Cette tournée est clôturée. Aucun arrêt ne peut être ajouté.');
     tx.update(ref, { stops: [...mission.stops, stop], updatedAt: now });
   });
 };

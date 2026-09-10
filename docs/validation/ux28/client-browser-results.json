@@ -1,0 +1,125 @@
+{
+  "results": [
+    {
+      "name": "create-options-and-retry-320",
+      "passed": true,
+      "width": 320,
+      "scroll": 320,
+      "labels": [],
+      "focusInside": true
+    },
+    {
+      "name": "portal-loading-error-retry-320",
+      "passed": true,
+      "width": 320,
+      "scroll": 320,
+      "labels": [
+        {
+          "id": "",
+          "labels": 0,
+          "aria": "Rechercher dans mes colis",
+          "font": "16px"
+        }
+      ],
+      "focusInside": false
+    },
+    {
+      "name": "preview-readonly-and-audited-intervention-320",
+      "passed": true,
+      "width": 320,
+      "scroll": 320,
+      "labels": [
+        {
+          "id": ":r6:-companyName",
+          "labels": 1,
+          "aria": null,
+          "font": "16px"
+        },
+        {
+          "id": ":r6:-companyPhone",
+          "labels": 1,
+          "aria": null,
+          "font": "16px"
+        },
+        {
+          "id": ":r6:-companyAddress",
+          "labels": 1,
+          "aria": null,
+          "font": "16px"
+        },
+        {
+          "id": ":r6:-companySiret",
+          "labels": 1,
+          "aria": null,
+          "font": "16px"
+        }
+      ],
+      "focusInside": true
+    },
+    {
+      "name": "invitation-false-and-success-320",
+      "passed": true
+    },
+    {
+      "name": "create-options-and-retry-390",
+      "passed": true,
+      "width": 390,
+      "scroll": 390,
+      "labels": [],
+      "focusInside": true
+    },
+    {
+      "name": "portal-loading-error-retry-390",
+      "passed": true,
+      "width": 390,
+      "scroll": 390,
+      "labels": [
+        {
+          "id": "",
+          "labels": 0,
+          "aria": "Rechercher dans mes colis",
+          "font": "16px"
+        }
+      ],
+      "focusInside": false
+    },
+    {
+      "name": "preview-readonly-and-audited-intervention-390",
+      "passed": true,
+      "width": 390,
+      "scroll": 390,
+      "labels": [
+        {
+          "id": ":r6:-companyName",
+          "labels": 1,
+          "aria": null,
+          "font": "16px"
+        },
+        {
+          "id": ":r6:-companyPhone",
+          "labels": 1,
+          "aria": null,
+          "font": "16px"
+        },
+        {
+          "id": ":r6:-companyAddress",
+          "labels": 1,
+          "aria": null,
+          "font": "16px"
+        },
+        {
+          "id": ":r6:-companySiret",
+          "labels": 1,
+          "aria": null,
+          "font": "16px"
+        }
+      ],
+      "focusInside": true
+    },
+    {
+      "name": "invitation-false-and-success-390",
+      "passed": true
+    }
+  ],
+  "exceptions": []
+}

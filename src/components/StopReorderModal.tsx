@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 
 interface StopReorderModalProps {
+  recalculationNotice?: boolean;
   isOpen: boolean;
   onClose: () => void;
   mission: Mission;
@@ -18,6 +19,7 @@ interface StopReorderModalProps {
 const StopReorderModal: React.FC<StopReorderModalProps> = ({
   isOpen,
   onClose,
+  recalculationNotice = false,
   mission,
   onSave
 }) => {
@@ -165,6 +167,7 @@ const StopReorderModal: React.FC<StopReorderModalProps> = ({
         )}
 
         {/* Instructions */}
+        {recalculationNotice && <p className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">Modifier l’ordre des arrêts annule les anciennes estimations. Un nouveau calcul d’itinéraire est nécessaire pour obtenir de nouveaux horaires.</p>}
         <div className="text-sm text-slate-500 flex items-center gap-2">
           <GripVertical size={16} />
           <span>Glissez-déposez les arrêts pour changer l'ordre, ou utilisez les flèches ↑↓</span>

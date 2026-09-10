@@ -16,6 +16,7 @@
  */
 
 import { db } from '../firebaseConfig';
+import { recordSupportErrorReference } from '../utils/supportContext';
 import { collection, addDoc, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
 
 export type LogLevel = 'error' | 'warning' | 'info' | 'success';
@@ -23,6 +24,7 @@ export type LogLevel = 'error' | 'warning' | 'info' | 'success';
 /** Un enregistrement du journal d'erreurs (collection Firestore `error_logs`). */
 export interface ErrorLogRecord {
   id: string;
+  referenceId?: string;
   level: 'error' | 'warning';
   context: string;
   message: string;
@@ -181,8 +183,12 @@ const persist = async (entry: Record<string, unknown>): Promise<void> => {
 export const reportError = (context: string, error: unknown, opts: ReportOptions = {}): void => {
   const { message, stack } = serializeError(error);
   const level = opts.level ?? 'error';
+  const referenceId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `error-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  // Background warnings must not overwrite the last error the user experienced.
+  if (!opts.silent) recordSupportErrorReference(referenceId);
 
   const entry: Record<string, unknown> = {
+    referenceId,
     level,
     context,
     message,

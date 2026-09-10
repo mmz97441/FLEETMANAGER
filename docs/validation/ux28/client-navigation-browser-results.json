@@ -1,0 +1,35 @@
+{
+  "results": [
+    {
+      "name": "real-chrome-reload-back-cancel-accept-forward",
+      "passed": true,
+      "before": {
+        "stamp": {
+          "session": "hvnlzw7872i",
+          "index": 1
+        },
+        "length": 3
+      },
+      "after": {
+        "stamp": {
+          "session": "hvnlzw7872i",
+          "index": 1
+        },
+        "length": 3
+      },
+      "final": {
+        "url": "http://127.0.0.1:5208/missions",
+        "state": {
+          "filter": "today",
+          "__fleetNavigation": {
+            "session": "hvnlzw7872i",
+            "index": 1
+          }
+        },
+        "length": 3,
+        "confirmations": 2
+      }
+    }
+  ],
+  "exceptions": []
+}

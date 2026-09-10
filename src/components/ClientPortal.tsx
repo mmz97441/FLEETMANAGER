@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useId } from 'react';
 import { QuoteRequest, QuoteStatus, User, UserRole, ViewState, SavedAddress, DeliveryTimeSlot, Zone, ProofOfDelivery, Package as PackageType, PackageStatus, PACKAGE_STATUS_COLORS } from '../types';
 import { Package, MapPin, Calendar, Plus, CheckCircle, XCircle, Clock, Truck, Euro, Send, X, ArrowRight, User as UserIcon, Phone, Box, Info, Bell, FileText, Weight, Building2, StickyNote, BarChart3, Users, Mail, UserPlus, AlertTriangle, PieChart as PieChartIcon, Edit, Trash2, HelpCircle, PhoneCall, FileQuestion, BookOpen, ChevronDown, ChevronUp, Bookmark, Star, Printer, Search, Download, QrCode, Eye, FileSpreadsheet, Navigation } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
@@ -31,6 +31,10 @@ import ClientLiveTracking from './ClientLiveTracking';
 import ClientHelp, { HelpNavTarget } from './ClientHelp';
 import HintTooltip from './shared/Tooltip';
 import { getClientInsights } from '../services/clientInsights';
+import { notifySuccess, notifyWarning, notifyInfo } from '../services/logService';
+import { ClientAccessContext, ClientAccess } from './client/ClientAccessContext';
+import { ClientMutationAudit, runClientMutation } from '../utils/clientMutation';
+import ShipmentReference from './client/ShipmentReference';
 import { changePassword } from '../services/accountService';
 
 // ============================================================================
@@ -222,7 +226,9 @@ interface ClientPortalProps {
   onAddTeamMember?: (user: User) => void;
   onUpdateTeamMember?: (user: User) => void;
   onDeleteTeamMember?: (userId: string) => void;
-  previewMode?: boolean; // "Voir en tant que" : on incarne le client (auth reste celle de l'admin)
+  previewMode?: boolean;
+  interventionActorLabel?: string;
+  interventionAudit?: ClientMutationAudit; // absent = lecture seule en aperçu
 }
 
 const COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444'];
@@ -264,11 +270,22 @@ const STATUS_TOOLTIP: Record<string, string> = {
   [PackageStatus.RETURNED]: 'Retourné au centre',
 };
 
-const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, quotes, companyUsers = [], onNavigate, onAddQuote, onUpdateQuoteStatus, onAddTeamMember, onUpdateTeamMember, onDeleteTeamMember, previewMode = false }) => {
+const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, quotes, companyUsers = [], onNavigate, onAddQuote, onUpdateQuoteStatus, onAddTeamMember, onUpdateTeamMember, onDeleteTeamMember, previewMode = false, interventionAudit, interventionActorLabel }) => {
+  const formFieldId = useId();
+  const readOnly = previewMode && !interventionAudit;
+  const access = useMemo<ClientAccess>(() => ({
+    readOnly, impersonating: previewMode,
+    contextLabel: previewMode ? `Client : ${currentUser.companyName || currentUser.email} · Intervenant : ${interventionActorLabel || 'session authentifiée'}` : undefined,
+    runMutation: (action, operation) => runClientMutation({ readOnly, audit: previewMode ? interventionAudit : undefined, onAuditFailure: () => notifyWarning("Le résultat de l’intervention n’a pas pu être journalisé. La demande initiale reste tracée ; vérifiez le résultat avant toute relance.") }, action, operation),
+  }), [readOnly, previewMode, interventionAudit, interventionActorLabel, currentUser.companyName, currentUser.email]);
+  const [quoteError, setQuoteError] = useState('');
+  const [teamMessages, setTeamMessages] = useState<Record<string, string>>({});
+  const [sendingInvitation, setSendingInvitation] = useState<string | null>(null);
+  const [podMessages, setPodMessages] = useState<Record<string, string>>({});
   // En mode "Voir en tant que", l'auth Firebase reste celle de l'admin : on
   // interdit le changement de mot de passe (il modifierait le compte admin).
   const blockedChangePassword = async () => {
-    throw new Error('Changement de mot de passe indisponible en mode test (aperçu).');
+    throw new Error('Le mot de passe doit être modifié par le titulaire du compte depuis sa propre session.');
   };
   // Navigation Local State REMOVED in favor of activeView prop
   const [listFilter, setListFilter] = useState<'active' | 'history'>('active');
@@ -338,24 +355,26 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   const handleSaveCompany = async () => {
     setSavingCompany(true);
     try {
-      await updateUserProfile({
+      await access.runMutation('Enregistrer les informations entreprise', () => updateUserProfile({
         ...currentUser,
         companyName: companyForm.companyName.trim(),
         companyAddress: companyForm.companyAddress.trim(),
         companySiret: companyForm.companySiret.trim(),
         companyPhone: companyForm.companyPhone.trim(),
-      });
+      }));
       setCompanySaveMsg('✅ Infos entreprise enregistrées — elles apparaîtront sur vos BL.');
     } catch (e) {
-      setCompanySaveMsg('❌ Échec de l\'enregistrement, réessayez.');
+      setCompanySaveMsg(e instanceof Error ? e.message : 'Échec de l’enregistrement. Vos informations sont conservées ; réessayez.');
     }
     setSavingCompany(false);
-    setTimeout(() => setCompanySaveMsg(''), 4000);
+
   };
 
   // === MES EXPÉDITIONS (colis du client) ===
   const [clientPackages, setClientPackages] = useState<PackageType[]>([]);
   const [isLoadingPackages, setIsLoadingPackages] = useState(true);
+  const [packagesError, setPackagesError] = useState('');
+  const [packagesRetry, setPackagesRetry] = useState(0);
   const [labelPrintError, setLabelPrintError] = useState('');
   const printShipmentLabels = (parcels: PackageType[]) => {
     if (!parcels.length) return;
@@ -375,7 +394,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
     return m;
   }, [clientPackages]);
   const handleCreateRecipient = async (fields: { contactName: string; address: string; city: string; contactPhone: string; contactEmail?: string; notes?: string }) => {
-    await addSavedAddress({
+    await access.runMutation('Ajouter un destinataire', () => addSavedAddress({
       companyName: currentUser.companyName || `${currentUser.firstName} ${currentUser.lastName}`,
       createdBy: currentUser.id,
       label: fields.contactName,
@@ -387,10 +406,10 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
       contactEmail: fields.contactEmail,
       notes: fields.notes,
       createdAt: '', updatedAt: '',
-    } as any);
+    } as any));
   };
-  const handleUpdateRecipient = async (addr: SavedAddress) => { await updateSavedAddress(addr); };
-  const handleDeleteRecipient = async (id: string) => { await deleteSavedAddress(id); };
+  const handleUpdateRecipient = async (addr: SavedAddress) => { await access.runMutation('Modifier un destinataire', () => updateSavedAddress(addr)); };
+  const handleDeleteRecipient = async (id: string) => { await access.runMutation('Supprimer un destinataire', () => deleteSavedAddress(id)); };
 
   // Liens réels depuis le centre d'aide vers les vraies pages/actions
   const handleHelpNavigate = (target: HelpNavTarget) => {
@@ -399,7 +418,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
       case 'shipments': onNavigate?.('client_shipments'); break;
       case 'recipients': onNavigate?.('client_recipients'); break;
       case 'analytics': onNavigate?.('client_analytics'); break;
-      case 'create': setShowCreateShipment(true); break;
+      case 'create': if (!readOnly) setShowCreateShipment(true); break;
       case 'account': setShowAccountHub(true); break;
     }
   };
@@ -419,13 +438,13 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
 
   // Sauvegarde des infos entreprise depuis "Mon compte" (persiste + rafraîchit le formulaire local)
   const handleSaveCompanyFromHub = async (fields: { companyName: string; companyAddress: string; companyPhone: string; companySiret: string }) => {
-    await updateUserProfile({
+    await access.runMutation('Enregistrer les informations entreprise', () => updateUserProfile({
       ...currentUser,
       companyName: currentUser.companyName || '',
       companyAddress: fields.companyAddress.trim(),
       companyPhone: fields.companyPhone.trim(),
       companySiret: fields.companySiret.trim(),
-    });
+    }));
     setCompanyForm({
       companyName: currentUser.companyName || '',
       companyAddress: fields.companyAddress.trim(),
@@ -454,15 +473,22 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   useEffect(() => {
     if (!currentUser?.id) return;
     setIsLoadingPackages(true);
+    setPackagesError('');
+    setClientPackages([]);
     const unsub = subscribeToClientPackages(
       { id: currentUser.id, companyName: currentUser.companyName },
       (pkgs) => {
         setClientPackages(pkgs);
         setIsLoadingPackages(false);
+        setPackagesError('');
+      },
+      () => {
+        setIsLoadingPackages(false);
+        setPackagesError('Vos colis n’ont pas pu être chargés complètement. Vérifiez votre connexion et réessayez. Les éventuelles données déjà affichées ne sont plus à jour.');
       }
     );
     return unsub;
-  }, [currentUser.id, currentUser.companyName]);
+  }, [currentUser.id, currentUser.companyName, packagesRetry]);
 
   // Détecter la zone quand l'adresse destination change
   useEffect(() => {
@@ -517,8 +543,8 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
     }
     
     try {
-      await addSavedAddress({
-        companyName: currentUser.companyName,
+      await access.runMutation('Ajouter une adresse au carnet', () => addSavedAddress({
+        companyName: currentUser.companyName!,
         createdBy: currentUser.id,
         label: label || `${type === 'pickup' ? 'Enlèvement' : 'Livraison'} - ${data.city}`,
         type,
@@ -528,7 +554,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
         contactPhone: data.contactPhone,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
-      });
+      }));
       setAddressSaveMessage('✅ Adresse enregistrée dans votre carnet');
       setTimeout(() => setAddressSaveMessage(null), 3000);
       return true;
@@ -545,7 +571,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
       const companyUserIds = companyUsers.map(u => u.id);
       if (!companyUserIds.includes(currentUser.id)) companyUserIds.push(currentUser.id);
 
-      return quotes.filter(q => companyUserIds.includes(q.clientId) || q.clientName === currentUser.companyName)
+      return quotes.filter(q => companyUserIds.includes(q.clientId) || (Boolean(currentUser.companyName) && q.clientName === currentUser.companyName))
                    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [quotes, currentUser, companyUsers]);
 
@@ -626,6 +652,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   // --- CONFIRMATION HANDLERS ---
   const executePendingAction = async () => {
       if (!pendingAction) return;
+      if (readOnly || previewMode) throw new Error('Cette action se gère depuis le compte client ou la gestion dédiée, en dehors de la consultation.');
 
       try {
       switch (pendingAction.type) {
@@ -685,7 +712,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                     
                     const activationUrl = getActivationUrl(token);
                     
-                    await sendUserInvitationEmail(
+                    const sent = await sendUserInvitationEmail(
                       {
                         email: pendingAction.data.email,
                         firstName: pendingAction.data.firstName,
@@ -699,10 +726,13 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                       activationUrl,
                       expiresAt
                     );
-                    alert(`✅ Invitation envoyée à ${pendingAction.data.email}.\n\nIl/elle va recevoir un email avec un lien pour créer son mot de passe (valable 7 jours) et accéder à votre espace. En attendant, le collaborateur apparaît dans votre équipe avec le statut « Invité ».`);
+                    if (!sent) throw new Error('Email non envoyé.');
+                    notifySuccess(`Invitation envoyée à ${pendingAction.data.email}.`);
+                    setTeamMessages(messages => ({ ...messages, [pendingAction.data.id]: 'Invitation envoyée. Le lien d’activation est valable 7 jours.' }));
                   } catch (emailError) {
                     console.error('❌ Erreur envoi email invitation:', emailError);
-                    alert(`⚠️ Le collaborateur a été ajouté à votre équipe, mais l'email n'a pas pu partir. Réessayez « Renvoyer l'invitation » depuis la fiche du collaborateur.`);
+                    setTeamMessages(messages => ({ ...messages, [pendingAction.data.id]: 'Collaborateur ajouté, mais email non envoyé. Utilisez Renvoyer l’invitation sur cette fiche.' }));
+                    notifyWarning('Collaborateur ajouté, mais email non envoyé. Vous pouvez renvoyer l’invitation depuis sa fiche.');
                   }
               }
               break;
@@ -736,8 +766,10 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   // --- SUBMITS (TRIGGER CONFIRMATION) ---
   const handleQuoteSubmit = (e: React.FormEvent) => {
       e.preventDefault();
+      if (readOnly || previewMode) return;
+      setQuoteError('');
       if (!newRequest.originCity || !newRequest.destinationCity || !newRequest.goodsDescription || newRequest.volume <= 0) {
-          alert("Veuillez remplir les champs obligatoires.");
+          setQuoteError('Renseignez les villes de départ et d’arrivée, la description et les dimensions du chargement.');
           return;
       }
 
@@ -796,7 +828,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
               lastName: memberForm.lastName,
               email: normalizedEmail,
               role: UserRole.CLIENT,
-              companyName: currentUser.companyName,
+              companyName: currentUser.companyName!,
               leaveBalance: 0,
               avatarUrl: `https://ui-avatars.com/api/?name=${memberForm.firstName}+${memberForm.lastName}&background=random`
           };
@@ -826,15 +858,17 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   const handleViewPOD = async (quote: QuoteRequest) => {
     if (!quote.convertedToPackageId) return;
     setLoadingPOD(quote.id);
+    setPodMessages(messages => ({ ...messages, [quote.id]: '' }));
     try {
       const pod = await getPODByPackage(quote.convertedToPackageId);
       if (pod) {
         setViewingPOD({ pod, quote });
       } else {
-        alert('La preuve de livraison n\'est pas encore disponible.');
+        setPodMessages(messages => ({ ...messages, [quote.id]: 'La preuve de livraison n’est pas encore disponible. Réessayez après confirmation par le chauffeur.' }));
+        notifyInfo('Preuve de livraison en attente de disponibilité.');
       }
     } catch (e) {
-      console.error('Erreur chargement POD:', e);
+      setPodMessages(messages => ({ ...messages, [quote.id]: 'Impossible de charger la preuve. Vérifiez votre connexion puis réessayez.' }));
     }
     setLoadingPOD(null);
   };
@@ -866,7 +900,13 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   };
 
   return (
+    <ClientAccessContext.Provider value={access}>
     <div className="space-y-6 animate-fade-in pb-10">
+        {readOnly && <p role="status" className="rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-950">Consultation en lecture seule : les modifications, imports et invitations sont désactivés.</p>}
+        {previewMode && <p className="text-sm text-slate-700">Les devis et l’équipe se gèrent depuis les écrans de gestion dédiés. Le mot de passe reste réservé au titulaire du compte.</p>}
+        {packagesError && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900"><p>{packagesError}</p><button type="button" onClick={() => setPackagesRetry(attempt => attempt + 1)} className="mt-2 min-h-11 rounded-lg border border-red-300 bg-white px-3 font-semibold">Réessayer le chargement des colis</button></div>}
+        {isLoadingPackages && activeView !== 'client_shipments' && <p role="status" className="rounded-xl bg-slate-100 p-3 text-sm text-slate-700">Chargement de vos colis…</p>}
+
         
         {/* --- GLOBAL HEADER (PROFILE CARD - SIMPLIFIED) --- */}
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm mb-6 relative overflow-hidden">
@@ -896,12 +936,12 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
 
                 {/* Quick Action */}
                 <div className="flex flex-wrap items-center justify-center gap-3 w-full lg:w-auto">
-                    <button 
-                        onClick={() => setIsModalOpen(true)}
+                    {!(previewMode) && (<button
+                         onClick={() => setIsModalOpen(true)}
                         className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl font-bold shadow-lg shadow-indigo-200 transition-all flex items-center gap-2 transform active:scale-95"
                     >
                         <Plus size={18} /> Demander un devis
-                    </button>
+                    </button>)}
                     <p className="w-full text-center text-sm text-slate-600">Recevoir une offre de prix avant de confirmer le transport.</p>
                 </div>
             </div>
@@ -931,7 +971,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
               <p className="text-slate-500 mb-4">Que voulez-vous faire ?</p>
               <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
                 {[
-                  { icon: Plus, label: 'Créer une expédition', hint: 'Créer les colis à collecter', color: 'bg-indigo-600', onClick: () => setShowCreateShipment(true) },
+                  { icon: Plus, label: 'Créer une expédition', hint: 'Créer les colis à collecter', color: 'bg-indigo-600', writes: true, onClick: () => setShowCreateShipment(true) },
                   { icon: Search, label: 'Suivre mes colis', hint: 'Où sont mes envois ?', color: 'bg-blue-600', onClick: () => onNavigate?.('client_shipments') },
                   { icon: Navigation, label: 'Suivi des livraisons', hint: 'Dernières positions reçues', color: 'bg-teal-600', onClick: () => onNavigate?.('client_tracking') },
                   { icon: BarChart3, label: 'Mes statistiques', hint: 'Résultats et tendances', color: 'bg-slate-700', onClick: () => onNavigate?.('client_analytics') },
@@ -941,6 +981,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                 ].map((a, i) => (
                   <button
                     key={i}
+                    disabled={readOnly && a.writes}
                     onClick={a.onClick}
                     className="bg-white rounded-2xl border border-slate-200 p-4 text-left hover:shadow-md hover:border-indigo-200 active:scale-95 transition-all flex flex-col gap-2"
                   >
@@ -959,7 +1000,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
               const step1 = companyInfoComplete;
               const step2 = savedAddresses.length > 0;
               const step3 = clientPackages.length > 0;
-              if (step1 && step2 && step3) return null;
+              if (readOnly || isLoadingPackages || packagesError || (step1 && step2 && step3)) return null;
               const steps = [
                 { done: step1, label: 'Complétez votre entreprise', hint: 'Raison sociale + adresse (pour vos BL)', action: () => onNavigate?.('client_company'), cta: 'Compléter' },
                 { done: step2, label: 'Importez vos destinataires', hint: 'Une fois, puis choix en un clic', action: () => setShowImportRecipients(true), cta: 'Importer' },
@@ -1009,10 +1050,10 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
               )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-medium text-slate-500 mb-1 block">Raison sociale *</label>
+                  <label htmlFor={`${formFieldId}-companyName`} className="text-sm font-medium text-slate-600 mb-1 block">Raison sociale *</label>
                   <input
                     type="text"
-                    value={companyForm.companyName}
+                    id={`${formFieldId}-companyName`} value={companyForm.companyName}
                     readOnly title="Le nom de société est géré par votre responsable."
                     onChange={(e) => setCompanyForm(f => ({ ...f, companyName: e.target.value }))}
                     placeholder="Ex : PREM BPA"
@@ -1020,30 +1061,30 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-slate-500 mb-1 block">Téléphone</label>
+                  <label htmlFor={`${formFieldId}-companyPhone`} className="text-sm font-medium text-slate-600 mb-1 block">Téléphone</label>
                   <input
                     type="tel"
-                    value={companyForm.companyPhone}
+                    disabled={readOnly} id={`${formFieldId}-companyPhone`} value={companyForm.companyPhone}
                     onChange={(e) => setCompanyForm(f => ({ ...f, companyPhone: e.target.value }))}
                     placeholder="0262 00 00 00"
                     className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
                   />
                 </div>
                 <div className="sm:col-span-2">
-                  <label className="text-xs font-medium text-slate-500 mb-1 block">Adresse complète *</label>
+                  <label htmlFor={`${formFieldId}-companyAddress`} className="text-sm font-medium text-slate-600 mb-1 block">Adresse complète *</label>
                   <input
                     type="text"
-                    value={companyForm.companyAddress}
+                    disabled={readOnly} id={`${formFieldId}-companyAddress`} value={companyForm.companyAddress}
                     onChange={(e) => setCompanyForm(f => ({ ...f, companyAddress: e.target.value }))}
                     placeholder="12 rue des Lilas, 97400 Saint-Denis"
                     className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-slate-500 mb-1 block">SIRET</label>
+                  <label htmlFor={`${formFieldId}-companySiret`} className="text-sm font-medium text-slate-600 mb-1 block">SIRET</label>
                   <input
                     type="text"
-                    value={companyForm.companySiret}
+                    disabled={readOnly} id={`${formFieldId}-companySiret`} value={companyForm.companySiret}
                     onChange={(e) => setCompanyForm(f => ({ ...f, companySiret: e.target.value }))}
                     placeholder="123 456 789 00012"
                     className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
@@ -1052,7 +1093,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                 <div className="flex items-end">
                   <button
                     onClick={handleSaveCompany}
-                    disabled={savingCompany || !companyForm.companyName.trim() || !companyForm.companyAddress.trim()}
+                    disabled={readOnly || savingCompany || !companyForm.companyName.trim() || !companyForm.companyAddress.trim()}
                     className="w-full sm:w-auto px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {savingCompany ? 'Enregistrement…' : 'Enregistrer'}
@@ -1072,12 +1113,12 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                         <h3 className="text-xl font-bold text-indigo-900">Mon Équipe Logistique</h3>
                         <p className="text-indigo-700 mt-1">Invitez des collaborateurs pour qu'ils puissent gérer les demandes en toute autonomie.</p>
                     </div>
-                    <button 
-                        onClick={openAddMemberModal}
+                    {!(previewMode || !onAddTeamMember) && (<button
+                         onClick={openAddMemberModal}
                         className="bg-white text-indigo-700 px-5 py-3 rounded-xl font-bold shadow-sm hover:bg-white/80 transition-colors flex items-center gap-2"
                     >
                         <UserPlus size={18} /> Ajouter un collaborateur
-                    </button>
+                    </button>)}
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -1170,7 +1211,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                             </div>
                             
                             {/* Message d'info selon le statut */}
-                            {!user.activatedAt && !user.isDisabled && (
+                            {!previewMode && !user.activatedAt && !user.isDisabled && (
                                 <div className="mb-4 p-3 bg-orange-50 rounded-xl border border-orange-100">
                                     <p className="text-xs text-orange-700 flex items-start gap-2">
                                         <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
@@ -1189,24 +1230,29 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                             )}
                             
                             <div className="grid grid-cols-2 gap-3 mt-4 pt-4 border-t border-slate-100">
-                                <button 
-                                    onClick={() => openEditMemberModal(user)}
+                                {!(previewMode || !onUpdateTeamMember) && (<button
+                                     onClick={() => openEditMemberModal(user)}
                                     className="flex items-center justify-center gap-2 py-2 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-600 font-bold text-sm transition-colors"
                                 >
                                     <Edit size={14} /> Modifier
-                                </button>
-                                <button 
-                                    onClick={() => confirmDeleteMember(user)}
+                                </button>)}
+                                {!(previewMode || !onDeleteTeamMember) && (<button
+                                     onClick={() => confirmDeleteMember(user)}
                                     className="flex items-center justify-center gap-2 py-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 font-bold text-sm transition-colors"
                                 >
                                     <Trash2 size={14} /> Supprimer
-                                </button>
+                                </button>)}
                             </div>
                             
+                            {teamMessages[user.id] && <p role="status" className="mt-3 rounded-lg bg-slate-100 p-3 text-sm text-slate-800">{teamMessages[user.id]}</p>}
                             {/* Bouton Renvoyer invitation - visible seulement si pas encore activé */}
-                            {!user.activatedAt && !user.isDisabled && (
+                            {!previewMode && !user.activatedAt && !user.isDisabled && (
                                 <button 
+                                    disabled={sendingInvitation !== null}
                                     onClick={async () => {
+                                      if (sendingInvitation || previewMode) return;
+                                      setSendingInvitation(user.id);
+                                      setTeamMessages(messages => ({ ...messages, [user.id]: '' }));
                                       try {
                                         const result = await resendInvitation(
                                           user.email,
@@ -1218,19 +1264,21 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                         
                                         if (result) {
                                           const activationUrl = getActivationUrl(result.token);
-                                          await sendUserInvitationEmail(
+                                          const sent = await sendUserInvitationEmail(
                                             { email: user.email, firstName: user.firstName, lastName: user.lastName, role: 'Client' },
                                             { firstName: currentUser.firstName, lastName: currentUser.lastName },
                                             activationUrl,
                                             result.expiresAt
                                           );
-                                          alert(`✅ Invitation renvoyée à ${user.email}`);
+                                          if (!sent) throw new Error('Email non envoyé.');
+                                          notifySuccess(`Invitation renvoyée à ${user.email}.`);
+                                          setTeamMessages(messages => ({ ...messages, [user.id]: 'Invitation renvoyée. Le lien d’activation est valable 7 jours.' }));
                                         } else {
-                                          alert(`❌ Erreur lors du renvoi`);
+                                          setTeamMessages(messages => ({ ...messages, [user.id]: 'L’invitation n’a pas pu être renouvelée. Réessayez depuis cette fiche.' }));
                                         }
                                       } catch (e) {
-                                        alert(`❌ Erreur lors de l'envoi`);
-                                      }
+                                        setTeamMessages(messages => ({ ...messages, [user.id]: 'Email non envoyé. Vérifiez l’adresse puis réessayez.' }));
+                                      } finally { setSendingInvitation(null); }
                                     }}
                                     className="w-full mt-3 py-2 rounded-lg bg-orange-100 hover:bg-orange-200 text-orange-700 font-bold text-sm transition-colors flex items-center justify-center gap-2"
                                 >
@@ -1241,15 +1289,15 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                     )})}
                     
                     {/* Add Button Card */}
-                    <button 
-                        onClick={openAddMemberModal}
+                    {!(previewMode || !onAddTeamMember) && (<button
+                         onClick={openAddMemberModal}
                         className="bg-slate-50 rounded-2xl border-2 border-dashed border-slate-300 flex flex-col items-center justify-center p-6 text-slate-400 hover:text-indigo-600 hover:border-indigo-300 hover:bg-indigo-50/50 transition-all h-full min-h-[200px]"
                     >
                         <div className="bg-white p-4 rounded-full shadow-sm mb-3">
                             <Plus size={24} />
                         </div>
                         <span className="font-bold">Ajouter un membre</span>
-                    </button>
+                    </button>)}
                 </div>
             </div>
         )}
@@ -1364,22 +1412,23 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                     )}
 
                                     <div className="flex gap-3 w-full md:w-auto">
-                                        <button 
-                                            onClick={() => confirmStatusChange(quote.id, QuoteStatus.REJECTED)}
+                                        {!(previewMode) && (<button
+                                             onClick={() => confirmStatusChange(quote.id, QuoteStatus.REJECTED)}
                                             className="flex-1 md:flex-none px-5 py-2.5 bg-white border border-slate-200 text-slate-600 hover:text-red-600 hover:border-red-200 hover:bg-red-50 rounded-xl font-bold transition-colors text-sm"
                                         >
                                             Refuser
-                                        </button>
-                                        <button 
-                                            onClick={() => confirmStatusChange(quote.id, QuoteStatus.ACCEPTED)}
+                                        </button>)}
+                                        {!(previewMode) && (<button
+                                             onClick={() => confirmStatusChange(quote.id, QuoteStatus.ACCEPTED)}
                                             className="flex-1 md:flex-none px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-lg shadow-indigo-200 flex items-center justify-center gap-2 text-sm transition-transform active:scale-95"
                                         >
                                             <CheckCircle size={16} /> Accepter l'offre
-                                        </button>
+                                        </button>)}
                                     </div>
                                 </div>
                             )}
 
+                            {podMessages[quote.id] && <p role="status" className="mx-4 my-3 rounded-xl bg-slate-100 p-3 text-sm text-slate-800">{podMessages[quote.id]}</p>}
                             {/* Footer devis ACCEPTÉ — Bouton Étiquette */}
                             {quote.status === QuoteStatus.ACCEPTED && (
                                 <div className="px-6 py-4 bg-emerald-50/50 border-t border-emerald-100 flex flex-col md:flex-row justify-between items-center gap-4 rounded-b-2xl">
@@ -1438,12 +1487,12 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
         )}
 
         {/* --- VIEW: STATISTIQUES (Studio Analytique) --- */}
-        {activeView === 'client_analytics' && (
+        {activeView === 'client_analytics' && !isLoadingPackages && !packagesError && (
             <ClientAnalytics packages={clientPackages} />
         )}
 
         {/* --- VIEW: SUIVI LIVE (livreurs de mes colis en cours) --- */}
-        {activeView === 'client_tracking' && (
+        {activeView === 'client_tracking' && !isLoadingPackages && !packagesError && (
             <ClientLiveTracking packages={clientPackages} currentUser={currentUser} />
         )}
 
@@ -1476,24 +1525,24 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                 Mes Expéditions
                             </h2>
                             <p className="text-blue-100 mt-1">
-                                {clientPackages.length} colis au total — Suivez vos envois et téléchargez vos étiquettes
+                                {isLoadingPackages ? 'Chargement du nombre de colis…' : packagesError ? 'Nombre de colis indisponible' : `${clientPackages.length} colis au total — Suivez vos envois et téléchargez vos étiquettes`}
                             </p>
                         </div>
                         <div className="flex gap-2 flex-wrap">
                             <button
-                                onClick={() => setShowImportRecipients(true)}
+                                disabled={readOnly} onClick={() => setShowImportRecipients(true)}
                                 className="flex items-center gap-2 px-4 py-2.5 bg-white/15 hover:bg-white/25 text-white rounded-xl font-bold text-sm transition-colors"
                             >
                                 <UserPlus size={16} /> Importer mes destinataires
                             </button>
                             <button
-                                onClick={() => setShowImportShipments(true)}
+                                disabled={readOnly} onClick={() => setShowImportShipments(true)}
                                 className="flex items-center gap-2 px-4 py-2.5 bg-white/15 hover:bg-white/25 text-white rounded-xl font-bold text-sm transition-colors"
                             >
                                 <FileSpreadsheet size={16} /> Importer des expéditions
                             </button>
                             <button
-                                onClick={() => setShowCreateShipment(true)}
+                                disabled={readOnly} onClick={() => setShowCreateShipment(true)}
                                 className="flex items-center gap-2 px-4 py-2.5 bg-white text-indigo-700 rounded-xl font-bold text-sm shadow-lg active:scale-95 transition-transform"
                             >
                                 <Plus size={16} /> Créer une expédition
@@ -1513,12 +1562,14 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                     ].map(s => (
                         <button
                             key={s.filter}
+                            disabled={isLoadingPackages || Boolean(packagesError)}
+                            aria-label={`${s.label} : ${isLoadingPackages ? 'chargement' : packagesError ? 'indisponible' : s.count}`}
                             onClick={() => setShipmentFilter(s.filter)}
                             className={`p-3 rounded-xl text-center transition-all ${
                                 shipmentFilter === s.filter ? `${s.color} ring-2 ring-offset-1 ring-current shadow-md` : 'bg-white border border-slate-200 hover:bg-slate-50'
                             }`}
                         >
-                            <p className="text-2xl font-black">{s.count}</p>
+                            <p className="text-2xl font-black">{isLoadingPackages || packagesError ? '—' : s.count}</p>
                             <p className="text-[11px] font-medium">{s.label}</p>
                         </button>
                     ))}
@@ -1562,13 +1613,13 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                         className="flex items-center gap-2 px-5 py-2.5 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold text-sm hover:bg-slate-50 transition-colors"
                     >
                         <Download size={16} />
-                        Toutes les étiquettes en attente ({clientPackages.filter(p => p.status === PackageStatus.PENDING).length})
+                        Toutes les étiquettes en attente ({isLoadingPackages || packagesError ? '—' : clientPackages.filter(p => p.status === PackageStatus.PENDING).length})
                     </button>
                 </div>
 
                 {/* Liste des colis */}
 {expandedShipmentId && <div role="status" className="rounded-xl border border-indigo-200 bg-indigo-50 p-3 flex flex-wrap justify-between gap-3 text-sm text-indigo-900">
-                      <p>{isLoadingPackages ? 'Chargement du colis demandé…' : clientPackages.some(parcel => parcel.id === expandedShipmentId) ? 'Colis ouvert depuis un lien. Les filtres précédents sont temporairement ignorés.' : 'Ce colis est indisponible dans votre compte ou n’existe plus.'}</p>
+                      <p>{packagesError ? 'Le colis demandé ne peut pas être vérifié tant que le chargement a échoué.' : isLoadingPackages ? 'Chargement du colis demandé…' : clientPackages.some(parcel => parcel.id === expandedShipmentId) ? 'Colis ouvert depuis un lien. Les filtres précédents sont temporairement ignorés.' : 'Ce colis est indisponible dans votre compte ou n’existe plus.'}</p>
                       <button type="button" onClick={() => updateUrlParams({ package: null, clientSearch: null, clientStatus: null })} className="font-semibold underline min-h-11">Afficher tous mes colis</button>
                     </div>}
                                 {(() => {
@@ -1648,7 +1699,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                                         <div className="min-w-0 flex-1">
                                                             <p className="text-sm font-bold text-slate-800 truncate">{rep.contactName}</p>
                                                             <p className="text-xs text-slate-500 truncate">{rep.address} · {rep.postalCode} {rep.city}</p>
-                                                            {etaPkg && (() => { const eta=new Date(etaPkg.estimatedDeliveryAt!); if(isNaN(eta.getTime()))return null; const today=eta.toDateString()===new Date().toDateString(); const hhmm=eta.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}); return <p className="text-[10px] font-bold text-orange-600 mt-0.5">🕒 Livraison prévue {today?`vers ${hhmm}`:`le ${eta.toLocaleDateString('fr-FR')} vers ${hhmm}`}</p>; })()}
+                                                            {etaPkg && (() => { const eta=new Date(etaPkg.estimatedDeliveryAt!); if(isNaN(eta.getTime()))return null; const today=eta.toDateString()===new Date().toDateString(); const hhmm=eta.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}); return <p className="text-sm font-semibold text-orange-800 mt-1">Estimation d’arrivée {today?`vers ${hhmm}`:`le ${eta.toLocaleDateString('fr-FR')} vers ${hhmm}`}</p>; })()}
                                                         </div>
                                                         <div className="flex items-center gap-2 shrink-0">
                                                             <div className="text-center leading-none"><span className="text-base font-black text-slate-700">{pkgs.length}</span><br/><span className="text-[9px] text-slate-400">colis</span></div>
@@ -1669,10 +1720,10 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                                                 <div key={pkg.id} className={`px-6 py-2.5 border-l-4 ${STATUS_BORDER[pkg.status] || 'border-l-slate-300'}`}>
                                                                     <div className="flex items-center gap-2">
                                                                         <div className="min-w-0 flex-1">
-                                                                            <p className="font-mono text-xs font-bold text-slate-800 truncate">{pkg.externalId || pkg.barcode || pkg.orderNumber}</p>
+                                                                            <ShipmentReference reference={pkg.externalId || pkg.barcode || pkg.orderNumber} />
                                                                             <p className="text-[10px] text-slate-400 truncate">Cmd: {pkg.orderNumber}{pkg.clientReference ? ` · Réf: ${pkg.clientReference}` : ''}</p>
                                                                             {pkg.requestedDeliveryDate && pkg.status !== PackageStatus.DELIVERED && (
-                                                                              <p className="text-[10px] text-indigo-600 font-semibold truncate">📅 Livraison souhaitée : {new Date(pkg.requestedDeliveryDate + 'T00:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })}</p>
+                                                                              <p className="text-sm text-indigo-800 font-semibold mt-1">Créneau demandé : {new Date(pkg.requestedDeliveryDate + 'T00:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })}</p>
                                                                             )}
                                                                         </div>
                                                                         <HintTooltip label={STATUS_TOOLTIP[pkg.status] || pkg.status}><span className={`inline-flex items-center px-2 py-1 rounded-lg text-[11px] font-bold cursor-help ${sc.bg} ${sc.text}`}>{pkg.status}</span></HintTooltip>
@@ -1701,24 +1752,25 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                 })()}
 
                                 {isLoadingPackages && filtered.length === 0 && (
-                                    <div className="text-center py-16">
+                                    <div role="status" className="text-center py-16">
                                         <div className="inline-block w-8 h-8 border-2 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-3" />
                                         <p className="text-slate-500 font-medium">Chargement de vos expéditions…</p>
                                     </div>
                                 )}
 
-                                {!isLoadingPackages && filtered.length === 0 && (
+                                {!isLoadingPackages && !packagesError && filtered.length === 0 && (
                                     <div className="text-center py-16">
                                         <Package className="mx-auto text-slate-300 mb-3" size={40} />
                                         <p className="text-slate-600 font-bold">
-                                            {shipmentSearch ? 'Aucun colis ne correspond à votre recherche' : 'Vous n\'avez pas encore de colis'}
+                                            {shipmentSearch || shipmentFilter !== 'all' ? 'Aucun colis ne correspond à ces filtres' : 'Vous n’avez pas encore de colis'}
                                         </p>
                                         <p className="text-xs text-slate-400 mt-1 mb-4">
-                                            {shipmentSearch ? 'Essayez un autre terme de recherche' : 'Créez votre première expédition en un clic.'}
+                                            {shipmentSearch || shipmentFilter !== 'all' ? 'Modifiez la recherche ou effacez les filtres.' : 'Créez votre première expédition en un clic.'}
                                         </p>
-                                        {!shipmentSearch && (
+                                        {(shipmentSearch || shipmentFilter !== 'all') && <button type="button" onClick={() => updateUrlParams({ clientSearch: null, clientStatus: null, package: null })} className="min-h-11 rounded-xl border px-3 font-semibold">Effacer les filtres</button>}
+                                        {!shipmentSearch && shipmentFilter === 'all' && (
                                             <button
-                                                onClick={() => setShowCreateShipment(true)}
+                                                disabled={readOnly} onClick={() => setShowCreateShipment(true)}
                                                 className="inline-flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-bold text-sm shadow-lg active:scale-95 transition-transform"
                                             >
                                                 <Plus size={16} /> Créer une expédition
@@ -1747,7 +1799,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
 
         {/* --- MODAL NEW REQUEST --- */}
         <Modal
-            isOpen={isModalOpen}
+            isOpen={!previewMode && isModalOpen}
             onClose={() => setIsModalOpen(false)}
             dirty={newRequest.originAddress !== _origin.street || newRequest.originCity !== _origin.city || newRequest.originContactName !== (currentUser.companyName || '') || newRequest.originContactPhone !== (currentUser.companyPhone || '') || Object.entries(newRequest).some(([key, value]) => !['originAddress', 'originCity', 'originContactName', 'originContactPhone', 'volume'].includes(key) && Boolean(value)) || saveOriginAddress || saveDestAddress}
             title="Demander un devis"
@@ -1756,6 +1808,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
             headerIcon={<Send size={20} />}
         >
 <form onSubmit={handleQuoteSubmit} className="space-y-8">
+{quoteError && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-900">{quoteError}</p>}
                 <p className="text-sm text-slate-600">Cette demande permet de recevoir un prix. Le transport sera confirmé après votre acceptation de l’offre. Pour préparer directement vos colis, utilisez Créer une expédition.</p>
                 {/* Toast de feedback pour la sauvegarde d'adresse */}
                 {addressSaveMessage && (
@@ -1802,7 +1855,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                     if (addr) {
                                         setSelectedOriginLabel(addr.label || addr.address);
                                     }
-                                    incrementAddressUsage(addressId);
+                                    void access.runMutation('Utiliser une adresse du carnet', () => incrementAddressUsage(addressId)).catch(() => notifyWarning('L’utilisation de cette adresse n’a pas pu être mémorisée.'));
                                     setSaveOriginAddress(false);
                                 }}
                                 selectedLabel={selectedOriginLabel || undefined}
@@ -1907,7 +1960,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                     if (addr) {
                                         setSelectedDestLabel(addr.label || addr.address);
                                     }
-                                    incrementAddressUsage(addressId);
+                                    void access.runMutation('Utiliser une adresse du carnet', () => incrementAddressUsage(addressId)).catch(() => notifyWarning('L’utilisation de cette adresse n’a pas pu être mémorisée.'));
                                     setSaveDestAddress(false);
                                 }}
                                 selectedLabel={selectedDestLabel || undefined}
@@ -2106,7 +2159,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
 
         {/* --- MODAL ADD/EDIT TEAM MEMBER --- */}
         <Modal
-            isOpen={isTeamModalOpen}
+            isOpen={!previewMode && isTeamModalOpen}
             onClose={() => setIsTeamModalOpen(false)}
             title={editingMember ? 'Modifier Collaborateur' : 'Ajouter un Collaborateur'}
             size="md"
@@ -2156,7 +2209,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
         {/* --- GLOBAL CONFIRMATION MODAL --- */}
         {pendingAction && (
             <ConfirmModal
-                isOpen={isConfirmModalOpen}
+                isOpen={!previewMode && isConfirmModalOpen}
                 onClose={() => setIsConfirmModalOpen(false)}
                 onConfirm={executePendingAction}
                 title="Confirmer l'action"
@@ -2184,7 +2237,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
         )}
 
         {/* CRÉER UNE EXPÉDITION (self-service) */}
-        {showCreateShipment && (
+        {!readOnly && showCreateShipment && (
           <CreateShipmentModal
             currentUser={currentUser}
             savedAddresses={savedAddresses}
@@ -2196,7 +2249,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
         )}
 
         {/* IMPORTER DES EXPÉDITIONS (fichier Excel/CSV, avec contrôle qualité) */}
-        {showImportShipments && (
+        {!readOnly && showImportShipments && (
           <ImportShipmentsModal
             currentUser={currentUser}
             onClose={() => setShowImportShipments(false)}
@@ -2209,7 +2262,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
         )}
 
         {/* IMPORTER LE CARNET DE DESTINATAIRES */}
-        {showImportRecipients && (
+        {!readOnly && showImportRecipients && (
           <ImportRecipientsModal
             currentUser={currentUser}
             existingAddresses={savedAddresses}
@@ -2249,6 +2302,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
           />
         )}
     </div>
+    </ClientAccessContext.Provider>
   );
 };
 

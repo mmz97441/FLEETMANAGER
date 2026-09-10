@@ -1,3 +1,4 @@
+import { useClientAccess } from './client/ClientAccessContext';
 /**
  * IMPORT EN MASSE D'EXPÉDITIONS (client expéditeur)
  *
@@ -102,6 +103,7 @@ const getField = (row: Record<string, any>, field: keyof typeof HEADER_ALIASES):
 };
 
 const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser, onClose, onImported, onViewPackages }) => {
+  const access = useClientAccess();
   const [rows, setRows] = useState<ParsedRow[] | null>(null);
   const [fileName, setFileName] = useState('');
   const [format, setFormat] = useState<LabelFormat>('A6');
@@ -280,7 +282,7 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
   };
 
   const handleImport = async () => {
-    if (validCount === 0 || importingRef.current || complete) return;
+    if (access.readOnly || validCount === 0 || importingRef.current || complete) return;
     if (!deliveryDate) { setError('Choisissez la date de livraison souhaitée.'); return; }
     if (!attempted && deliveryDate < todayISOLocal) { setError('La date de livraison ne peut pas être dans le passé.'); return; }
     importingRef.current = true; setBusy(true); setAttempted(true); setError('');
@@ -288,17 +290,17 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
       const remaining = validRows.filter(row => !confirmedRef.current.has(row.line));
       for (let offset = 0; offset < remaining.length; offset += 150) {
         const batch = remaining.slice(offset, offset + 150);
-        const rowsWithZone = [];
+        const rowsWithZone: Array<Omit<ParsedRow, 'weight'> & { weight?: number; zone?: Zone }> = [];
         // Address estimation is local and may fall back to the transporter's zone review.
         for (const row of batch) {
           let zone: Zone | undefined;
           try { zone = (await estimateZoneFromAddress(`${row.address}, ${row.postalCode} ${row.city}`))?.zone; } catch { /* transporteur ajuste */ }
           rowsWithZone.push({ ...row, weight: row.weight ? Number(row.weight.replace(',', '.')) : undefined, zone });
         }
-        const packages = await createClientShipmentsBatch({
+        const packages = await access.runMutation('Importer des expéditions', () => createClientShipmentsBatch({
           client: { id: currentUser.id, companyName: currentUser.companyName || `${currentUser.firstName} ${currentUser.lastName}` },
           deliveryDate, rows: rowsWithZone,
-        });
+        }));
         const stored = new Map((await getPackagesByIds(packages.map(parcel => parcel.id))).map(parcel => [parcel.id, parcel]));
         if (stored.size !== new Set(packages.map(parcel => parcel.id)).size) throw new Error('Certains colis enregistrés n’ont pas pu être relus.');
         packages.forEach((parcel, index) => confirmedRef.current.set(batch[index].line, stored.get(parcel.id)!));
@@ -312,7 +314,7 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
   };
 
   return (
-    <Modal isOpen onClose={onClose} title={complete ? 'Bilan de l’import' : 'Importer mes expéditions'} headerIcon={<FileSpreadsheet size={22} />} size="2xl" preventClose={busy} dirty={Boolean(rows) && !complete}>
+    <Modal subtitle={access.contextLabel} isOpen onClose={onClose} title={complete ? 'Bilan de l’import' : 'Importer mes expéditions'} headerIcon={<FileSpreadsheet size={22} />} size="2xl" preventClose={busy} dirty={Boolean(rows) && !complete}>
         {attempted && <div ref={resultRef} tabIndex={-1} role="status" className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 mb-4 text-sm text-indigo-900">
           <p className="font-bold">{complete ? 'Import terminé' : busy ? 'Import en cours…' : 'Import interrompu'}</p>
           <p className="mt-1">{outcomes.total} lignes : {outcomes.confirmed} confirmées · {outcomes.invalid} rejetées · {outcomes.duplicates} doublons dans le fichier · {outcomes.pending} non confirmées.</p>

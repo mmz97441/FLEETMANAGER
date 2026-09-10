@@ -1,3 +1,4 @@
+import { useClientAccess } from './client/ClientAccessContext';
 /**
  * IMPORT DU CARNET DE DESTINATAIRES (client)
  *
@@ -56,6 +57,7 @@ const pick = (row: Record<string, any>, aliases: string[]): string => {
 };
 
 const ImportRecipientsModal: React.FC<ImportRecipientsModalProps> = ({ currentUser, existingAddresses, onClose, onDone, onViewRecipients }) => {
+  const access = useClientAccess();
   const [rows, setRows] = useState<ParsedRow[] | null>(null);
   const [fileName, setFileName] = useState('');
   const [importing, setImporting] = useState(false);
@@ -151,7 +153,7 @@ const ImportRecipientsModal: React.FC<ImportRecipientsModalProps> = ({ currentUs
   };
 
   const handleImport = async () => {
-    if (!okRows.length || importingRef.current || complete) return;
+    if (access.readOnly || !okRows.length || importingRef.current || complete) return;
     importingRef.current = true; setImporting(true); setError('');
     const updated = [...(rows || [])];
     let confirmedCount = 0;
@@ -160,7 +162,7 @@ const ImportRecipientsModal: React.FC<ImportRecipientsModalProps> = ({ currentUs
       await Promise.all(okRows.slice(offset, offset + 10).map(async row => {
         const index = updated.findIndex(item => item.line === row.line);
         try {
-          await addSavedAddress({ companyName: currentUser.companyName || `${currentUser.firstName} ${currentUser.lastName}`, createdBy: currentUser.id, label: row.contactName, type: 'delivery', address: row.address, city: row.city, contactName: row.contactName, contactPhone: row.contactPhone, contactEmail: row.contactEmail, createdAt: '', updatedAt: '' });
+          await access.runMutation('Importer un destinataire', () => addSavedAddress({ companyName: currentUser.companyName || `${currentUser.firstName} ${currentUser.lastName}`, createdBy: currentUser.id, label: row.contactName, type: 'delivery', address: row.address, city: row.city, contactName: row.contactName, contactPhone: row.contactPhone, contactEmail: row.contactEmail, createdAt: '', updatedAt: '' }));
           updated[index] = { ...row, _status: 'confirmed', _reason: 'Enregistrement confirmé' };
           confirmedCount++;
         } catch {
@@ -174,7 +176,7 @@ const ImportRecipientsModal: React.FC<ImportRecipientsModalProps> = ({ currentUs
   };
 
   return (
-    <Modal isOpen onClose={onClose} title={complete ? 'Bilan de l’import du carnet' : 'Importer mes destinataires'} headerIcon={<FileSpreadsheet size={22} />} size="2xl" preventClose={importing} dirty={Boolean(rows) && !complete}>
+    <Modal subtitle={access.contextLabel} isOpen onClose={onClose} title={complete ? 'Bilan de l’import du carnet' : 'Importer mes destinataires'} headerIcon={<FileSpreadsheet size={22} />} size="2xl" preventClose={importing} dirty={Boolean(rows) && !complete}>
         {!rows && (
           <>
             <p className="text-sm text-slate-600 mb-3">

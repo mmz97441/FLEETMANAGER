@@ -1,0 +1,174 @@
+{
+  "checkedAt": "2026-09-10T17:21:15.904Z",
+  "fixture": "Current MissionManager, synthetic services, external Firebase requests blocked",
+  "results": [
+    {
+      "id": "no-premature-empty",
+      "pass": true
+    },
+    {
+      "id": "one-date",
+      "pass": true
+    },
+    {
+      "id": "focus-before-key"
+    },
+    {
+      "id": "keyboard-disclosure",
+      "pass": true
+    },
+    {
+      "id": "space-disclosure",
+      "pass": true
+    },
+    {
+      "id": "stop-targets44",
+      "pass": true
+    },
+    {
+      "id": "editor-focus",
+      "pass": true
+    },
+    {
+      "id": "nine-named-fields",
+      "pass": true
+    },
+    {
+      "id": "tab-wrap-contained",
+      "pass": true
+    },
+    {
+      "id": "shift-tab-wrap-contained",
+      "pass": true
+    },
+    {
+      "id": "dirty-backdrop",
+      "pass": true
+    },
+    {
+      "id": "dirty-escape",
+      "pass": true
+    },
+    {
+      "id": "dirty-cancel",
+      "pass": true
+    },
+    {
+      "id": "dirty-cross",
+      "pass": true
+    },
+    {
+      "id": "validation-address-no-write",
+      "pass": true
+    },
+    {
+      "id": "validation-duration-no-write",
+      "pass": true
+    },
+    {
+      "id": "validation-window-no-write",
+      "pass": true
+    },
+    {
+      "id": "save-error-durable-preserved",
+      "pass": true
+    },
+    {
+      "id": "busy-cannot-close",
+      "pass": true
+    },
+    {
+      "id": "save-success-focus-restored",
+      "pass": true
+    },
+    {
+      "id": "mission-no-clipping-320",
+      "pass": true
+    },
+    {
+      "id": "mobile-fields-readable-320",
+      "pass": true
+    },
+    {
+      "id": "mission-no-clipping-390",
+      "pass": true
+    },
+    {
+      "id": "mobile-fields-readable-390",
+      "pass": true
+    },
+    {
+      "id": "global-query-independent",
+      "pass": true
+    },
+    {
+      "id": "global-search-all-history",
+      "pass": true
+    },
+    {
+      "id": "global-search-measured",
+      "pass": true
+    },
+    {
+      "id": "sort-url",
+      "pass": true
+    },
+    {
+      "id": "favorite-sanitized",
+      "pass": true
+    },
+    {
+      "id": "favorite-clears-selection",
+      "pass": true
+    },
+    {
+      "id": "sort-restored",
+      "pass": true
+    },
+    {
+      "id": "date-only-resubscribes-missions",
+      "pass": true
+    },
+    {
+      "id": "read-error-not-empty",
+      "pass": true
+    },
+    {
+      "id": "retry-read-restores",
+      "pass": true
+    },
+    {
+      "id": "add-uncertain-locked",
+      "pass": true
+    },
+    {
+      "id": "add-reload-preserves-request",
+      "pass": true
+    },
+    {
+      "id": "source-error-packages",
+      "pass": true
+    },
+    {
+      "id": "source-error-dispatchable",
+      "pass": true
+    },
+    {
+      "id": "source-error-imports",
+      "pass": true
+    },
+    {
+      "id": "source-error-hubs",
+      "pass": true
+    },
+    {
+      "id": "hub-single-dialog-named-fields",
+      "pass": true
+    },
+    {
+      "id": "hub-draft-guard",
+      "pass": true
+    }
+  ],
+  "exceptions": []
+}

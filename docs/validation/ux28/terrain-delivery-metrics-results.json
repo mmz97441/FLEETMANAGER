@@ -1,0 +1,17 @@
+{
+  "checks": [
+    {
+      "label": "delivery observation absent before actual submission",
+      "pass": true
+    },
+    {
+      "label": "real submit failure recorded with no identifier",
+      "pass": true
+    },
+    {
+      "label": "successful submission recorded only after return",
+      "pass": true
+    }
+  ],
+  "exceptions": []
+}

@@ -23,6 +23,7 @@ import {
   getAdminEmails,
   getMechanicEmails 
 } from '../services/emailService';
+import { useUrlParam } from '../hooks/useUrlState';
 import { usePermissions, Permission } from '../usePermissions';
 
 // ============================================================================
@@ -131,6 +132,8 @@ const IssueManager: React.FC<IssueManagerProps> = ({
   }, [issues, currentUser.id, canViewAllIssues, canViewIssues]);
 
   // === STATE ===
+  const [linkedIssueId, setLinkedIssueId] = useUrlParam<string>('issue', '');
+  const linkedIssue = accessibleIssues.find(issue => issue.id === linkedIssueId);
   const [activeTab, setActiveTab] = useState<string>('open'); // 'open', 'closed', 'all'
   const [vehicleFilter, setVehicleFilter] = useState<string>('all');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
@@ -144,6 +147,19 @@ const IssueManager: React.FC<IssueManagerProps> = ({
   const [isReplyModalOpen, setIsReplyModalOpen] = useState(false);
   const [isCloseModalOpen, setIsCloseModalOpen] = useState(false);
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
+
+  useEffect(() => {
+    if (!linkedIssueId) return;
+    if (!canViewIssues || !linkedIssue) {
+      setIsDetailModalOpen(false);
+      setIsReplyModalOpen(false);
+      setIsCloseModalOpen(false);
+      setSelectedIssue(null);
+      return;
+    }
+    setSelectedIssue(linkedIssue);
+    setIsDetailModalOpen(true);
+  }, [linkedIssueId, linkedIssue, canViewIssues]);
 
   // Photos
   const [selectedFiles, setSelectedFiles] = useState<{ file: File; previewUrl: string }[]>([]);
@@ -284,6 +300,7 @@ const IssueManager: React.FC<IssueManagerProps> = ({
   };
 
   const openDetailModal = (issue: Issue) => {
+    setLinkedIssueId(issue.id);
     setSelectedIssue(issue);
     setIsDetailModalOpen(true);
   };
@@ -640,6 +657,7 @@ const IssueManager: React.FC<IssueManagerProps> = ({
 
   return (
     <div className="space-y-6 animate-fade-in pb-10">
+      {linkedIssueId && !linkedIssue && <div role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950"><p>Ce dossier n’est pas disponible dans les données reçues. Vérifiez la connexion, l’identifiant et vos droits. Il s’ouvrira automatiquement s’il devient disponible.</p><button type="button" onClick={() => setLinkedIssueId('', true)} className="mt-2 min-h-11 rounded-lg border border-amber-400 px-3 font-bold">Revenir à la liste</button></div>}
       
       {/* === KPI HEADER === */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -846,7 +864,7 @@ const IssueManager: React.FC<IssueManagerProps> = ({
       {/* === DETAIL MODAL === */}
       <Modal
         isOpen={isDetailModalOpen && !!selectedIssue}
-        onClose={() => { setIsDetailModalOpen(false); setSelectedIssue(null); }}
+        onClose={() => { setIsDetailModalOpen(false); setSelectedIssue(null); setLinkedIssueId('', true); }}
         title="Détail du dossier"
         size="2xl"
         headerIcon={<Folder size={20} />}

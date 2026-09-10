@@ -4,10 +4,10 @@
  * Raccourci disponible sur tous les écrans (usage interne) : ouvre la caméra,
  * scanne un colis (étiquette client BR…/2D, tracking GFL… ou N° commande) et
  * affiche instantanément sa fiche — statut, destinataire et suivi complet.
- * Lecture seule : aucun risque de modifier une donnée.
+ * La prise en charge est une opération réelle, confirmée après réponse serveur.
  */
 import React, { useState, useRef, lazy, Suspense } from 'react';
-import { ScanLine, X, Loader2, MapPin, Package as PackageIcon, Search, PackageCheck, CheckCircle, Plus } from 'lucide-react';
+import { ScanLine, Loader2, MapPin, Package as PackageIcon, Search, PackageCheck, CheckCircle, Plus } from 'lucide-react';
 import { Package, PackageStatus, PACKAGE_STATUS_COLORS, User, UserRole } from '../types';
 import { normalizeRole } from '../utils/role';
 import { todayISO } from '../utils/date';
@@ -15,6 +15,10 @@ import { findPackageByCode, claimPackagesForDelivery, createAndClaimPackage, get
 import { reportError } from '../services/logService';
 import { packageDisplayCode, packageScanCodes, packageMatchesCode } from '../utils/barcode';
 import { getCurrentPosition } from '../utils/geo';
+import Modal from './shared/Modal';
+import { FormInput, FormSelect } from './shared/FormInput';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import { packageStatusLabel } from '../utils/operationalLabels';
 import PackageTimeline from './PackageTimeline';
 
 interface QuickScanButtonProps {
@@ -53,16 +57,23 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
   const [manifest, setManifest] = useState<Package[] | null>(null);
   const [manifestClient, setManifestClient] = useState('');
   const [manifestScanning, setManifestScanning] = useState(false);
-  const [manifestScannedCodes, setManifestScannedCodes] = useState<string[]>([]);
+  const [manifestErrors, setManifestErrors] = useState<Record<string, string>>({});
+  const [pendingClaims, setPendingClaims] = useState(0);
   const [manifestClaimedIds, setManifestClaimedIds] = useState<Set<string>>(new Set());
   const claimingRef = useRef<Set<string>>(new Set());
 
+  const busy = isSearching || isClaiming || creating || pendingClaims > 0;
+  const dirty = showCreate && !claimed && Object.values(createForm).some(value => value.trim());
+  const requestClose = useUnsavedChanges(dirty, busy);
+  const close = () => { void requestClose(reset); };
+  const scanAnother = () => { void requestClose(() => { reset(); setShowScanner(true); }); };
   const manifestMissing = manifest ? manifest.filter(p => !manifestClaimedIds.has(p.id)) : [];
 
   // Prise en charge d'UN colis (idempotent + garde anti-double via claimingRef).
   const claimOne = async (pkg: Package) => {
     if (claimingRef.current.has(pkg.id)) return;
     claimingRef.current.add(pkg.id);
+    setPendingClaims(previous => previous + 1);
     try {
       let location: { lat: number; lng: number } | undefined;
       try { location = await getCurrentPosition({ timeout: 5000 }); } catch { /* optionnel */ }
@@ -73,29 +84,27 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
         location,
       });
       setManifestClaimedIds(prev => new Set(prev).add(pkg.id));
-      setClaimError(null); // succès → on efface une éventuelle erreur précédente
+      setManifestErrors(previous => { const next = { ...previous }; delete next[pkg.id]; return next; });
     } catch (e) {
-      setClaimError(`Colis ${packageDisplayCode(pkg)} NON pris (réseau ?) — rescanne-le`);
+      reportError('quickscan.manifest.claim', e, { silent: true });
+      setManifestErrors(previous => ({ ...previous, [pkg.id]: `Colis ${packageDisplayCode(pkg)} : prise en charge non confirmée. Vérifiez le réseau et scannez-le à nouveau.` }));
     } finally {
       claimingRef.current.delete(pkg.id);
+      setPendingClaims(previous => Math.max(0, previous - 1));
     }
   };
 
   // Rafale : chaque scan prend en charge le colis correspondant NON encore pris.
   // On NE ferme PAS le scanner → le chauffeur scanne tous ses cartons d'affilée.
   const handleManifestScan = (code: string) => {
-    setManifestScannedCodes(prev => (prev.includes(code) ? prev : [...prev, code]));
-    setManifestClaimedIds(claimed => {
-      const hit = (manifest || []).find(p =>
-        !claimed.has(p.id) && !claimingRef.current.has(p.id) && packageMatchesCode(p, code)
-      );
-      if (hit) void claimOne(hit);
-      return claimed; // l'ajout réel se fait dans claimOne après succès
-    });
+    const hit = (manifest || []).find(pkg =>
+      !manifestClaimedIds.has(pkg.id) && !claimingRef.current.has(pkg.id) && packageMatchesCode(pkg, code)
+    );
+    if (hit) void claimOne(hit);
   };
 
   const handleCreate = async () => {
-    if (!result) return;
+    if (!result || creating) return;
     if (!createForm.clientId) { setClaimError('Choisissez le client expéditeur'); return; }
     if (!createForm.address.trim() || !createForm.city.trim()) { setClaimError('Adresse et ville obligatoires'); return; }
     setCreating(true); setClaimError(null);
@@ -121,6 +130,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
       setShowCreate(false);
       setClaimed(true);
     } catch (e) {
+      reportError('quickscan.create', e, { silent: true });
       setClaimError(e instanceof Error ? e.message : 'Échec de la création');
     }
     setCreating(false);
@@ -149,6 +159,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
       });
       setClaimed(true);
     } catch (e) {
+      reportError('quickscan.claim', e, { silent: true });
       setClaimError(e instanceof Error ? e.message : 'Échec de la prise en charge — réessayez');
     }
     setIsClaiming(false);
@@ -172,7 +183,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
           if (pending.length >= 2) {
             setManifest(pending);
             setManifestClient(pkg.clientName || 'ce client');
-            setManifestScannedCodes([code]);
+            setManifestErrors({});
             setManifestClaimedIds(new Set());
             setIsSearching(false);
             void claimOne(pkg);        // 1er colis pris en charge immédiatement
@@ -197,6 +208,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
   };
 
   const reset = () => {
+    if (busy) return;
     setResult(null);
     setIsSearching(false);
     setClaimed(false);
@@ -207,7 +219,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
     setCreateForm({ clientId: '', contactName: '', address: '', postalCode: '', city: '', contactPhone: '' });
     setManifest(null);
     setManifestClient('');
-    setManifestScannedCodes([]);
+    setManifestErrors({});
     setManifestScanning(false);
     setManifestClaimedIds(new Set());
     claimingRef.current = new Set();
@@ -219,7 +231,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
     <>
       {/* Bouton flottant — au-dessus de la barre de nav mobile */}
       <button
-        onClick={() => { reset(); setShowScanner(true); }}
+        onClick={scanAnother} disabled={busy}
         title="Scanner un colis"
         aria-label="Scanner un colis"
         className="fixed z-40 bottom-20 right-4 lg:bottom-6 lg:right-6 w-14 h-14 rounded-full bg-brand-600 hover:bg-brand-700 text-white shadow-lg shadow-brand-600/30 flex items-center justify-center active:scale-90 transition-transform"
@@ -255,7 +267,8 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
             onScan={handleManifestScan}
             onClose={() => setManifestScanning(false)}
             expectedBarcodes={(manifest || []).flatMap(p => packageScanCodes(p))}
-            alreadyScanned={manifestScannedCodes}
+            alreadyScanned={(manifest || []).filter(pkg => manifestClaimedIds.has(pkg.id)).flatMap(packageScanCodes)}
+            flashMessage={Object.keys(manifestErrors).length > 0 ? { type: 'warn', text: Object.values(manifestErrors).join(' ') } : pendingClaims > 0 ? { type: 'warn', text: `${pendingClaims} prise(s) en charge en cours de confirmation…` } : null}
             isMatch={(code) => (manifest || []).some(p => packageMatchesCode(p, code))}
             title={`Enlèvement — ${manifestClient}`}
             progress={{ done: manifestClaimedIds.size, total: manifest?.length || 0 }}
@@ -263,24 +276,13 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
         </Suspense>
       )}
 
-      {/* Erreur de prise en charge VISIBLE au-dessus du scanner (z > scanner) :
-          si un claim échoue en rafale, le chauffeur le voit tout de suite au lieu
-          d'un faux « pris ». Le compteur X/N n'avance QUE sur claim réussi. */}
-      {manifestScanning && claimError && (
-        <div className="fixed top-28 left-4 right-4 z-[60] px-4 py-3 rounded-xl bg-red-600 text-white text-sm font-bold text-center shadow-lg">
-          ⚠️ {claimError}
-        </div>
-      )}
-
-      {/* Recherche en cours */}
-      {isSearching && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center">
-          <div className="bg-white rounded-2xl px-6 py-5 flex items-center gap-3">
-            <Loader2 size={20} className="animate-spin text-brand-600" />
-            <span className="text-sm font-medium text-slate-700">Recherche du colis…</span>
-          </div>
-        </div>
-      )}
+      <Modal isOpen={isSearching} onClose={() => {}} title="Recherche du colis" preventClose size="sm">
+        <p role="status" className="flex items-center gap-3 text-slate-700"><Loader2 size={20} className="animate-spin" />Recherche en cours…</p>
+      </Modal>
+      <Modal isOpen={!isSearching && !result && !manifest && !!claimError} onClose={close} title="Recherche impossible" size="sm">
+        <p role="alert" className="text-red-800">{claimError}</p>
+        <button type="button" onClick={scanAnother} className="mt-4 min-h-11 w-full rounded-xl bg-brand-700 px-4 py-3 text-white font-bold">Scanner à nouveau</button>
+      </Modal>
 
       {/* MANIFESTE D'ENLÈVEMENT — complétude vs colis attendus du client.
           MASQUÉ pendant le scan (manifestScanning) : ce panneau est `fixed inset-0`
@@ -288,17 +290,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
           la caméra. Pendant le scan, seul le compteur X/N compact du scanner s'affiche ;
           le panneau complet réapparaît dès qu'on ferme la caméra. */}
       {manifest && !manifestScanning && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center sm:p-4" onClick={reset}>
-          <div className="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto animate-slide-up" onClick={e => e.stopPropagation()}>
-            {/* En-tête */}
-            <div className="p-4 border-b border-slate-200 flex items-start justify-between">
-              <div className="min-w-0">
-                <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Enlèvement</p>
-                <p className="font-bold text-lg text-slate-800 truncate">{manifestClient}</p>
-              </div>
-              <button onClick={reset} className="p-2 rounded-full hover:bg-slate-100 shrink-0"><X size={20} className="text-slate-400" /></button>
-            </div>
-
+        <Modal isOpen onClose={close} title={`Enlèvement — ${manifestClient}`} preventClose={busy} size="lg" bodyClassName="!p-0">
             <div className="p-4 space-y-3">
               {/* Compteur — se met à jour à CHAQUE scan (prise en charge auto) */}
               <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 flex items-center justify-between">
@@ -306,10 +298,10 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
                 <span className={`text-2xl font-black tabular-nums ${manifestMissing.length === 0 ? 'text-green-600' : 'text-slate-800'}`}>{manifestClaimedIds.size} / {manifest.length}</span>
               </div>
               {manifestMissing.length === 0 ? (
-                <div className="rounded-xl border border-green-300 bg-green-50 p-3 text-sm font-semibold text-green-800">✅ Tu as bien <b>tous</b> les colis de {manifestClient} ({manifest.length}/{manifest.length}).</div>
+                <div className="rounded-xl border border-green-300 bg-green-50 p-3 text-sm font-semibold text-green-800">✅ Vous avez pris en charge <b>tous</b> les colis de {manifestClient} ({manifest.length}/{manifest.length}).</div>
               ) : (
                 <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
-                  <p className="font-bold">⚠️ Il te manque {manifestMissing.length} colis sur {manifest.length}.</p>
+                  <p className="font-bold">⚠️ Il reste {manifestMissing.length} colis à prendre en charge sur {manifest.length}.</p>
                   <p className="text-xs mt-1">À scanner : {manifestMissing.map(packageDisplayCode).join(', ')}</p>
                 </div>
               )}
@@ -323,33 +315,29 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
                       {ok ? <CheckCircle size={16} className="text-green-600 shrink-0" /> : <div className="w-4 h-4 rounded-full border-2 border-slate-300 shrink-0" />}
                       <div className="min-w-0 flex-1">
                         <p className={`font-mono text-xs font-bold ${ok ? 'text-green-700' : 'text-slate-800'}`}>{packageDisplayCode(p)}</p>
-                        <p className="text-[11px] text-slate-500 truncate">→ {p.contactName} • {p.city}</p>
+                        <p className="text-sm text-slate-500 truncate">→ {p.contactName} • {p.city}</p>
                       </div>
-                      {ok && <span className="text-[9px] font-bold px-1.5 py-0.5 bg-green-100 text-green-700 rounded">PRIS</span>}
+                      {ok && <span className="text-xs font-bold px-1.5 py-0.5 bg-green-100 text-green-700 rounded">PRIS</span>}
                     </div>
                   );
                 })}
               </div>
 
-              {claimError && <p className="text-xs text-red-600 font-medium bg-red-50 border border-red-200 rounded-lg p-2">⚠️ {claimError}</p>}
+              {pendingClaims > 0 && <p role="status" className="rounded-lg bg-blue-50 p-3 text-sm text-blue-900">{pendingClaims} prise(s) en charge en cours de confirmation. Attendez avant de terminer.</p>}
+              {Object.values(manifestErrors).map(message => <p key={message} role="alert" className="text-sm text-red-800 font-medium bg-red-50 border border-red-200 rounded-lg p-3">⚠️ {message}</p>)}
 
               {/* Scan = prise en charge auto (aucune validation manuelle) */}
               <button onClick={() => setManifestScanning(true)} className="w-full flex items-center justify-center gap-2 py-3.5 bg-brand-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform">
                 <ScanLine size={18} /> {manifestClaimedIds.size === 0 ? 'Scanner les colis' : 'Scanner un autre colis'}
               </button>
-              <button onClick={reset} className="w-full py-3 bg-slate-100 text-slate-700 rounded-xl font-medium text-sm">Terminer</button>
+              <button onClick={close} disabled={busy} className="disabled:opacity-50 w-full py-3 bg-slate-100 text-slate-700 rounded-xl font-medium text-sm">Fermer le manifeste</button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* Fiche résultat */}
       {result && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center sm:p-4" onClick={reset}>
-          <div
-            className="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto animate-slide-up"
-            onClick={e => e.stopPropagation()}
-          >
+        <Modal isOpen onClose={close} title={showCreate ? 'Créer un colis hors import' : 'Résultat du scan'} preventClose={busy} size="lg" bodyClassName="!p-0">
             {result.pkg ? (
               <>
                 {/* En-tête fiche colis */}
@@ -358,9 +346,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
                     <p className="font-mono text-lg font-bold text-slate-800">{packageDisplayCode(result.pkg)}</p>
                     <p className="text-xs text-slate-500">Commande {result.pkg.orderNumber}</p>
                   </div>
-                  <button onClick={reset} className="p-2 rounded-full hover:bg-slate-100 shrink-0">
-                    <X size={20} className="text-slate-400" />
-                  </button>
+
                 </div>
 
                 <div className="p-4 space-y-3">
@@ -369,7 +355,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
                     <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-bold ${
                       (PACKAGE_STATUS_COLORS[result.pkg.status] || { bg: 'bg-slate-100', text: 'text-slate-700' }).bg
                     } ${(PACKAGE_STATUS_COLORS[result.pkg.status] || { text: 'text-slate-700' }).text}`}>
-                      {statusEmoji(result.pkg.status)} {result.pkg.status}
+                      {statusEmoji(result.pkg.status)} {packageStatusLabel(result.pkg.status)}
                     </span>
                   </div>
 
@@ -377,7 +363,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
                       Le receveur voit clairement qu'il le RÉCUPÈRE (transfert tracé). */}
                   {result.pkg.currentDriverId && result.pkg.currentDriverId !== currentUser.id && !!result.pkg.missionId && (
                     <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
-                      🔁 <b>Ce colis est actuellement porté par {[...(result.pkg.movements || [])].reverse().find(m => m.driverName)?.driverName || 'un autre chauffeur'}.</b> En le prenant en charge, il basculera dans <b>ta tournée</b> (le transfert est tracé : de lui → à toi).
+                      🔁 <b>Ce colis est actuellement porté par {[...(result.pkg.movements || [])].reverse().find(m => m.driverName)?.driverName || 'un autre chauffeur'}.</b> En le prenant en charge, il basculera dans <b>votre tournée</b> ; le transfert entre chauffeurs est enregistré.
                     </div>
                   )}
 
@@ -394,7 +380,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
 
                   {/* Timeline */}
                   <div className="border-t border-slate-100 pt-2">
-                    <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">Suivi du colis</p>
+                    <p className="text-sm font-bold text-slate-500 uppercase tracking-wide mb-1">Suivi du colis</p>
                     {/* Détail complet (chauffeur+véhicule à chaque étape + preuve)
                         pour tous SAUF le chauffeur (vue chauffeur volontairement sobre). */}
                     <PackageTimeline
@@ -406,7 +392,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
                   </div>
                 </div>
               </>
-            ) : (
+            ) : claimed ? <p role="status" className="p-4 text-sm text-green-900">Le colis a été créé et ajouté à votre tournée.</p> : (
               /* Colis introuvable */
               !showCreate ? (
               <div className="p-6 text-center">
@@ -423,7 +409,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
                 </p>
                 <button
                   onClick={() => setShowCreate(true)}
-                  className="mt-4 w-full flex items-center justify-center gap-2 py-3 bg-green-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform"
+                  className="mt-4 w-full flex items-center justify-center gap-2 py-3 bg-green-700 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform"
                 >
                   <Plus size={18} /> Créer et prendre en charge
                 </button>
@@ -433,34 +419,19 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
               <div className="p-4 space-y-3">
                 <div className="flex items-start gap-2 p-2.5 bg-amber-50 border border-amber-200 rounded-xl">
                   <span>⚠️</span>
-                  <p className="text-[11px] text-amber-800">Colis <b>hors import</b>. Il sera pris en charge dans votre tournée et signalé au bureau pour réconciliation avec le fichier client.</p>
+                  <p className="text-sm text-amber-800">Colis <b>hors import</b>. Il sera pris en charge dans votre tournée et signalé au bureau pour réconciliation avec le fichier client.</p>
                 </div>
                 <p className="text-xs text-slate-500">N° colis : <b className="font-mono">{result.scannedCode}</b></p>
-                <div>
-                  <label className="text-xs font-bold text-slate-500 block mb-1">Client expéditeur *</label>
-                  <select value={createForm.clientId} onChange={e => setCreateForm(f => ({ ...f, clientId: e.target.value }))}
-                    className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-green-500 outline-none">
-                    <option value="">— Choisir —</option>
-                    {clients.map(c => <option key={c.id} value={c.id}>{c.companyName || `${c.firstName} ${c.lastName}`}</option>)}
-                  </select>
-                </div>
-                <input type="text" placeholder="Destinataire" value={createForm.contactName}
-                  onChange={e => setCreateForm(f => ({ ...f, contactName: e.target.value }))}
-                  className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-green-500 outline-none" />
-                <input type="text" placeholder="Adresse *" value={createForm.address}
-                  onChange={e => setCreateForm(f => ({ ...f, address: e.target.value }))}
-                  className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-green-500 outline-none" />
-                <div className="flex gap-2">
-                  <input type="text" inputMode="numeric" placeholder="Code postal" value={createForm.postalCode}
-                    onChange={e => setCreateForm(f => ({ ...f, postalCode: e.target.value }))}
-                    className="w-1/3 px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-green-500 outline-none" />
-                  <input type="text" placeholder="Ville *" value={createForm.city}
-                    onChange={e => setCreateForm(f => ({ ...f, city: e.target.value }))}
-                    className="flex-1 px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-green-500 outline-none" />
-                </div>
-                <input type="tel" placeholder="Téléphone (optionnel)" value={createForm.contactPhone}
-                  onChange={e => setCreateForm(f => ({ ...f, contactPhone: e.target.value }))}
-                  className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-green-500 outline-none" />
+                <fieldset disabled={busy} className="space-y-3">
+                  <FormSelect label="Client expéditeur" required value={createForm.clientId} onChange={e => setCreateForm(f => ({ ...f, clientId: e.target.value }))} options={[{ value: '', label: 'Choisir un client' }, ...clients.map(client => ({ value: client.id, label: client.companyName || `${client.firstName} ${client.lastName}` }))]} />
+                  <FormInput label="Destinataire" value={createForm.contactName} onChange={e => setCreateForm(f => ({ ...f, contactName: e.target.value }))} />
+                  <FormInput label="Adresse" required autoComplete="street-address" value={createForm.address} onChange={e => setCreateForm(f => ({ ...f, address: e.target.value }))} />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <FormInput label="Code postal" inputMode="numeric" autoComplete="postal-code" value={createForm.postalCode} onChange={e => setCreateForm(f => ({ ...f, postalCode: e.target.value }))} />
+                    <FormInput label="Ville" required autoComplete="address-level2" value={createForm.city} onChange={e => setCreateForm(f => ({ ...f, city: e.target.value }))} />
+                  </div>
+                  <FormInput label="Téléphone" hint="Optionnel" type="tel" autoComplete="tel" value={createForm.contactPhone} onChange={e => setCreateForm(f => ({ ...f, contactPhone: e.target.value }))} />
+                </fieldset>
               </div>
               )
             )}
@@ -469,7 +440,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
             {/* Prise en charge : bouton principal quand le colis est disponible */}
             {claimError && (
               <div className="px-4 pt-1">
-                <p className="text-xs text-red-600 font-medium bg-red-50 border border-red-200 rounded-lg p-2">⚠️ {claimError}</p>
+                <p role="alert" className="text-sm text-red-800 font-medium bg-red-50 border border-red-200 rounded-lg p-2">⚠️ {claimError}</p>
               </div>
             )}
             {result.pkg && !claimed && canClaim(result.pkg) && (
@@ -477,7 +448,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
                 <button
                   onClick={handleClaimClick}
                   disabled={isClaiming}
-                  className="w-full flex items-center justify-center gap-2 py-3.5 bg-green-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-50"
+                  className="w-full flex items-center justify-center gap-2 py-3.5 bg-green-700 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-50"
                 >
                   {isClaiming ? <><Loader2 size={18} className="animate-spin" /> Prise en charge…</> : <><PackageCheck size={18} /> Prendre en charge dans ma tournée</>}
                 </button>
@@ -495,7 +466,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
                 <button
                   onClick={handleCreate}
                   disabled={creating}
-                  className="w-full flex items-center justify-center gap-2 py-3.5 bg-green-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-50"
+                  className="w-full flex items-center justify-center gap-2 py-3.5 bg-green-700 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-50"
                 >
                   {creating ? <><Loader2 size={18} className="animate-spin" /> Création…</> : <><Plus size={18} /> Créer et prendre en charge</>}
                 </button>
@@ -504,20 +475,19 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
 
             <div className="p-4 border-t border-slate-200 flex gap-2">
               <button
-                onClick={() => { reset(); setShowScanner(true); }}
+                onClick={scanAnother} disabled={busy}
                 className="flex-1 flex items-center justify-center gap-2 py-3 bg-brand-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform"
               >
                 <ScanLine size={18} /> Scanner un autre
               </button>
               <button
-                onClick={reset}
+                onClick={close} disabled={busy}
                 className="px-5 py-3 bg-slate-100 text-slate-700 rounded-xl font-medium text-sm"
               >
                 Fermer
               </button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </>
   );

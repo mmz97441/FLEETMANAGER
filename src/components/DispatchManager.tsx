@@ -17,6 +17,7 @@ import { optimizeMultiVehicle, isGMPROConfigured, getGoogleMapsApiKey, Optimizat
 import { todayISO } from '../utils/date';
 import { formatDistance, formatDuration } from '../utils/format';
 import { dispatchMissionsCF } from '../services/cloudFunctions';
+import { startUxTask } from '../utils/uxMetrics';
 import { placeKey } from '../utils/address';
 import Modal from './shared/Modal';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
@@ -297,6 +298,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
     if (!optimResult || optimResult.tours.length === 0 || !selectedZoneStats) return;
     
     if (dispatchLock.current || !departureHub || !selectedZone) return;
+    const observation = startUxTask('dispatch', String(currentUser.role));
     dispatchLock.current = true;
     setIsDispatching(true);
     try {
@@ -318,6 +320,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
       }
       const attempt = dispatchAttempt.current;
       await dispatchMissionsCF({ requestId: attempt.requestId, missions: attempt.missions });
+      observation.finish('success', { items: attempt.missions.length });
       dispatchAttempt.current = null;
       setShowDispatchModal(false);
       setSelectedZone(null);
@@ -327,6 +330,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
       onMissionCreated();
     } catch (error) {
       console.error('Dispatch error:', error);
+      observation.finish('error', { errors: 1 });
       setPlanError(error instanceof Error ? error.message : 'L’affectation n’a pas pu être confirmée. Réessayez : la même demande ne créera pas de doublon.');
     } finally {
       dispatchLock.current = false;

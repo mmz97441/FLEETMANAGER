@@ -1,4 +1,7 @@
 import React, { useMemo, useState } from 'react';
+import SupportRequest from './SupportRequest';
+import DeviceDiagnostics from './DeviceDiagnostics';
+import UxMetricsPanel from './UxMetricsPanel';
 import Modal from './shared/Modal';
 import {
   HelpCircle,
@@ -38,7 +41,7 @@ const SECTION_TARGET: Record<string, { target: HelpNavTarget; label: string }> =
   bl: { target: 'shipments', label: 'Voir mes colis (BL)' },
 };
 
-type TabId = 'guide' | 'faq' | 'news';
+type TabId = 'guide' | 'faq' | 'news' | 'support';
 
 interface GuideSection {
   id: string;
@@ -336,6 +339,7 @@ const ClientHelp: React.FC<ClientHelpProps> = ({ onClose, onNavigate, embedded =
     { id: 'guide', label: "Guide d'utilisation", count: filteredGuide.length },
     { id: 'faq', label: 'FAQ', count: filteredFaq.length },
     { id: 'news', label: 'Nouveautés', count: filteredNews.length },
+    { id: 'support', label: 'Assistance', count: 0 },
   ];
 
   const panel = (
@@ -393,7 +397,7 @@ const ClientHelp: React.FC<ClientHelpProps> = ({ onClose, onNavigate, embedded =
 
         {/* Onglets */}
         <div className="px-5 pt-3">
-          <div className="flex gap-2 border-b border-slate-200">
+          <div className="flex flex-wrap gap-2 border-b border-slate-200">
             {tabs.map((tab) => {
               const isActive = activeTab === tab.id;
               return (
@@ -426,7 +430,7 @@ const ClientHelp: React.FC<ClientHelpProps> = ({ onClose, onNavigate, embedded =
 
         {/* Contenu défilant */}
         <div className="flex-1 overflow-y-auto px-5 py-4">
-          {activeTab === 'guide' ? (
+          {activeTab === 'support' ? <div className="space-y-4"><SupportRequest /><DeviceDiagnostics /><UxMetricsPanel /></div> : activeTab === 'guide' ? (
             filteredGuide.length === 0 ? (
               <EmptyState query={query} />
             ) : (

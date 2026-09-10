@@ -14,6 +14,11 @@ import { assertMissionReadyToClose, submitDelivery, pendingDeliveries, outboxCha
  * - Vue progression en temps réel
  */
 
+import { emptyDriverManualStop, makeDriverManualStopRequest } from '../utils/driverManualStopRequest';
+import { PendingManualStop, readPendingManualStop, reservePendingManualStop, clearPendingManualStop } from '../utils/pendingManualStop';
+import { stopFormPayload } from '../utils/missionStopForm';
+import { startUxTask } from '../utils/uxMetrics';
+import { missionStatusLabel, stopStatusLabel } from '../utils/operationalLabels';
 import React, { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import {
   Mission, MissionStatus, MissionType, MissionStop, StopStatus,
@@ -222,10 +227,10 @@ const SignaturePad: React.FC<{
         <span className="text-sm font-bold text-amber-800">✍️ Signature du destinataire</span>
         <div className="flex gap-2">
           <button onClick={undo} disabled={strokesRef.current.length === 0}
-            className="min-h-11 text-sm text-slate-500 hover:text-amber-600 disabled:opacity-30 font-medium">
+            className="min-h-11 text-sm text-slate-500 hover:text-amber-800 disabled:opacity-30 font-medium">
             ↩ Annuler
           </button>
-          <button onClick={clear} className="min-h-11 text-sm text-red-500 hover:text-red-700 font-medium">
+          <button onClick={clear} className="min-h-11 text-sm text-red-700 hover:text-red-700 font-medium">
             Effacer tout
           </button>
         </div>
@@ -324,7 +329,26 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [showReorder, setShowReorder] = useState(false);
   const [showManualStop, setShowManualStop] = useState(false);
-  const [manualStop, setManualStop] = useState({ contactName: '', address: '', postalCode: '', city: '', contactPhone: '' });
+  const [manualStop, setManualStop] = useState(emptyDriverManualStop);
+  const [pendingManualStop, setPendingManualStop] = useState<PendingManualStop | null>(null);
+  const [manualStopError, setManualStopError] = useState('');
+  const [manualJournalError, setManualJournalError] = useState('');
+  const manualStopLock = useRef(false);
+  useEffect(() => {
+    const restore = () => {
+      try {
+        const saved = readPendingManualStop(localStorage, currentUser.id);
+        setPendingManualStop(saved);
+        setManualJournalError('');
+        if (saved) setManualStop({ ...saved.form });
+      } catch {
+        setManualJournalError('La demande précédente ne peut pas être relue sur ce téléphone. Contactez le bureau pour vérifier son résultat avant tout nouvel ajout.');
+      }
+    };
+    restore();
+    window.addEventListener('storage', restore);
+    return () => window.removeEventListener('storage', restore);
+  }, [currentUser.id]);
   const [showIssue, setShowIssue] = useState(false);
   const [issueForm, setIssueForm] = useState<{ category: string; description: string; priority: 'Low' | 'Medium' | 'High' }>({ category: 'Véhicule / panne', description: '', priority: 'Medium' });
   const [issueSubmitting, setIssueSubmitting] = useState(false);
@@ -358,7 +382,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   const [showReturnSignature, setShowReturnSignature] = useState(false);
   const returnPhotoInputRef = useRef<HTMLInputElement>(null);
 
-  const closeManual = useUnsavedChanges(showManualStop && Object.values(manualStop).some(Boolean), isProcessing);
+  const closeManual = useUnsavedChanges(showManualStop && !pendingManualStop && Object.values(manualStop).some(Boolean), isProcessing);
   const closeIssue = useUnsavedChanges(showIssue && (!!issueForm.description.trim() || issueForm.category !== 'Véhicule / panne' || issueForm.priority !== 'Medium'), issueSubmitting);
   const closeFailure = useUnsavedChanges(showFailureModal && (!!failureNotes || failurePhotos.length > 0 || failureReason !== FailureReason.ABSENT), isProcessing);
   const closeReturn = useUnsavedChanges(showReturnModal && (returnPhotos.length > 0 || !!returnSignature), isProcessing);
@@ -994,6 +1018,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
     const pos = await ensureGps(handleDeliverySuccess);
     if (!pos) { setIsProcessing(false); return; }
     coords = pos;
+    let observation: ReturnType<typeof startUxTask> | null = null;
     try {
       const now = new Date().toISOString();
       const driverFullName = `${currentUser.firstName} ${currentUser.lastName}`;
@@ -1011,6 +1036,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
 
       if (!deliverIds.length) throw new Error('Aucun colis remis : utilisez la déclaration d’échec de livraison.');
       const okDelivered = deliverIds, okFailed = failIds;
+      observation = startUxTask('deliver', String(currentUser.role));
       const { allDone, stops: updatedStops } = await submitDelivery({
         id: `${currentUser.id}/${activeMission.id}/${currentStop.id}`,
         userId: currentUser.id, kind: 'success', createdAt: now,
@@ -1030,6 +1056,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
           reservesNote:merchandiseGood ? undefined : reservesNote,signatureBase64:signatureData || undefined,
           photosBase64:capturedPhotos,coordinates:coords,notes:scanTrace }
       });
+
+      observation.finish('success', { items: stopIds.length });
 
       // 4bis. JOURNAL — livraison (succès + éventuels non remis). Trace « qui a livré
       //       quoi » visible par le président. Best-effort, n'interrompt jamais.
@@ -1065,6 +1093,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
       const nonRemis = okFailed.length > 0 ? ` (${okFailed.length} non remis)` : '';
       showNotif(allDone ? `✅ Dernier arrêt livré${nonRemis} — terminez votre tournée` : `✅ Arrêt ${currentStop.sequence} livré !${nonRemis}`);
     } catch (err) {
+      observation?.finish('error', { items: currentStop.packageIds.length, errors: 1 });
       // Ne PAS conserver une intention partielle après une erreur : elle pourrait
       // « fuiter » sur une prochaine livraison. Le chauffeur repart propre.
       deliverIntentRef.current = null;
@@ -1079,12 +1108,14 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
     if (!activeMission || !currentStop || isProcessing) return;
     if (!failurePhotos.length) { showNotif('❌ Une photo est obligatoire pour déclarer l’échec.'); return; }
     setIsProcessing(true);
+    let observation: ReturnType<typeof startUxTask> | null = null;
     try {
       let coords: { lat: number; lng: number } | undefined;
       try { coords = await getCurrentPosition(); } catch {}
 
       const now = new Date().toISOString();
 
+      observation = startUxTask('deliver', String(currentUser.role));
       const { allDone, stops: updatedStops } = await submitDelivery({
         id:`${currentUser.id}/${activeMission.id}/${currentStop.id}`,userId:currentUser.id,kind:'failure',createdAt:now,
         action:{missionId:activeMission.id,stopId:currentStop.id,
@@ -1095,6 +1126,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
           driverId:currentUser.id,driverName:`${currentUser.firstName} ${currentUser.lastName}`,vehicleId:activeMission.vehicleId || '',vehiclePlate:activeMission.vehiclePlate || '',
           failureReason,failureNotes,photosBase64:failurePhotos,coordinates:coords ?? null}
       });
+
+      observation.finish('success', { items: currentStop.packageIds.length });
 
       // FIX BUG 2: Prochain arrêt dans l'ORDRE TRIÉ
       const updatedSorted = [...updatedStops].sort((a, b) => a.sequence - b.sequence);
@@ -1112,6 +1145,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
 
       showNotif(allDone ? '✅ Dernier arrêt traité — terminez votre tournée' : `⚠️ Arrêt ${currentStop.sequence} — échec enregistré`);
     } catch (err) {
+      observation?.finish('error', { items: currentStop.packageIds.length, errors: 1 });
       reportError('driver.markFailed', err, { silent: true });
       showNotif(`❌ Erreur${err instanceof Error ? ` — ${err.message}` : ''}`);
     }
@@ -1184,30 +1218,59 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
     setIsOptimizing(false);
   };
 
-  // Ajouter un arrêt manuel (adresse hors import)
+  // Keep the exact mission, payload and request identity until the server confirms it.
+  const openManualStop = () => {
+    if (manualJournalError) { showNotif(manualJournalError); return; }
+    if (pendingManualStop) setManualStop({ ...pendingManualStop.form });
+    setManualStopError('');
+    setShowManualStop(true);
+  };
   const handleAddManualStop = async () => {
-    if (!activeMission || isProcessing) return; // garde anti double-tap
-    if (!manualStop.address.trim() || !manualStop.city.trim()) {
-      showNotif('⚠️ Adresse et ville obligatoires');
+    if (isProcessing || manualStopLock.current || manualJournalError) return;
+    if (!pendingManualStop && !activeMission) return;
+    if (!pendingManualStop && (!manualStop.address.trim() || !manualStop.city.trim())) {
+      setManualStopError('Adresse et ville obligatoires.');
       return;
     }
+    manualStopLock.current = true;
     setIsProcessing(true);
+    let request: PendingManualStop;
     try {
-      await addManualStopToMission(activeMission.id, {
-        contactName: manualStop.contactName.trim() || 'Arrêt manuel',
-        address: manualStop.address.trim(),
-        postalCode: manualStop.postalCode.trim(),
-        city: manualStop.city.trim(),
-        contactPhone: manualStop.contactPhone.trim() || undefined
-      });
-      setShowManualStop(false);
-      setManualStop({ contactName: '', address: '', postalCode: '', city: '', contactPhone: '' });
-      showNotif('➕ Arrêt manuel ajouté à votre tournée');
-    } catch (e) {
-      reportError('driver.addManualStop', e, { silent: true });
-      showNotif(`❌ Erreur lors de l'ajout de l'arrêt${e instanceof Error ? ` — ${e.message}` : ''}`);
+      // Re-read before sending: a request retained by this or another open tab wins.
+      const retained = readPendingManualStop(localStorage, currentUser.id);
+      request = retained || pendingManualStop || makeDriverManualStopRequest(activeMission!, manualStop, crypto.randomUUID());
+      request = await reservePendingManualStop(localStorage, currentUser.id, request);
+    } catch {
+      manualStopLock.current = false;
+      setIsProcessing(false);
+      setManualStopError('La demande ne peut pas être conservée pour une reprise sûre. Aucun nouvel ajout n’a été envoyé. Vérifiez le stockage du navigateur, puis réessayez.');
+      return;
     }
-    setIsProcessing(false);
+    setPendingManualStop(request);
+    setManualStop({ ...request.form });
+    setManualStopError('');
+    try {
+      const payload = stopFormPayload(request.form);
+      await addManualStopToMission(request.missionId, { ...payload, contactPhone: payload.contactPhone || undefined, timeWindowStart: payload.timeWindowStart || undefined, timeWindowEnd: payload.timeWindowEnd || undefined, notes: payload.notes || undefined }, request.requestId);
+      let journalCleared = true;
+      try {
+        await clearPendingManualStop(localStorage, currentUser.id, request.requestId);
+        const retained = readPendingManualStop(localStorage, currentUser.id);
+        setPendingManualStop(retained);
+        setManualStop(retained ? { ...retained.form } : emptyDriverManualStop());
+      } catch {
+        journalCleared = false;
+        setPendingManualStop(request);
+      }
+      setShowManualStop(false);
+      showNotif(journalCleared ? 'L’arrêt manuel est confirmé dans la tournée.' : 'L’arrêt est confirmé. Sa référence de reprise reste conservée ; une nouvelle vérification ne créera pas de doublon.');
+    } catch (error) {
+      reportError('driver.addManualStop', error, { silent: true });
+      setManualStopError('Le résultat de cet ajout n’est pas confirmé. Vérifiez cette même demande : les informations et la référence sont conservées pour éviter un deuxième arrêt.');
+    } finally {
+      manualStopLock.current = false;
+      setIsProcessing(false);
+    }
   };
 
   // Signaler un problème depuis la tournée (crée un incident vu par le bureau)
@@ -1323,6 +1386,24 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
     window.open(`tel:${phone}`, '_self');
   };
 
+  const manualStopRecovery = (pendingManualStop || manualJournalError) && <div role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-left text-sm text-amber-950">
+    {manualJournalError ? <p>{manualJournalError}</p> : <><p className="font-semibold">Un ajout d’arrêt reste à confirmer — tournée du {pendingManualStop!.date}.</p><p>Votre demande est conservée sur ce téléphone. Vérifiez son résultat avant de créer un nouvel arrêt.</p><button type="button" disabled={isProcessing} onClick={openManualStop} className="mt-2 min-h-11 rounded-lg border border-amber-500 px-3 font-bold disabled:opacity-50">Reprendre la demande d’arrêt</button></>}
+  </div>;
+  const manualStopDialog = <Modal isOpen={showManualStop} onClose={() => { void closeManual(() => setShowManualStop(false)); }} title={pendingManualStop ? 'Vérifier l’ajout d’arrêt' : 'Ajouter un arrêt manuel'} preventClose={isProcessing} size="lg"
+    footer={<div className="flex flex-wrap gap-2"><button type="button" disabled={isProcessing || !!manualJournalError} onClick={handleAddManualStop} className="min-h-11 flex-1 rounded-xl bg-amber-800 px-3 py-3 text-sm font-bold text-white disabled:opacity-50">{isProcessing ? 'Vérification…' : pendingManualStop ? 'Vérifier cette demande' : 'Ajouter l’arrêt'}</button><button type="button" disabled={isProcessing} onClick={() => { void closeManual(() => setShowManualStop(false)); }} className="min-h-11 rounded-xl border border-slate-300 px-3 py-3 text-sm font-medium text-slate-700">{pendingManualStop ? 'Fermer — demande conservée' : 'Annuler'}</button></div>}>
+    <div className="space-y-3">
+      <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Cet arrêt n’a pas de colis rattaché et ne provient pas d’un import client. Il ne sera pas suivi dans le portail client. À utiliser uniquement pour un passage exceptionnel.</p>
+      {pendingManualStop && <p className="rounded-xl bg-blue-50 p-3 text-sm text-blue-900">Tournée du {pendingManualStop.date}. Les champs sont verrouillés jusqu’à confirmation de la demande initiale. Vous pourrez ensuite demander une modification au bureau.</p>}
+      {manualStopError && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-900">{manualStopError}</p>}
+      <fieldset disabled={isProcessing || !!pendingManualStop || !!manualJournalError} className="space-y-3">
+        <FormInput label="Nom du destinataire" value={manualStop.contactName} onChange={event => setManualStop(previous => ({ ...previous, contactName: event.target.value }))} hint="Optionnel" />
+        <FormInput label="Adresse" required value={manualStop.address} onChange={event => setManualStop(previous => ({ ...previous, address: event.target.value }))} />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3"><FormInput label="Code postal" inputMode="numeric" autoComplete="postal-code" value={manualStop.postalCode} onChange={event => setManualStop(previous => ({ ...previous, postalCode: event.target.value }))} /><FormInput label="Ville" required value={manualStop.city} onChange={event => setManualStop(previous => ({ ...previous, city: event.target.value }))} /></div>
+        <FormInput label="Téléphone" type="tel" autoComplete="tel" value={manualStop.contactPhone} onChange={event => setManualStop(previous => ({ ...previous, contactPhone: event.target.value }))} hint="Optionnel" />
+      </fieldset>
+    </div>
+  </Modal>;
+
   // ============================================================================
   // RENDU — Loading
   // ============================================================================
@@ -1345,6 +1426,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   if (missions.length === 0) {
     return (
       <div className="max-w-lg mx-auto px-6 pt-10 pb-6 text-center space-y-5">
+        {manualStopRecovery}{manualStopDialog}
         {notification && (
           <div role="status" className="bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg text-center text-sm font-medium animate-fade-in">{notification}</div>
         )}
@@ -1354,7 +1436,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
         <div>
           <h2 className="text-xl font-bold text-slate-700 mb-2">Aucune tournée aujourd'hui</h2>
           <p className="text-slate-500 text-sm">
-            Scanne des colis pour démarrer ta tournée, ou attends que le dispatch t'en envoie une.
+            Scannez des colis pour démarrer votre tournée, ou attendez que le bureau vous en affecte une.
           </p>
         </div>
         {/* Le chauffeur peut charger des colis même sans tournée pré-dispatchée */}
@@ -1393,6 +1475,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   if (activeMission && activeMission.status === MissionStatus.IN_PROGRESS) {
     return (
       <div className="max-w-lg mx-auto pb-6 space-y-3 animate-fade-in">
+        {manualStopRecovery}{manualStopDialog}
         {/* Notification toast */}
         {notification && (
           <div role="status" className="bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg text-center text-sm font-medium animate-fade-in">
@@ -1404,7 +1487,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
           <p className="text-sm text-slate-600 mb-4">Vérifiez les arrêts, les retours au hub et l’envoi des preuves. La clôture est confirmée après vérification du serveur.</p>
           <div className="space-y-4">
             <section><h4 className="font-bold text-base">{remainingStops} arrêt{remainingStops > 1 ? 's' : ''} à traiter</h4>
-              {sortedStops.map((stop, index) => ![StopStatus.COMPLETED, StopStatus.FAILED, StopStatus.SKIPPED].includes(stop.status) && <button key={stop.id} type="button" onClick={() => openStop(index)} className="mt-2 min-h-12 w-full rounded-xl border border-slate-200 p-3 text-left text-base"><b>Arrêt {stop.sequence}</b> · {stop.contactName || stop.address}<span className="block text-sm text-slate-600">{stop.address} · {stop.status} → Ouvrir l’arrêt</span></button>)}
+              {sortedStops.map((stop, index) => ![StopStatus.COMPLETED, StopStatus.FAILED, StopStatus.SKIPPED].includes(stop.status) && <button key={stop.id} type="button" onClick={() => openStop(index)} className="mt-2 min-h-12 w-full rounded-xl border border-slate-200 p-3 text-left text-base"><b>Arrêt {stop.sequence}</b> · {stop.contactName || stop.address}<span className="block text-sm text-slate-600">{stop.address} · {stopStatusLabel(stop.status)} → Ouvrir l’arrêt</span></button>)}
             </section>
             <section><h4 className="font-bold text-base">{activeReturns.length} colis à remettre au hub</h4>
               {activeReturns.map(pkg => <button type="button" key={pkg.id} onClick={() => { setShowFinishBlocked(false); openReturnModal(pkg); }} className="mt-2 min-h-12 w-full rounded-xl border border-amber-300 bg-amber-50 p-3 text-left text-base">{packageDisplayCode(pkg)} · {pkg.contactName}<span className="block text-sm">Confirmer la remise au hub →</span></button>)}
@@ -1459,7 +1542,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                   currentStop.status === StopStatus.ARRIVED ? 'bg-blue-100 text-blue-700' :
                   'bg-slate-100 text-slate-600'
                 }`}>
-                  {currentStop.status}
+                  {stopStatusLabel(currentStop.status)}
                 </span>
               </div>
 
@@ -1528,7 +1611,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                     <XCircle size={14} />
                     ATTENTION — {otherAtAddress.length} autre{otherAtAddress.length > 1 ? 's' : ''} colis à cette adresse !
                   </p>
-                  <p className="text-sm text-red-600 mt-1">
+                  <p className="text-sm text-red-800 mt-1">
                     {stopPackages.length + otherAtAddress.length} colis semblent destinés à ce client, vous n’en avez que <b>{stopPackages.length}</b> dans cet arrêt. Vérifiez avec le client avant de repartir.
                   </p>
                   <div className="flex flex-wrap gap-1.5 mt-1.5">
@@ -1634,7 +1717,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                       {DELIVERY_STEPS.map((label, i) => (
                         <div key={label} className="min-w-0 flex-1 flex flex-col items-center gap-1 text-center">
                           <div className={`w-full h-1.5 rounded-full ${i <= deliveryStep ? 'bg-green-500' : 'bg-slate-200'}`} />
-                          <span className={`text-sm font-bold ${i === deliveryStep ? 'text-green-700' : 'text-slate-600'}`}>{label}</span>
+                          <span className="sm:hidden text-sm font-bold text-slate-700">{i + 1}</span>
+                          <span className={`hidden sm:block text-sm font-bold ${i === deliveryStep ? 'text-green-700' : 'text-slate-600'}`}>{label}</span>
                         </div>
                       ))}
                     </div>
@@ -1679,7 +1763,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                               })}
                             </div>
                             {!allStopScanned && (
-                              <p className="text-sm text-amber-600 font-medium">
+                              <p className="text-sm text-amber-800 font-medium">
                                 ⚠️ {missingStopCodes.length} colis non scanné{missingStopCodes.length > 1 ? 's' : ''} — scannez-les, ou « Continuer » proposera de forcer / déclarer absents
                               </p>
                             )}
@@ -1731,12 +1815,12 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                             <button
                               onClick={() => setDeliveryStep(2)}
                               disabled={!reservesNote.trim()}
-                              className="min-h-11 w-full py-4 bg-amber-600 text-white rounded-2xl font-black text-base active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
+                              className="min-h-11 w-full py-4 bg-amber-800 text-white rounded-2xl font-black text-base active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
                             >
                               Continuer →
                             </button>
                             {!reservesNote.trim() && (
-                              <p className="text-sm text-amber-600 font-medium text-center">Décrivez la réserve pour continuer</p>
+                              <p className="text-sm text-amber-800 font-medium text-center">Décrivez la réserve pour continuer</p>
                             )}
                           </div>
                         )}
@@ -1751,7 +1835,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                         <div className="px-1">
                           <label htmlFor="delivery-recipient" className="text-sm font-medium text-slate-500 mb-1 block">
                             Nom du réceptionnaire
-                            <span className="text-red-400 ml-1">*</span>
+                            <span className="text-red-700 ml-1">*</span>
                           </label>
                           <input id="delivery-recipient" autoComplete="name"
                             type="text"
@@ -1798,7 +1882,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                           C'est bon →
                         </button>
                         {!recipientName.trim() && (
-                          <p className="text-sm text-amber-600 font-medium text-center px-2">Saisis le nom pour continuer</p>
+                          <p className="text-sm text-amber-800 font-medium text-center px-2">Saisissez le nom pour continuer</p>
                         )}
                       </div>
                     )}
@@ -1828,9 +1912,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
 
                         {signatureData && (
                           <div className="flex items-center gap-2 px-3 py-2.5 bg-green-50 border border-green-200 rounded-xl">
-                            <CheckCircle size={16} className="text-green-600" />
+                            <CheckCircle size={16} className="text-green-700" />
                             <span className="text-sm text-green-700 font-bold flex-1">Signature enregistrée ✓</span>
-                            <button onClick={() => { setSignatureData(null); setShowSignature(true); }} className="min-h-11 text-sm text-green-600 underline font-medium">
+                            <button onClick={() => { setSignatureData(null); setShowSignature(true); }} className="min-h-11 text-sm text-green-700 underline font-medium">
                               Refaire
                             </button>
                           </div>
@@ -1839,7 +1923,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                         {/* Photos — 1 minimum, max 5 */}
                         <div className="px-1">
                           <label className="text-sm font-medium text-slate-500 mb-1.5 block">
-                            📸 Photos de la livraison <span className="text-red-500">*</span>
+                            📸 Photos de la livraison <span className="text-red-700">*</span>
                             <span className="block text-sm text-slate-600 font-normal mt-0.5">
                               1 photo minimum. Tu peux en ajouter d'autres (jusqu'à {MAX_PHOTOS}) en réappuyant sur le bouton.
                             </span>
@@ -1892,12 +1976,12 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                         )}
 
                         {!signatureData && (
-                          <p className="text-sm text-amber-600 font-medium text-center px-2">
+                          <p className="text-sm text-amber-800 font-medium text-center px-2">
                             ⚠️ Signature obligatoire pour valider la livraison
                           </p>
                         )}
                         {capturedPhotos.length === 0 && (
-                          <p className="text-sm text-amber-600 font-medium text-center px-2">
+                          <p className="text-sm text-amber-800 font-medium text-center px-2">
                             ⚠️ Au moins 1 photo obligatoire (une seule photo du lot suffit)
                           </p>
                         )}
@@ -1991,7 +2075,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                     <button
                       onClick={() => setShowFailureModal(true)}
                       disabled={isProcessing}
-                      className="min-h-11 w-full flex items-center justify-center gap-1.5 py-2.5 text-red-600 text-sm font-bold disabled:opacity-50"
+                      className="min-h-11 w-full flex items-center justify-center gap-1.5 py-2.5 text-red-800 text-sm font-bold disabled:opacity-50"
                     >
                       <XCircle size={14} />
                       Signaler un échec de livraison
@@ -2074,7 +2158,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                       </div>
                       <button
                         onClick={() => openReturnModal(pkg)}
-                        className="min-h-11 ml-2 px-3 py-1.5 bg-yellow-700 text-white rounded-lg text-sm font-bold hover:bg-yellow-600 active:scale-95 transition-all"
+                        className="min-h-11 ml-2 px-3 py-1.5 bg-yellow-700 text-white rounded-lg text-sm font-bold hover:bg-yellow-800 active:scale-95 transition-all"
                       >
                         Retour hub
                       </button>
@@ -2115,7 +2199,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
             <div className="flex items-center justify-between mt-2 text-sm text-slate-500">
               <span>✅ {activeMission.deliveredPackages || 0} livrés</span>
               {(activeMission.failedPackages || 0) > 0 && (
-                <span className="text-red-500">❌ {activeMission.failedPackages} échecs</span>
+                <span className="text-red-700">❌ {activeMission.failedPackages} échecs</span>
               )}
               <span>📦 {activeMission.totalPackages} total</span>
             </div>
@@ -2126,7 +2210,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
             {sortedStops.map((stop, idx) => (
               <button
                 key={stop.id}
-                onClick={() => openStop(idx)} aria-label={`Ouvrir l’arrêt ${stop.sequence}, ${stop.contactName || stop.address}, ${stop.status}`} aria-current={idx === activeStopIndex ? 'step' : undefined}
+                onClick={() => openStop(idx)} aria-label={`Ouvrir l’arrêt ${stop.sequence}, ${stop.contactName || stop.address}, ${stopStatusLabel(stop.status)}`} aria-current={idx === activeStopIndex ? 'step' : undefined}
                 className={`flex-shrink-0 w-11 h-11 rounded-full text-sm font-bold flex items-center justify-center transition-all ${
                   idx === activeStopIndex
                     ? 'bg-blue-600 text-white ring-2 ring-blue-300 scale-110'
@@ -2195,16 +2279,16 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
           </button>
         </div>
         <button
-          onClick={() => setShowManualStop(true)}
+          onClick={openManualStop}
           className="min-h-11 w-full flex items-center justify-center gap-2 py-3 bg-white border border-amber-300 rounded-xl text-sm font-medium text-amber-700 active:scale-95 transition-transform"
         >
-          ➕ Ajouter un arrêt manuel
+          {pendingManualStop ? 'Reprendre l’ajout d’arrêt' : '➕ Ajouter un arrêt manuel'}
         </button>
 
         {/* Signaler un problème au bureau (incident) */}
         <button
           onClick={() => setShowIssue(true)}
-          className="min-h-11 w-full flex items-center justify-center gap-2 py-3 bg-white border border-red-200 rounded-xl text-sm font-medium text-red-600 active:scale-95 transition-transform"
+          className="min-h-11 w-full flex items-center justify-center gap-2 py-3 bg-white border border-red-200 rounded-xl text-sm font-medium text-red-800 active:scale-95 transition-transform"
         >
           🛠️ Signaler un problème
         </button>
@@ -2337,41 +2421,6 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
           />
         )}
 
-        {/* === MODAL AJOUT ARRÊT MANUEL === */}
-        {showManualStop && (
-          <Modal isOpen onClose={() => { void closeManual(() => setShowManualStop(false)); }} title="Ajouter un arrêt manuel" preventClose={isProcessing} bodyClassName="!p-0">
-            <div className="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-md animate-slide-up" onClick={e => e.stopPropagation()}>
-              <div className="p-4 border-b border-slate-200 flex items-center justify-between">
-                <h3 className="font-bold text-slate-800">➕ Ajouter un arrêt manuel</h3>
-                <button onClick={() => { void closeManual(() => setShowManualStop(false)); }} aria-label="Fermer cette fenêtre" className="min-h-11 min-w-11 p-2 rounded-full hover:bg-slate-100"><XCircle size={20} className="text-slate-600" /></button>
-              </div>
-              <div className="p-4 space-y-3">
-                <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl">
-                  <span className="text-lg">⚠️</span>
-                  <p className="text-sm text-amber-800">
-                    Cet arrêt n'a <b>pas de colis rattaché</b> et ne provient pas d'un import client. Il ne sera pas suivi dans le portail client. À utiliser uniquement pour un passage exceptionnel.
-                  </p>
-                </div>
-                <FormInput label="Nom du destinataire" value={manualStop.contactName} onChange={event => setManualStop(previous => ({ ...previous, contactName: event.target.value }))} placeholder="Optionnel" />
-                <FormInput label="Adresse" required value={manualStop.address} onChange={event => setManualStop(previous => ({ ...previous, address: event.target.value }))} />
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <FormInput label="Code postal" inputMode="numeric" autoComplete="postal-code" value={manualStop.postalCode} onChange={event => setManualStop(previous => ({ ...previous, postalCode: event.target.value }))} />
-                  <FormInput label="Ville" required value={manualStop.city} onChange={event => setManualStop(previous => ({ ...previous, city: event.target.value }))} />
-                </div>
-                <FormInput label="Téléphone" type="tel" autoComplete="tel" value={manualStop.contactPhone} onChange={event => setManualStop(previous => ({ ...previous, contactPhone: event.target.value }))} placeholder="Optionnel" />
-              </div>
-              <div className="p-4 border-t border-slate-200 flex gap-2">
-                <button onClick={handleAddManualStop} className="min-h-11 flex-1 py-3 bg-amber-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform">
-                  Ajouter l'arrêt
-                </button>
-                <button onClick={() => { void closeManual(() => setShowManualStop(false)); }} className="min-h-11 px-5 py-3 bg-slate-100 text-slate-700 rounded-xl font-medium text-sm">
-                  Annuler
-                </button>
-              </div>
-            </div>
-          </Modal>
-        )}
-
         {/* === MODAL SIGNALER UN PROBLÈME === */}
         {showIssue && (
           <Modal isOpen onClose={() => { void closeIssue(() => setShowIssue(false)); }} title="Signaler un problème" preventClose={issueSubmitting} bodyClassName="!p-0">
@@ -2404,7 +2453,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                   <div className="flex gap-2">
                     {([['Low', 'Basse'], ['Medium', 'Moyenne'], ['High', 'Haute']] as const).map(([val, label]) => (
                       <button key={val} onClick={() => setIssueForm(f => ({ ...f, priority: val }))}
-                        className={`flex-1 py-2 rounded-lg text-sm font-bold border ${issueForm.priority === val ? (val === 'High' ? 'bg-red-600 text-white border-red-600' : val === 'Medium' ? 'bg-amber-700 text-white border-amber-500' : 'bg-slate-600 text-white border-slate-600') : 'bg-white text-slate-600 border-slate-300'}`}>
+                        className={`min-h-11 flex-1 py-2 rounded-lg text-sm font-bold border ${issueForm.priority === val ? (val === 'High' ? 'bg-red-600 text-white border-red-600' : val === 'Medium' ? 'bg-amber-700 text-white border-amber-500' : 'bg-slate-600 text-white border-slate-600') : 'bg-white text-slate-600 border-slate-300'}`}>
                         {label}
                       </button>
                     ))}
@@ -2429,7 +2478,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
             <div className="bg-white w-full max-w-md rounded-t-2xl sm:rounded-2xl overflow-hidden animate-slide-up max-h-[85vh] overflow-y-auto">
               <div className="p-4 bg-red-50 border-b border-red-100">
                 <h3 className="text-lg font-bold text-red-800">Raison de l'échec</h3>
-                <p className="text-sm text-red-600">Arrêt {currentStop?.sequence} — {currentStop?.contactName}</p>
+                <p className="text-sm text-red-800">Arrêt {currentStop?.sequence} — {currentStop?.contactName}</p>
               </div>
               <div className="p-4 space-y-3">
                 {Object.values(FailureReason).map(reason => (
@@ -2455,7 +2504,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
 
                 {/* Photo preuve d'échec */}
                 <div className="border-t border-slate-100 pt-3">
-                  <p className="text-sm font-bold text-slate-500 mb-2">📷 Photo preuve <span className="text-red-500">obligatoire</span></p>
+                  <p className="text-sm font-bold text-slate-500 mb-2">📷 Photo preuve <span className="text-red-700">obligatoire</span></p>
                   <button
                     onClick={() => failurePhotoInputRef.current?.click()}
                     disabled={failurePhotos.length >= MAX_PHOTOS}
@@ -2473,7 +2522,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                     onChange={handleFailurePhotoCapture}
                   />
                   {failurePhotos.length === 0 && (
-                    <p className="text-sm text-red-500 font-medium mt-1.5 text-center">
+                    <p className="text-sm text-red-700 font-medium mt-1.5 text-center">
                       ⚠️ Au moins 1 photo requise pour confirmer l'échec
                     </p>
                   )}
@@ -2497,7 +2546,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                 {uploadProgress && uploadProgress.step !== 'done' && uploadProgress.step !== 'error' && (
                   <div className="bg-red-50 border border-red-200 rounded-xl p-2">
                     <div className="flex items-center gap-2">
-                      <Loader2 size={12} className="animate-spin text-red-600" />
+                      <Loader2 size={12} className="animate-spin text-red-800" />
                       <span className="text-sm text-red-700">{uploadProgress.message}</span>
                     </div>
                   </div>
@@ -2564,7 +2613,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                 {/* Photos (obligatoire) */}
                 <div>
                   <label className="text-sm font-bold text-slate-700 flex items-center gap-1 mb-2">
-                    📷 Photo du colis <span className="text-red-500">*</span>
+                    📷 Photo du colis <span className="text-red-700">*</span>
                   </label>
                   <input
                     ref={returnPhotoInputRef}
@@ -2590,14 +2639,14 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                     {returnPhotos.length < 5 && (
                       <button
                         aria-label="Prendre une photo du colis retourné" onClick={() => returnPhotoInputRef.current?.click()}
-                        className="w-16 h-16 rounded-lg border-2 border-dashed border-slate-300 flex items-center justify-center text-slate-600 hover:border-yellow-400 hover:text-yellow-500"
+                        className="w-16 h-16 rounded-lg border-2 border-dashed border-slate-300 flex items-center justify-center text-slate-600 hover:border-yellow-400 hover:text-yellow-800"
                       >
                         <Camera size={24} />
                       </button>
                     )}
                   </div>
                   {returnPhotos.length === 0 && (
-                    <p className="text-sm text-red-500 mt-1">⚠️ Au moins 1 photo obligatoire</p>
+                    <p className="text-sm text-red-700 mt-1">⚠️ Au moins 1 photo obligatoire</p>
                   )}
                 </div>
 
@@ -2691,6 +2740,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
 
   return (
     <div className="max-w-lg mx-auto pb-6 space-y-4 animate-fade-in">
+      {manualStopRecovery}{manualStopDialog}
       {/* Notification toast */}
       {notification && (
         <div role="status" className="bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg text-center text-sm font-medium animate-fade-in">
@@ -2793,7 +2843,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                   <div className="flex items-center gap-2 mb-1">
                     <h3 className="text-lg font-bold text-slate-800">Tournée {mission.zone}</h3>
                     <span className={`px-2 py-0.5 rounded-full text-sm font-bold ${statusColors.bg} ${statusColors.text}`}>
-                      {mission.status}
+                      {missionStatusLabel(mission.status)}
                     </span>
                   </div>
                   <p className="text-sm text-slate-500">
@@ -2818,7 +2868,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                 </div>
                 <div className="bg-slate-50 rounded-lg p-2 text-center">
                   <p className="text-sm text-slate-500">Livrés</p>
-                  <p className="text-sm font-bold text-green-600">{mission.deliveredPackages || 0}</p>
+                  <p className="text-sm font-bold text-green-700">{mission.deliveredPackages || 0}</p>
                 </div>
               </div>
 
@@ -2861,10 +2911,10 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                 <div className="space-y-2">
                   <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
                     <div className="flex items-center gap-2 mb-1">
-                      <Loader2 size={14} className="animate-spin text-amber-600" />
+                      <Loader2 size={14} className="animate-spin text-amber-800" />
                       <span className="text-sm font-bold text-amber-800">Chargement en cours...</span>
                     </div>
-                    <p className="text-sm text-amber-600">
+                    <p className="text-sm text-amber-800">
                       {mission.totalPackages} colis • {mission.stops.length} arrêts à charger
                     </p>
                   </div>
@@ -2917,7 +2967,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                     setActiveMissionId(mission.id);
                     setActiveStopIndex(pendingIdx >= 0 ? pendingIdx : 0);
                   }}
-                  className="min-h-11 w-full flex items-center justify-center gap-2 py-3.5 bg-orange-500 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform"
+                  className="min-h-11 w-full flex items-center justify-center gap-2 py-3.5 bg-orange-700 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform"
                 >
                   <Navigation size={18} />
                   Continuer la tournée

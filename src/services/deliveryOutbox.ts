@@ -145,6 +145,7 @@ export async function submitDelivery(entry: PendingDelivery) {
 }
 export async function syncDeliveries(userId: string) {
   const pending = await pendingDeliveries(userId);
+  const observation = pending.length ? startUxTask('sync', 'driver') : null;
   const errors: string[] = [];
   for (const entry of pending) {
     try {
@@ -153,6 +154,8 @@ export async function syncDeliveries(userId: string) {
       errors.push(e instanceof Error ? e.message : String(e));
     }
   }
+  observation?.finish(errors.length ? 'error' : 'success', { items: pending.length, errors: errors.length });
   return errors;
 }
 export const outboxChangeEvent = CHANGE;
+import { startUxTask } from '../utils/uxMetrics';
