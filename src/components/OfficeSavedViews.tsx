@@ -20,14 +20,14 @@ export default function OfficeSavedViews({ userId, label, params, onApply }: Pro
     if (views.length >= 8) { notifyInfo('Vous avez 8 vues favorites. Retirez-en une avant d’en ajouter une autre.'); return; }
     if (persist([...views, { id: crypto.randomUUID(), label, params: filtered }])) notifySuccess('Vue favorite conservée dans ce navigateur.');
   };
-  return <details className="rounded-xl border border-slate-200 bg-white text-sm">
+  return <details className="text-sm">
     <summary className="min-h-11 cursor-pointer px-3 py-3 font-semibold text-slate-700">Mes vues favorites{views.length ? ` (${views.length})` : ''}</summary>
     <div className="space-y-3 px-3 pb-3">
       <p className="text-slate-600">Filtres et tri conservés dans ce navigateur, pour votre compte. Une vue s’ouvre à la date du jour, sans recherche nominative ni sélection de colis.</p>
-      <button type="button" onClick={save} className="min-h-11 rounded-lg border border-blue-300 bg-blue-50 px-3 font-semibold text-blue-800">Mémoriser les filtres actuels</button>
+      <button type="button" onClick={save} className="ui-button ui-button-primary min-h-11 border">Mémoriser les filtres actuels</button>
       {views.map(view => <div key={view.id} className="flex items-start gap-2">
-        <button type="button" onClick={() => onApply(view.params)} className="min-h-11 min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-left text-slate-800">{view.label}</button>
-        <button type="button" aria-label={`Retirer la vue ${view.label}`} onClick={() => persist(views.filter(item => item.id !== view.id))} className="min-h-11 shrink-0 rounded-lg px-3 text-red-800">Retirer</button>
+        <button type="button" onClick={() => onApply(view.params)} className="ui-button ui-button-secondary min-h-11 min-w-0 flex-1 border text-left">{view.label}</button>
+        <button type="button" aria-label={`Retirer la vue ${view.label}`} onClick={() => persist(views.filter(item => item.id !== view.id))} className="ui-button ui-button-secondary min-h-11 shrink-0">Retirer</button>
       </div>)}
     </div>
   </details>;

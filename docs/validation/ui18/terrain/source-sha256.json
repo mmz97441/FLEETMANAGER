@@ -1,0 +1,10 @@
+{
+  "src/components/DriverMissionView.tsx": "42d38cf07c8c446f5a77b245607fe61e29654169cb14a974afeedbe42aac60cf",
+  "src/components/QuickScanButton.tsx": "6a7d35d601155b0191a1f5892ce710574b4f75fb99c1ccecca984fd5ad2a8e99",
+  "src/components/HelpCenter.tsx": "c4f431e30e024201b49532395a2bb58c55b0837a6d13ad9afd393d36f95f14c8",
+  "src/components/ClientHelp.tsx": "93bc80cf902c163e57d62b26a289d6a78233c976a5feac3ba0e6216a977e53fc",
+  "src/components/SupportRequest.tsx": "d6b8bce6591c96401cd03c8d8f601371c441cbab30fe2546b561760f429ba61a",
+  "src/components/DeviceDiagnostics.tsx": "8bcb83b35250bbc2dd890f14a7836992f1c65aa9d380bbaef08654b15f85cf5d",
+  "src/components/PendingSyncBanner.tsx": "7423fbe5cbcce43ca659edd869091346d2ed9001f7b90eb073cadccfad795258",
+  "src/components/BarcodeScanner.tsx": "62796e40020ec75deba1e4273b383cdceea79638505bf847093d230b8ed65945"
+}

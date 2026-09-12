@@ -111,35 +111,145 @@ export default function PendingSyncBanner({ userId }: { userId: string }) {
   const retry = () => window.dispatchEvent(new Event('fleet-sync-now'));
   if (!rows.length && !error && !open && !received.length) return null;
 
-  return <>
-    <section aria-label="Synchronisation des livraisons" className={`rounded-xl border p-3 text-sm ${rows.length || error ? 'border-amber-300 bg-amber-50 text-amber-950' : 'border-green-200 bg-green-50 text-green-900'}`}>
-      <div role="status" className="flex items-start gap-2">
-        {busy ? <Loader2 size={20} className="shrink-0 animate-spin" /> : rows.length ? <UploadCloud size={20} className="shrink-0" /> : <CheckCircle size={20} className="shrink-0" />}
-        <p className="flex-1">{rows.length ? `${rows.length} livraison${rows.length > 1 ? 's' : ''} conservée${rows.length > 1 ? 's' : ''} sur ce téléphone. ${online ? 'Envoi des preuves en attente.' : 'L’envoi reprendra au retour du réseau.'}` : error || 'Les derniers envois ont été reçus par le serveur.'}</p>
-      </div>
-      {rows.length > 0 && error && <p role="alert" className="mt-2">{error}</p>}
-      <div className="mt-2 flex flex-wrap gap-2">
-        <button type="button" className="min-h-11 px-3 rounded-lg border border-current font-bold" onClick={() => { setMissionFilter(undefined); setOpen(true); }}>Voir les envois{rows.length ? ` (${rows.length})` : ''}</button>
-        {(rows.length > 0 || error) && <button type="button" disabled={busy || !online} className="min-h-11 px-3 rounded-lg font-bold underline disabled:opacity-60" onClick={retry}>{busy ? 'Envoi en cours…' : online ? 'Réessayer les envois' : 'En attente du réseau'}</button>}
-        {!rows.length && !error && <button type="button" className="min-h-11 px-3 underline" onClick={() => setReceived([])}>Masquer la confirmation</button>}
-      </div>
-    </section>
-    <Modal isOpen={open} onClose={() => setOpen(false)} title="Envois des livraisons" size="lg">
-      <p className="text-sm text-slate-600 mb-4">Vos preuves restent sur ce téléphone jusqu’à leur réception. Gardez cette application et ce compte pour terminer l’envoi ; il n’est pas nécessaire de refaire la livraison.</p>
-      {missionFilter && <button type="button" onClick={() => setMissionFilter(undefined)} className="min-h-11 mb-3 text-sm font-bold underline text-brand-700">Voir toutes les tournées</button>}
-      {error && <p role="alert" className="p-3 mb-3 rounded-lg bg-red-50 text-red-800">{error}</p>}
-      <ul className="space-y-3">
-        {visibleRows.map(row => { const labels = describe(row); return <li key={row.id} className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-1 break-words">
-          <p className="font-bold text-base text-slate-900">{labels.stop}</p>
-          <p className="text-sm text-slate-700">{labels.tour}</p>
-          <p className="text-sm text-slate-700">Sauvegardé le {new Date(row.createdAt).toLocaleString('fr-FR')} · {row.packageCount} colis</p>
-          <p role="status" className="text-sm font-semibold text-amber-950">{sendingId === row.id ? 'Envoi en cours…' : row.committed ? 'Résultat enregistré · preuves conservées sur ce téléphone' : 'Livraison et preuves conservées sur ce téléphone'}</p>
-          {errors[row.id] && <p className="text-sm text-red-800">Dernière tentative : {errors[row.id]}</p>}
-        </li>; })}
-      </ul>
-      {!visibleRows.length && <p role="status" className="rounded-xl bg-green-50 p-4 text-green-900">Aucun envoi local en attente{missionFilter ? ' pour cette tournée' : ''}. Si un arrêt reste signalé en attente, synchronisez le téléphone qui a enregistré sa preuve.</p>}
-      {rows.length > 0 && <button type="button" disabled={busy || !online} onClick={retry} className="mt-4 min-h-12 w-full rounded-xl bg-brand-700 px-4 py-3 text-white font-bold disabled:opacity-60">{busy ? 'Envoi en cours…' : online ? 'Réessayer tous les envois' : 'Reconnectez ce téléphone pour envoyer'}</button>}
-      {received.filter(row => !missionFilter || row.action.missionId === missionFilter).length > 0 && <div className="mt-5"><h4 className="font-bold mb-2">Reçus pendant cette session</h4><ul className="space-y-2">{received.filter(row => !missionFilter || row.action.missionId === missionFilter).map(row => <li key={row.id} className="p-3 rounded-lg bg-green-50 text-sm text-green-900"><CheckCircle size={16} className="inline mr-2" />{describe(row).stop} · Reçu par le serveur</li>)}</ul></div>}
-    </Modal>
-  </>;
+  return (
+    <>
+      <section
+        aria-label="Synchronisation des livraisons"
+        className={`ui-notice ${rows.length || error ? "ui-notice-warning" : "ui-notice-success"}`}
+      >
+        <div role="status" className="flex items-start gap-2">
+          {busy ? (
+            <Loader2 size={20} className="shrink-0 animate-spin" />
+          ) : rows.length ? (
+            <UploadCloud size={20} className="shrink-0" />
+          ) : (
+            <CheckCircle size={20} className="shrink-0" />
+          )}
+          <p className="flex-1">
+            {rows.length ? `${rows.length} livraison${rows.length > 1 ? 's' : ''} conservée${rows.length > 1 ? 's' : ''} sur ce téléphone. ${online ? 'Envoi des preuves en attente.' : 'L’envoi reprendra au retour du réseau.'}` : error || 'Les derniers envois ont été reçus par le serveur.'}
+          </p>
+        </div>
+        {rows.length > 0 && error && (
+          <p role="alert" className="mt-2">
+            {error}
+          </p>
+        )}
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="ui-button ui-button-secondary border-current"
+            onClick={() => { setMissionFilter(undefined); setOpen(true); }}
+          >
+            Voir les envois{rows.length ? ` (${rows.length})` : ''}
+          </button>
+          {(rows.length > 0 || error) && (
+            <button
+              type="button"
+              disabled={busy || !online}
+              className="ui-button ui-button-ghost underline"
+              onClick={retry}
+            >
+              {busy ? 'Envoi en cours…' : online ? 'Réessayer les envois' : 'En attente du réseau'}
+            </button>
+          )}
+          {!rows.length && !error && (
+            <button
+              type="button"
+              className="ui-button ui-button-ghost underline"
+              onClick={() => setReceived([])}
+            >
+              Masquer la confirmation
+            </button>
+          )}
+        </div>
+      </section>
+      <Modal
+        isOpen={open}
+        onClose={() => setOpen(false)}
+        title="Envois des livraisons"
+        size="lg"
+        mobileFullscreen
+      >
+        <p className="text-sm text-slate-600 mb-4">
+          Vos preuves restent sur ce téléphone jusqu’à leur réception. Gardez
+          cette application et ce compte pour terminer l’envoi ; il n’est pas
+          nécessaire de refaire la livraison.
+        </p>
+        {missionFilter && (
+          <button
+            type="button"
+            onClick={() => setMissionFilter(undefined)}
+            className="ui-button ui-button-ghost mb-3 underline"
+          >
+            Voir toutes les tournées
+          </button>
+        )}
+        {error && (
+          <p role="alert" className="p-3 mb-3 rounded-lg bg-red-50 text-red-800">
+            {error}
+          </p>
+        )}
+        <ul className="space-y-3">
+          {visibleRows.map((row) => {
+            const labels = describe(row);
+            return (
+              <li
+                key={row.id}
+                className="border-l-2 border-amber-400 pl-3 py-2 space-y-1 break-words"
+              >
+                <p className="font-bold text-base text-slate-900">
+                  {labels.stop}
+                </p>
+                <p className="text-sm text-slate-700">{labels.tour}</p>
+                <p className="text-sm text-slate-700">
+                  Sauvegardé le{" "}
+                  {new Date(row.createdAt).toLocaleString('fr-FR')} ·{" "}
+                  {row.packageCount} colis
+                </p>
+                <p role="status" className="text-sm font-semibold text-amber-950">
+                  {sendingId === row.id ? 'Envoi en cours…' : row.committed ? 'Résultat enregistré · preuves conservées sur ce téléphone' : 'Livraison et preuves conservées sur ce téléphone'}
+                </p>
+                {errors[row.id] && (
+                  <p className="text-sm text-red-800">
+                    Dernière tentative : {errors[row.id]}
+                  </p>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+        {!visibleRows.length && (
+          <p role="status" className="rounded-xl bg-green-50 p-4 text-green-900">
+            Aucun envoi local en attente
+            {missionFilter ? ' pour cette tournée' : ''}. Si un arrêt reste
+            signalé en attente, synchronisez le téléphone qui a enregistré sa
+            preuve.
+          </p>
+        )}
+        {rows.length > 0 && (
+          <button
+            type="button"
+            disabled={busy || !online}
+            onClick={retry}
+            className="ui-button ui-button-primary mt-4 w-full"
+          >
+            {busy ? 'Envoi en cours…' : online ? 'Réessayer tous les envois' : 'Reconnectez ce téléphone pour envoyer'}
+          </button>
+        )}
+        {received.filter(row => !missionFilter || row.action.missionId === missionFilter).length > 0 && (
+          <div className="mt-5">
+            <h4 className="font-bold mb-2">Reçus pendant cette session</h4>
+            <ul className="space-y-2">
+              {received.filter(row => !missionFilter || row.action.missionId === missionFilter).map((row) => (
+                  <li key={row.id} className="p-3 rounded-lg bg-green-50 text-sm text-green-900">
+                    <CheckCircle size={16} className="inline mr-2" />
+                    {describe(row).stop} · Reçu par le serveur
+                  </li>
+                ))}
+            </ul>
+          </div>
+        )}
+      </Modal>
+    </>
+  );
 }

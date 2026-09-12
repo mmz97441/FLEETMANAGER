@@ -1,0 +1,321 @@
+{
+  "baselineCommit": "1facefb368c2d73a0ee951f4cdd71115579c95cd",
+  "results": [
+    {
+      "name": "portal-before-320-normal",
+      "passed": true,
+      "width": 320,
+      "documentWidth": 320,
+      "firstResultY": 1087,
+      "recipient": [
+        {
+          "font": "14px",
+          "clipped": false,
+          "lines": 20
+        }
+      ],
+      "address": [
+        {
+          "font": "12px",
+          "clipped": true,
+          "lines": 16
+        }
+      ],
+      "smallButtons": [
+        {
+          "name": "Importer mes destinataires",
+          "height": 40
+        },
+        {
+          "name": "Importer des expéditions",
+          "height": 40
+        },
+        {
+          "name": "Créer une expédition",
+          "height": 40
+        },
+        {
+          "name": "Toutes les étiquettes en attente (0)",
+          "height": 42
+        },
+        {
+          "name": "Imprimer les étiquettes du destinataire",
+          "height": 30
+        },
+        {
+          "name": "Ouvrir le bon de livraison du destinataire",
+          "height": 30
+        },
+        {
+          "name": "Afficher les colis du destinataire",
+          "height": 30
+        }
+      ]
+    },
+    {
+      "name": "portal-before-320-long",
+      "passed": true,
+      "width": 320,
+      "documentWidth": 320,
+      "firstResultY": 1087,
+      "recipient": [
+        {
+          "font": "14px",
+          "clipped": true,
+          "lines": 20
+        }
+      ],
+      "address": [
+        {
+          "font": "12px",
+          "clipped": true,
+          "lines": 16
+        }
+      ],
+      "smallButtons": [
+        {
+          "name": "Importer mes destinataires",
+          "height": 40
+        },
+        {
+          "name": "Importer des expéditions",
+          "height": 40
+        },
+        {
+          "name": "Créer une expédition",
+          "height": 40
+        },
+        {
+          "name": "Toutes les étiquettes en attente (0)",
+          "height": 42
+        },
+        {
+          "name": "Imprimer les étiquettes du destinataire",
+          "height": 30
+        },
+        {
+          "name": "Ouvrir le bon de livraison du destinataire",
+          "height": 30
+        },
+        {
+          "name": "Afficher les colis du destinataire",
+          "height": 30
+        }
+      ]
+    },
+    {
+      "name": "portal-before-390-normal",
+      "passed": true,
+      "width": 390,
+      "documentWidth": 390,
+      "firstResultY": 1018.5,
+      "recipient": [
+        {
+          "font": "14px",
+          "clipped": false,
+          "lines": 20
+        }
+      ],
+      "address": [
+        {
+          "font": "12px",
+          "clipped": true,
+          "lines": 16
+        }
+      ],
+      "smallButtons": [
+        {
+          "name": "Importer mes destinataires",
+          "height": 40
+        },
+        {
+          "name": "Importer des expéditions",
+          "height": 40
+        },
+        {
+          "name": "Créer une expédition",
+          "height": 40
+        },
+        {
+          "name": "Toutes les étiquettes en attente (0)",
+          "height": 42
+        },
+        {
+          "name": "Imprimer les étiquettes du destinataire",
+          "height": 30
+        },
+        {
+          "name": "Ouvrir le bon de livraison du destinataire",
+          "height": 30
+        },
+        {
+          "name": "Afficher les colis du destinataire",
+          "height": 30
+        }
+      ]
+    },
+    {
+      "name": "portal-before-390-long",
+      "passed": true,
+      "width": 390,
+      "documentWidth": 390,
+      "firstResultY": 1018.5,
+      "recipient": [
+        {
+          "font": "14px",
+          "clipped": true,
+          "lines": 20
+        }
+      ],
+      "address": [
+        {
+          "font": "12px",
+          "clipped": true,
+          "lines": 16
+        }
+      ],
+      "smallButtons": [
+        {
+          "name": "Importer mes destinataires",
+          "height": 40
+        },
+        {
+          "name": "Importer des expéditions",
+          "height": 40
+        },
+        {
+          "name": "Créer une expédition",
+          "height": 40
+        },
+        {
+          "name": "Toutes les étiquettes en attente (0)",
+          "height": 42
+        },
+        {
+          "name": "Imprimer les étiquettes du destinataire",
+          "height": 30
+        },
+        {
+          "name": "Ouvrir le bon de livraison du destinataire",
+          "height": 30
+        },
+        {
+          "name": "Afficher les colis du destinataire",
+          "height": 30
+        }
+      ]
+    },
+    {
+      "name": "portal-before-1365-normal",
+      "passed": true,
+      "width": 1365,
+      "documentWidth": 1365,
+      "firstResultY": 513.5,
+      "recipient": [
+        {
+          "font": "14px",
+          "clipped": false,
+          "lines": 20
+        }
+      ],
+      "address": [
+        {
+          "font": "12px",
+          "clipped": false,
+          "lines": 16
+        }
+      ],
+      "smallButtons": [
+        {
+          "name": "Importer mes destinataires",
+          "height": 40
+        },
+        {
+          "name": "Importer des expéditions",
+          "height": 40
+        },
+        {
+          "name": "Créer une expédition",
+          "height": 40
+        },
+        {
+          "name": "Toutes les étiquettes en attente (0)",
+          "height": 42
+        },
+        {
+          "name": "Imprimer les étiquettes du destinataire",
+          "height": 30
+        },
+        {
+          "name": "Ouvrir le bon de livraison du destinataire",
+          "height": 30
+        },
+        {
+          "name": "Afficher les colis du destinataire",
+          "height": 30
+        }
+      ]
+    },
+    {
+      "name": "portal-before-1365-long",
+      "passed": true,
+      "width": 1365,
+      "documentWidth": 1365,
+      "firstResultY": 533.5,
+      "recipient": [
+        {
+          "font": "14px",
+          "clipped": false,
+          "lines": 20
+        }
+      ],
+      "address": [
+        {
+          "font": "12px",
+          "clipped": false,
+          "lines": 16
+        }
+      ],
+      "smallButtons": [
+        {
+          "name": "Importer mes destinataires",
+          "height": 40
+        },
+        {
+          "name": "Importer des expéditions",
+          "height": 40
+        },
+        {
+          "name": "Créer une expédition",
+          "height": 40
+        },
+        {
+          "name": "Toutes les étiquettes en attente (0)",
+          "height": 42
+        },
+        {
+          "name": "Imprimer les étiquettes du destinataire",
+          "height": 30
+        },
+        {
+          "name": "Ouvrir le bon de livraison du destinataire",
+          "height": 30
+        },
+        {
+          "name": "Afficher les colis du destinataire",
+          "height": 30
+        }
+      ]
+    }
+  ],
+  "exceptions": [],
+  "externalRequests": [
+    "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap",
+    "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap",
+    "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap",
+    "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap",
+    "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap",
+    "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap",
+    "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+  ]
+}

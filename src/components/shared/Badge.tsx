@@ -32,8 +32,8 @@ const variantClasses: Record<BadgeVariant, string> = {
 };
 
 const sizeClasses: Record<BadgeSize, { wrapper: string; icon: number }> = {
-  xs: { wrapper: 'px-1.5 py-0.5 text-[10px]', icon: 10 },
-  sm: { wrapper: 'px-2 py-0.5 text-xs', icon: 12 },
+  xs: { wrapper: 'px-1.5 py-0.5 text-sm', icon: 14 },
+  sm: { wrapper: 'px-2 py-0.5 text-sm', icon: 14 },
   md: { wrapper: 'px-2.5 py-1 text-sm', icon: 14 }
 };
 
@@ -50,10 +50,10 @@ const Badge: React.FC<BadgeProps> = ({
   return (
     <span 
       className={`
-        inline-flex items-center gap-1 font-bold rounded-full
+        inline-flex items-center gap-1 font-semibold rounded-md leading-snug
         ${variantClasses[variant]}
         ${s.wrapper}
-        ${pulse ? 'animate-pulse' : ''}
+        ${pulse && variant === 'danger' ? 'animate-pulse' : ''}
         ${className}
       `}
     >

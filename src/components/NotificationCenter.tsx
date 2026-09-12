@@ -1,4 +1,5 @@
 import Modal from './shared/Modal';
+import CountBadge from './shared/CountBadge';
 import { notificationDestination } from '../utils/notificationDestination';
 /**
  * NOTIFICATION CENTER
@@ -12,7 +13,7 @@ import { notificationDestination } from '../utils/notificationDestination';
  */
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Bell, Check, CheckCheck, X, ChevronRight, Filter } from 'lucide-react';
+import { Bell, Check, CheckCheck, X, ChevronRight, Filter, Truck, CheckCircle2, XCircle, Route, RefreshCw, Clock, AlertTriangle, Download, Package, BarChart3, Users, CalendarDays, Info } from 'lucide-react';
 import {
   AppNotification,
   NotificationType,
@@ -34,6 +35,26 @@ interface NotificationCenterProps {
 }
 
 type FilterType = 'all' | 'unread' | 'urgent';
+const notificationIcons = {
+  [NotificationType.PACKAGE_IN_DELIVERY]: Truck,
+  [NotificationType.PACKAGE_DELIVERED]: CheckCircle2,
+  [NotificationType.PACKAGE_FAILED]: XCircle,
+  [NotificationType.MISSION_ASSIGNED]: Route,
+  [NotificationType.MISSION_UPDATED]: RefreshCw,
+  [NotificationType.TIME_WINDOW_ALERT]: Clock,
+  [NotificationType.DELIVERY_FAILURE]: AlertTriangle,
+  [NotificationType.PICKUP_MISMATCH]: AlertTriangle,
+  [NotificationType.IMPORT_COMPLETED]: Download,
+  [NotificationType.HUB_RECEPTION_COMPLETE]: Package,
+  [NotificationType.DAILY_SUMMARY]: BarChart3,
+  [NotificationType.RATE_ALERT]: AlertTriangle,
+  [NotificationType.NEW_CLIENT]: Users,
+  [NotificationType.LEAVE_REQUEST]: CalendarDays,
+  [NotificationType.LEAVE_APPROVED]: CheckCircle2,
+  [NotificationType.LEAVE_REJECTED]: XCircle,
+  [NotificationType.SYSTEM]: Info,
+};
+
 
 // ============================================================================
 // HELPERS
@@ -49,11 +70,11 @@ const timeAgo = (isoDate: string): string => {
   if (minutes < 60) return `il y a ${minutes} min`;
   
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `il y a ${hours}h`;
+  if (hours < 24) return `il y a ${hours} h`;
   
   const days = Math.floor(hours / 24);
   if (days === 1) return 'Hier';
-  if (days < 7) return `il y a ${days}j`;
+  if (days < 7) return `il y a ${days} j`;
   
   return new Date(isoDate).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
 };
@@ -129,13 +150,13 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({ currentUser, on
       {/* === CLOCHE === */}
       <button
         type="button"
-        aria-label={`Notifications${unreadCount ? ` : ${unreadCount} non lues` : ''}`}
+        aria-label={`Notifications${unreadCount ? ` : ${unreadCount} non lues` : ''}${urgentCount ? `, dont ${urgentCount} prioritaires` : ''}`}
         aria-haspopup="dialog"
         aria-expanded={isOpen}
         onClick={() => setIsOpen(!isOpen)}
-        className={`relative min-h-11 min-w-11 flex items-center justify-center p-2 rounded-xl transition-all ${
+        className={`relative min-h-11 min-w-11 flex items-center justify-center p-2 rounded-xl transition-colors ${
           isOpen 
-            ? 'bg-indigo-100 text-indigo-700' 
+            ? 'bg-brand-100 text-brand-700'
             : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'
         }`}
       >
@@ -143,11 +164,7 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({ currentUser, on
         
         {/* Badge */}
         {unreadCount > 0 && (
-          <span className={`absolute -top-1 -right-1 min-w-[18px] h-[18px] flex items-center justify-center rounded-full text-xs font-black text-white px-1 ${
-            urgentCount > 0 ? 'bg-red-500 animate-pulse' : 'bg-indigo-600'
-          }`}>
-            {unreadCount > 99 ? '99+' : unreadCount}
-          </span>
+          <span className="absolute -top-2 -right-2"><CountBadge count={unreadCount} compact /></span>
         )}
       </button>
 
@@ -159,7 +176,7 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({ currentUser, on
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium text-slate-700">Votre activité</span>
               {unreadCount > 0 && (
-                <span className="bg-indigo-100 text-indigo-700 text-xs font-bold px-2 py-0.5 rounded-full">
+                <span className="bg-brand-100 text-brand-700 text-sm font-bold px-2 py-0.5 rounded-full">
                   {unreadCount} nouvelle{unreadCount > 1 ? 's' : ''}
                 </span>
               )}
@@ -170,7 +187,7 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({ currentUser, on
                   type="button"
                   disabled={marking}
                   onClick={handleMarkAllRead}
-                  className="min-h-11 text-sm text-indigo-700 hover:text-indigo-800 font-medium px-2 py-2 rounded-lg hover:bg-indigo-50 transition-colors"
+                  className="ui-button ui-button-ghost"
                 >
                   <CheckCheck size={14} className="inline mr-1" />
                   Tout lire
@@ -185,17 +202,13 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({ currentUser, on
             {([
               { id: 'all' as FilterType, label: 'Toutes' },
               { id: 'unread' as FilterType, label: 'Non lues' },
-              { id: 'urgent' as FilterType, label: 'Urgentes' },
+              { id: 'urgent' as FilterType, label: 'Prioritaires' },
             ]).map(f => (
               <button
                 key={f.id}
                 aria-pressed={filter === f.id}
                 onClick={() => setFilter(f.id)}
-                className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
-                  filter === f.id
-                    ? 'bg-indigo-100 text-indigo-700'
-                    : 'text-slate-500 hover:bg-slate-50'
-                }`}
+                className="ui-filter"
               >
                 {f.label}
               </button>
@@ -208,7 +221,7 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({ currentUser, on
             {loading ? <p role="status" className="p-6 text-slate-600">Chargement des notifications…</p> : filteredNotifications.length === 0 ? (
               <div className="text-center py-12">
                 <Bell size={32} className="mx-auto text-slate-300 mb-2" />
-                <p className="text-sm text-slate-400">
+                <p className="text-sm text-slate-600">
                   {filter === 'all' ? 'Aucune notification' : 'Rien à afficher'}
                 </p>
               </div>
@@ -216,44 +229,46 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({ currentUser, on
               <div>
                 {filteredNotifications.map((notif) => {
                   const config = NOTIFICATION_CONFIG[notif.type] || NOTIFICATION_CONFIG[NotificationType.SYSTEM];
-                  const isUrgent = notif.priority === NotificationPriority.URGENT || notif.priority === NotificationPriority.HIGH;
+                  const isUrgent = notif.priority === NotificationPriority.URGENT;
+                  const isHigh = notif.priority === NotificationPriority.HIGH;
+                  const Icon = notificationIcons[notif.type] || Info;
                   
                   return (
                     <button
                       key={notif.id}
                       onClick={() => handleNotificationClick(notif)}
                       className={`w-full text-left px-4 py-3 border-b border-slate-50 transition-colors hover:bg-slate-50 ${
-                        !notif.read ? 'bg-indigo-50/30' : ''
+                        !notif.read ? 'bg-brand-50/30' : ''
                       }`}
                     >
                       <div className="flex gap-3">
                         {/* Icône */}
                         <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 text-base ${config.bgColor}`}>
-                          {config.icon}
+                          <Icon size={20} aria-hidden="true" className={config.color} />
                         </div>
                         
                         {/* Contenu */}
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <p className={`text-sm font-semibold truncate ${!notif.read ? 'text-slate-900' : 'text-slate-600'}`}>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className={`text-sm font-semibold break-words ${!notif.read ? 'text-slate-900' : 'text-slate-600'}`}>
                               {notif.title}
                             </p>
                             {!notif.read && (
-                              <span className="w-2 h-2 bg-indigo-500 rounded-full flex-shrink-0" />
+                              <span className="w-2 h-2 bg-brand-500 rounded-full flex-shrink-0" />
                             )}
-                            {isUrgent && !notif.read && (
-                              <span className="text-xs font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded flex-shrink-0">
-                                URGENT
+                            {(isUrgent || isHigh) && !notif.read && (
+                              <span className={`text-sm font-semibold px-1.5 py-0.5 rounded flex-shrink-0 ${isUrgent ? "text-red-800 bg-red-50" : "text-amber-900 bg-amber-50"}`}>
+                                {isUrgent ? "Urgent" : "Prioritaire"}
                               </span>
                             )}
                           </div>
-                          <p className={`text-xs mt-0.5  ${!notif.read ? 'text-slate-600' : 'text-slate-400'}`}>
+                          <p className={`text-sm mt-0.5 break-words  ${!notif.read ? 'text-slate-600' : 'text-slate-600'}`}>
                             {notif.message}
                           </p>
                           <div className="flex items-center justify-between mt-1">
-                            <span className="text-xs text-slate-400">{timeAgo(notif.createdAt)}</span>
+                            <span className="text-sm text-slate-600">{timeAgo(notif.createdAt)}</span>
                             {notif.actionLabel && (
-                              <span className="text-xs text-indigo-500 font-medium flex items-center gap-0.5">
+                              <span className="text-sm text-brand-500 font-medium flex items-center gap-0.5">
                                 {notif.actionLabel} <ChevronRight size={10} />
                               </span>
                             )}
@@ -270,7 +285,7 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({ currentUser, on
           {/* Footer */}
           {notifications.length > 0 && (
             <div className="px-4 py-2 border-t border-slate-100 text-center flex-shrink-0">
-              <p className="text-xs text-slate-400">
+              <p className="text-sm text-slate-600">
                 {notifications.length} notification{notifications.length > 1 ? 's' : ''} • {unreadCount} non lue{unreadCount > 1 ? 's' : ''}
               </p>
             </div>

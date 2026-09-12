@@ -1,0 +1,277 @@
+{
+  "checkedAt": "2026-09-12T01:10:23.221Z",
+  "results": [
+    {
+      "id": "mission-density",
+      "width": 320,
+      "firstResultOffset": 192,
+      "overflow": false,
+      "layoutWidth": 320,
+      "scrollWidth": 320,
+      "emulatedWidth": 320,
+      "smallText": [],
+      "smallButtons": []
+    },
+    {
+      "id": "stop-editor",
+      "width": 320,
+      "overflow": false,
+      "layoutWidth": 320,
+      "scrollWidth": 320,
+      "emulatedWidth": 320,
+      "smallText": [],
+      "smallButtons": [],
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 320,
+        "height": 900
+      }
+    },
+    {
+      "id": "quote-list",
+      "width": 320,
+      "overflow": false,
+      "layoutWidth": 320,
+      "scrollWidth": 320,
+      "emulatedWidth": 320,
+      "smallText": [],
+      "smallButtons": []
+    },
+    {
+      "id": "quote-enter-320",
+      "pass": true
+    },
+    {
+      "id": "quote-detail",
+      "width": 320,
+      "overflow": false,
+      "layoutWidth": 320,
+      "scrollWidth": 320,
+      "emulatedWidth": 320,
+      "smallText": [],
+      "smallButtons": []
+    },
+    {
+      "id": "quote-focus-return-320",
+      "pass": true
+    },
+    {
+      "id": "quote-space-320",
+      "pass": true
+    },
+    {
+      "id": "vehicle-list",
+      "width": 320,
+      "overflow": false,
+      "layoutWidth": 320,
+      "scrollWidth": 320,
+      "emulatedWidth": 320,
+      "smallText": [],
+      "smallButtons": []
+    },
+    {
+      "id": "vehicle-mobile-information-320",
+      "pass": true
+    },
+    {
+      "id": "vehicle-delete-protected-320",
+      "pass": true
+    },
+    {
+      "id": "vehicle-editor",
+      "width": 320,
+      "overflow": false,
+      "layoutWidth": 320,
+      "scrollWidth": 320,
+      "emulatedWidth": 320,
+      "smallText": [],
+      "smallButtons": [],
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 320,
+        "height": 900
+      }
+    },
+    {
+      "id": "mission-density",
+      "width": 390,
+      "firstResultOffset": 192,
+      "overflow": false,
+      "layoutWidth": 390,
+      "scrollWidth": 390,
+      "emulatedWidth": 390,
+      "smallText": [],
+      "smallButtons": []
+    },
+    {
+      "id": "stop-editor",
+      "width": 390,
+      "overflow": false,
+      "layoutWidth": 390,
+      "scrollWidth": 390,
+      "emulatedWidth": 390,
+      "smallText": [],
+      "smallButtons": [],
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 390,
+        "height": 900
+      }
+    },
+    {
+      "id": "quote-list",
+      "width": 390,
+      "overflow": false,
+      "layoutWidth": 390,
+      "scrollWidth": 390,
+      "emulatedWidth": 390,
+      "smallText": [],
+      "smallButtons": []
+    },
+    {
+      "id": "quote-enter-390",
+      "pass": true
+    },
+    {
+      "id": "quote-detail",
+      "width": 390,
+      "overflow": false,
+      "layoutWidth": 390,
+      "scrollWidth": 390,
+      "emulatedWidth": 390,
+      "smallText": [],
+      "smallButtons": []
+    },
+    {
+      "id": "quote-focus-return-390",
+      "pass": true
+    },
+    {
+      "id": "quote-space-390",
+      "pass": true
+    },
+    {
+      "id": "vehicle-list",
+      "width": 390,
+      "overflow": false,
+      "layoutWidth": 390,
+      "scrollWidth": 390,
+      "emulatedWidth": 390,
+      "smallText": [],
+      "smallButtons": []
+    },
+    {
+      "id": "vehicle-mobile-information-390",
+      "pass": true
+    },
+    {
+      "id": "vehicle-delete-protected-390",
+      "pass": true
+    },
+    {
+      "id": "vehicle-editor",
+      "width": 390,
+      "overflow": false,
+      "layoutWidth": 390,
+      "scrollWidth": 390,
+      "emulatedWidth": 390,
+      "smallText": [],
+      "smallButtons": [],
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 390,
+        "height": 900
+      }
+    },
+    {
+      "id": "mission-density",
+      "width": 1365,
+      "firstResultOffset": 253,
+      "overflow": false,
+      "layoutWidth": 1365,
+      "scrollWidth": 1365,
+      "emulatedWidth": 1365,
+      "smallText": [],
+      "smallButtons": []
+    },
+    {
+      "id": "stop-editor",
+      "width": 1365,
+      "overflow": false,
+      "layoutWidth": 1365,
+      "scrollWidth": 1365,
+      "emulatedWidth": 1365,
+      "smallText": [],
+      "smallButtons": [],
+      "bounds": {
+        "x": 426.5,
+        "y": 45,
+        "width": 512,
+        "height": 810
+      }
+    },
+    {
+      "id": "quote-list",
+      "width": 1365,
+      "overflow": false,
+      "layoutWidth": 1365,
+      "scrollWidth": 1365,
+      "emulatedWidth": 1365,
+      "smallText": [],
+      "smallButtons": []
+    },
+    {
+      "id": "quote-enter-1365",
+      "pass": true
+    },
+    {
+      "id": "quote-detail",
+      "width": 1365,
+      "overflow": false,
+      "layoutWidth": 1365,
+      "scrollWidth": 1365,
+      "emulatedWidth": 1365,
+      "smallText": [],
+      "smallButtons": []
+    },
+    {
+      "id": "quote-focus-return-1365",
+      "pass": true
+    },
+    {
+      "id": "quote-space-1365",
+      "pass": true
+    },
+    {
+      "id": "vehicle-list",
+      "width": 1365,
+      "overflow": false,
+      "layoutWidth": 1365,
+      "scrollWidth": 1365,
+      "emulatedWidth": 1365,
+      "smallText": [],
+      "smallButtons": []
+    },
+    {
+      "id": "vehicle-editor",
+      "width": 1365,
+      "overflow": false,
+      "layoutWidth": 1365,
+      "scrollWidth": 1365,
+      "emulatedWidth": 1365,
+      "smallText": [],
+      "smallButtons": [],
+      "bounds": {
+        "x": 346.5,
+        "y": 76.5,
+        "width": 672,
+        "height": 747
+      }
+    }
+  ],
+  "exceptions": []
+}

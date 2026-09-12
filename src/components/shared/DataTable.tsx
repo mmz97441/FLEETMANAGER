@@ -23,6 +23,7 @@ export interface DataTableProps<T> {
   compact?: boolean;
   striped?: boolean;
   hoverable?: boolean;
+  ariaLabel?: string;
 }
 
 function DataTable<T>({
@@ -36,7 +37,8 @@ function DataTable<T>({
   className = '',
   compact = false,
   striped = false,
-  hoverable = true
+  hoverable = true,
+  ariaLabel = 'Liste des résultats'
 }: DataTableProps<T>) {
   const cellPadding = compact ? 'px-3 py-2' : 'px-4 py-3';
   const headerPadding = compact ? 'px-3 py-2' : 'px-4 py-3';
@@ -49,7 +51,7 @@ function DataTable<T>({
 
   if (loading) {
     return (
-      <div className={`bg-white rounded-2xl border border-slate-200 ${className}`}>
+      <div className={`ui-panel ${className}`}>
         <div className="p-8 flex items-center justify-center">
           <div role="status" className="flex items-center gap-3 text-slate-600"><span aria-hidden="true" className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600"/>Chargement des données…</div>
         </div>
@@ -59,7 +61,7 @@ function DataTable<T>({
 
   if (data.length === 0) {
     return (
-      <div className={`bg-white rounded-2xl border border-slate-200 ${className}`}>
+      <div className={`ui-panel ${className}`}>
         <EmptyState
           icon={Inbox}
           title={emptyMessage}
@@ -71,16 +73,16 @@ function DataTable<T>({
   }
 
   return (
-    <div className={`bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden ${className}`}>
+    <div className={`ui-panel overflow-hidden ${className}`}>
       <div className="overflow-x-auto">
-        <table aria-label="Liste des résultats" className="w-full text-left border-collapse">
+        <table aria-label={ariaLabel} className={`ui-table ${compact ? 'ui-table-compact' : ''}`}>
           <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
               {columns.map((col) => (
                 <th
                   key={col.key}
                   scope="col"
-                  className={`${headerPadding} text-xs font-bold text-slate-500 uppercase tracking-wider ${alignClasses[col.align || 'left']}`}
+                  className={`${headerPadding} text-sm font-semibold text-slate-600 ${alignClasses[col.align || 'left']}`}
                   style={col.width ? { width: col.width } : undefined}
                 >
                   {col.header}

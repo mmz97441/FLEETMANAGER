@@ -40,22 +40,22 @@ const typeConfig: Record<ConfirmType, {
   danger: {
     icon: <AlertTriangle size={28} />,
     iconBg: 'bg-red-50 text-red-600',
-    buttonClass: 'bg-red-600 hover:bg-red-700'
+    buttonClass: 'ui-button-danger'
   },
   success: {
     icon: <CheckCircle size={28} />,
     iconBg: 'bg-green-50 text-green-600',
-    buttonClass: 'bg-green-600 hover:bg-green-700'
+    buttonClass: 'ui-button-primary'
   },
   info: {
     icon: <Info size={28} />,
     iconBg: 'bg-brand-50 text-brand-600',
-    buttonClass: 'bg-brand-600 hover:bg-brand-700'
+    buttonClass: 'ui-button-primary'
   },
   warning: {
     icon: <HelpCircle size={28} />,
     iconBg: 'bg-orange-50 text-orange-600',
-    buttonClass: 'bg-orange-600 hover:bg-orange-700'
+    buttonClass: 'ui-button-primary'
   }
 };
 
@@ -118,7 +118,7 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({
             data-autofocus
             onClick={onClose}
             disabled={busy}
-            className="flex-1 py-3 bg-slate-100 text-slate-700 rounded-xl font-bold hover:bg-slate-200 transition-colors disabled:opacity-50"
+            className="ui-button ui-button-secondary flex-1"
           >
             {cancelLabel}
           </button>
@@ -126,7 +126,8 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({
             type="button"
             onClick={handleConfirm}
             disabled={busy}
-            className={`flex-1 py-3 text-white rounded-xl font-bold shadow-lg transition-colors disabled:opacity-50 ${config.buttonClass}`}
+            aria-busy={busy || undefined}
+            className={`ui-button flex-1 ${config.buttonClass}`}
           >
             {busy ? (
               <span className="flex items-center justify-center gap-2">

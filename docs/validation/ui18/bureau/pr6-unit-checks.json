@@ -1,0 +1,25 @@
+{
+  "dateTests": [
+    {
+      "TZ": "Indian/Reunion",
+      "command": "npx vitest run src/utils/date.test.ts",
+      "passed": 21,
+      "failed": 0
+    },
+    {
+      "TZ": "America/Los_Angeles",
+      "command": "npx vitest run src/utils/date.test.ts",
+      "passed": 21,
+      "failed": 0
+    },
+    {
+      "TZ": "UTC",
+      "command": "npx vitest run src/utils/date.test.ts",
+      "passed": 21,
+      "failed": 0
+    }
+  ],
+  "typecheck": "passed",
+  "diffCheck": "passed",
+  "newDateTestCases": 14
+}

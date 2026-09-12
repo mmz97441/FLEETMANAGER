@@ -27,7 +27,7 @@ export const FormInput = forwardRef<HTMLInputElement, FormInputProps>(({
   const describedBy = [props['aria-describedby'], (error || hint) ? helpId : undefined].filter(Boolean).join(' ') || undefined;
 
   const sizeClasses = {
-    sm: { wrapper: 'text-xs', input: 'min-h-11 py-2 px-3 text-base sm:text-sm', icon: 14, label: 'text-sm' },
+    sm: { wrapper: 'text-sm', input: 'min-h-11 py-2 px-3 text-base sm:text-sm', icon: 14, label: 'text-sm' },
     md: { wrapper: 'text-sm', input: 'min-h-11 py-2.5 sm:py-3 px-4 text-base sm:text-sm', icon: 18, label: 'text-sm' },
     lg: { wrapper: 'text-base', input: 'py-3.5 px-5 text-base', icon: 20, label: 'text-sm' }
   };
@@ -42,7 +42,7 @@ export const FormInput = forwardRef<HTMLInputElement, FormInputProps>(({
   return (
     <div className={s.wrapper}>
       {label && (
-        <label htmlFor={fieldId} className={`block ${s.label} font-bold text-slate-700 mb-1.5 ml-0.5`}>
+        <label htmlFor={fieldId} className={`block ${s.label} font-semibold text-slate-700 mb-1.5 ml-0.5`}>
           {label}
           {props.required && <span className="text-red-500 ml-0.5">*</span>}
         </label>
@@ -62,10 +62,10 @@ export const FormInput = forwardRef<HTMLInputElement, FormInputProps>(({
           className={`
             w-full ${s.input} ${Icon ? 'pl-10' : ''}
             ${variantClasses[variant]}
-            rounded-xl font-medium text-slate-900
+            rounded-lg font-normal text-slate-900
             placeholder:text-slate-500
             focus:ring-2 focus:ring-brand-500 focus:border-brand-500
-            outline-none transition-all shadow-sm
+            outline-none transition-colors
             disabled:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-70
             ${error ? 'border-red-500 focus:ring-red-500' : ''}
             ${className}
@@ -112,7 +112,7 @@ export const FormTextarea = forwardRef<HTMLTextAreaElement, FormTextareaProps>((
   return (
     <div>
       {label && (
-        <label htmlFor={fieldId} className={`block ${s.label} font-bold text-slate-700 mb-1.5 ml-0.5`}>
+        <label htmlFor={fieldId} className={`block ${s.label} font-semibold text-slate-700 mb-1.5 ml-0.5`}>
           {label}
           {props.required && <span className="text-red-500 ml-0.5">*</span>}
         </label>
@@ -126,10 +126,10 @@ export const FormTextarea = forwardRef<HTMLTextAreaElement, FormTextareaProps>((
         className={`
           w-full ${s.input}
           bg-white border border-slate-300 hover:border-slate-400
-          rounded-xl font-medium text-slate-900
+          rounded-lg font-normal text-slate-900
           placeholder:text-slate-500
           focus:ring-2 focus:ring-brand-500 focus:border-brand-500
-          outline-none transition-all shadow-sm resize-none
+          outline-none transition-colors resize-none
           disabled:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-70
           ${error ? 'border-red-500 focus:ring-red-500' : ''}
           ${className}
@@ -181,7 +181,7 @@ export const FormSelect = forwardRef<HTMLSelectElement, FormSelectProps>(({
   return (
     <div>
       {label && (
-        <label htmlFor={fieldId} className={`block ${s.label} font-bold text-slate-700 mb-1.5 ml-0.5`}>
+        <label htmlFor={fieldId} className={`block ${s.label} font-semibold text-slate-700 mb-1.5 ml-0.5`}>
           {label}
           {props.required && <span className="text-red-500 ml-0.5">*</span>}
         </label>
@@ -201,9 +201,9 @@ export const FormSelect = forwardRef<HTMLSelectElement, FormSelectProps>(({
           className={`
             w-full ${s.input} ${Icon ? 'pl-10' : ''} pr-10
             bg-white border border-slate-300 hover:border-slate-400
-            rounded-xl font-medium text-slate-900
+            rounded-lg font-normal text-slate-900
             focus:ring-2 focus:ring-brand-500 focus:border-brand-500
-            outline-none transition-all shadow-sm appearance-none
+            outline-none transition-colors appearance-none
             disabled:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-70
             ${error ? 'border-red-500 focus:ring-red-500' : ''}
             ${className}
@@ -243,23 +243,30 @@ export const FormCheckbox = forwardRef<HTMLInputElement, FormCheckboxProps>(({
   className = '',
   ...props
 }, ref) => {
+  const generatedId = useId();
+  const fieldId = props.id || generatedId;
+  const helpId = `${fieldId}-help`;
+  const describedBy = [props['aria-describedby'], (error || description) ? helpId : undefined].filter(Boolean).join(' ') || undefined;
   return (
     <div>
-      <label className={`flex items-start gap-3 cursor-pointer ${className}`}>
+      <label className={`flex min-h-11 items-center gap-3 cursor-pointer ${className}`}>
         <input
           ref={ref}
           type="checkbox"
           {...props}
-          className="mt-0.5 w-4 h-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
+          id={fieldId}
+          aria-invalid={error ? true : props['aria-invalid']}
+          aria-describedby={describedBy}
+          className="shrink-0 w-5 h-5 rounded border-slate-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
         />
         <div>
           <span className="text-sm font-medium text-slate-700">{label}</span>
-          {description && (
-            <p className="text-xs text-slate-500 mt-0.5">{description}</p>
+          {description && !error && (
+            <p id={helpId} className="text-sm text-slate-600 mt-0.5">{description}</p>
           )}
         </div>
       </label>
-      {error && <p className="text-red-500 text-xs mt-1 ml-7">{error}</p>}
+      {error && <p id={helpId} role="alert" className="text-red-700 text-sm mt-1 ml-8">{error}</p>}
     </div>
   );
 });
@@ -289,17 +296,17 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(({
   ...props
 }, ref) => {
   const sizeClasses = {
-    sm: 'min-h-11 py-2 px-3 text-sm gap-1.5',
-    md: 'min-h-11 py-2.5 sm:py-3 px-4 text-sm gap-2',
-    lg: 'min-h-12 py-3.5 px-6 text-base gap-2'
+    sm: 'ui-button-sm',
+    md: '',
+    lg: 'ui-button-lg'
   };
 
   const variantClasses = {
-    primary: 'bg-brand-600 hover:bg-brand-700 text-white shadow-lg hover:shadow-xl',
-    secondary: 'bg-slate-100 hover:bg-slate-200 text-slate-700',
-    danger: 'bg-red-600 hover:bg-red-700 text-white shadow-lg',
-    success: 'bg-green-700 hover:bg-green-800 text-white shadow-lg',
-    ghost: 'bg-transparent hover:bg-slate-100 text-slate-600'
+    primary: 'ui-button-primary',
+    secondary: 'ui-button-secondary',
+    danger: 'ui-button-danger',
+    success: 'ui-button-primary',
+    ghost: 'ui-button-ghost'
   };
 
   const iconSize = size === 'sm' ? 14 : size === 'lg' ? 20 : 18;
@@ -314,9 +321,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(({
         ${sizeClasses[size]}
         ${variantClasses[variant]}
         ${fullWidth ? 'w-full' : ''}
-        rounded-xl font-bold flex items-center justify-center
-        transition-all transform hover:-translate-y-0.5 active:translate-y-0
-        disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none
+        ui-button
         ${className}
       `}
     >

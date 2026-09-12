@@ -1,0 +1,26 @@
+{
+  "measurements": [
+    {
+      "width": 320,
+      "scroll": 320,
+      "scanTop": 411.5,
+      "scanHeight": 44,
+      "headerToScan": 335.5
+    },
+    {
+      "width": 390,
+      "scroll": 390,
+      "scanTop": 345.5,
+      "scanHeight": 44,
+      "headerToScan": 269.5
+    },
+    {
+      "width": 1365,
+      "scroll": 1365,
+      "scanTop": 300.75,
+      "scanHeight": 44,
+      "headerToScan": 244.75
+    }
+  ],
+  "exceptions": []
+}

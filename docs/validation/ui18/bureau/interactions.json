@@ -1,0 +1,140 @@
+{
+  "checkedAt": "2026-09-12T01:04:46.890Z",
+  "results": [
+    {
+      "id": "quote-double-click-one-call",
+      "pass": true
+    },
+    {
+      "id": "quote-error-preserves-fields",
+      "pass": true
+    },
+    {
+      "id": "quote-dirty-return-preserved",
+      "pass": true
+    },
+    {
+      "id": "quote-retry-success-same-payload",
+      "pass": true
+    },
+    {
+      "id": "quote-success-restores-focus",
+      "pass": true
+    },
+    {
+      "id": "vehicle-double-submit-one-call",
+      "pass": true
+    },
+    {
+      "id": "vehicle-error-retains-fields",
+      "pass": true
+    },
+    {
+      "id": "vehicle-close-retains-draft",
+      "pass": true
+    },
+    {
+      "id": "dispatch-select",
+      "width": 320,
+      "overflow": false,
+      "layoutWidth": 320,
+      "scrollWidth": 320,
+      "emulatedWidth": 320,
+      "smallText": [],
+      "smallButtons": []
+    },
+    {
+      "id": "dispatch-plan",
+      "width": 320,
+      "overflow": false,
+      "layoutWidth": 320,
+      "scrollWidth": 320,
+      "emulatedWidth": 320,
+      "smallText": [],
+      "smallButtons": []
+    },
+    {
+      "id": "dispatch-full-address-320",
+      "pass": true
+    },
+    {
+      "id": "dispatch-review",
+      "width": 320,
+      "overflow": false,
+      "layoutWidth": 320,
+      "scrollWidth": 320,
+      "emulatedWidth": 320,
+      "smallText": [],
+      "smallButtons": []
+    },
+    {
+      "id": "dispatch-select",
+      "width": 390,
+      "overflow": false,
+      "layoutWidth": 390,
+      "scrollWidth": 390,
+      "emulatedWidth": 390,
+      "smallText": [],
+      "smallButtons": []
+    },
+    {
+      "id": "dispatch-plan",
+      "width": 390,
+      "overflow": false,
+      "layoutWidth": 390,
+      "scrollWidth": 390,
+      "emulatedWidth": 390,
+      "smallText": [],
+      "smallButtons": []
+    },
+    {
+      "id": "dispatch-full-address-390",
+      "pass": true
+    },
+    {
+      "id": "dispatch-review",
+      "width": 390,
+      "overflow": false,
+      "layoutWidth": 390,
+      "scrollWidth": 390,
+      "emulatedWidth": 390,
+      "smallText": [],
+      "smallButtons": []
+    },
+    {
+      "id": "dispatch-select",
+      "width": 1365,
+      "overflow": false,
+      "layoutWidth": 1365,
+      "scrollWidth": 1365,
+      "emulatedWidth": 1365,
+      "smallText": [],
+      "smallButtons": []
+    },
+    {
+      "id": "dispatch-plan",
+      "width": 1365,
+      "overflow": false,
+      "layoutWidth": 1365,
+      "scrollWidth": 1365,
+      "emulatedWidth": 1365,
+      "smallText": [],
+      "smallButtons": []
+    },
+    {
+      "id": "dispatch-full-address-1365",
+      "pass": true
+    },
+    {
+      "id": "dispatch-review",
+      "width": 1365,
+      "overflow": false,
+      "layoutWidth": 1365,
+      "scrollWidth": 1365,
+      "emulatedWidth": 1365,
+      "smallText": [],
+      "smallButtons": []
+    }
+  ],
+  "exceptions": []
+}

@@ -55,7 +55,7 @@ const getInitials = (firstName?: string, lastName?: string, email?: string): str
 };
 
 const inputClass =
-  'w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500 transition-all';
+  'w-full min-h-11 px-3 py-2.5 border border-slate-300 rounded-xl text-base outline-none focus:ring-2 focus:ring-brand-500 transition-all';
 
 const AccountHub: React.FC<AccountHubProps> = ({
   currentUser,
@@ -155,7 +155,7 @@ const AccountHub: React.FC<AccountHubProps> = ({
   }, [packages]);
 
   return (
-    <Modal isOpen onClose={onClose} title="Mon compte" subtitle={access.contextLabel || currentUser.email} size="3xl" dirty={dirty} preventClose={pwdLoading || companyLoading} bodyClassName="p-0 sm:p-0">
+    <Modal mobileFullscreen isOpen onClose={onClose} title="Mon compte" subtitle={access.contextLabel || currentUser.email} size="3xl" dirty={dirty} preventClose={pwdLoading || companyLoading} bodyClassName="p-0 sm:p-0">
         {/* Corps : rail vertical (desktop) + onglets horizontaux (mobile) */}
         <div className="flex flex-col md:flex-row flex-1 min-h-0">
           {/* Rail vertical desktop */}
@@ -170,11 +170,7 @@ const AccountHub: React.FC<AccountHubProps> = ({
                   aria-current={active ? 'page' : undefined}
                   disabled={pwdLoading || companyLoading}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-left transition-colors ${
-                    active
-                      ? 'bg-indigo-50 text-indigo-700'
-                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                  }`}
+                  className="ui-filter !justify-start"
                 >
                   <Icon size={18} />
                   <span>{tab.label}</span>
@@ -196,11 +192,7 @@ const AccountHub: React.FC<AccountHubProps> = ({
                     aria-current={active ? 'page' : undefined}
                   disabled={pwdLoading || companyLoading}
                   onClick={() => setActiveTab(tab.id)}
-                    className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-colors ${
-                      active
-                        ? 'bg-indigo-50 text-indigo-700'
-                        : 'text-slate-600 hover:bg-slate-50'
-                    }`}
+                    className="ui-filter !justify-start"
                   >
                     <Icon size={16} />
                     <span>{tab.label}</span>
@@ -216,14 +208,14 @@ const AccountHub: React.FC<AccountHubProps> = ({
             {activeTab === 'profile' && (
               <div className="space-y-5">
                 {/* Identité */}
-                <div className="rounded-2xl border border-slate-200 p-5">
+                <div className="space-y-3">
                   <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
-                    <UserCircle size={18} className="text-indigo-600" />
+                    <UserCircle size={18} className="text-brand-600" />
                     Mes informations
                   </h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-medium text-slate-500 mb-1">
+                      <label className="block text-sm font-medium text-slate-600 mb-1">
                         Nom complet
                       </label>
                       <div className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900">
@@ -231,12 +223,12 @@ const AccountHub: React.FC<AccountHubProps> = ({
                       </div>
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-slate-500 mb-1">
+                      <label className="block text-sm font-medium text-slate-600 mb-1">
                         Adresse e-mail
                       </label>
                       <div className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 flex items-center gap-2">
-                        <Mail size={15} className="text-slate-400 flex-shrink-0" />
-                        <span className="truncate">{currentUser.email}</span>
+                        <Mail size={15} className="text-slate-600 flex-shrink-0" />
+                        <span className="break-all">{currentUser.email}</span>
                       </div>
                     </div>
                   </div>
@@ -247,15 +239,15 @@ const AccountHub: React.FC<AccountHubProps> = ({
                 {access.impersonating && <p className="mb-3 text-sm text-slate-700">Le changement de mot de passe est réservé au titulaire dans sa propre session.</p>}
                 <form
                   onSubmit={handleChangePassword}
-                  className="rounded-2xl border border-slate-200 p-5"
+                  className="space-y-3"
                 >
                   <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
-                    <Lock size={18} className="text-indigo-600" />
+                    <Lock size={18} className="text-brand-600" />
                     Changer le mot de passe
                   </h3>
                   <div className="space-y-3">
                     <div>
-                      <label htmlFor="account-currentPassword" className="block text-xs font-medium text-slate-600 mb-1">
+                      <label htmlFor="account-currentPassword" className="block text-sm font-medium text-slate-600 mb-1">
                         Mot de passe actuel
                       </label>
                       <input
@@ -270,7 +262,7 @@ const AccountHub: React.FC<AccountHubProps> = ({
                       />
                     </div>
                     <div>
-                      <label htmlFor="account-newPassword" className="block text-xs font-medium text-slate-600 mb-1">
+                      <label htmlFor="account-newPassword" className="block text-sm font-medium text-slate-600 mb-1">
                         Nouveau mot de passe
                       </label>
                       <input
@@ -285,7 +277,7 @@ const AccountHub: React.FC<AccountHubProps> = ({
                       />
                     </div>
                     <div>
-                      <label htmlFor="account-confirmPassword" className="block text-xs font-medium text-slate-600 mb-1">
+                      <label htmlFor="account-confirmPassword" className="block text-sm font-medium text-slate-600 mb-1">
                         Confirmer le nouveau mot de passe
                       </label>
                       <input
@@ -306,7 +298,7 @@ const AccountHub: React.FC<AccountHubProps> = ({
                   )}
                   {pwdSuccess && (
                     <p role="status" className="mt-3 text-sm text-green-700 font-medium">
-                      ✅ Mot de passe mis à jour
+                      Mot de passe mis à jour
                     </p>
                   )}
 
@@ -314,7 +306,7 @@ const AccountHub: React.FC<AccountHubProps> = ({
                     <button
                       type="submit"
                       disabled={pwdLoading}
-                      className="px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                      className="ui-button ui-button-primary text-sm disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       {pwdLoading ? 'Enregistrement…' : 'Mettre à jour'}
                     </button>
@@ -327,24 +319,24 @@ const AccountHub: React.FC<AccountHubProps> = ({
             {/* ===================== ONGLET 2 : MON ENTREPRISE ===================== */}
             {activeTab === 'company' && (
               <fieldset disabled={access.readOnly}><form onSubmit={handleSaveCompany} className="space-y-5">
-                <div className="rounded-2xl border border-slate-200 p-5">
+                <div className="space-y-3">
                   <h3 className="text-sm font-bold text-slate-900 mb-1 flex items-center gap-2">
-                    <Building2 size={18} className="text-indigo-600" />
+                    <Building2 size={18} className="text-brand-600" />
                     Identité de l'expéditeur
                   </h3>
-                  <p className="text-xs text-slate-500 mb-4">
+                  <p className="text-sm text-slate-600 mb-4">
                     Ces informations sont reprises automatiquement sur vos bons de livraison.
                   </p>
 
                   {showCompanyHint && (
                     <div className="mb-4 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2.5 text-sm text-amber-700">
-                      ⚠️ Raison sociale et adresse figurent sur vos bons de livraison — complétez-les.
+                      Raison sociale et adresse figurent sur vos bons de livraison — complétez-les.
                     </div>
                   )}
 
                   <div className="space-y-3">
                     <div>
-                      <label htmlFor="account-companyName" className="block text-xs font-medium text-slate-600 mb-1">
+                      <label htmlFor="account-companyName" className="block text-sm font-medium text-slate-600 mb-1">
                         Raison sociale
                       </label>
                       <input
@@ -360,7 +352,7 @@ const AccountHub: React.FC<AccountHubProps> = ({
                       />
                     </div>
                     <div>
-                      <label htmlFor="account-companyAddress" className="block text-xs font-medium text-slate-600 mb-1">
+                      <label htmlFor="account-companyAddress" className="block text-sm font-medium text-slate-600 mb-1">
                         Adresse complète
                       </label>
                       <input
@@ -375,7 +367,7 @@ const AccountHub: React.FC<AccountHubProps> = ({
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
-                        <label htmlFor="account-companyPhone" className="block text-xs font-medium text-slate-600 mb-1">
+                        <label htmlFor="account-companyPhone" className="block text-sm font-medium text-slate-600 mb-1">
                           Téléphone
                         </label>
                         <input
@@ -389,7 +381,7 @@ const AccountHub: React.FC<AccountHubProps> = ({
                         />
                       </div>
                       <div>
-                        <label htmlFor="account-companySiret" className="block text-xs font-medium text-slate-600 mb-1">
+                        <label htmlFor="account-companySiret" className="block text-sm font-medium text-slate-600 mb-1">
                           N° SIRET
                         </label>
                         <input
@@ -409,14 +401,14 @@ const AccountHub: React.FC<AccountHubProps> = ({
                     <p role="alert" className="mt-3 text-sm text-red-700 font-medium">{companyError}</p>
                   )}
                   {companySuccess && (
-                    <p role="status" className="mt-3 text-sm text-green-700 font-medium">✅ Enregistré</p>
+                    <p role="status" className="mt-3 text-sm text-green-700 font-medium">Enregistré</p>
                   )}
 
                   <div className="mt-4 flex justify-end">
                     <button
                       type="submit"
                       disabled={companyLoading}
-                      className="px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                      className="ui-button ui-button-primary text-sm disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       {companyLoading ? 'Enregistrement…' : 'Enregistrer'}
                     </button>
@@ -428,9 +420,9 @@ const AccountHub: React.FC<AccountHubProps> = ({
             {/* ===================== ONGLET 3 : ÉQUIPE & ACCÈS ===================== */}
             {activeTab === 'team' && (
               <div className="space-y-4">
-                <div className="rounded-2xl border border-slate-200 p-5">
+                <div className="space-y-3">
                   <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
-                    <Users size={18} className="text-indigo-600" />
+                    <Users size={18} className="text-brand-600" />
                     Membres de l'équipe
                   </h3>
 
@@ -442,18 +434,18 @@ const AccountHub: React.FC<AccountHubProps> = ({
                           className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 hover:bg-slate-50 transition-colors"
                         >
                           <div
-                            className="w-9 h-9 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-semibold flex-shrink-0"
+                            className="w-9 h-9 rounded-full bg-indigo-100 text-brand-700 flex items-center justify-center text-sm font-semibold flex-shrink-0"
                             title={`${member.firstName} ${member.lastName}`}
                           >
                             {getInitials(member.firstName, member.lastName, member.email)}
                           </div>
                           <div className="min-w-0 flex-1">
-                            <p className="text-sm font-medium text-slate-900 truncate">
+                            <p className="text-sm font-medium text-slate-900 break-words">
                               {`${member.firstName} ${member.lastName}`.trim() || member.email}
                             </p>
-                            <p className="text-xs text-slate-500 truncate">{member.email}</p>
+                            <p className="text-sm text-slate-600 break-words">{member.email}</p>
                           </div>
-                          <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 text-xs font-medium flex-shrink-0">
+                          <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 text-sm font-medium flex-shrink-0">
                             {member.role}
                           </span>
                         </li>
@@ -462,11 +454,11 @@ const AccountHub: React.FC<AccountHubProps> = ({
                   ) : (
                     <div className="flex flex-col items-center justify-center py-10 text-center">
                       <ShieldCheck size={40} className="text-slate-300 mb-3" />
-                      <p className="text-sm text-slate-500">Aucun membre pour l'instant.</p>
+                      <p className="text-sm text-slate-600">Aucun membre pour l'instant.</p>
                     </div>
                   )}
 
-                  <p className="mt-4 text-xs text-slate-400 flex items-center gap-1.5">
+                  <p className="mt-4 text-sm text-slate-600 flex items-center gap-1.5">
                     <Info size={13} className="flex-shrink-0" />
                     Bientôt : gérer les rôles et accès par membre.
                   </p>
@@ -477,31 +469,31 @@ const AccountHub: React.FC<AccountHubProps> = ({
             {/* ===================== ONGLET 4 : HISTORIQUE ===================== */}
             {activeTab === 'history' && (
               <div className="space-y-4">
-                <div className="rounded-2xl border border-slate-200 p-5">
+                <div className="space-y-3">
                   <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
-                    <History size={18} className="text-indigo-600" />
+                    <History size={18} className="text-brand-600" />
                     Derniers envois
                   </h3>
 
                   {recentPackages.length > 0 ? (
                     <ul className="divide-y divide-slate-100">
                       {recentPackages.map((pkg) => (
-                        <li key={pkg.id} className="flex items-center gap-3 py-3">
-                          <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center flex-shrink-0">
+                        <li key={pkg.id} className="flex flex-col sm:flex-row sm:items-center gap-3 py-3">
+                          <div className="w-9 h-9 rounded-xl bg-indigo-50 text-brand-600 flex items-center justify-center flex-shrink-0">
                             <PackageIcon size={18} />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <p className="text-sm font-medium text-slate-900 truncate">
+                            <p className="text-sm font-medium text-slate-900 break-words">
                               {pkg.contactName || '—'}
                             </p>
-                            <p className="text-xs text-slate-500 truncate flex items-center gap-1">
+                            <p className="text-sm text-slate-600 break-words flex items-center gap-1">
                               <MapPin size={12} className="flex-shrink-0" />
                               {pkg.city || '—'}
                             </p>
                           </div>
                           <div className="text-right flex-shrink-0">
-                            <p className="text-xs font-medium text-slate-600">{pkg.status}</p>
-                            <p className="text-xs text-slate-400">
+                            <p className="text-sm font-medium text-slate-600">{pkg.status}</p>
+                            <p className="text-sm text-slate-600">
                               {pkg.createdAt
                                 ? new Date(pkg.createdAt).toLocaleDateString('fr-FR')
                                 : '—'}
@@ -513,8 +505,8 @@ const AccountHub: React.FC<AccountHubProps> = ({
                   ) : (
                     <div className="flex flex-col items-center justify-center py-10 text-center">
                       <PackageIcon size={40} className="text-slate-300 mb-3" />
-                      <p className="text-sm text-slate-500">Aucun envoi pour l'instant.</p>
-                      <p className="text-xs text-slate-400 mt-1">
+                      <p className="text-sm text-slate-600">Aucun envoi pour l'instant.</p>
+                      <p className="text-sm text-slate-600 mt-1">
                         Vos colis apparaîtront ici dès votre premier envoi.
                       </p>
                     </div>

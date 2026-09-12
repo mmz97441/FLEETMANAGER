@@ -20,11 +20,11 @@ const VehicleStatusBadge: React.FC<VehicleStatusBadgeProps> = ({
   size = 'md'
 }) => {
   const sizeClasses = {
-    sm: 'px-2 py-0.5 text-[10px] gap-1',
-    md: 'px-2.5 py-1 text-xs gap-1.5'
+    sm: 'px-2 py-0.5 text-sm gap-1',
+    md: 'px-2.5 py-1 text-sm gap-1.5'
   };
 
-  const iconSize = size === 'sm' ? 10 : 12;
+  const iconSize = 16;
   const s = sizeClasses[size];
 
   const getConfig = () => {
@@ -55,7 +55,7 @@ const VehicleStatusBadge: React.FC<VehicleStatusBadgeProps> = ({
         return {
           label: 'Problème',
           icon: AlertTriangle,
-          className: 'bg-red-100 text-red-700 border-red-200 animate-pulse'
+          className: 'bg-red-100 text-red-700 border-red-200 '
         };
       case VehicleStatus.IDLE:
         return {
@@ -67,7 +67,7 @@ const VehicleStatusBadge: React.FC<VehicleStatusBadgeProps> = ({
         return {
           label: 'Immobilisé',
           icon: XOctagon,
-          className: 'bg-red-100 text-red-700 border-red-300 animate-pulse'
+          className: 'bg-red-100 text-red-700 border-red-300 '
         };
       default:
         return {

@@ -1,0 +1,133 @@
+{
+  "checkedAt": "2026-09-12T01:30:43.266Z",
+  "timezone": "Indian/Reunion",
+  "results": [
+    {
+      "id": "calendar-UX-YESTERDAY",
+      "hour": 0,
+      "width": 320,
+      "pass": true,
+      "overdue": true,
+      "dateText": "UX-YESTERDAY\n\nUtilitaire avec hayon et aménagement longue distance professionnel\n\nUtilitaire\n\nCamille Test UX\nEn service\nKilométrage\n123 456 km\nMAINTENANCE\n23%\n\nEntretien dans 11 544 km\n\nContrôle technique dépassé\n11/09/2026\nModifier\nSupprimer",
+      "localNow": "Sat Sep 12 2026 00:01:59 GMT+0400 (heure de La Réunion)"
+    },
+    {
+      "id": "calendar-UX-TODAY",
+      "hour": 0,
+      "width": 320,
+      "pass": true,
+      "overdue": false,
+      "dateText": "UX-TODAY\n\nUtilitaire avec hayon et aménagement longue distance professionnel\n\nUtilitaire\n\nCamille Test UX\nEn service\nKilométrage\n123 456 km\nMAINTENANCE\n23%\n\nEntretien dans 11 544 km\n\nContrôle technique\n12/09/2026\nModifier\nSupprimer",
+      "localNow": "Sat Sep 12 2026 00:01:59 GMT+0400 (heure de La Réunion)"
+    },
+    {
+      "id": "calendar-UX-TOMORROW",
+      "hour": 0,
+      "width": 320,
+      "pass": true,
+      "overdue": false,
+      "dateText": "UX-TOMORROW\n\nUtilitaire avec hayon et aménagement longue distance professionnel\n\nUtilitaire\n\nCamille Test UX\nEn service\nKilométrage\n123 456 km\nMAINTENANCE\n23%\n\nEntretien dans 11 544 km\n\nContrôle technique\n13/09/2026\nModifier\nSupprimer",
+      "localNow": "Sat Sep 12 2026 00:01:59 GMT+0400 (heure de La Réunion)"
+    },
+    {
+      "id": "calendar-UX-YESTERDAY",
+      "hour": 0,
+      "width": 1365,
+      "pass": true,
+      "overdue": true,
+      "dateText": "UX-YESTERDAY\nUtilitaire avec hayon et aménagement longue distance professionnel\nCamille Test UX\n\tUtilitaire\t\nEn service\t\nUSURE\nReste 11 544 km\n\t123 456 km\t\n11/09/2026\t",
+      "localNow": "Sat Sep 12 2026 00:01:59 GMT+0400 (heure de La Réunion)"
+    },
+    {
+      "id": "calendar-UX-TODAY",
+      "hour": 0,
+      "width": 1365,
+      "pass": true,
+      "overdue": false,
+      "dateText": "UX-TODAY\nUtilitaire avec hayon et aménagement longue distance professionnel\nCamille Test UX\n\tUtilitaire\t\nEn service\t\nUSURE\nReste 11 544 km\n\t123 456 km\t12/09/2026\t",
+      "localNow": "Sat Sep 12 2026 00:01:59 GMT+0400 (heure de La Réunion)"
+    },
+    {
+      "id": "calendar-UX-TOMORROW",
+      "hour": 0,
+      "width": 1365,
+      "pass": true,
+      "overdue": false,
+      "dateText": "UX-TOMORROW\nUtilitaire avec hayon et aménagement longue distance professionnel\nCamille Test UX\n\tUtilitaire\t\nEn service\t\nUSURE\nReste 11 544 km\n\t123 456 km\t13/09/2026\t",
+      "localNow": "Sat Sep 12 2026 00:01:59 GMT+0400 (heure de La Réunion)"
+    },
+    {
+      "id": "calendar-UX-YESTERDAY",
+      "hour": 23,
+      "width": 320,
+      "pass": true,
+      "overdue": true,
+      "dateText": "UX-YESTERDAY\n\nUtilitaire avec hayon et aménagement longue distance professionnel\n\nUtilitaire\n\nCamille Test UX\nEn service\nKilométrage\n123 456 km\nMAINTENANCE\n23%\n\nEntretien dans 11 544 km\n\nContrôle technique dépassé\n11/09/2026\nModifier\nSupprimer",
+      "localNow": "Sat Sep 12 2026 23:59:59 GMT+0400 (heure de La Réunion)"
+    },
+    {
+      "id": "calendar-UX-TODAY",
+      "hour": 23,
+      "width": 320,
+      "pass": true,
+      "overdue": false,
+      "dateText": "UX-TODAY\n\nUtilitaire avec hayon et aménagement longue distance professionnel\n\nUtilitaire\n\nCamille Test UX\nEn service\nKilométrage\n123 456 km\nMAINTENANCE\n23%\n\nEntretien dans 11 544 km\n\nContrôle technique\n12/09/2026\nModifier\nSupprimer",
+      "localNow": "Sat Sep 12 2026 23:59:59 GMT+0400 (heure de La Réunion)"
+    },
+    {
+      "id": "calendar-UX-TOMORROW",
+      "hour": 23,
+      "width": 320,
+      "pass": true,
+      "overdue": false,
+      "dateText": "UX-TOMORROW\n\nUtilitaire avec hayon et aménagement longue distance professionnel\n\nUtilitaire\n\nCamille Test UX\nEn service\nKilométrage\n123 456 km\nMAINTENANCE\n23%\n\nEntretien dans 11 544 km\n\nContrôle technique\n13/09/2026\nModifier\nSupprimer",
+      "localNow": "Sat Sep 12 2026 23:59:59 GMT+0400 (heure de La Réunion)"
+    },
+    {
+      "id": "calendar-UX-YESTERDAY",
+      "hour": 23,
+      "width": 1365,
+      "pass": true,
+      "overdue": true,
+      "dateText": "UX-YESTERDAY\nUtilitaire avec hayon et aménagement longue distance professionnel\nCamille Test UX\n\tUtilitaire\t\nEn service\t\nUSURE\nReste 11 544 km\n\t123 456 km\t\n11/09/2026\t",
+      "localNow": "Sat Sep 12 2026 23:59:59 GMT+0400 (heure de La Réunion)"
+    },
+    {
+      "id": "calendar-UX-TODAY",
+      "hour": 23,
+      "width": 1365,
+      "pass": true,
+      "overdue": false,
+      "dateText": "UX-TODAY\nUtilitaire avec hayon et aménagement longue distance professionnel\nCamille Test UX\n\tUtilitaire\t\nEn service\t\nUSURE\nReste 11 544 km\n\t123 456 km\t12/09/2026\t",
+      "localNow": "Sat Sep 12 2026 23:59:59 GMT+0400 (heure de La Réunion)"
+    },
+    {
+      "id": "calendar-UX-TOMORROW",
+      "hour": 23,
+      "width": 1365,
+      "pass": true,
+      "overdue": false,
+      "dateText": "UX-TOMORROW\nUtilitaire avec hayon et aménagement longue distance professionnel\nCamille Test UX\n\tUtilitaire\t\nEn service\t\nUSURE\nReste 11 544 km\n\t123 456 km\t13/09/2026\t",
+      "localNow": "Sat Sep 12 2026 23:59:59 GMT+0400 (heure de La Réunion)"
+    },
+    {
+      "id": "quote-route-spans-two-columns",
+      "pass": true,
+      "layout": {
+        "gridWidth": 838.671875,
+        "routeWidth": 838.671875,
+        "columnStart": "span 2",
+        "columnEnd": "span 2",
+        "fullOrigin": true,
+        "fullDestination": true,
+        "clippedParagraphs": [],
+        "documentWidth": 1365
+      }
+    },
+    {
+      "id": "quote-long-addresses-complete",
+      "pass": true
+    }
+  ],
+  "exceptions": []
+}

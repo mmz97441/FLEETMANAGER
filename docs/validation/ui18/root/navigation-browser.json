@@ -1,0 +1,46 @@
+{
+  "checkedAt": "2026-09-12T01:10:36.242Z",
+  "checks": [
+    {
+      "name": "Back attend confirmation sans changer la vue",
+      "pass": true
+    },
+    {
+      "name": "Confirmation focus interne",
+      "pass": true
+    },
+    {
+      "name": "Back annulé conserve URL et brouillon",
+      "pass": true
+    },
+    {
+      "name": "Back accepté change réellement la vue",
+      "pass": true
+    },
+    {
+      "name": "Forward conservé",
+      "pass": true
+    },
+    {
+      "name": "Navigation du menu protégée",
+      "pass": true
+    },
+    {
+      "name": "Envoi en cours ne propose pas abandon",
+      "pass": true
+    },
+    {
+      "name": "Envoi conservé",
+      "pass": true
+    },
+    {
+      "name": "Confirmation mobile sans débordement",
+      "pass": true
+    },
+    {
+      "name": "Fermeture normale reste protégée",
+      "pass": true
+    }
+  ],
+  "exceptions": []
+}

@@ -27,6 +27,29 @@ export const localDatePart = (d: Date | string | number): string => {
 /** Date du jour (AAAA-MM-JJ) dans le fuseau LOCAL. Remplace toISOString().split('T')[0]. */
 export const todayISO = (): string => localDatePart(new Date());
 
+/** Nombre de jours calendaires locaux jusqu'à l'échéance ; null si absent/invalide. */
+export const daysUntilCalendarDate = (value: string | Date | number | null | undefined, reference = new Date()): number | null => {
+  if (value == null || value === '') return null;
+  const calendarTimestamp = (day: string): number | null => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+    const timestamp = Date.parse(`${day}T00:00:00.000Z`);
+    // Date.parse normalise certains jours impossibles (ex. 30 février).
+    if (!Number.isFinite(timestamp) || new Date(timestamp).toISOString().slice(0, 10) !== day) return null;
+    return timestamp;
+  };
+  const dueDay = calendarTimestamp(localDatePart(value));
+  const referenceDay = calendarTimestamp(localDatePart(reference));
+  if (dueDay == null || referenceDay == null) return null;
+  // Même origine UTC pour chaque jour : les journées locales de 23/25 h ne biaisent pas le résultat.
+  return (dueDay - referenceDay) / 86400000;
+};
+
+/** Une échéance calendaire reste valable jusqu'à la fin de son jour local. */
+export const isPastLocalDate = (value: string | Date | number | null | undefined, reference = new Date()): boolean => {
+  const days = daysUntilCalendarDate(value, reference);
+  return days != null && days < 0;
+};
+
 /** Formate une date en jj/mm/aaaa (fr-FR). Garde-fou : '—' si invalide/absent. */
 export const formatDate = (value?: string | number | Date | null): string => {
   if (!value) return '—';

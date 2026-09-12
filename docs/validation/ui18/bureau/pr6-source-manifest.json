@@ -1,0 +1,7 @@
+{
+  "src/utils/date.ts": "207336a936a48fa337c3d06e1638049a4d0ddb0c147a1991143753062324fdb7",
+  "src/utils/date.test.ts": "41f0e62545874ae718687c9e82115b48c02b99ab8489a381b8b09053a64fe968",
+  "src/components/vehicles/VehicleCard.tsx": "2930e15db224f65e40c9bcc4c349952822c495a3011669bf3e6ff858b6a3c8f7",
+  "src/components/vehicles/VehicleRow.tsx": "51fed5e1ddd480919984f34e0a99596d0b6adb52b5b0523f23a10df9c1ca5391",
+  "src/components/QuoteManager.tsx": "3de874725c84b93b362d3d95e9faf4d21b3e024d341f5d2999657f0402089263"
+}

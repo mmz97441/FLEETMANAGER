@@ -8,6 +8,7 @@
 // Layout & Containers
 export { default as Modal } from './Modal';
 export type { ModalProps, ModalSize } from './Modal';
+export { default as PageHeader } from './PageHeader';
 
 export { default as ConfirmModal } from './ConfirmModal';
 export type { ConfirmModalProps, ConfirmType } from './ConfirmModal';
@@ -19,4 +20,4 @@ export { default as EmptyState } from './EmptyState';
 export { default as DataTable } from './DataTable';
 
 // Form Elements
-export { default as FormInput, FormSelect, FormTextarea } from './FormInput';
+export { FormInput, FormSelect, FormTextarea, FormCheckbox, Button } from './FormInput';

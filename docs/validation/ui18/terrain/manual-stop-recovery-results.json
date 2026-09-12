@@ -1,0 +1,38 @@
+{
+  "checks": [
+    {
+      "label": "commit then lost response leaves a recoverable request",
+      "pass": true
+    },
+    {
+      "label": "uncertain request fields are frozen",
+      "pass": true
+    },
+    {
+      "label": "closing uncertainty retains recovery banner",
+      "pass": true
+    },
+    {
+      "label": "recovery survives reload and a different active mission",
+      "pass": true
+    },
+    {
+      "label": "restored data is unchanged and locked",
+      "pass": true
+    },
+    {
+      "label": "retry uses same mission payload and third argument",
+      "pass": true
+    },
+    {
+      "label": "only one stop created and recovery cleared after confirmation",
+      "pass": true
+    },
+    {
+      "label": "storage failure sends no extra request",
+      "pass": true
+    }
+  ],
+  "exceptions": [],
+  "scope": "Actual DriverMissionView caller, server commit and lost response simulated locally; no production writes"
+}

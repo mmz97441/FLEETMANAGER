@@ -15,8 +15,8 @@ export default function ConfirmationHost() {
   return <Modal isOpen={!!current} onClose={() => finish(false)} title={current?.title} role="alertdialog" size="sm" showCloseButton={false}>
     <p className="text-slate-700">{current?.message}</p>
     <div className="mt-5 flex flex-col gap-3">
-      <button type="button" data-autofocus onClick={() => finish(false)} className="min-h-12 rounded-xl bg-slate-100 px-4 py-3 font-semibold text-slate-800">{current?.cancelLabel || 'Annuler'}</button>
-      <button type="button" onClick={() => finish(true)} className={`min-h-12 rounded-xl px-4 py-3 font-semibold text-white ${current?.danger ? 'bg-red-700' : 'bg-brand-600'}`}>{current?.confirmLabel || 'Confirmer'}</button>
+      <button type="button" data-autofocus onClick={() => finish(false)} className="ui-button ui-button-secondary">{current?.cancelLabel || 'Annuler'}</button>
+      <button type="button" onClick={() => finish(true)} className={`ui-button ${current?.danger ? 'ui-button-danger' : 'ui-button-primary'}`}>{current?.confirmLabel || 'Confirmer'}</button>
     </div>
   </Modal>;
 }

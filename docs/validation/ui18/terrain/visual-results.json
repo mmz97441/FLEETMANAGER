@@ -1,0 +1,316 @@
+{
+  "checks": [
+    {
+      "label": "help standard header 320",
+      "pass": true
+    },
+    {
+      "label": "help no overflow 320",
+      "pass": true
+    },
+    {
+      "label": "help targets 320",
+      "pass": true
+    },
+    {
+      "label": "help device tab reachable 320",
+      "pass": true
+    },
+    {
+      "label": "clienthelp standard header 320",
+      "pass": true
+    },
+    {
+      "label": "clienthelp no overflow 320",
+      "pass": true
+    },
+    {
+      "label": "clienthelp targets 320",
+      "pass": true
+    },
+    {
+      "label": "client support diagnostic is optional 320",
+      "pass": true
+    },
+    {
+      "label": "scan result full identity 320",
+      "pass": true
+    },
+    {
+      "label": "scan result no overflow 320",
+      "pass": true
+    },
+    {
+      "label": "scan result targets 320",
+      "pass": true
+    },
+    {
+      "label": "help standard header 390",
+      "pass": true
+    },
+    {
+      "label": "help no overflow 390",
+      "pass": true
+    },
+    {
+      "label": "help targets 390",
+      "pass": true
+    },
+    {
+      "label": "help device tab reachable 390",
+      "pass": true
+    },
+    {
+      "label": "clienthelp standard header 390",
+      "pass": true
+    },
+    {
+      "label": "clienthelp no overflow 390",
+      "pass": true
+    },
+    {
+      "label": "clienthelp targets 390",
+      "pass": true
+    },
+    {
+      "label": "client support diagnostic is optional 390",
+      "pass": true
+    },
+    {
+      "label": "scan result full identity 390",
+      "pass": true
+    },
+    {
+      "label": "scan result no overflow 390",
+      "pass": true
+    },
+    {
+      "label": "scan result targets 390",
+      "pass": true
+    },
+    {
+      "label": "help standard header 1365",
+      "pass": true
+    },
+    {
+      "label": "help no overflow 1365",
+      "pass": true
+    },
+    {
+      "label": "help targets 1365",
+      "pass": true
+    },
+    {
+      "label": "help device tab reachable 1365",
+      "pass": true
+    },
+    {
+      "label": "clienthelp standard header 1365",
+      "pass": true
+    },
+    {
+      "label": "clienthelp no overflow 1365",
+      "pass": true
+    },
+    {
+      "label": "clienthelp targets 1365",
+      "pass": true
+    },
+    {
+      "label": "client support diagnostic is optional 1365",
+      "pass": true
+    },
+    {
+      "label": "scan result full identity 1365",
+      "pass": true
+    },
+    {
+      "label": "scan result no overflow 1365",
+      "pass": true
+    },
+    {
+      "label": "scan result targets 1365",
+      "pass": true
+    },
+    {
+      "label": "quickscan-keyboard footer visible",
+      "pass": true
+    },
+    {
+      "label": "quickscan-keyboard no horizontal overflow",
+      "pass": true
+    },
+    {
+      "label": "quickscan-keyboard touch targets 44px",
+      "pass": true
+    },
+    {
+      "label": "quickscan keyboard focused input visible",
+      "pass": true
+    },
+    {
+      "label": "manual-stop-keyboard footer visible",
+      "pass": true
+    },
+    {
+      "label": "manual-stop-keyboard no horizontal overflow",
+      "pass": true
+    },
+    {
+      "label": "manual-stop-keyboard touch targets 44px",
+      "pass": true
+    },
+    {
+      "label": "missing scan still opens guard before advancing",
+      "pass": true
+    },
+    {
+      "label": "failure-keyboard footer visible",
+      "pass": true
+    },
+    {
+      "label": "failure-keyboard no horizontal overflow",
+      "pass": true
+    },
+    {
+      "label": "failure-keyboard touch targets 44px",
+      "pass": true
+    },
+    {
+      "label": "failure still requires photo",
+      "pass": true
+    },
+    {
+      "label": "return-keyboard footer visible",
+      "pass": true
+    },
+    {
+      "label": "return-keyboard no horizontal overflow",
+      "pass": true
+    },
+    {
+      "label": "return-keyboard touch targets 44px",
+      "pass": true
+    },
+    {
+      "label": "return still requires photo",
+      "pass": true
+    },
+    {
+      "label": "manual scanner input and validation visible at keyboard size",
+      "pass": true
+    },
+    {
+      "label": "manual scanner no overflow at keyboard size",
+      "pass": true
+    }
+  ],
+  "measurements": [
+    {
+      "label": "quickscan-keyboard",
+      "width": 390,
+      "height": 420,
+      "dialog": {
+        "x": 0,
+        "y": 0,
+        "width": 390,
+        "height": 420,
+        "top": 0,
+        "right": 390,
+        "bottom": 420,
+        "left": 0
+      },
+      "footer": {
+        "x": 0,
+        "y": 307,
+        "width": 390,
+        "height": 113,
+        "top": 307,
+        "right": 390,
+        "bottom": 420,
+        "left": 0
+      },
+      "scroll": 390
+    },
+    {
+      "label": "manual-stop-keyboard",
+      "width": 390,
+      "height": 420,
+      "dialog": {
+        "x": 0,
+        "y": 0,
+        "width": 390,
+        "height": 420,
+        "top": 0,
+        "right": 390,
+        "bottom": 420,
+        "left": 0
+      },
+      "footer": {
+        "x": 0,
+        "y": 359,
+        "width": 390,
+        "height": 61,
+        "top": 359,
+        "right": 390,
+        "bottom": 420,
+        "left": 0
+      },
+      "scroll": 390
+    },
+    {
+      "label": "failure-keyboard",
+      "width": 390,
+      "height": 420,
+      "dialog": {
+        "x": 0,
+        "y": 0,
+        "width": 390,
+        "height": 420,
+        "top": 0,
+        "right": 390,
+        "bottom": 420,
+        "left": 0
+      },
+      "footer": {
+        "x": 0,
+        "y": 359,
+        "width": 390,
+        "height": 61,
+        "top": 359,
+        "right": 390,
+        "bottom": 420,
+        "left": 0
+      },
+      "scroll": 390
+    },
+    {
+      "label": "return-keyboard",
+      "width": 390,
+      "height": 420,
+      "dialog": {
+        "x": 0,
+        "y": 0,
+        "width": 390,
+        "height": 420,
+        "top": 0,
+        "right": 390,
+        "bottom": 420,
+        "left": 0
+      },
+      "footer": {
+        "x": 0,
+        "y": 359,
+        "width": 390,
+        "height": 61,
+        "top": 359,
+        "right": 390,
+        "bottom": 420,
+        "left": 0
+      },
+      "scroll": 390
+    }
+  ],
+  "exceptions": [],
+  "scope": "Chrome desktop simulation with fixed viewport; no physical phone, OS keyboard, camera capture, printing or production writes."
+}

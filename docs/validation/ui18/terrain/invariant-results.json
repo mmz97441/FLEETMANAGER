@@ -1,0 +1,130 @@
+{
+  "reference": "1facefb",
+  "scope": "AST structure, operators and literal values of operational handlers unchanged from4.26; ignores whitespace/quote formatting. Does not assert physical hardware behavior.",
+  "checks": [
+    {
+      "label": "DriverMissionView.handleClaimOthersToStop",
+      "pass": true
+    },
+    {
+      "label": "DriverMissionView.handleStartLoading",
+      "pass": true
+    },
+    {
+      "label": "DriverMissionView.handleLoadingComplete",
+      "pass": true
+    },
+    {
+      "label": "DriverMissionView.handleCancelLoading",
+      "pass": true
+    },
+    {
+      "label": "DriverMissionView.handleReturnPhoto",
+      "pass": true
+    },
+    {
+      "label": "DriverMissionView.handleConfirmReturn",
+      "pass": true
+    },
+    {
+      "label": "DriverMissionView.handleArriveAtStop",
+      "pass": true
+    },
+    {
+      "label": "DriverMissionView.handleFinishTour",
+      "pass": true
+    },
+    {
+      "label": "DriverMissionView.handleDeliverySuccess",
+      "pass": true
+    },
+    {
+      "label": "DriverMissionView.handleDeliveryFailure",
+      "pass": true
+    },
+    {
+      "label": "DriverMissionView.handlePhotoCapture",
+      "pass": true
+    },
+    {
+      "label": "DriverMissionView.handleFailurePhotoCapture",
+      "pass": true
+    },
+    {
+      "label": "DriverMissionView.handleBarcodeScan",
+      "pass": true
+    },
+    {
+      "label": "DriverMissionView.handleOptimizeTour",
+      "pass": true
+    },
+    {
+      "label": "DriverMissionView.handleAddManualStop",
+      "pass": true
+    },
+    {
+      "label": "DriverMissionView.handleSubmitIssue",
+      "pass": true
+    },
+    {
+      "label": "DriverMissionView.handlePickupComplete",
+      "pass": true
+    },
+    {
+      "label": "QuickScanButton.claimOne",
+      "pass": true
+    },
+    {
+      "label": "QuickScanButton.handleManifestScan",
+      "pass": true
+    },
+    {
+      "label": "QuickScanButton.handleCreate",
+      "pass": true
+    },
+    {
+      "label": "QuickScanButton.canClaim",
+      "pass": true
+    },
+    {
+      "label": "QuickScanButton.handleClaim",
+      "pass": true
+    },
+    {
+      "label": "QuickScanButton.handleScan",
+      "pass": true
+    },
+    {
+      "label": "QuickScanButton.reset",
+      "pass": true
+    },
+    {
+      "label": "QuickScanButton.handleClaimClick",
+      "pass": true
+    },
+    {
+      "label": "DeviceDiagnostics.stopCamera",
+      "pass": true
+    },
+    {
+      "label": "DeviceDiagnostics.startCamera",
+      "pass": true
+    },
+    {
+      "label": "DeviceDiagnostics.testGps",
+      "pass": true
+    },
+    {
+      "label": "DeviceDiagnostics.printTest",
+      "pass": true
+    },
+    {
+      "label": "BarcodeScanner.handleManualSubmit",
+      "pass": true
+    },
+    {
+      "label": "BarcodeScanner.handleClose",
+      "pass": true
+    }
+  ]
+}

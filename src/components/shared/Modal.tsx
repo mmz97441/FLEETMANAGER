@@ -43,6 +43,8 @@ export interface ModalProps {
   ariaLabel?: string;
   role?: 'dialog' | 'alertdialog';
   className?: string;
+  /** Use the whole mobile viewport for long forms; desktop remains a dialog. */
+  mobileFullscreen?: boolean;
 }
 
 const sizeClasses: Record<ModalSize, string> = {
@@ -75,7 +77,8 @@ const Modal: React.FC<ModalProps> = ({
   dirty = false,
   ariaLabel,
   role = 'dialog',
-  className = ''
+  className = '',
+  mobileFullscreen = false
 }) => {
   const titleId = useId();
   const subtitleId = useId();
@@ -88,7 +91,7 @@ const Modal: React.FC<ModalProps> = ({
 
   const modalContent = (
     <div 
-      className={`fixed inset-0 flex items-end sm:items-center justify-center p-2 sm:p-4 ${className}`}
+      className={`fixed inset-0 flex items-end sm:items-center justify-center p-2 sm:p-4 ${mobileFullscreen ? 'ui-dialog-fullscreen' : ''} ${className}`}
       ref={layerRef}
       tabIndex={-1}
       style={{ zIndex: 10010 }}
@@ -101,7 +104,7 @@ const Modal: React.FC<ModalProps> = ({
     >
       {/* Overlay */}
       <div 
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-fade-in"
+        className="absolute inset-0 bg-slate-950/50 animate-fade-in"
         onClick={closeOnOverlay ? handleClose : undefined}
         aria-hidden="true"
       />
@@ -109,7 +112,7 @@ const Modal: React.FC<ModalProps> = ({
       {/* Modal Box */}
       <div 
         className={`
-          relative bg-white rounded-2xl shadow-2xl 
+          ui-dialog-box relative bg-white rounded-xl shadow-xl
           w-full ${sizeClasses[size]} 
           max-h-[calc(100dvh-1rem)] sm:max-h-[90dvh] overflow-hidden flex flex-col
           animate-fade-in
@@ -118,7 +121,7 @@ const Modal: React.FC<ModalProps> = ({
       >
         {/* Header */}
         {(title || showCloseButton) && (
-          <div className={`px-4 py-3 sm:px-6 sm:py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 flex-shrink-0 ${headerClassName}`}>
+          <div className={`ui-dialog-header px-4 py-2 sm:px-6 sm:py-3 border-b border-slate-200 flex justify-between items-center bg-white flex-shrink-0 ${headerClassName}`}>
             <div className="flex items-center gap-3 min-w-0 flex-1">
               {headerIcon && (
                 <div className="flex-shrink-0 p-2 bg-brand-50 text-brand-600 rounded-xl">
@@ -143,7 +146,7 @@ const Modal: React.FC<ModalProps> = ({
                 type="button"
                 disabled={blocked}
                 onClick={handleClose}
-                className="min-h-11 min-w-11 flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-slate-200 rounded-full transition-colors flex-shrink-0 ml-2 disabled:opacity-50"
+                className="ui-button ui-button-ghost ui-button-icon flex-shrink-0 ml-2"
                 aria-label="Fermer"
               >
                 <X size={20} />
@@ -159,7 +162,7 @@ const Modal: React.FC<ModalProps> = ({
 
         {/* Footer */}
         {footer && (
-          <div className={`px-4 py-3 sm:px-6 sm:py-4 border-t border-slate-100 bg-slate-50 flex-shrink-0 pb-[max(1rem,env(safe-area-inset-bottom))] ${footerClassName}`}>
+          <div className={`ui-dialog-footer px-4 py-2 sm:px-6 sm:py-3 border-t border-slate-200 bg-white flex-shrink-0 pb-[max(0.5rem,env(safe-area-inset-bottom))] ${footerClassName}`}>
             {footer}
           </div>
         )}

@@ -1,0 +1,25 @@
+{
+  "checkedAt": "2026-09-12T01:05:11.791Z",
+  "method": "Measured from MissionManager root to first mission card header; fixture banner and outer padding excluded.",
+  "results": [
+    {
+      "width": 320,
+      "firstResultOffset": 435,
+      "documentOverflow": false,
+      "firstCard": "Chauffeur de démonstration avec un nom particulièrement long\n\nAffectée au chauffeur\n\nPas de véhicule · Hub fictif\n\n3 arrêts\n9999 colis\n123 456,8 km\n92 h 35\n\n100 % · 9999 livrés\n\nNord\nLien vers cette tournée\nImprimer"
+    },
+    {
+      "width": 390,
+      "firstResultOffset": 387,
+      "documentOverflow": false,
+      "firstCard": "Chauffeur de démonstration avec un nom particulièrement long\n\nAffectée au chauffeur\n\nPas de véhicule · Hub fictif\n\n3 arrêts\n9999 colis\n123 456,8 km\n92 h 35\n\n100 % · 9999 livrés\n\nNord\nLien vers cette tournée\nImprimer"
+    },
+    {
+      "width": 1365,
+      "firstResultOffset": 338,
+      "documentOverflow": false,
+      "firstCard": "Chauffeur de démonstration avec un nom particulièrement long\n\nAffectée au chauffeur\n\nPas de véhicule · Hub fictif\n\n3 arrêts\n9999 colis\n123 456,8 km\n92 h 35\n\n100 % · 9999 livrés\n\nNord\nLien vers cette tournée\nImprimer"
+    }
+  ],
+  "exceptions": []
+}
