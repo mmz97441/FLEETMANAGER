@@ -243,7 +243,7 @@ const QuoteManager: React.FC<QuoteManagerProps> = ({ quotes, onUpdateQuote }) =>
                                 </div>
 
                                 {/* ITINÉRAIRE & CONTACTS */}
-                                <div className="col-span-1 md:md:col-span-2 bg-slate-50 p-5 rounded-xl border border-slate-200">
+                                <div className="col-span-1 md:col-span-2 bg-slate-50 p-5 rounded-xl border border-slate-200">
                                     <h4 className="text-sm font-bold text-slate-500 uppercase mb-4 flex items-center gap-2">
                                         <MapPin size={14} /> Itinéraire & Contacts
                                     </h4>

@@ -26,6 +26,7 @@ for (const file of scope.files) {
       if (tag === 'table' || tag === 'DataTable') count.tables++;
       if (tag === 'Modal' || tag === 'ConfirmModal') count.dialogs++;
       if (/\btext-(?:xs|\[(?:10|11|12)px\])/.test(classes)) report('small-text', node, 'Information visible sous 14 px : migrer ou justifier une métadonnée secondaire dans le périmètre.');
+      if (/\b(sm|md|lg|xl|2xl):\1:/.test(classes)) report('responsive-variant', node, 'Préfixe responsive dupliqué : la règle Tailwind ne sera pas appliquée.');
       if (['div', 'span', 'article'].includes(tag) && attrs.onClick && !attrs.onClick.includes('stopPropagation') && attrs['aria-hidden'] !== '"true"') {
         if (!attrs.role || !attrs.tabIndex || !(attrs.onKeyDown || attrs.onKeyUp)) report('keyboard-command', node, 'Commande non native sans rôle, tabulation et clavier : préférer un bouton.');
       }

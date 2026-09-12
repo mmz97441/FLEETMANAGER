@@ -15,7 +15,7 @@ const click=async selector=>{await ev(`(()=>{const el=document.querySelector(${J
 const key=async (key,shift=false)=>{await call('Input.dispatchKeyEvent',{type:'keyDown',key,code:key,windowsVirtualKeyCode:key==='Tab'?9:27,modifiers:shift?8:0});await call('Input.dispatchKeyEvent',{type:'keyUp',key,code:key});await pause(80)};
 const navigate=async mode=>{await ev(`try{sessionStorage.setItem('fixtureMode',${JSON.stringify(mode)})}catch{}`);await call('Page.navigate',{url:'http://127.0.0.1:5244/?fixture='+mode});await pause(1400)};
 const type=async(selector,text)=>{await ev(`document.querySelector(${JSON.stringify(selector)}).focus()`);await call('Input.insertText',{text});await pause(50)};
-const screenshot=async name=>{const r=await call('Page.captureScreenshot',{format:'png'});await writeFile(`${out}/shared-${name}.png`,Buffer.from(r.data,'base64'))};
+const screenshot=async name=>{await pause(350);const r=await call('Page.captureScreenshot',{format:'png'});await writeFile(`${out}/shared-${name}.png`,Buffer.from(r.data,'base64'))};
 await call('Page.bringToFront');await call('Runtime.enable');await call('Page.enable');await call('Network.enable');await call('Network.setBlockedURLs',{urls:['*://*.googleapis.com/*','*://*.firebaseio.com/*','*://*.cloudfunctions.net/*','*://*.run.app/*']});
 
 const wait=async expr=>{for(let i=0;i<100;i++){if(await ev(expr))return;await pause(100)}throw new Error('Timeout '+expr)};
@@ -60,5 +60,15 @@ await call('Page.navigate',{url:'http://127.0.0.1:5244/__gallery?screen=dashboar
 const metrics=await ev(`['Km parcourus','Litres totaux','Carburant par km'].map(label=>{const p=[...document.querySelectorAll('span')].find(e=>e.textContent===label);const card=p?.parentElement.parentElement;const t=card?.querySelector('span.inline-flex');return {label,text:card?.textContent,color:t&&getComputedStyle(t).color}})`);
 checks.push({name:'Indicateurs réels distance et volume neutres, coût contextualisé',pass:metrics[0]?.color==='rgb(71, 85, 105)'&&metrics[1]?.color==='rgb(71, 85, 105)'&&metrics[2]?.color==='rgb(22, 101, 52)',measurements:metrics});
 await screenshot('dashboard-president');
+await call('Page.navigate',{url:'http://127.0.0.1:5244/__gallery?screen=dashboard&month=2026-09&no-baseline=1'});await wait(`document.body.innerText.includes('Comparaison indisponible')`);check('Absence de base précédente ne donne pas Stable ou succès',await ev(`!document.body.innerText.includes('Stable')&&[...document.querySelectorAll('span.inline-flex')].filter(e=>e.textContent.includes('Comparaison indisponible')).every(e=>getComputedStyle(e).color==='rgb(71, 85, 105)')`));await screenshot('dashboard-sans-comparaison');
 }catch(error){checks.push({name:'probe-error',pass:false,error:error.stack,body:await ev('document.body.innerText.slice(0,2000)')})}
+try {
+await call('Emulation.setTimezoneOverride',{timezoneId:'Indian/Reunion'});
+for (const [offset,expected,label] of [[-1,'1','hier'],[0,'0','aujourd’hui'],[1,'0','demain']]) {
+ await call('Page.navigate',{url:`http://127.0.0.1:5244/__gallery?screen=dashboard&ct-offset=${offset}`});
+ await wait(`document.body.innerText.includes('CT expirés')`);
+ const count=await ev(`[...document.querySelectorAll('span')].find(e=>e.textContent==='CT expirés')?.nextElementSibling?.textContent`);
+ checks.push({name:`Dashboard CT ${label} selon jour local Réunion`,pass:count===expected,actual:count,expected});
+}
+} catch(error) { checks.push({name:'calendar-probe-error',pass:false,error:error.stack}); }
 await writeFile(`${out}/contracts-browser.json`,JSON.stringify({checkedAt:new Date().toISOString(),checks,exceptions},null,2));console.log(JSON.stringify({checks,exceptions},null,2));await call('Page.close');ws.close();if(checks.some(c=>!c.pass)||exceptions.length)process.exitCode=1;

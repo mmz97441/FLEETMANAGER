@@ -1,5 +1,5 @@
 {
-  "checkedAt": "2026-09-12T01:10:07.706Z",
+  "checkedAt": "2026-09-12T01:33:49.808Z",
   "checks": [
     {
       "name": "Galerie sans débordement 320",
@@ -175,6 +175,28 @@
           "color": "rgb(22, 101, 52)"
         }
       ]
+    },
+    {
+      "name": "Absence de base précédente ne donne pas Stable ou succès",
+      "pass": true
+    },
+    {
+      "name": "Dashboard CT hier selon jour local Réunion",
+      "pass": true,
+      "actual": "1",
+      "expected": "1"
+    },
+    {
+      "name": "Dashboard CT aujourd’hui selon jour local Réunion",
+      "pass": true,
+      "actual": "0",
+      "expected": "0"
+    },
+    {
+      "name": "Dashboard CT demain selon jour local Réunion",
+      "pass": true,
+      "actual": "0",
+      "expected": "0"
     }
   ],
   "exceptions": []

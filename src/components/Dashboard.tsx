@@ -17,12 +17,13 @@ import { MissionStatus } from '../types';
 import Modal from './shared/Modal';
 import PageHeader from './shared/PageHeader';
 import Trend from './shared/Trend';
+import { trendPercent } from '../utils/uiTrend';
 import { usePermissions, Permission } from '../usePermissions';
 import { useMissionStats } from '../hooks/useMissionStats';
 import { normalizeRole, roleKey } from '../utils/role';
 import { formatEuro, formatDistance, formatNumberFr } from '../utils/format';
 import { useUrlParam } from '../hooks/useUrlState';
-import { todayISO } from '../utils/date';
+import { todayISO, daysUntilCalendarDate } from '../utils/date';
 
 // ============================================================================
 // TYPES & INTERFACES
@@ -87,13 +88,7 @@ const calculateRealDistance = (logs: FuelLog[], targetMonth: number, targetYear:
   return totalDistance;
 };
 
-const daysUntil = (dateStr: string | undefined): number => {
-  if (!dateStr) return 999;
-  const target = new Date(dateStr);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return Math.ceil((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-};
+const daysUntil = (dateStr: string | undefined): number => daysUntilCalendarDate(dateStr) ?? 999;
 
 const isExpired = (dateStr: string | undefined): boolean => daysUntil(dateStr) < 0;
 const isExpiringSoon = (dateStr: string | undefined, days: number): boolean => {
@@ -353,7 +348,7 @@ const Dashboard: React.FC<DashboardProps> = ({
 
     const fuelCost = monthlyFuelLogs.reduce((acc, l) => acc + l.cost + (l.adBlueCost || 0), 0);
     const prevFuelCost = prevMonthFuelLogs.reduce((acc, l) => acc + l.cost + (l.adBlueCost || 0), 0);
-    const fuelTrend = prevFuelCost > 0 ? ((fuelCost - prevFuelCost) / prevFuelCost) * 100 : 0;
+    const fuelTrend = trendPercent(fuelCost, prevFuelCost);
 
     const totalVolume = monthlyFuelLogs.reduce((acc, l) => acc + l.volume, 0);
     const totalDistance = calculateRealDistance(logs, month, year);
@@ -385,7 +380,7 @@ const Dashboard: React.FC<DashboardProps> = ({
 
     const maintCost = monthlyMaintLogs.reduce((acc, l) => acc + l.cost, 0);
     const prevMaintCost = prevMonthMaintLogs.reduce((acc, l) => acc + l.cost, 0);
-    const maintTrend = prevMaintCost > 0 ? ((maintCost - prevMaintCost) / prevMaintCost) * 100 : 0;
+    const maintTrend = trendPercent(maintCost, prevMaintCost);
 
     // --- RH ---
     const drivers = users.filter(u => {
@@ -435,38 +430,38 @@ const Dashboard: React.FC<DashboardProps> = ({
     // Coût/km carburant
     const fuelCostPerKm = totalDistance > 0 ? fuelCost / totalDistance : 0;
     const prevFuelCostPerKm = prevTotalDistance > 0 ? prevFuelCost / prevTotalDistance : 0;
-    const fuelCostPerKmTrend = prevFuelCostPerKm > 0 ? ((fuelCostPerKm - prevFuelCostPerKm) / prevFuelCostPerKm) * 100 : 0;
+    const fuelCostPerKmTrend = trendPercent(fuelCostPerKm, prevFuelCostPerKm);
 
     // Coût/km maintenance
     const maintCostPerKm = totalDistance > 0 ? maintCost / totalDistance : 0;
     const prevMaintCostPerKm = prevTotalDistance > 0 ? prevMaintCost / prevTotalDistance : 0;
-    const maintCostPerKmTrend = prevMaintCostPerKm > 0 ? ((maintCostPerKm - prevMaintCostPerKm) / prevMaintCostPerKm) * 100 : 0;
+    const maintCostPerKmTrend = trendPercent(maintCostPerKm, prevMaintCostPerKm);
 
     // Coût total/km
     const totalCost = fuelCost + maintCost;
     const prevTotalCost = prevFuelCost + prevMaintCost;
     const totalCostPerKm = totalDistance > 0 ? totalCost / totalDistance : 0;
     const prevTotalCostPerKm = prevTotalDistance > 0 ? prevTotalCost / prevTotalDistance : 0;
-    const totalCostPerKmTrend = prevTotalCostPerKm > 0 ? ((totalCostPerKm - prevTotalCostPerKm) / prevTotalCostPerKm) * 100 : 0;
+    const totalCostPerKmTrend = trendPercent(totalCostPerKm, prevTotalCostPerKm);
 
     // Tendance km parcourus
-    const distanceTrend = prevTotalDistance > 0 ? ((totalDistance - prevTotalDistance) / prevTotalDistance) * 100 : 0;
+    const distanceTrend = trendPercent(totalDistance, prevTotalDistance);
 
     // Tendance consommation
-    const consumptionTrend = prevAvgConsumption > 0 ? ((avgConsumption - prevAvgConsumption) / prevAvgConsumption) * 100 : 0;
+    const consumptionTrend = trendPercent(avgConsumption, prevAvgConsumption);
 
     // Tendance litres
-    const volumeTrend = prevTotalVolume > 0 ? ((totalVolume - prevTotalVolume) / prevTotalVolume) * 100 : 0;
+    const volumeTrend = trendPercent(totalVolume, prevTotalVolume);
 
     // Coût moyen par véhicule (véhicules actifs)
     const costPerVehicle = activeVehicles.length > 0 ? totalCost / activeVehicles.length : 0;
     const prevCostPerVehicle = activeVehicles.length > 0 ? prevTotalCost / activeVehicles.length : 0;
-    const costPerVehicleTrend = prevCostPerVehicle > 0 ? ((costPerVehicle - prevCostPerVehicle) / prevCostPerVehicle) * 100 : 0;
+    const costPerVehicleTrend = trendPercent(costPerVehicle, prevCostPerVehicle);
 
     // Coût moyen par chauffeur
     const costPerDriver = drivers.length > 0 ? totalCost / drivers.length : 0;
     const prevCostPerDriver = drivers.length > 0 ? prevTotalCost / drivers.length : 0;
-    const costPerDriverTrend = prevCostPerDriver > 0 ? ((costPerDriver - prevCostPerDriver) / prevCostPerDriver) * 100 : 0;
+    const costPerDriverTrend = trendPercent(costPerDriver, prevCostPerDriver);
 
     // Taux d'utilisation flotte (véhicules avec au moins 1 plein ce mois)
     const vehiclesWithFuelThisMonth = new Set(monthlyFuelLogs.map(l => l.vehicleId)).size;

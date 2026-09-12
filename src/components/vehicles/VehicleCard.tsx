@@ -5,6 +5,7 @@
 import React from 'react';
 import { Truck, Gauge, AlertTriangle, Edit, Trash2, User as UserIcon, Plus, ArrowRightLeft, MapPin } from 'lucide-react';
 import { Vehicle, VehicleStatus, Issue, MaintenanceLog } from '../../types';
+import { isPastLocalDate } from '../../utils/date';
 import {
   getEffectiveStatus,
   getMaintenanceHealth,
@@ -43,7 +44,7 @@ const VehicleCard: React.FC<VehicleCardProps> = ({
   onAssignReplacement
 }) => {
   const health = getMaintenanceHealth(vehicle);
-  const controlOverdue = !!vehicle.technicalControlDate && new Date(vehicle.technicalControlDate) < new Date();
+  const controlOverdue = isPastLocalDate(vehicle.technicalControlDate);
   const vehicleType = ({ 'Heavy Truck': 'Poids lourd', Van: 'Utilitaire', Car: 'Véhicule léger', Trailer: 'Remorque', Electric: 'Électrique' } as Record<string, string>)[vehicle.type] || vehicle.type;
   const activeIssues = getActiveIssuesCount(vehicle.id, issues);
   const { status: effectiveStatus, isRepairing } = getEffectiveStatus(vehicle, issues, maintenanceLogs);

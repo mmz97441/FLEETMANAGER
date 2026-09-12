@@ -5,6 +5,7 @@
 import React from 'react';
 import { Truck, AlertCircle, Edit, Trash2, User as UserIcon, Plus, ArrowRightLeft, MapPin } from 'lucide-react';
 import { Vehicle, Issue, MaintenanceLog, VehicleStatus } from '../../types';
+import { isPastLocalDate } from '../../utils/date';
 import {
   getEffectiveStatus,
   getMaintenanceHealth,
@@ -44,7 +45,7 @@ const VehicleRow: React.FC<VehicleRowProps> = ({
 }) => {
   const health = getMaintenanceHealth(vehicle);
   const ctDate = vehicle.technicalControlDate ? new Date(vehicle.technicalControlDate) : null;
-  const isCtUrgent = ctDate && ctDate < new Date();
+  const isCtUrgent = isPastLocalDate(vehicle.technicalControlDate);
   const activeIssues = getActiveIssuesCount(vehicle.id, issues);
   const { status: effectiveStatus, isRepairing } = getEffectiveStatus(vehicle, issues, maintenanceLogs);
   const hasDriver = !!getDriverId(vehicle);

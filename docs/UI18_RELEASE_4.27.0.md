@@ -22,7 +22,7 @@ La version 4.27.0 applique les 18 axes de l’avis UI du 12 septembre 2026 à pa
 | **14. Icônes** | Lucide pour les commandes et instructions reprises, avec libellés visibles. Les symboles de classement deviennent des rangs lisibles. | Relecture visuelle des parcours client, chauffeur, bureau et aide. |
 | **15. Rédaction** | Pluriels réels, casse de phrase, dates françaises, virgule décimale et unités cohérentes. Les statuts stockés ne sont pas renommés dans les données. | Relecture des états singulier/pluriel et des montants, volumes et durées. |
 | **16. Devis au clavier** | Cartes de devis transformées en boutons natifs nommés ; focus au détail, retour à la liste protégé et restauration du focus. L’envoi attend la confirmation réelle et conserve prix/note en cas d’échec. | Entrée, Espace, retour, double clic, échec puis reprise avec le même contenu. |
-| **17. Sens des tendances** | Kilomètres et litres neutres sans objectif explicite. Les ratios de coût et de consommation utilisent un sens métier explicite. Zéro annonce « Stable » ; la période comparée est visible. Aucun calcul financier n’a été changé. | Tests `uiTrend` et vrai Dashboard : +100 % de km et +50 % de litres restent neutres ; −25 % de carburant/km est favorable. |
+| **17. Sens des tendances** | Kilomètres et litres neutres sans objectif explicite. Les ratios de coût et de consommation utilisent un sens métier explicite. Zéro annonce « Stable » ; la période comparée est visible. Les montants et distances calculés sont inchangés ; une base précédente nulle ou absente ne produit plus une fausse stabilité. | Tests `uiTrend` et vrai Dashboard : +100 % de km et +50 % de litres restent neutres ; −25 % de carburant/km est favorable. |
 | **18. Application du socle** | Adoption explicite des contrats sur les écrans repris, inventaire versionné, exceptions justifiées et contrôle `audit:ui` en CI. Les commandes de navigation/cartes conservent une géométrie adaptée à leur contenu. | [Périmètre](./UI18_SCOPE.json), [conventions](./UI_COMPONENTS.md), [sondes rejouables](../scripts/ui18/README.md) et résultats navigateur. |
 
 ## Mesures de place, sans promesse de vitesse utilisateur
@@ -41,14 +41,20 @@ Dans la liste client mesurée, les sept anciennes commandes de 30 à 42 px passe
 
 Les relevés initiaux du terrain utilisaient déjà un socle partiellement modifié : ils ne sont pas présentés comme un avant/après strict de 4.26.0. Les positions finales du scanner et les limites des mesures figurent dans le [rapport terrain](./UI18_TERRAIN_DECISIONS.md).
 
+## Dernières corrections issues de la revue
+
+La revue GitHub de la PR nº6 a relevé deux cas supplémentaires : un contrôle technique arrivant à échéance aujourd’hui était comparé à l’heure courante, et un préfixe responsive dupliqué comprimait le trajet du devis sur ordinateur. Les échéances des cartes, lignes véhicules et indicateurs du tableau de bord sont maintenant comparées par jour calendaire local, avec tests hier/aujourd’hui/demain dans trois fuseaux ; le trajet reprend les deux colonnes prévues. Le contrôle statique bloque désormais les préfixes responsive dupliqués.
+
+La relecture de l’orchestrateur a aussi retiré la fausse indication « Stable » lorsque la base précédente est nulle ou absente. Le tableau de bord annonce une comparaison indisponible ; les montants, distances et volumes ne sont pas modifiés.
+
 ## Vérifications
 
-- TypeScript, compilation frontend et fonctions ; **245 tests unitaires** et **127 vérifications Firebase** (31 règles, 32 intégration, 41 serveur, 13 cycle de tournée, 10 Storage).
+- TypeScript, compilation frontend et fonctions ; **260 tests unitaires** et **127 vérifications Firebase** (31 règles, 32 intégration, 41 serveur, 13 cycle de tournée, 10 Storage).
 - Le build conserve l’avertissement préexistant sur le chunk Firebase d’environ 651 kB minifié ; il ne bloque pas la compilation.
 - Audits des dépendances frontend et fonctions : **0 vulnérabilité signalée** au moment de la validation.
-- Contrats partagés : **36 contrôles navigateur**, plus **10 contrôles de navigation** Retour/Avancer, menu, brouillon et envoi en cours. Contrastes mesurés du texte des boutons : principal 7,56:1, secondaire 10,35:1, danger 6,47:1.
+- Contrats partagés : **40 contrôles navigateur**, plus **10 contrôles de navigation** Retour/Avancer, menu, brouillon et envoi en cours. Contrastes mesurés du texte des boutons : principal 7,56:1, secondaire 10,35:1, danger 6,47:1.
 - Parcours client : création, copie exacte, dépliage, recherche, rechargement et reprise, import, carnet, consultation/intervention et succès partiels.
-- Parcours bureau : densité, tableaux/cartes, devis au clavier, erreurs d’enregistrement et double soumission ; préparation du dispatch avec adresses complètes.
+- Parcours bureau : densité, tableaux/cartes, devis au clavier, erreurs d’enregistrement et double soumission ; préparation du dispatch avec adresses complètes ; 14 contrôles supplémentaires sur les échéances et la largeur du trajet après revue GitHub.
 - Parcours terrain : scan, manifeste, garde-fous, erreur/réponse perdue, arrêt manuel et preuves en attente ; 31 handlers métier comparés structurellement à la version précédente.
 
 Les preuves retenues sont versionnées sous [docs/validation/ui18](./validation/ui18/). Les essais intermédiaires de sondes remplacés par des relances corrigées sont identifiés dans les rapports des lots. Les scénarios utilisent des services simulés ou des émulateurs : aucun envoi client, livraison, message de support ou écriture métier de production n’a servi de test.
