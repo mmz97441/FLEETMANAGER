@@ -1,7 +1,7 @@
 {
   "name": "fleetgenius-pro",
   "private": true,
-  "version": "4.26.0",
+  "version": "4.27.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -13,7 +13,8 @@
     "test:rules": "node scripts/test-rules.mjs",
     "test:server": "node scripts/test-server.cjs && node scripts/test-mission-lifecycle.cjs",
     "test:storage": "node scripts/test-storage.mjs",
-    "test:emulated": "npm run test:rules && npm run test:integration && npm run test:server && npm run test:storage"
+    "test:emulated": "npm run test:rules && npm run test:integration && npm run test:server && npm run test:storage",
+    "audit:ui": "node scripts/audit-ui.mjs"
   },
   "dependencies": {
     "firebase": "^12.18.0",

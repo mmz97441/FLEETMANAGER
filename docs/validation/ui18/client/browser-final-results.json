@@ -1,0 +1,1248 @@
+{
+  "description": "Dernier résultat par scénario, issu des fichiers bruts conservés ; les essais de sonde remplacés sont détaillés séparément.",
+  "total": 36,
+  "passed": 36,
+  "results": [
+    {
+      "name": "create-options-and-retry-320",
+      "passed": true,
+      "width": 320,
+      "scroll": 320,
+      "labels": [
+        {
+          "id": "",
+          "labels": 1,
+          "aria": null,
+          "font": "16px"
+        }
+      ],
+      "focusInside": true,
+      "body": "Démonstration locale client\n\nDonnées fictives ; tous services métier neutralisés.\n\nOuvrirLien arrière-plan\nExpédition enregistrée\n\n1 colis enregistré\n\nPharmacie UX\n\n12 rue de démonstration, 97400 Saint-Denis\n\nEn attente de collecte. Préparez vos étiquettes maintenant ou retrouvez-les dans Mes colis.\n\nVos colis sont créés, mais l’ajout au carnet n’a pas été confirmé. Vérifiez Mes destinataires avant de l’ajouter à nouveau.\n\nPréparer les étiquettes\nFormat\nA6 · une par page\nA5 · deux par page\nA4 · quatre par page\nRéférences des colis\n\nRéférence abrégée\n\nCL-123456…789012\n\nCopier\nVoir en entier\nPartager\n\nRéférence complète copiée.\n\nImprimer les étiquettes\nTerminer",
+      "calls": [
+        [
+          "create",
+          {
+            "requestId": "0352d199-5978-4731-900b-fcefa2e572db",
+            "client": {
+              "id": "UX-CLIENT",
+              "companyName": "Entreprise de démonstration"
+            },
+            "recipient": {
+              "contactName": "Pharmacie UX",
+              "address": "12 rue de démonstration",
+              "city": "Saint-Denis",
+              "postalCode": "97400",
+              "contactPhone": "0262123456"
+            },
+            "zone": "NORD",
+            "packageCount": 1
+          }
+        ],
+        [
+          "create",
+          {
+            "requestId": "0352d199-5978-4731-900b-fcefa2e572db",
+            "client": {
+              "id": "UX-CLIENT",
+              "companyName": "Entreprise de démonstration"
+            },
+            "recipient": {
+              "contactName": "Pharmacie UX",
+              "address": "12 rue de démonstration",
+              "city": "Saint-Denis",
+              "postalCode": "97400",
+              "contactPhone": "0262123456"
+            },
+            "zone": "NORD",
+            "packageCount": 1
+          }
+        ],
+        [
+          "save-recipient",
+          {
+            "contactName": "Pharmacie UX",
+            "address": "12 rue de démonstration",
+            "city": "97400 Saint-Denis",
+            "contactPhone": "0262123456"
+          }
+        ]
+      ],
+      "source": "browser-results.json"
+    },
+    {
+      "name": "portal-loading-error-retry-320",
+      "passed": true,
+      "width": 320,
+      "scroll": 320,
+      "labels": [
+        {
+          "id": "",
+          "labels": 0,
+          "aria": "Rechercher dans mes colis",
+          "font": "16px"
+        },
+        {
+          "id": "",
+          "labels": 1,
+          "aria": "Filtrer mes colis par statut",
+          "font": "16px"
+        }
+      ],
+      "focusInside": false,
+      "body": "Démonstration locale client\n\nDonnées fictives ; tous services métier neutralisés.\n\nOuvrirLien arrière-plan\n\nEntreprise de démonstration\n\nMes expéditions\n1 colis au total\nCréer une expédition\nStatut\nTous (1)\nEn attente (0)\nEn transit (1)\nLivrés (0)\nÉchecs / retours (0)\nImports et étiquettes\nColis regroupés par destinataire\n\nsamedi 12 septembre 2026\n\n1 colis · 1 destinataire\n\nDestinataire UX\n\n12 rue fictive · 97400 Saint-Denis\n\nEn livraison\n1 colis\n\nEstimation d’arrivée le 13/09/2026 vers 05:53\n\nMasquer les colis\nÉtiquettes du destinataire\nBon de livraison\n\nEn livraison\n\nRéférence abrégée\n\nCL-123456…789012\n\nCopier\nVoir en entier\nPartager\n\nCommande : CMD-123\n\nCréneau demandé : 14/09/2026\n\nVoir le suivi\nÉtiquette\n1 expédition",
+      "source": "browser-results.json"
+    },
+    {
+      "name": "preview-readonly-and-audited-intervention-320",
+      "passed": true,
+      "calls": [
+        [
+          "audit",
+          {
+            "id": "UX-ADMIN",
+            "firstName": "Alex",
+            "lastName": "Responsable",
+            "email": "admin@example.invalid",
+            "role": "Admin"
+          },
+          {
+            "id": "UX-CLIENT",
+            "companyName": "Entreprise de démonstration",
+            "firstName": "Camille",
+            "lastName": "UX",
+            "email": "test@example.invalid",
+            "role": "Client",
+            "companyAddress": "12 rue fictive, 97400 Saint-Denis",
+            "companyPhone": "0262123456"
+          },
+          "77723f66-907d-4617-888f-bda215959868",
+          "Début de l’intervention",
+          "confirmed"
+        ],
+        [
+          "audit",
+          {
+            "id": "UX-ADMIN",
+            "firstName": "Alex",
+            "lastName": "Responsable",
+            "email": "admin@example.invalid",
+            "role": "Admin"
+          },
+          {
+            "id": "UX-CLIENT",
+            "companyName": "Entreprise de démonstration",
+            "firstName": "Camille",
+            "lastName": "UX",
+            "email": "test@example.invalid",
+            "role": "Client",
+            "companyAddress": "12 rue fictive, 97400 Saint-Denis",
+            "companyPhone": "0262123456"
+          },
+          "c9cd20c7-ef67-4f66-b7c6-4dd7fde76c09",
+          "Début de l’intervention",
+          "confirmed"
+        ],
+        [
+          "audit",
+          {
+            "id": "UX-ADMIN",
+            "firstName": "Alex",
+            "lastName": "Responsable",
+            "email": "admin@example.invalid",
+            "role": "Admin"
+          },
+          {
+            "id": "UX-CLIENT",
+            "companyName": "Entreprise de démonstration",
+            "firstName": "Camille",
+            "lastName": "UX",
+            "email": "test@example.invalid",
+            "role": "Client",
+            "companyAddress": "12 rue fictive, 97400 Saint-Denis",
+            "companyPhone": "0262123456"
+          },
+          "c9cd20c7-ef67-4f66-b7c6-4dd7fde76c09",
+          "Enregistrer les informations entreprise",
+          "requested"
+        ],
+        [
+          "company",
+          {
+            "id": "UX-CLIENT",
+            "companyName": "Entreprise de démonstration",
+            "firstName": "Camille",
+            "lastName": "UX",
+            "email": "test@example.invalid",
+            "role": "Client",
+            "companyAddress": "14 rue de démonstration, 97400 Saint-Denis",
+            "companyPhone": "0262123456",
+            "companySiret": ""
+          }
+        ],
+        [
+          "audit",
+          {
+            "id": "UX-ADMIN",
+            "firstName": "Alex",
+            "lastName": "Responsable",
+            "email": "admin@example.invalid",
+            "role": "Admin"
+          },
+          {
+            "id": "UX-CLIENT",
+            "companyName": "Entreprise de démonstration",
+            "firstName": "Camille",
+            "lastName": "UX",
+            "email": "test@example.invalid",
+            "role": "Client",
+            "companyAddress": "12 rue fictive, 97400 Saint-Denis",
+            "companyPhone": "0262123456"
+          },
+          "c9cd20c7-ef67-4f66-b7c6-4dd7fde76c09",
+          "Enregistrer les informations entreprise",
+          "confirmed"
+        ]
+      ],
+      "width": 320,
+      "scroll": 320,
+      "labels": [
+        {
+          "id": ":r6:-companyName",
+          "labels": 1,
+          "aria": null,
+          "font": "16px"
+        },
+        {
+          "id": ":r6:-companyPhone",
+          "labels": 1,
+          "aria": null,
+          "font": "16px"
+        },
+        {
+          "id": ":r6:-companyAddress",
+          "labels": 1,
+          "aria": null,
+          "font": "16px"
+        },
+        {
+          "id": ":r6:-companySiret",
+          "labels": 1,
+          "aria": null,
+          "font": "16px"
+        }
+      ],
+      "focusInside": true,
+      "body": "Démonstration locale client\n\nDonnées fictives ; tous services métier neutralisés.\n\nOuvrirLien arrière-plan\nConsultation client\n\nClient : Entreprise de démonstration · Intervenant : Alex Responsable\n\nConsultation en lecture seule\n\nIntervenir pour ce client\nIdentités et accès\nAccueil\nMes colis\nSuivi des livraisons\nStatistiques\nDestinataires\nMon entreprise\nMes devis\nAide\n\nLes devis et l’équipe se gèrent depuis les écrans de gestion dédiés. Le mot de passe reste réservé au titulaire du compte.\n\nMon entreprise\nIdentité de l’expéditeur et accès de votre équipe.\nMon entreprise (expéditeur)\nRaison sociale *\nTéléphone\nAdresse complète *\nSIRET\nEnregistrer\n\nInfos entreprise enregistrées — elles apparaîtront sur vos BL.\n\nMon équipe logistique\n\nInvitez des collaborateurs pour qu'ils puissent gérer les demandes en toute autonomie.\n\nAdmin Principal\nCamille UX\n\ntest@example.invalid\n\nCompte actif",
+      "source": "browser-results.json"
+    },
+    {
+      "name": "invitation-false-and-success-320",
+      "passed": true,
+      "source": "browser-results.json"
+    },
+    {
+      "name": "create-options-and-retry-390",
+      "passed": true,
+      "width": 390,
+      "scroll": 390,
+      "labels": [
+        {
+          "id": "",
+          "labels": 1,
+          "aria": null,
+          "font": "16px"
+        }
+      ],
+      "focusInside": true,
+      "body": "Démonstration locale client\n\nDonnées fictives ; tous services métier neutralisés.\n\nOuvrirLien arrière-plan\nExpédition enregistrée\n\n1 colis enregistré\n\nPharmacie UX\n\n12 rue de démonstration, 97400 Saint-Denis\n\nEn attente de collecte. Préparez vos étiquettes maintenant ou retrouvez-les dans Mes colis.\n\nVos colis sont créés, mais l’ajout au carnet n’a pas été confirmé. Vérifiez Mes destinataires avant de l’ajouter à nouveau.\n\nPréparer les étiquettes\nFormat\nA6 · une par page\nA5 · deux par page\nA4 · quatre par page\nRéférences des colis\n\nRéférence abrégée\n\nCL-123456…789012\n\nCopier\nVoir en entier\nPartager\n\nRéférence complète copiée.\n\nImprimer les étiquettes\nTerminer",
+      "calls": [
+        [
+          "create",
+          {
+            "requestId": "87460f1d-e099-4400-a1de-990f46bf95ae",
+            "client": {
+              "id": "UX-CLIENT",
+              "companyName": "Entreprise de démonstration"
+            },
+            "recipient": {
+              "contactName": "Pharmacie UX",
+              "address": "12 rue de démonstration",
+              "city": "Saint-Denis",
+              "postalCode": "97400",
+              "contactPhone": "0262123456"
+            },
+            "zone": "NORD",
+            "packageCount": 1
+          }
+        ],
+        [
+          "create",
+          {
+            "requestId": "87460f1d-e099-4400-a1de-990f46bf95ae",
+            "client": {
+              "id": "UX-CLIENT",
+              "companyName": "Entreprise de démonstration"
+            },
+            "recipient": {
+              "contactName": "Pharmacie UX",
+              "address": "12 rue de démonstration",
+              "city": "Saint-Denis",
+              "postalCode": "97400",
+              "contactPhone": "0262123456"
+            },
+            "zone": "NORD",
+            "packageCount": 1
+          }
+        ],
+        [
+          "save-recipient",
+          {
+            "contactName": "Pharmacie UX",
+            "address": "12 rue de démonstration",
+            "city": "97400 Saint-Denis",
+            "contactPhone": "0262123456"
+          }
+        ]
+      ],
+      "source": "browser-results.json"
+    },
+    {
+      "name": "portal-loading-error-retry-390",
+      "passed": true,
+      "width": 390,
+      "scroll": 390,
+      "labels": [
+        {
+          "id": "",
+          "labels": 0,
+          "aria": "Rechercher dans mes colis",
+          "font": "16px"
+        },
+        {
+          "id": "",
+          "labels": 1,
+          "aria": "Filtrer mes colis par statut",
+          "font": "16px"
+        }
+      ],
+      "focusInside": false,
+      "body": "Démonstration locale client\n\nDonnées fictives ; tous services métier neutralisés.\n\nOuvrirLien arrière-plan\n\nEntreprise de démonstration\n\nMes expéditions\n1 colis au total\nCréer une expédition\nStatut\nTous (1)\nEn attente (0)\nEn transit (1)\nLivrés (0)\nÉchecs / retours (0)\nImports et étiquettes\nColis regroupés par destinataire\n\nsamedi 12 septembre 2026\n\n1 colis · 1 destinataire\n\nDestinataire UX\n\n12 rue fictive · 97400 Saint-Denis\n\nEn livraison\n1 colis\n\nEstimation d’arrivée le 13/09/2026 vers 05:53\n\nMasquer les colis\nÉtiquettes du destinataire\nBon de livraison\n\nEn livraison\n\nRéférence abrégée\n\nCL-123456…789012\n\nCopier\nVoir en entier\nPartager\n\nCommande : CMD-123\n\nCréneau demandé : 14/09/2026\n\nVoir le suivi\nÉtiquette\n1 expédition",
+      "source": "browser-results.json"
+    },
+    {
+      "name": "preview-readonly-and-audited-intervention-390",
+      "passed": true,
+      "calls": [
+        [
+          "audit",
+          {
+            "id": "UX-ADMIN",
+            "firstName": "Alex",
+            "lastName": "Responsable",
+            "email": "admin@example.invalid",
+            "role": "Admin"
+          },
+          {
+            "id": "UX-CLIENT",
+            "companyName": "Entreprise de démonstration",
+            "firstName": "Camille",
+            "lastName": "UX",
+            "email": "test@example.invalid",
+            "role": "Client",
+            "companyAddress": "12 rue fictive, 97400 Saint-Denis",
+            "companyPhone": "0262123456"
+          },
+          "789f44f9-cdd1-4aea-b250-40b5c38ace9b",
+          "Début de l’intervention",
+          "confirmed"
+        ],
+        [
+          "audit",
+          {
+            "id": "UX-ADMIN",
+            "firstName": "Alex",
+            "lastName": "Responsable",
+            "email": "admin@example.invalid",
+            "role": "Admin"
+          },
+          {
+            "id": "UX-CLIENT",
+            "companyName": "Entreprise de démonstration",
+            "firstName": "Camille",
+            "lastName": "UX",
+            "email": "test@example.invalid",
+            "role": "Client",
+            "companyAddress": "12 rue fictive, 97400 Saint-Denis",
+            "companyPhone": "0262123456"
+          },
+          "e4910f36-877d-4b43-9656-a410e41d5de8",
+          "Début de l’intervention",
+          "confirmed"
+        ],
+        [
+          "audit",
+          {
+            "id": "UX-ADMIN",
+            "firstName": "Alex",
+            "lastName": "Responsable",
+            "email": "admin@example.invalid",
+            "role": "Admin"
+          },
+          {
+            "id": "UX-CLIENT",
+            "companyName": "Entreprise de démonstration",
+            "firstName": "Camille",
+            "lastName": "UX",
+            "email": "test@example.invalid",
+            "role": "Client",
+            "companyAddress": "12 rue fictive, 97400 Saint-Denis",
+            "companyPhone": "0262123456"
+          },
+          "e4910f36-877d-4b43-9656-a410e41d5de8",
+          "Enregistrer les informations entreprise",
+          "requested"
+        ],
+        [
+          "company",
+          {
+            "id": "UX-CLIENT",
+            "companyName": "Entreprise de démonstration",
+            "firstName": "Camille",
+            "lastName": "UX",
+            "email": "test@example.invalid",
+            "role": "Client",
+            "companyAddress": "14 rue de démonstration, 97400 Saint-Denis",
+            "companyPhone": "0262123456",
+            "companySiret": ""
+          }
+        ],
+        [
+          "audit",
+          {
+            "id": "UX-ADMIN",
+            "firstName": "Alex",
+            "lastName": "Responsable",
+            "email": "admin@example.invalid",
+            "role": "Admin"
+          },
+          {
+            "id": "UX-CLIENT",
+            "companyName": "Entreprise de démonstration",
+            "firstName": "Camille",
+            "lastName": "UX",
+            "email": "test@example.invalid",
+            "role": "Client",
+            "companyAddress": "12 rue fictive, 97400 Saint-Denis",
+            "companyPhone": "0262123456"
+          },
+          "e4910f36-877d-4b43-9656-a410e41d5de8",
+          "Enregistrer les informations entreprise",
+          "confirmed"
+        ]
+      ],
+      "width": 390,
+      "scroll": 390,
+      "labels": [
+        {
+          "id": ":r6:-companyName",
+          "labels": 1,
+          "aria": null,
+          "font": "16px"
+        },
+        {
+          "id": ":r6:-companyPhone",
+          "labels": 1,
+          "aria": null,
+          "font": "16px"
+        },
+        {
+          "id": ":r6:-companyAddress",
+          "labels": 1,
+          "aria": null,
+          "font": "16px"
+        },
+        {
+          "id": ":r6:-companySiret",
+          "labels": 1,
+          "aria": null,
+          "font": "16px"
+        }
+      ],
+      "focusInside": true,
+      "body": "Démonstration locale client\n\nDonnées fictives ; tous services métier neutralisés.\n\nOuvrirLien arrière-plan\nConsultation client\n\nClient : Entreprise de démonstration · Intervenant : Alex Responsable\n\nConsultation en lecture seule\n\nIntervenir pour ce client\nIdentités et accès\nAccueil\nMes colis\nSuivi des livraisons\nStatistiques\nDestinataires\nMon entreprise\nMes devis\nAide\n\nLes devis et l’équipe se gèrent depuis les écrans de gestion dédiés. Le mot de passe reste réservé au titulaire du compte.\n\nMon entreprise\nIdentité de l’expéditeur et accès de votre équipe.\nMon entreprise (expéditeur)\nRaison sociale *\nTéléphone\nAdresse complète *\nSIRET\nEnregistrer\n\nInfos entreprise enregistrées — elles apparaîtront sur vos BL.\n\nMon équipe logistique\n\nInvitez des collaborateurs pour qu'ils puissent gérer les demandes en toute autonomie.\n\nAdmin Principal\nCamille UX\n\ntest@example.invalid\n\nCompte actif",
+      "source": "browser-results.json"
+    },
+    {
+      "name": "invitation-false-and-success-390",
+      "passed": true,
+      "source": "browser-results.json"
+    },
+    {
+      "name": "create-options-and-retry-1365",
+      "passed": true,
+      "width": 1365,
+      "scroll": 1365,
+      "labels": [
+        {
+          "id": "",
+          "labels": 1,
+          "aria": null,
+          "font": "16px"
+        }
+      ],
+      "focusInside": true,
+      "body": "Démonstration locale client\n\nDonnées fictives ; tous services métier neutralisés.\n\nOuvrirLien arrière-plan\nExpédition enregistrée\n\n1 colis enregistré\n\nPharmacie UX\n\n12 rue de démonstration, 97400 Saint-Denis\n\nEn attente de collecte. Préparez vos étiquettes maintenant ou retrouvez-les dans Mes colis.\n\nVos colis sont créés, mais l’ajout au carnet n’a pas été confirmé. Vérifiez Mes destinataires avant de l’ajouter à nouveau.\n\nPréparer les étiquettes\nFormat\nA6 · une par page\nA5 · deux par page\nA4 · quatre par page\nRéférences des colis\n\nRéférence abrégée\n\nCL-123456…789012\n\nCopier\nVoir en entier\nPartager\n\nRéférence complète copiée.\n\nImprimer les étiquettes\nTerminer",
+      "calls": [
+        [
+          "create",
+          {
+            "requestId": "5206016f-f444-4bab-942e-9d353a3cab5d",
+            "client": {
+              "id": "UX-CLIENT",
+              "companyName": "Entreprise de démonstration"
+            },
+            "recipient": {
+              "contactName": "Pharmacie UX",
+              "address": "12 rue de démonstration",
+              "city": "Saint-Denis",
+              "postalCode": "97400",
+              "contactPhone": "0262123456"
+            },
+            "zone": "NORD",
+            "packageCount": 1
+          }
+        ],
+        [
+          "create",
+          {
+            "requestId": "5206016f-f444-4bab-942e-9d353a3cab5d",
+            "client": {
+              "id": "UX-CLIENT",
+              "companyName": "Entreprise de démonstration"
+            },
+            "recipient": {
+              "contactName": "Pharmacie UX",
+              "address": "12 rue de démonstration",
+              "city": "Saint-Denis",
+              "postalCode": "97400",
+              "contactPhone": "0262123456"
+            },
+            "zone": "NORD",
+            "packageCount": 1
+          }
+        ],
+        [
+          "save-recipient",
+          {
+            "contactName": "Pharmacie UX",
+            "address": "12 rue de démonstration",
+            "city": "97400 Saint-Denis",
+            "contactPhone": "0262123456"
+          }
+        ]
+      ],
+      "source": "browser-results.json"
+    },
+    {
+      "name": "portal-loading-error-retry-1365",
+      "passed": true,
+      "width": 1365,
+      "scroll": 1365,
+      "labels": [
+        {
+          "id": "",
+          "labels": 0,
+          "aria": "Rechercher dans mes colis",
+          "font": "16px"
+        },
+        {
+          "id": "",
+          "labels": 1,
+          "aria": "Filtrer mes colis par statut",
+          "font": "16px"
+        }
+      ],
+      "focusInside": false,
+      "body": "Démonstration locale client\n\nDonnées fictives ; tous services métier neutralisés.\n\nOuvrirLien arrière-plan\n\nEntreprise de démonstration\n\nMes expéditions\n1 colis au total\nCréer une expédition\nStatut\nTous\n(1)\nEn attente\n(0)\nEn transit\n(1)\nLivrés\n(0)\nÉchecs / retours\n(0)\nImports et étiquettes\nColis regroupés par destinataire\n\nsamedi 12 septembre 2026\n\n1 colis · 1 destinataire\n\nDestinataire UX\n\n12 rue fictive · 97400 Saint-Denis\n\nEn livraison\n1 colis\n\nEstimation d’arrivée le 13/09/2026 vers 05:53\n\nMasquer les colis\nÉtiquettes du destinataire\nBon de livraison\n\nEn livraison\n\nRéférence abrégée\n\nCL-123456…789012\n\nCopier\nVoir en entier\nPartager\n\nCommande : CMD-123\n\nCréneau demandé : 14/09/2026\n\nVoir le suivi\nÉtiquette\n1 expédition",
+      "source": "browser-results.json"
+    },
+    {
+      "name": "preview-readonly-and-audited-intervention-1365",
+      "passed": true,
+      "calls": [
+        [
+          "audit",
+          {
+            "id": "UX-ADMIN",
+            "firstName": "Alex",
+            "lastName": "Responsable",
+            "email": "admin@example.invalid",
+            "role": "Admin"
+          },
+          {
+            "id": "UX-CLIENT",
+            "companyName": "Entreprise de démonstration",
+            "firstName": "Camille",
+            "lastName": "UX",
+            "email": "test@example.invalid",
+            "role": "Client",
+            "companyAddress": "12 rue fictive, 97400 Saint-Denis",
+            "companyPhone": "0262123456"
+          },
+          "4d40862a-4a4f-409d-8a26-a05a80e1c564",
+          "Début de l’intervention",
+          "confirmed"
+        ],
+        [
+          "audit",
+          {
+            "id": "UX-ADMIN",
+            "firstName": "Alex",
+            "lastName": "Responsable",
+            "email": "admin@example.invalid",
+            "role": "Admin"
+          },
+          {
+            "id": "UX-CLIENT",
+            "companyName": "Entreprise de démonstration",
+            "firstName": "Camille",
+            "lastName": "UX",
+            "email": "test@example.invalid",
+            "role": "Client",
+            "companyAddress": "12 rue fictive, 97400 Saint-Denis",
+            "companyPhone": "0262123456"
+          },
+          "44d47079-d5f0-4718-986f-97e65a83b689",
+          "Début de l’intervention",
+          "confirmed"
+        ],
+        [
+          "audit",
+          {
+            "id": "UX-ADMIN",
+            "firstName": "Alex",
+            "lastName": "Responsable",
+            "email": "admin@example.invalid",
+            "role": "Admin"
+          },
+          {
+            "id": "UX-CLIENT",
+            "companyName": "Entreprise de démonstration",
+            "firstName": "Camille",
+            "lastName": "UX",
+            "email": "test@example.invalid",
+            "role": "Client",
+            "companyAddress": "12 rue fictive, 97400 Saint-Denis",
+            "companyPhone": "0262123456"
+          },
+          "44d47079-d5f0-4718-986f-97e65a83b689",
+          "Enregistrer les informations entreprise",
+          "requested"
+        ],
+        [
+          "company",
+          {
+            "id": "UX-CLIENT",
+            "companyName": "Entreprise de démonstration",
+            "firstName": "Camille",
+            "lastName": "UX",
+            "email": "test@example.invalid",
+            "role": "Client",
+            "companyAddress": "14 rue de démonstration, 97400 Saint-Denis",
+            "companyPhone": "0262123456",
+            "companySiret": ""
+          }
+        ],
+        [
+          "audit",
+          {
+            "id": "UX-ADMIN",
+            "firstName": "Alex",
+            "lastName": "Responsable",
+            "email": "admin@example.invalid",
+            "role": "Admin"
+          },
+          {
+            "id": "UX-CLIENT",
+            "companyName": "Entreprise de démonstration",
+            "firstName": "Camille",
+            "lastName": "UX",
+            "email": "test@example.invalid",
+            "role": "Client",
+            "companyAddress": "12 rue fictive, 97400 Saint-Denis",
+            "companyPhone": "0262123456"
+          },
+          "44d47079-d5f0-4718-986f-97e65a83b689",
+          "Enregistrer les informations entreprise",
+          "confirmed"
+        ]
+      ],
+      "width": 1365,
+      "scroll": 1365,
+      "labels": [
+        {
+          "id": ":r6:-companyName",
+          "labels": 1,
+          "aria": null,
+          "font": "14px"
+        },
+        {
+          "id": ":r6:-companyPhone",
+          "labels": 1,
+          "aria": null,
+          "font": "14px"
+        },
+        {
+          "id": ":r6:-companyAddress",
+          "labels": 1,
+          "aria": null,
+          "font": "14px"
+        },
+        {
+          "id": ":r6:-companySiret",
+          "labels": 1,
+          "aria": null,
+          "font": "14px"
+        }
+      ],
+      "focusInside": true,
+      "body": "Démonstration locale client\n\nDonnées fictives ; tous services métier neutralisés.\n\nOuvrirLien arrière-plan\nVoir en tant que\nConsultation client\n\nClient : Entreprise de démonstration · Intervenant : Alex Responsable\n\nConsultation en lecture seule\n\nIntervenir pour ce client\nIdentités et accès\nAccueil\nMes colis\nSuivi des livraisons\nStatistiques\nDestinataires\nMon entreprise\nMes devis\nAide\n\nLes devis et l’équipe se gèrent depuis les écrans de gestion dédiés. Le mot de passe reste réservé au titulaire du compte.\n\nMon entreprise\nIdentité de l’expéditeur et accès de votre équipe.\nMon entreprise (expéditeur)\nRaison sociale *\nTéléphone\nAdresse complète *\nSIRET\nEnregistrer\n\nInfos entreprise enregistrées — elles apparaîtront sur vos BL.\n\nMon équipe logistique\n\nInvitez des collaborateurs pour qu'ils puissent gérer les demandes en toute autonomie.\n\nAdmin Principal\nCamille UX\n\ntest@example.invalid\n\nCompte actif",
+      "source": "browser-results.json"
+    },
+    {
+      "name": "invitation-false-and-success-1365",
+      "passed": true,
+      "source": "browser-results.json"
+    },
+    {
+      "name": "keyboard-reference-search-320",
+      "passed": true,
+      "source": "browser-keyboard-reload-results.json"
+    },
+    {
+      "name": "fullscreen-form-and-resume-reload-320",
+      "passed": true,
+      "sizes": {
+        "dialog": {
+          "x": 0,
+          "y": 0,
+          "width": 320,
+          "height": 568,
+          "top": 0,
+          "right": 320,
+          "bottom": 568,
+          "left": 0
+        },
+        "footer": {
+          "x": 16,
+          "y": 516,
+          "width": 288,
+          "height": 44,
+          "top": 516,
+          "right": 304,
+          "bottom": 560,
+          "left": 16
+        },
+        "width": 320,
+        "height": 568
+      },
+      "source": "browser-mobile-reload-results.json"
+    },
+    {
+      "name": "keyboard-reference-search-390",
+      "passed": true,
+      "source": "browser-keyboard-reload-results.json"
+    },
+    {
+      "name": "fullscreen-form-and-resume-reload-390",
+      "passed": true,
+      "sizes": {
+        "dialog": {
+          "x": 0,
+          "y": 0,
+          "width": 390,
+          "height": 844,
+          "top": 0,
+          "right": 390,
+          "bottom": 844,
+          "left": 0
+        },
+        "footer": {
+          "x": 16,
+          "y": 792,
+          "width": 358,
+          "height": 44,
+          "top": 792,
+          "right": 374,
+          "bottom": 836,
+          "left": 16
+        },
+        "width": 390,
+        "height": 844
+      },
+      "source": "browser-mobile-reload-results.json"
+    },
+    {
+      "name": "keyboard-reference-search-1365",
+      "passed": true,
+      "source": "browser-keyboard-reload-results.json"
+    },
+    {
+      "name": "fullscreen-form-and-resume-reload-1365",
+      "passed": true,
+      "sizes": {
+        "dialog": {
+          "x": 426.5,
+          "y": 45,
+          "width": 512,
+          "height": 810,
+          "top": 45,
+          "right": 938.5,
+          "bottom": 855,
+          "left": 426.5
+        },
+        "footer": {
+          "x": 450.5,
+          "y": 799,
+          "width": 464,
+          "height": 44,
+          "top": 799,
+          "right": 914.5,
+          "bottom": 843,
+          "left": 450.5
+        },
+        "width": 1365,
+        "height": 900
+      },
+      "source": "browser-keyboard-reload-results.json"
+    },
+    {
+      "name": "nested-preview-context-320",
+      "passed": true,
+      "header": {
+        "height": 145,
+        "text": "Consultation client\n\nClient : Pharmacie du quartier des grandes allées de Saint-Denis et des Hauts de la Réunion · Intervenant : Alex Responsable des opérations régionales"
+      },
+      "nested": {
+        "header": "Créer une expédition\n\nClient : Pharmacie du quartier des grandes allées de Saint-Denis et des Hauts de la Réunion · Intervenant : Alex Responsable des opérations régionales",
+        "top": 0,
+        "bottom": 165,
+        "footerBottom": 560,
+        "viewportHeight": 568,
+        "scroll": 320,
+        "width": 320
+      },
+      "source": "browser-nested-results.json"
+    },
+    {
+      "name": "recipient-list-and-form-320",
+      "passed": true,
+      "size": {
+        "width": 320,
+        "height": 568,
+        "submitHeight": 44,
+        "submitBottom": 560,
+        "viewport": 568
+      },
+      "source": "browser-additional-results.json"
+    },
+    {
+      "name": "result-print-independent-320",
+      "passed": true,
+      "source": "browser-additional-results.json"
+    },
+    {
+      "name": "nested-preview-context-390",
+      "passed": true,
+      "header": {
+        "height": 125,
+        "text": "Consultation client\n\nClient : Pharmacie du quartier des grandes allées de Saint-Denis et des Hauts de la Réunion · Intervenant : Alex Responsable des opérations régionales"
+      },
+      "nested": {
+        "header": "Créer une expédition\n\nClient : Pharmacie du quartier des grandes allées de Saint-Denis et des Hauts de la Réunion · Intervenant : Alex Responsable des opérations régionales",
+        "top": 0,
+        "bottom": 125,
+        "footerBottom": 836,
+        "viewportHeight": 844,
+        "scroll": 390,
+        "width": 390
+      },
+      "source": "browser-nested-results.json"
+    },
+    {
+      "name": "recipient-list-and-form-390",
+      "passed": true,
+      "size": {
+        "width": 390,
+        "height": 844,
+        "submitHeight": 44,
+        "submitBottom": 836,
+        "viewport": 844
+      },
+      "source": "browser-additional-results.json"
+    },
+    {
+      "name": "result-print-independent-390",
+      "passed": true,
+      "source": "browser-additional-results.json"
+    },
+    {
+      "name": "nested-preview-context-1365",
+      "passed": true,
+      "header": {
+        "height": 73,
+        "text": "Consultation client\n\nClient : Pharmacie du quartier des grandes allées de Saint-Denis et des Hauts de la Réunion · Intervenant : Alex Responsable des opérations régionales"
+      },
+      "nested": {
+        "header": "Créer une expédition\n\nClient : Pharmacie du quartier des grandes allées de Saint-Denis et des Hauts de la Réunion · Intervenant : Alex Responsable des opérations régionales",
+        "top": 45,
+        "bottom": 158,
+        "footerBottom": 843,
+        "viewportHeight": 900,
+        "scroll": 1365,
+        "width": 1365
+      },
+      "source": "browser-nested-results.json"
+    },
+    {
+      "name": "recipient-list-and-form-1365",
+      "passed": true,
+      "size": {
+        "width": 512,
+        "height": 781,
+        "submitHeight": 44,
+        "submitBottom": 828.5,
+        "viewport": 900
+      },
+      "source": "browser-additional-results.json"
+    },
+    {
+      "name": "result-print-independent-1365",
+      "passed": true,
+      "source": "browser-additional-results.json"
+    },
+    {
+      "name": "import-review-and-footer-320",
+      "passed": true,
+      "data": {
+        "name": "Importer 1 expédition valide",
+        "button": {
+          "x": 16,
+          "y": 516,
+          "width": 288,
+          "height": 44,
+          "top": 516,
+          "right": 304,
+          "bottom": 560,
+          "left": 16
+        },
+        "width": 320,
+        "documentWidth": 320,
+        "height": 568
+      },
+      "source": "browser-import-results.json"
+    },
+    {
+      "name": "import-recipients-review-and-footer-320",
+      "passed": true,
+      "data": {
+        "name": "Importer 1 destinataire",
+        "button": {
+          "x": 16,
+          "y": 516,
+          "width": 288,
+          "height": 44,
+          "top": 516,
+          "right": 304,
+          "bottom": 560,
+          "left": 16
+        },
+        "width": 320,
+        "documentWidth": 320,
+        "height": 568
+      },
+      "source": "browser-import-results.json"
+    },
+    {
+      "name": "import-review-and-footer-390",
+      "passed": true,
+      "data": {
+        "name": "Importer 1 expédition valide",
+        "button": {
+          "x": 16,
+          "y": 792,
+          "width": 358,
+          "height": 44,
+          "top": 792,
+          "right": 374,
+          "bottom": 836,
+          "left": 16
+        },
+        "width": 390,
+        "documentWidth": 390,
+        "height": 844
+      },
+      "source": "browser-import-results.json"
+    },
+    {
+      "name": "import-recipients-review-and-footer-390",
+      "passed": true,
+      "data": {
+        "name": "Importer 1 destinataire",
+        "button": {
+          "x": 16,
+          "y": 792,
+          "width": 358,
+          "height": 44,
+          "top": 792,
+          "right": 374,
+          "bottom": 836,
+          "left": 16
+        },
+        "width": 390,
+        "documentWidth": 390,
+        "height": 844
+      },
+      "source": "browser-import-results.json"
+    },
+    {
+      "name": "import-review-and-footer-1365",
+      "passed": true,
+      "data": {
+        "name": "Importer 1 expédition valide",
+        "button": {
+          "x": 535.421875,
+          "y": 733,
+          "width": 459.078125,
+          "height": 44,
+          "top": 733,
+          "right": 994.5,
+          "bottom": 777,
+          "left": 535.421875
+        },
+        "width": 1365,
+        "documentWidth": 1365,
+        "height": 900
+      },
+      "source": "browser-import-results.json"
+    },
+    {
+      "name": "import-recipients-review-and-footer-1365",
+      "passed": true,
+      "data": {
+        "name": "Importer 1 destinataire",
+        "button": {
+          "x": 535.421875,
+          "y": 688,
+          "width": 459.078125,
+          "height": 44,
+          "top": 688,
+          "right": 994.5,
+          "bottom": 732,
+          "left": 535.421875
+        },
+        "width": 1365,
+        "documentWidth": 1365,
+        "height": 900
+      },
+      "source": "browser-import-results.json"
+    },
+    {
+      "name": "quote-created-address-partial-failure",
+      "passed": true,
+      "calls": [
+        [
+          "quote",
+          {
+            "id": "q-1789175209928",
+            "clientId": "UX-CLIENT",
+            "clientName": "Entreprise de démonstration",
+            "requesterId": "UX-CLIENT",
+            "requesterName": "Camille UX",
+            "date": "2026-09-12T01:06:49.928Z",
+            "origin": "97400 Saint-Denis",
+            "originAddress": "22 rue fictive",
+            "originContact": {
+              "name": "Echec enlèvement UX",
+              "phone": "0262123456"
+            },
+            "destination": "97400 Saint-Denis",
+            "destinationAddress": "32 rue fictive",
+            "destinationContact": {
+              "name": "Nouveau destinataire UX",
+              "phone": "0262123457"
+            },
+            "goodsDescription": "Une palette de démonstration",
+            "weight": 10,
+            "dimensions": {
+              "length": 100,
+              "width": 100,
+              "height": 100
+            },
+            "volume": 1,
+            "pickupDate": "2026-09-17T08:00",
+            "deliveryDate": "2026-09-18T08:00",
+            "clientNotes": "",
+            "status": "Demande reçue"
+          }
+        ],
+        [
+          "recipient-import",
+          {
+            "companyName": "Entreprise de démonstration",
+            "createdBy": "UX-CLIENT",
+            "label": "Enlèvement - 97400 Saint-Denis",
+            "type": "pickup",
+            "address": "22 rue fictive",
+            "city": "97400 Saint-Denis",
+            "contactName": "Echec enlèvement UX",
+            "contactPhone": "0262123456",
+            "createdAt": "2026-09-12T01:06:49.934Z",
+            "updatedAt": "2026-09-12T01:06:49.934Z"
+          }
+        ],
+        [
+          "recipient-import",
+          {
+            "companyName": "Entreprise de démonstration",
+            "createdBy": "UX-CLIENT",
+            "label": "Livraison - 97400 Saint-Denis",
+            "type": "delivery",
+            "address": "32 rue fictive",
+            "city": "97400 Saint-Denis",
+            "contactName": "Nouveau destinataire UX",
+            "contactPhone": "0262123457",
+            "createdAt": "2026-09-12T01:06:49.939Z",
+            "updatedAt": "2026-09-12T01:06:49.939Z"
+          }
+        ]
+      ],
+      "source": "browser-quote-result.json"
+    },
+    {
+      "name": "quote-created-address-duplicate",
+      "passed": true,
+      "calls": [
+        [
+          "quote",
+          {
+            "id": "q-1789175213952",
+            "clientId": "UX-CLIENT",
+            "clientName": "Entreprise de démonstration",
+            "requesterId": "UX-CLIENT",
+            "requesterName": "Camille UX",
+            "date": "2026-09-12T01:06:53.952Z",
+            "origin": "97400 Saint-Denis",
+            "originAddress": "22 rue fictive",
+            "originContact": {
+              "name": "Expéditeur UX",
+              "phone": "0262123456"
+            },
+            "destination": "97400 Saint-Denis",
+            "destinationAddress": "12 rue fictive",
+            "destinationContact": {
+              "name": "Destinataire UX",
+              "phone": "0262123457"
+            },
+            "goodsDescription": "Une palette de démonstration",
+            "weight": 10,
+            "dimensions": {
+              "length": 100,
+              "width": 100,
+              "height": 100
+            },
+            "volume": 1,
+            "pickupDate": "2026-09-17T08:00",
+            "deliveryDate": "2026-09-18T08:00",
+            "clientNotes": "",
+            "status": "Demande reçue"
+          }
+        ],
+        [
+          "recipient-import",
+          {
+            "companyName": "Entreprise de démonstration",
+            "createdBy": "UX-CLIENT",
+            "label": "Enlèvement - 97400 Saint-Denis",
+            "type": "pickup",
+            "address": "22 rue fictive",
+            "city": "97400 Saint-Denis",
+            "contactName": "Expéditeur UX",
+            "contactPhone": "0262123456",
+            "createdAt": "2026-09-12T01:06:53.957Z",
+            "updatedAt": "2026-09-12T01:06:53.957Z"
+          }
+        ]
+      ],
+      "source": "browser-quote-result.json"
+    },
+    {
+      "name": "creation-keyboard-cycle-and-reduced-viewport",
+      "passed": true,
+      "measured": {
+        "height": 360,
+        "submitBottom": 352,
+        "submitHeight": 44
+      },
+      "source": "browser-quote-result.json"
+    }
+  ],
+  "runtimeExceptions": [],
+  "supersededProbeErrors": [
+    {
+      "scenario": "keyboard-reference-search-320",
+      "source": "browser-results.json",
+      "error": "Error: Timeout: document.body.innerText.includes('Référence abrégée') Pharmacie du quartier des grandes allées de Saint-Denis et des Hauts de la Réunion"
+    },
+    {
+      "scenario": "fullscreen-form-and-resume-reload-320",
+      "source": "browser-results.json",
+      "error": "Error: Submit not visible"
+    },
+    {
+      "scenario": "keyboard-reference-search-390",
+      "source": "browser-results.json",
+      "error": "Error: Timeout: document.body.innerText.includes('Référence abrégée') Pharmacie du quartier des grandes allées de Saint-Denis et des Hauts de la Réunion"
+    },
+    {
+      "scenario": "fullscreen-form-and-resume-reload-390",
+      "source": "browser-results.json",
+      "error": "Error: Submit not visible"
+    },
+    {
+      "scenario": "keyboard-reference-search-1365",
+      "source": "browser-results.json",
+      "error": "Error: Timeout: document.body.innerText.includes('Référence abrégée') Pharmacie du quartier des grandes allées de Saint-Denis et des Hauts de la Réunion"
+    },
+    {
+      "scenario": "fullscreen-form-and-resume-reload-320",
+      "source": "browser-keyboard-reload-results.json",
+      "error": "Error: Error: Bouton manquant: Ouvrir"
+    },
+    {
+      "scenario": "fullscreen-form-and-resume-reload-390",
+      "source": "browser-keyboard-reload-results.json",
+      "error": "Error: Error: Bouton manquant: Ouvrir"
+    },
+    {
+      "scenario": "nested-preview-context-320",
+      "source": "browser-additional-results.json",
+      "error": "Error: Error: Bouton manquant: Mon compte"
+    },
+    {
+      "scenario": "nested-preview-context-390",
+      "source": "browser-additional-results.json",
+      "error": "Error: Error: Bouton manquant: Mon compte"
+    },
+    {
+      "scenario": "nested-preview-context-1365",
+      "source": "browser-additional-results.json",
+      "error": "Error: Error: Bouton manquant: Mon compte"
+    }
+  ],
+  "limits": [
+    "Composants réels rendus dans Chrome headless avec services métier neutralisés.",
+    "Mesures responsive 320/390/1365 ; viewport réduit320x360 simulé, aucun appareil physique testé.",
+    "Requêtes externes Firebase bloquées ; seule la demande de police Google Fonts apparaît dans le journal réseau et elle est bloquée."
+  ]
+}

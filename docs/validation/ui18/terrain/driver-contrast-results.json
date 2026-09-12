@@ -1,0 +1,39 @@
+{
+  "checks": [
+    {
+      "label": "driver screen remains within viewport 320",
+      "pass": true
+    },
+    {
+      "label": "driver warning contrast passes 4.5 320",
+      "pass": true
+    },
+    {
+      "label": "computed contrast 320",
+      "evidence": {
+        "color": "rgb(120, 53, 15)",
+        "ratio": 9.072242058919679,
+        "text": "1 colis non scanné. Scannez le colis, ou utilisez Continuer pour déclarer une exception."
+      },
+      "pass": true
+    },
+    {
+      "label": "driver screen remains within viewport 390",
+      "pass": true
+    },
+    {
+      "label": "driver warning contrast passes 4.5 390",
+      "pass": true
+    },
+    {
+      "label": "computed contrast 390",
+      "evidence": {
+        "color": "rgb(120, 53, 15)",
+        "ratio": 9.072242058919679,
+        "text": "1 colis non scanné. Scannez le colis, ou utilisez Continuer pour déclarer une exception."
+      },
+      "pass": true
+    }
+  ],
+  "exceptions": []
+}

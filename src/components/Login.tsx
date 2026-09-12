@@ -63,11 +63,11 @@ export default function Login() {
               {showPassword ? <EyeOff aria-hidden="true" size={21} /> : <Eye aria-hidden="true" size={21} />}
             </button>
           </div>
-          <button type="submit" disabled={!!busy} className="w-full min-h-12 flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-3 font-bold text-white hover:bg-slate-800 disabled:opacity-60">
+          <button type="submit" disabled={!!busy} className="ui-button ui-button-primary w-full min-h-12">
             {busy === 'login' ? <Loader2 aria-hidden="true" size={20} className="animate-spin" /> : <ArrowRight aria-hidden="true" size={20} />}
             {busy === 'login' ? 'Connexion en cours…' : 'Se connecter'}
           </button>
-          <button type="button" disabled={!!busy} onClick={handleReset} className="w-full min-h-11 rounded-lg px-2 py-2 text-sm font-semibold text-brand-700 hover:bg-brand-50 disabled:opacity-60">
+          <button type="button" disabled={!!busy} onClick={handleReset} className="ui-button ui-button-ghost w-full">
             {busy === 'reset' ? 'Envoi du lien…' : 'Mot de passe oublié ?'}
           </button>
         </form>

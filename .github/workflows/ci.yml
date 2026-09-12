@@ -28,6 +28,9 @@ jobs:
       - name: Typecheck (tsc --noEmit)
         run: npm run typecheck
 
+      - name: UI contracts and coverage inventory
+        run: npm run audit:ui
+
       - name: Unit tests
         run: npm test
 

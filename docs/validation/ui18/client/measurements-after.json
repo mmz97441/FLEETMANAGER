@@ -1,0 +1,146 @@
+{
+  "baselineCommit": null,
+  "results": [
+    {
+      "name": "portal-after-320-normal",
+      "passed": true,
+      "width": 320,
+      "documentWidth": 320,
+      "firstResultY": 454,
+      "recipient": [
+        {
+          "font": "16px",
+          "clipped": false,
+          "lines": 24
+        }
+      ],
+      "address": [
+        {
+          "font": "14px",
+          "clipped": false,
+          "lines": 20
+        }
+      ],
+      "smallButtons": []
+    },
+    {
+      "name": "portal-after-320-long",
+      "passed": true,
+      "width": 320,
+      "documentWidth": 320,
+      "firstResultY": 474,
+      "recipient": [
+        {
+          "font": "16px",
+          "clipped": false,
+          "lines": 72
+        }
+      ],
+      "address": [
+        {
+          "font": "14px",
+          "clipped": false,
+          "lines": 80
+        }
+      ],
+      "smallButtons": []
+    },
+    {
+      "name": "portal-after-390-normal",
+      "passed": true,
+      "width": 390,
+      "documentWidth": 390,
+      "firstResultY": 454,
+      "recipient": [
+        {
+          "font": "16px",
+          "clipped": false,
+          "lines": 24
+        }
+      ],
+      "address": [
+        {
+          "font": "14px",
+          "clipped": false,
+          "lines": 20
+        }
+      ],
+      "smallButtons": []
+    },
+    {
+      "name": "portal-after-390-long",
+      "passed": true,
+      "width": 390,
+      "documentWidth": 390,
+      "firstResultY": 474,
+      "recipient": [
+        {
+          "font": "16px",
+          "clipped": false,
+          "lines": 48
+        }
+      ],
+      "address": [
+        {
+          "font": "14px",
+          "clipped": false,
+          "lines": 60
+        }
+      ],
+      "smallButtons": []
+    },
+    {
+      "name": "portal-after-1365-normal",
+      "passed": true,
+      "width": 1365,
+      "documentWidth": 1365,
+      "firstResultY": 384,
+      "recipient": [
+        {
+          "font": "16px",
+          "clipped": false,
+          "lines": 24
+        }
+      ],
+      "address": [
+        {
+          "font": "14px",
+          "clipped": false,
+          "lines": 20
+        }
+      ],
+      "smallButtons": []
+    },
+    {
+      "name": "portal-after-1365-long",
+      "passed": true,
+      "width": 1365,
+      "documentWidth": 1365,
+      "firstResultY": 384,
+      "recipient": [
+        {
+          "font": "16px",
+          "clipped": false,
+          "lines": 24
+        }
+      ],
+      "address": [
+        {
+          "font": "14px",
+          "clipped": false,
+          "lines": 20
+        }
+      ],
+      "smallButtons": []
+    }
+  ],
+  "exceptions": [],
+  "externalRequests": [
+    "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap",
+    "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap",
+    "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap",
+    "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap",
+    "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap",
+    "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+  ]
+}

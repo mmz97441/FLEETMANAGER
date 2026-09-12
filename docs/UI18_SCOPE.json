@@ -1,0 +1,63 @@
+{
+  "description": "Écrans et composants couverts par VIS-01 à VIS-18, version 4.27.0. Le contrôle statique complète les preuves navigateur ; il ne mesure pas le contraste ni les dimensions calculées.",
+  "files": [
+    "src/components/AccountHub.tsx",
+    "src/components/BarcodeScanner.tsx",
+    "src/components/ClientHelp.tsx",
+    "src/components/ClientPortal.tsx",
+    "src/components/ConfirmationHost.tsx",
+    "src/components/CreateShipmentModal.tsx",
+    "src/components/Dashboard.tsx",
+    "src/components/DeviceDiagnostics.tsx",
+    "src/components/DispatchManager.tsx",
+    "src/components/DriverMissionView.tsx",
+    "src/components/HelpCenter.tsx",
+    "src/components/ImportRecipientsModal.tsx",
+    "src/components/ImportShipmentsModal.tsx",
+    "src/components/Login.tsx",
+    "src/components/MissionManager.tsx",
+    "src/components/MissionStopFields.tsx",
+    "src/components/NotificationCenter.tsx",
+    "src/components/OfficeSavedViews.tsx",
+    "src/components/PendingSyncBanner.tsx",
+    "src/components/QuickScanButton.tsx",
+    "src/components/QuoteManager.tsx",
+    "src/components/RecipientsManager.tsx",
+    "src/components/Sidebar.tsx",
+    "src/components/StopReorderModal.tsx",
+    "src/components/SupportRequest.tsx",
+    "src/components/VehicleList.tsx",
+    "src/components/ViewAsSwitcher.tsx",
+    "src/components/client/ShipmentReference.tsx",
+    "src/components/shared/Badge.tsx",
+    "src/components/shared/ConfirmModal.tsx",
+    "src/components/shared/CountBadge.tsx",
+    "src/components/shared/DataTable.tsx",
+    "src/components/shared/EmptyState.tsx",
+    "src/components/shared/FormInput.tsx",
+    "src/components/shared/Modal.tsx",
+    "src/components/shared/PageHeader.tsx",
+    "src/components/shared/StatCard.tsx",
+    "src/components/shared/Trend.tsx",
+    "src/components/vehicles/VehicleCard.tsx",
+    "src/components/vehicles/VehicleFilters.tsx",
+    "src/components/vehicles/VehicleFormModal.tsx",
+    "src/components/vehicles/VehicleRow.tsx",
+    "src/components/vehicles/VehicleStats.tsx",
+    "src/components/vehicles/VehicleStatusBadge.tsx"
+  ],
+  "exceptions": [
+    {
+      "file": "src/components/Sidebar.tsx",
+      "rule": "small-text",
+      "contains": "__APP_VERSION__",
+      "reason": "Version technique secondaire, hors information métier."
+    },
+    {
+      "file": "src/components/Login.tsx",
+      "rule": "small-text",
+      "contains": "__APP_VERSION__",
+      "reason": "Version technique secondaire de la page de connexion."
+    }
+  ]
+}

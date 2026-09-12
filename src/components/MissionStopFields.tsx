@@ -22,6 +22,6 @@ export default function MissionStopFields({ value, onChange, errors, busy }: Pro
       <FormInput label="Créneau demandé — fin" type="time" {...field('timeWindowEnd')} />
     </div>
     <FormInput label="Temps sur place (minutes)" type="number" min={1} max={480} step={1} required {...field('serviceTime')} />
-    <FormTextarea label="Notes / Instructions" rows={3} {...field('notes')} />
+    <FormTextarea label="Notes ou instructions" rows={3} {...field('notes')} />
   </fieldset>;
 }

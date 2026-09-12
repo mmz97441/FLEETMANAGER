@@ -5,9 +5,9 @@
 import React from 'react';
 import { Truck, AlertCircle, Edit, Trash2, User as UserIcon, Plus, ArrowRightLeft, MapPin } from 'lucide-react';
 import { Vehicle, Issue, MaintenanceLog, VehicleStatus } from '../../types';
-import { 
-  getEffectiveStatus, 
-  getMaintenanceHealth, 
+import {
+  getEffectiveStatus,
+  getMaintenanceHealth,
   getActiveIssuesCount,
   getDriverId
 } from '../../hooks/useVehicles';
@@ -48,11 +48,11 @@ const VehicleRow: React.FC<VehicleRowProps> = ({
   const activeIssues = getActiveIssuesCount(vehicle.id, issues);
   const { status: effectiveStatus, isRepairing } = getEffectiveStatus(vehicle, issues, maintenanceLogs);
   const hasDriver = !!getDriverId(vehicle);
-  
+
   // Infos de remplacement
   const isImmobilized = vehicle.status === VehicleStatus.IMMOBILIZED || effectiveStatus === VehicleStatus.IMMOBILIZED;
   const isReplacement = vehicle.isReplacement;
-  const replacementVehicle = vehicle.currentReplacementId 
+  const replacementVehicle = vehicle.currentReplacementId
     ? allVehicles.find(v => v.id === vehicle.currentReplacementId)
     : null;
   const replacedVehicle = vehicle.replacesVehicleId
@@ -68,108 +68,103 @@ const VehicleRow: React.FC<VehicleRowProps> = ({
   };
 
   return (
-    <tr 
-      className={`hover:bg-slate-50/80 transition-colors group cursor-pointer ${
+    <tr
+      className={`hover:bg-slate-50/80 transition-colors group  ${
         isImmobilized ? 'bg-red-50/50' : ''
       } ${isReplacement ? 'bg-amber-50/50' : ''}`}
-      onClick={onSelect}
     >
       {/* Identité véhicule */}
       <td className="px-6 py-4">
         <div className="flex items-center gap-3 relative">
           <div className={`p-2 rounded-lg transition-all border relative ${
-            isImmobilized 
-              ? 'bg-red-100 text-red-600 border-red-200' 
+            isImmobilized
+              ? 'bg-red-100 text-red-600 border-red-200'
               : isReplacement
                 ? 'bg-amber-100 text-amber-600 border-amber-200'
                 : 'bg-slate-100 text-slate-500 border-transparent group-hover:bg-white group-hover:shadow-sm group-hover:border-slate-200'
           }`}>
             <Truck size={20} />
             {activeIssues > 0 && (
-              <div className="absolute -top-1 -right-1 w-4 h-4 bg-red-600 rounded-full flex items-center justify-center text-[10px] text-white font-bold border-2 border-white animate-pulse">
+              <div className="absolute -top-1 -right-1 min-w-6 h-6 bg-red-600 rounded-full flex items-center justify-center text-sm text-white font-bold border-2 border-white ">
                 {activeIssues}
               </div>
             )}
             {isImmobilized && !activeIssues && (
-              <div className="absolute -top-1 -right-1 w-4 h-4 bg-red-600 rounded-full flex items-center justify-center border-2 border-white animate-pulse">
-                <span className="text-white text-[8px]">!</span>
+              <div className="absolute -top-1 -right-1 min-w-6 h-6 bg-red-600 rounded-full flex items-center justify-center border-2 border-white ">
+                <span className="text-white text-sm">!</span>
               </div>
             )}
           </div>
           <div>
             <div className="font-mono font-bold text-slate-900 text-sm tracking-tight flex items-center gap-2">
-              {vehicle.plate}
+<button type="button" onClick={onSelect} className="ui-button ui-button-ghost font-mono" aria-label={`Ouvrir le véhicule ${vehicle.plate}`}>{vehicle.plate}</button>
               {activeIssues > 0 && (
-                <span 
+                <button type="button" aria-label={`Voir les incidents de ${vehicle.plate}`}
                   onClick={(e) => { e.stopPropagation(); onViewIncidents?.(); }}
                   title="Voir les incidents"
-                  className="bg-red-50 text-red-600 px-1.5 rounded text-[10px] uppercase font-bold border border-red-100 cursor-pointer hover:bg-red-600 hover:text-white transition-colors"
+                  className="ui-button ui-button-secondary text-sm uppercase border"
                 >
-                  Incident
-                </span>
+                  Incidents
+                </button>
               )}
               {isReplacement && (
-                <span className="bg-amber-100 text-amber-700 px-1.5 rounded text-[10px] uppercase font-bold border border-amber-200">
+                <span className="bg-amber-100 text-amber-700 px-1.5 rounded text-sm uppercase font-bold border border-amber-200">
                   Remplacement
                 </span>
               )}
             </div>
-            <div className="text-xs text-slate-500 font-medium">{vehicle.model}</div>
-            
+            <div className="text-sm text-slate-500 font-medium">{vehicle.model}</div>
+
             {/* Indicateur de remplacement */}
             {isImmobilized && replacementVehicle && (
-              <div className="mt-1 flex items-center gap-1 text-[10px] text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
-                <ArrowRightLeft size={10} />
+              <div className="mt-1 flex items-center gap-1 text-sm text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                <ArrowRightLeft size={16} />
                 Remplacé par {replacementVehicle.plate}
               </div>
             )}
             {isImmobilized && !replacementVehicle && showActions && onAssignReplacement && (
               <button
                 onClick={(e) => { e.stopPropagation(); onAssignReplacement(); }}
-                className="mt-1 flex items-center gap-1 text-[10px] text-red-600 bg-red-50 px-2 py-0.5 rounded-full border border-red-200 hover:bg-red-100 transition-colors"
+                className="ui-button ui-button-secondary mt-1 flex items-center gap-1 text-sm border"
               >
-                <Plus size={10} />
+                <Plus size={16} />
                 Affecter remplacement
               </button>
             )}
             {isReplacement && replacedVehicle && (
-              <div className="mt-1 flex items-center gap-1 text-[10px] text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
-                <ArrowRightLeft size={10} />
+              <div className="mt-1 flex items-center gap-1 text-sm text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
+                <ArrowRightLeft size={16} />
                 Remplace {replacedVehicle.plate}
               </div>
             )}
             {vehicle.immobilizedLocation && isImmobilized && (
-              <div className="mt-1 flex items-center gap-1 text-[10px] text-red-500 min-w-0">
-                <MapPin size={10} className="flex-shrink-0" />
-                <span className="truncate">{vehicle.immobilizedLocation}</span>
+              <div className="mt-1 flex items-center gap-1 text-sm text-red-500 min-w-0">
+                <MapPin size={16} className="flex-shrink-0" />
+                <span className="min-w-0 break-words">{vehicle.immobilizedLocation}</span>
               </div>
             )}
-            
+
             {/* Section chauffeur cliquable */}
             {showActions && onAssignDriver ? (
               <button
                 onClick={(e) => { e.stopPropagation(); onAssignDriver(); }}
-                className={`mt-1 text-[10px] font-medium flex items-center gap-1 px-2 py-0.5 rounded-full transition-colors ${
-                  hasDriver 
-                    ? 'bg-brand-50 text-brand-600 hover:bg-brand-100' 
-                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-                }`}
+                className="ui-button ui-button-secondary mt-1 min-w-0 max-w-full text-sm"
               >
                 {hasDriver ? (
                   <>
-                    <UserIcon size={10} />
+                    <UserIcon size={16} />
                     {driverName || 'Chauffeur inconnu'}
                   </>
                 ) : (
                   <>
-                    <Plus size={10} />
+                    <Plus size={16} />
                     Assigner chauffeur
                   </>
                 )}
               </button>
             ) : hasDriver ? (
-              <div className="text-[10px] text-brand-600 font-medium flex items-center gap-1 mt-0.5">
-                <UserIcon size={10} />
+              <div className="text-sm text-brand-600 font-medium flex items-center gap-1 mt-0.5">
+                <UserIcon size={16} />
                 {driverName || 'Chauffeur inconnu'}
               </div>
             ) : null}
@@ -179,7 +174,7 @@ const VehicleRow: React.FC<VehicleRowProps> = ({
 
       {/* Type */}
       <td className="px-6 py-4 text-center">
-        <span className="text-xs font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded border border-slate-200">
+        <span className="text-sm font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded border border-slate-200">
           {formatVehicleType(vehicle.type)}
         </span>
       </td>
@@ -193,14 +188,14 @@ const VehicleRow: React.FC<VehicleRowProps> = ({
       <td className="px-6 py-4 min-w-[180px]">
         <div className="w-full">
           <div className="flex justify-between items-center mb-1.5">
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Usure</span>
-            <span className={`text-[10px] font-bold ${health.percentage > 90 ? 'text-red-600' : 'text-slate-600'}`}>
+            <span className="text-sm font-bold text-slate-500 uppercase tracking-wide">Usure</span>
+            <span className={`text-sm font-bold ${health.percentage > 90 ? 'text-red-600' : 'text-slate-600'}`}>
               {health.remaining > 0 ? `Reste ${health.remaining.toLocaleString()} km` : 'DÉPASSÉ'}
             </span>
           </div>
           <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden shadow-inner">
-            <div 
-              className={`h-full rounded-full transition-all duration-500 ${health.color}`} 
+            <div
+              className={`h-full rounded-full transition-all duration-500 ${health.color}`}
               style={{ width: `${health.percentage}%` }}
             />
           </div>
@@ -217,30 +212,30 @@ const VehicleRow: React.FC<VehicleRowProps> = ({
       {/* Date CT */}
       <td className="px-6 py-4 text-center">
         {ctDate ? (
-          <div className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded ${isCtUrgent ? 'text-red-600 bg-red-50' : 'text-slate-600 bg-slate-50'}`}>
-            {isCtUrgent && <AlertCircle size={12} />}
+          <div className={`inline-flex items-center gap-1 text-sm font-bold px-2 py-1 rounded ${isCtUrgent ? 'text-red-600 bg-red-50' : 'text-slate-600 bg-slate-50'}`}>
+            {isCtUrgent && <AlertCircle size={16} />}
             {ctDate.toLocaleDateString('fr-FR')}
           </div>
         ) : (
-          <span className="text-xs text-slate-400">-</span>
+          <span className="text-sm text-slate-400">-</span>
         )}
       </td>
 
       {/* Actions */}
       <td className="px-6 py-4 text-right">
         {showActions && (
-          <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="flex items-center justify-end gap-1 transition-opacity">
             <button
               onClick={(e) => { e.stopPropagation(); onEdit(); }}
-              className="p-2 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors"
-              title="Modifier"
+              className="ui-button ui-button-primary"
+              aria-label={`Modifier le véhicule ${vehicle.plate}`}
             >
               <Edit size={18} />
             </button>
             <button
               onClick={(e) => { e.stopPropagation(); onDelete(); }}
-              className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-              title="Supprimer"
+              className="ui-button ui-button-danger"
+              aria-label={`Supprimer le véhicule ${vehicle.plate}`}
             >
               <Trash2 size={18} />
             </button>

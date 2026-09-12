@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import PageHeader from "./shared/PageHeader";
 import SupportRequest from './SupportRequest';
 import DeviceDiagnostics from './DeviceDiagnostics';
 import UxMetricsPanel from './UxMetricsPanel';
@@ -31,7 +32,7 @@ interface ClientHelpProps {
 }
 
 // Chaque section du guide pointe vers la vraie page/action correspondante
-const SECTION_TARGET: Record<string, { target: HelpNavTarget; label: string }> = {
+const SECTION_TARGET: Record<string, { target: HelpNavTarget; label: string; }> = {
   accueil: { target: 'home', label: "Aller à l'accueil" },
   creer: { target: 'create', label: 'Créer une expédition' },
   colis: { target: 'shipments', label: 'Voir mes colis' },
@@ -46,7 +47,6 @@ type TabId = 'guide' | 'faq' | 'news' | 'support';
 interface GuideSection {
   id: string;
   icon: React.ComponentType<{ className?: string }>;
-  emoji: string;
   title: string;
   intro: string;
   steps: string[];
@@ -78,7 +78,6 @@ const GUIDE_SECTIONS: GuideSection[] = [
   {
     id: 'accueil',
     icon: Home,
-    emoji: '🏠',
     title: 'Accueil',
     intro: 'Votre point de départ : la question « Que voulez-vous faire ? » et de grandes tuiles pour aller partout en un clic.',
     steps: [
@@ -91,7 +90,6 @@ const GUIDE_SECTIONS: GuideSection[] = [
   {
     id: 'creer',
     icon: PlusCircle,
-    emoji: '➕',
     title: 'Créer une expédition',
     intro: 'Préparez un envoi vers une pharmacie en quelques secondes.',
     steps: [
@@ -105,7 +103,6 @@ const GUIDE_SECTIONS: GuideSection[] = [
   {
     id: 'colis',
     icon: Package,
-    emoji: '📦',
     title: 'Mes Colis',
     intro: 'Le suivi de tous vos envois, regroupés par pharmacie.',
     steps: [
@@ -119,7 +116,6 @@ const GUIDE_SECTIONS: GuideSection[] = [
   {
     id: 'destinataires',
     icon: Contact,
-    emoji: '📇',
     title: 'Mes Destinataires',
     intro: 'Le carnet d\'adresses de toutes vos pharmacies.',
     steps: [
@@ -132,7 +128,6 @@ const GUIDE_SECTIONS: GuideSection[] = [
   {
     id: 'stats',
     icon: BarChart3,
-    emoji: '📊',
     title: 'Statistiques',
     intro: 'Vos indicateurs clés, avec des objectifs et des réponses claires.',
     steps: [
@@ -145,7 +140,6 @@ const GUIDE_SECTIONS: GuideSection[] = [
   {
     id: 'compte',
     icon: UserCircle,
-    emoji: '👤',
     title: 'Mon compte',
     intro: 'Vos informations personnelles et celles de votre entreprise.',
     steps: [
@@ -159,7 +153,6 @@ const GUIDE_SECTIONS: GuideSection[] = [
   {
     id: 'bl',
     icon: FileText,
-    emoji: '🧾',
     title: 'Bon de livraison (BL)',
     intro: 'Un document officiel par pharmacie livrée.',
     steps: [
@@ -336,225 +329,258 @@ const ClientHelp: React.FC<ClientHelpProps> = ({ onClose, onNavigate, embedded =
   };
 
   const tabs: { id: TabId; label: string; count: number }[] = [
-    { id: 'guide', label: "Guide d'utilisation", count: filteredGuide.length },
+    { id: 'guide', label: "Guides", count: filteredGuide.length },
     { id: 'faq', label: 'FAQ', count: filteredFaq.length },
     { id: 'news', label: 'Nouveautés', count: filteredNews.length },
     { id: 'support', label: 'Assistance', count: 0 },
   ];
 
   const panel = (
-      <div
-        className={embedded
+    <div
+      className={
+        embedded
           ? "max-w-3xl mx-auto w-full rounded-2xl bg-white flex flex-col overflow-hidden border border-slate-200"
-          : "max-w-3xl w-full max-h-[85dvh] rounded-2xl bg-white flex flex-col overflow-hidden shadow-2xl"}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center gap-3 px-5 py-4 border-b border-slate-200 bg-gradient-to-r from-indigo-50 to-white">
-          <div className="flex items-center justify-center w-11 h-11 rounded-xl bg-indigo-100 text-indigo-600 shrink-0">
-            <HelpCircle className="w-6 h-6" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <h2 className="text-lg font-bold text-slate-900 leading-tight">Aide &amp; Guide</h2>
-            <p className="text-sm text-slate-500 truncate">
-              Tout savoir sur votre espace expéditeur
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Fermer l'aide"
-            className="flex items-center justify-center w-11 h-11 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors shrink-0"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Recherche */}
-        <div className="px-5 pt-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Rechercher dans l'aide…"
-              aria-label="Rechercher dans l'aide"
-              className="w-full pl-11 pr-10 py-3 border border-slate-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-            />
-            {query && (
+          : "max-w-3xl w-full h-full bg-white flex flex-col overflow-hidden"
+      }
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="p-4 border-b border-slate-200">
+        <PageHeader
+          title="Aide"
+          description="Guides et assistance pour vos expéditions."
+          actions={
+            onClose ? (
               <button
                 type="button"
-                onClick={() => setQuery('')}
-                aria-label="Effacer la recherche"
-                className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center justify-center w-8 h-8 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                onClick={onClose}
+                aria-label="Fermer l’aide"
+                className="ui-button ui-button-ghost"
               >
-                <X className="w-4 h-4" />
+                <X aria-hidden="true" size={20} />
               </button>
-            )}
-          </div>
-        </div>
+            ) : undefined
+          }
+        />
+      </div>
 
-        {/* Onglets */}
-        <div className="px-5 pt-3">
-          <div className="flex flex-wrap gap-2 border-b border-slate-200">
-            {tabs.map((tab) => {
-              const isActive = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveTab(tab.id)}
-                  aria-current={isActive ? 'page' : undefined}
-                  className={`relative px-4 py-2.5 text-sm font-semibold rounded-t-lg transition-colors -mb-px border-b-2 ${
-                    isActive
-                      ? 'text-indigo-600 border-indigo-600'
-                      : 'text-slate-500 border-transparent hover:text-slate-800 hover:bg-slate-50'
-                  }`}
-                >
-                  {tab.label}
-                  {query && (
-                    <span
-                      className={`ml-2 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-xs font-bold ${
-                        isActive ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-500'
-                      }`}
-                    >
-                      {tab.count}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+      {/* Contenu défilant */}
+      <div className="px-4 pt-3">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Rechercher dans l'aide…"
+            aria-label="Rechercher dans l'aide"
+            className="ui-filter w-full !pl-10 !pr-14"
+          />
+          {query && (
+            <button
+              type="button"
+              onClick={() => setQuery('')}
+              aria-label="Effacer la recherche"
+              className="ui-button ui-button-ghost !p-2 absolute right-0 top-1/2 -translate-y-1/2 !w-11 !h-11"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
         </div>
+      </div>
 
-        {/* Contenu défilant */}
-        <div className="flex-1 overflow-y-auto px-5 py-4">
-          {activeTab === 'support' ? <div className="space-y-4"><SupportRequest /><DeviceDiagnostics /><UxMetricsPanel /></div> : activeTab === 'guide' ? (
-            filteredGuide.length === 0 ? (
-              <EmptyState query={query} />
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {filteredGuide.map((section) => {
-                  const Icon = section.icon;
-                  return (
-                    <div
-                      key={section.id}
-                      className="rounded-2xl border border-slate-200 bg-white p-4 hover:border-indigo-200 hover:shadow-sm transition-all"
-                    >
-                      <div className="flex items-center gap-3 mb-3">
-                        <div className="flex items-center justify-center w-11 h-11 rounded-xl bg-indigo-50 text-indigo-600 shrink-0">
-                          <Icon className="w-5 h-5" />
-                        </div>
-                        <h3 className="font-bold text-slate-900 leading-tight">
-                          <span className="mr-1" aria-hidden="true">
-                            {section.emoji}
-                          </span>
-                          {section.title}
-                        </h3>
-                      </div>
-                      <p className="text-sm text-slate-500 mb-3">{section.intro}</p>
-                      <ul className="space-y-2">
-                        {section.steps.map((step, index) => (
-                          <li key={index} className="flex items-start gap-2 text-sm text-slate-700">
-                            <span className="flex items-center justify-center w-5 h-5 mt-0.5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold shrink-0">
-                              {index + 1}
-                            </span>
-                            <span>{step}</span>
-                          </li>
-                        ))}
-                      </ul>
-                      {onNavigate && SECTION_TARGET[section.id] && (
-                        <button
-                          onClick={() => onNavigate(SECTION_TARGET[section.id].target)}
-                          className="mt-3 inline-flex items-center gap-1.5 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-bold active:scale-95 transition-transform"
-                        >
-                          {SECTION_TARGET[section.id].label} →
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
+      {/* Contenu défilant */}
+      <div className="px-4 pt-3">
+        <div className="flex flex-wrap gap-2">
+          {tabs.map((tab) => {
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                aria-current={isActive ? 'page' : undefined}
+                className={`ui-button ${isActive ? "ui-button-primary" : "ui-button-secondary"}`}
+              >
+                {tab.label}
+                {query && (
+                  <span
+                    className={`ml-2 inline-flex items-center justify-center min-w-[1.5rem] h-6 px-1.5 rounded-full text-sm font-bold ${
+                      isActive
+                        ? "bg-brand-50 text-brand-800"
+                        : 'bg-slate-100 text-slate-500'
+                    }`}
+                  >
+                    {tab.count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Contenu défilant */}
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+        {activeTab === 'support' ? (
+          <div className="space-y-4">
+            <SupportRequest />
+            <details className="ui-panel p-4">
+              <summary className="min-h-11 cursor-pointer font-semibold text-slate-900">
+                Vérifier cet appareil
+              </summary>
+              <div className="mt-3">
+                <DeviceDiagnostics />
               </div>
-            )
-          ) : activeTab === 'faq' ? (
-            filteredFaq.length === 0 ? (
-              <EmptyState query={query} />
-            ) : (
-              <div className="space-y-2.5">
-                {filteredFaq.map((item) => {
-                  const isOpen = openFaqId === item.id;
-                  return (
-                    <div
+            </details>
+            <details className="ui-panel p-4">
+              <summary className="min-h-11 cursor-pointer font-semibold text-slate-900">
+                Mesures locales d’utilisation
+              </summary>
+              <div className="mt-3">
+                <UxMetricsPanel />
+              </div>
+            </details>
+          </div>
+        ) : activeTab === 'guide' ? (
+          filteredGuide.length === 0 ? (
+            <EmptyState query={query} />
+          ) : (
+            <div className="divide-y divide-slate-200">
+              {filteredGuide.map((section) => {
+                const Icon = section.icon;
+                return (
+                  <div key={section.id} className="py-4 first:pt-0">
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="text-brand-700 shrink-0">
+                        <Icon className="w-5 h-5" />
+                      </div>
+                      <h3 className="font-bold text-slate-900 leading-tight">
+                        {section.title}
+                      </h3>
+                    </div>
+                    <p className="text-sm text-slate-500 mb-3">
+                      {section.intro}
+                    </p>
+                    <ul className="space-y-2">
+                      {section.steps.map((step, index) => (
+                        <li
+                        key={index}
+                        className="flex items-start gap-2 text-sm text-slate-700"
+                      >
+                          <span className="flex items-center justify-center w-6 h-6 mt-0.5 rounded-full bg-brand-50 text-brand-800 text-sm font-bold shrink-0">
+                            {index + 1}
+                          </span>
+                          <span>{step}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    {onNavigate && SECTION_TARGET[section.id] && (
+                      <button
+                        onClick={() => onNavigate(SECTION_TARGET[section.id].target)}
+                        className="ui-button ui-button-primary mt-3 inline-flex gap-1.5"
+                      >
+                        {SECTION_TARGET[section.id].label} →
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )
+        ) : activeTab === 'faq' ? (
+          filteredFaq.length === 0 ? (
+            <EmptyState query={query} />
+          ) : (
+            <div className="space-y-2.5">
+              {filteredFaq.map((item) => {
+                const isOpen = openFaqId === item.id;
+                return (
+                  <div
                       key={item.id}
                       className="rounded-2xl border border-slate-200 bg-white overflow-hidden"
                     >
-                      <button
-                        type="button"
-                        onClick={() => toggleFaq(item.id)}
-                        aria-expanded={isOpen}
-                        className="w-full flex items-center gap-3 text-left px-4 py-3.5 hover:bg-slate-50 transition-colors"
-                      >
-                        <span className="flex-1 font-semibold text-slate-900 text-sm">
-                          {item.question}
-                        </span>
-                        <ChevronDown
+                    <button
+                      type="button"
+                      onClick={() => toggleFaq(item.id)}
+                      aria-expanded={isOpen}
+                      className="ui-button ui-button-secondary w-full gap-3 text-left"
+                    >
+                      <span className="flex-1 font-semibold text-slate-900 text-sm">
+                        {item.question}
+                      </span>
+                      <ChevronDown
                           className={`w-5 h-5 text-slate-400 shrink-0 transition-transform ${
                             isOpen ? 'rotate-180' : ''
                           }`}
                         />
-                      </button>
-                      {isOpen && (
-                        <div className="px-4 pb-4 -mt-1">
-                          <p className="text-sm text-slate-600 leading-relaxed">{item.answer}</p>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )
-          ) : filteredNews.length === 0 ? (
+                    </button>
+                    {isOpen && (
+                      <div className="px-4 pb-4 -mt-1">
+                        <p className="text-sm text-slate-600 leading-relaxed">
+                          {item.answer}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )
+        ) : filteredNews.length === 0 ? (
             <EmptyState query={query} />
           ) : (
-            // Timeline verticale des nouveautés (version la plus récente en haut)
-            <ol className="relative border-l-2 border-indigo-100 ml-3 space-y-6">
-              {filteredNews.map((entry) => (
-                <li key={entry.version} className="relative pl-6">
-                  <span
-                    className="absolute -left-[7px] top-1.5 w-3 h-3 rounded-full bg-indigo-600 ring-4 ring-indigo-100"
-                    aria-hidden="true"
-                  />
-                  <div className="flex items-center gap-2 mb-3 flex-wrap">
-                    <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-indigo-600 text-white text-xs font-bold">
-                      {entry.version}
-                    </span>
-                    <span className="text-sm font-medium text-slate-500">{entry.date}</span>
-                  </div>
-                  <ul className="space-y-2">
-                    {entry.items.map((item, index) => (
-                      <li
+          // Timeline verticale des nouveautés (version la plus récente en haut)
+          <ol className="relative border-l-2 border-indigo-100 ml-3 space-y-6">
+            {filteredNews.map((entry) => (
+              <li key={entry.version} className="relative pl-6">
+                <span
+                  className="absolute -left-[7px] top-1.5 w-3 h-3 rounded-full bg-brand-700 ring-4 ring-indigo-100"
+                  aria-hidden="true"
+                />
+                <div className="flex items-center gap-2 mb-3 flex-wrap">
+                  <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-brand-700 text-white text-sm font-bold">
+                    {entry.version}
+                  </span>
+                  <span className="text-sm font-medium text-slate-500">
+                    {entry.date}
+                  </span>
+                </div>
+                <ul className="space-y-2">
+                  {entry.items.map((item, index) => (
+                    <li
                         key={index}
                         className="flex items-start gap-2 text-sm text-slate-700"
                       >
-                        <span
+                      <span
                           className="mt-1.5 w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0"
                           aria-hidden="true"
                         />
-                        <span>{item}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </li>
-              ))}
-            </ol>
-          )}
-        </div>
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ol>
+        )}
       </div>
+    </div>
   );
 
   if (embedded) return panel;
-  return <Modal isOpen onClose={() => onClose?.()} ariaLabel="Aide et guide client" showCloseButton={false} size="3xl" bodyClassName="p-0 sm:p-0">{panel}</Modal>;
+  return (
+    <Modal
+      isOpen
+      mobileFullscreen
+      onClose={() => onClose?.()}
+      ariaLabel="Aide et guide client"
+      showCloseButton={false}
+      size="3xl"
+      bodyClassName="p-0 sm:p-0"
+    >
+      {panel}
+    </Modal>
+  );
 };
 
 // --- État vide (aucun résultat de recherche) ---

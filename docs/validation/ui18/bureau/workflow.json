@@ -1,0 +1,46 @@
+{
+  "checkedAt": "2026-09-12T01:10:31.733Z",
+  "results": [
+    {
+      "id": "one-working-date",
+      "pass": true
+    },
+    {
+      "id": "tools-have-favorites",
+      "pass": true
+    },
+    {
+      "id": "global-search-independent-of-mission-filter",
+      "pass": true
+    },
+    {
+      "id": "package-table-mobile",
+      "width": 320,
+      "overflow": false,
+      "layoutWidth": 320,
+      "scrollWidth": 320,
+      "emulatedWidth": 320,
+      "smallText": [],
+      "smallButtons": []
+    },
+    {
+      "id": "package-sort-in-url",
+      "pass": true
+    },
+    {
+      "id": "package-selection-preserved-after-sort",
+      "pass": true
+    },
+    {
+      "id": "package-table-desktop",
+      "width": 1365,
+      "overflow": false,
+      "layoutWidth": 1365,
+      "scrollWidth": 1365,
+      "emulatedWidth": 1365,
+      "smallText": [],
+      "smallButtons": []
+    }
+  ],
+  "exceptions": []
+}

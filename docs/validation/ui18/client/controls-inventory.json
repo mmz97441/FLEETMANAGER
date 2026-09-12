@@ -1,0 +1,42 @@
+[
+  {
+    "file": "src/components/ClientPortal.tsx",
+    "buttons": 39,
+    "withoutSharedContract": []
+  },
+  {
+    "file": "src/components/CreateShipmentModal.tsx",
+    "buttons": 8,
+    "withoutSharedContract": []
+  },
+  {
+    "file": "src/components/ViewAsSwitcher.tsx",
+    "buttons": 5,
+    "withoutSharedContract": []
+  },
+  {
+    "file": "src/components/RecipientsManager.tsx",
+    "buttons": 10,
+    "withoutSharedContract": []
+  },
+  {
+    "file": "src/components/AccountHub.tsx",
+    "buttons": 4,
+    "withoutSharedContract": []
+  },
+  {
+    "file": "src/components/ImportRecipientsModal.tsx",
+    "buttons": 7,
+    "withoutSharedContract": []
+  },
+  {
+    "file": "src/components/ImportShipmentsModal.tsx",
+    "buttons": 8,
+    "withoutSharedContract": []
+  },
+  {
+    "file": "src/components/client/ShipmentReference.tsx",
+    "buttons": 3,
+    "withoutSharedContract": []
+  }
+]

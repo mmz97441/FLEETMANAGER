@@ -1,7 +1,7 @@
 import { assertMissionReadyToClose, submitDelivery, pendingDeliveries, outboxChangeEvent } from '../services/deliveryOutbox';
 /**
  * DRIVER MISSION VIEW — Interface Mobile Chauffeur
- * 
+ *
  * Vue mobile-first pour les chauffeurs sur le terrain.
  * Fonctionnalités :
  * - Voir sa/ses tournée(s) du jour
@@ -61,12 +61,57 @@ import { getCurrentPosition } from '../utils/geo';
 import { formatDistance, formatDuration } from '../utils/format';
 const BarcodeScanner = lazy(() => import('./BarcodeScanner'));
 import {
-  Truck, Package as PackageIcon, MapPin, Clock, Phone,
-  CheckCircle, XCircle, Navigation, Play,
-  Camera, PenTool, ChevronRight,
-  Loader2, ArrowLeft,
-  MapPinned, AlertTriangle
+  Truck,
+  Package as PackageIcon,
+  MapPin,
+  Clock,
+  Phone,
+  CheckCircle,
+  XCircle,
+  Navigation,
+  Play,
+  Camera,
+  PenTool,
+  ChevronRight,
+  Loader2,
+  ArrowLeft,
+  MapPinned,
+  AlertTriangle,
+  Building2,
+  StickyNote,
+  ScanLine,
+  Route,
+  Wrench,
+  Undo2,
+  Lock,
+  Plus,
+  X,
+  Handshake,
+  Home,
+  KeyRound,
+  Mail,
+  ClipboardList,
 } from 'lucide-react';
+
+const NotificationText = ({ message }: { message: string }) => {
+  const Icon = /❌|impossible|Erreur/i.test(message)
+    ? XCircle
+    : /⚠️/.test(message)
+      ? AlertTriangle
+      : /✅/.test(message)
+        ? CheckCircle
+        : PackageIcon;
+  return (
+    <>
+      <Icon
+        size={18}
+        className="inline mr-2 align-text-bottom"
+        aria-hidden="true"
+      />
+      {message.replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, '').trim()}
+    </>
+  );
+};
 
 // ============================================================================
 // REGROUPEMENT PAR POINT DE LIVRAISON (même logique que l'import)
@@ -224,13 +269,24 @@ const SignaturePad: React.FC<{
   return (
     <div className="min-w-0 max-w-full bg-white rounded-xl border-2 border-amber-300 overflow-hidden shadow-lg">
       <div className="px-3 py-2.5 bg-amber-50 border-b border-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-        <span className="text-sm font-bold text-amber-800">✍️ Signature du destinataire</span>
+        <span className="text-sm font-bold text-amber-800">
+          <PenTool
+            size={18}
+            className="inline shrink-0 align-text-bottom"
+            aria-hidden="true"
+          />{" "}
+          Signature du destinataire
+        </span>
         <div className="flex gap-2">
-          <button onClick={undo} disabled={strokesRef.current.length === 0}
-            className="min-h-11 text-sm text-slate-500 hover:text-amber-800 disabled:opacity-30 font-medium">
-            ↩ Annuler
+          <button
+            onClick={undo}
+            disabled={strokesRef.current.length === 0}
+            className="ui-button ui-button-secondary disabled:opacity-30"
+          >
+            <Undo2 size={18} aria-hidden="true" />
+            Annuler
           </button>
-          <button onClick={clear} className="min-h-11 text-sm text-red-700 hover:text-red-700 font-medium">
+          <button onClick={clear} className="ui-button ui-button-secondary">
             Effacer tout
           </button>
         </div>
@@ -256,15 +312,19 @@ const SignaturePad: React.FC<{
         )}
       </div>
       <div className="p-3 bg-slate-50 border-t border-slate-200 flex gap-2">
-        <button onClick={onCancel} className="min-h-11 flex-1 py-2.5 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-lg">
+        <button
+          onClick={onCancel}
+          className="ui-button ui-button-secondary flex-1"
+        >
           Annuler
         </button>
         <button
           onClick={save}
           disabled={!hasContent}
-          className="min-h-11 flex-1 py-2.5 text-sm font-bold text-white bg-green-600 rounded-lg disabled:opacity-40"
+          className="ui-button ui-button-primary flex-1"
         >
-          ✓ Valider signature
+          <CheckCircle size={18} aria-hidden="true" />
+          Valider signature
         </button>
       </div>
     </div>
@@ -428,7 +488,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
           setActiveMissionId(active.id);
           // Trouver le premier stop en attente pour cette mission
           const sorted = [...active.stops].sort((a, b) => a.sequence - b.sequence);
-          const pendingIdx = sorted.findIndex(s => s.status === StopStatus.PENDING || s.status === StopStatus.ARRIVED);
+          const pendingIdx = sorted.findIndex(s =>
+                      s.status === StopStatus.PENDING || s.status === StopStatus.ARRIVED);
           setActiveStopIndex(pendingIdx >= 0 ? pendingIdx : 0);
           hasAutoSelectedRef.current = true;
         }
@@ -473,8 +534,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   // L'arrêt courant est-il DÉJÀ traité ? → on masque tout le « bruit » de livraison
   // (colis à remettre, Naviguer, note, boutons de gestion) et on ne montre qu'un résumé.
   const currentStopDone = !!currentStop && (
-    currentStop.status === StopStatus.COMPLETED ||
-    currentStop.status === StopStatus.FAILED ||
+    currentStop.status === StopStatus.COMPLETED || currentStop.status === StopStatus.FAILED ||
     currentStop.status === StopStatus.SKIPPED
   );
 
@@ -504,7 +564,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
 
     // Filet de sécurité (livraison uniquement) : colis destinés à CE point mais PAS
     // dans l'arrêt (oubli / mal regroupé). Requête large volontairement (best-effort).
-    let unsub: () => void = () => {};
+    let unsub: () => void = () => { /* GPS indispo : l'arrivée est déjà enregistrée */ };
     if (currentStop.type === 'DELIVERY') {
       unsub = subscribeToPackages((pkgs) => {
         const others = pkgs.filter(p =>
@@ -575,7 +635,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   }, [currentUser.id]);
 
   const nextPendingStopIndex = useMemo(() => {
-    return sortedStops.findIndex(s => s.status === StopStatus.PENDING || s.status === StopStatus.ARRIVED);
+    return sortedStops.findIndex(s =>
+                      s.status === StopStatus.PENDING || s.status === StopStatus.ARRIVED);
   }, [sortedStops]);
 
   const missionProgress = useMemo(() => {
@@ -599,7 +660,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
     if (tour) {
       setActiveMissionId(tour.id);
       const sorted = [...(tour.stops || [])].sort((a, b) => a.sequence - b.sequence);
-      const idx = sorted.findIndex(s => s.status === StopStatus.PENDING || s.status === StopStatus.ARRIVED);
+      const idx = sorted.findIndex(s =>
+                      s.status === StopStatus.PENDING || s.status === StopStatus.ARRIVED);
       setActiveStopIndex(idx >= 0 ? idx : 0);
       return;
     }
@@ -612,32 +674,59 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   };
 
   // Modale de choix au scan : Enlèvement (charger, transfert auto) ou Livraison (livrer).
-  const renderScanChoice = () => showScanChoice && (
-    <Modal isOpen onClose={() => setShowScanChoice(false)} title="Choisir une opération" bodyClassName="!p-0">
-      <div className="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-md animate-slide-up" onClick={e => e.stopPropagation()}>
-        <div className="p-4 border-b border-slate-100">
-          <h3 className="font-black text-lg text-slate-800">Quelle opération souhaitez-vous effectuer ?</h3>
+  const renderScanChoice = () =>
+    showScanChoice && (
+      <Modal isOpen onClose={() => setShowScanChoice(false)} title="Choisir une opération" bodyClassName="!p-0">
+        <div className="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-md animate-slide-up" onClick={e => e.stopPropagation()}>
+          <div className="p-4 border-b border-slate-100">
+            <h3 className="font-black text-lg text-slate-800">
+              Quelle opération souhaitez-vous effectuer ?
+            </h3>
+          </div>
+          <div className="p-4 grid grid-cols-1 gap-3">
+            <button
+              onClick={() => { setShowScanChoice(false); setShowClaimModal(true); }}
+              className="ui-button ui-button-secondary w-full !flex-col !items-start !text-left"
+            >
+              <div className="font-black text-base flex items-center gap-2">
+                <PackageIcon
+                  size={18}
+                  className="inline shrink-0 align-text-bottom"
+                  aria-hidden="true"
+                />{" "}
+                Récupérer des colis
+              </div>
+              <div className="text-sm text-slate-600 mt-1">
+                Scannez les colis à récupérer : ils rejoignent votre tournée. Un
+                colis déjà chez un collègue = transfert automatique.
+              </div>
+            </button>
+            <button
+              onClick={() => { setShowScanChoice(false); goToDelivery(); }}
+              className="ui-button ui-button-secondary w-full !flex-col !items-start !text-left"
+            >
+              <div className="font-black text-base flex items-center gap-2">
+                <Truck
+                  size={18}
+                  className="inline shrink-0 align-text-bottom"
+                  aria-hidden="true"
+                />{" "}
+                Livraison — remettre au client
+              </div>
+              <div className="text-sm text-slate-600 mt-1">
+                Ouvrez votre tournée, arrêt par arrêt (scan, photo, signature).
+              </div>
+            </button>
+            <button
+              onClick={() => setShowScanChoice(false)}
+              className="ui-button ui-button-secondary w-full"
+            >
+              Annuler
+            </button>
+          </div>
         </div>
-        <div className="p-4 grid grid-cols-1 gap-3">
-          <button
-            onClick={() => { setShowScanChoice(false); setShowClaimModal(true); }}
-            className="min-h-11 w-full text-left p-4 rounded-2xl bg-green-700 text-white active:scale-95 transition-transform"
-          >
-            <div className="font-black text-base flex items-center gap-2">📥 Récupérer des colis</div>
-            <div className="text-sm text-white/90 mt-1">Scannez les colis à récupérer : ils rejoignent votre tournée. Un colis déjà chez un collègue = transfert automatique.</div>
-          </button>
-          <button
-            onClick={() => { setShowScanChoice(false); goToDelivery(); }}
-            className="min-h-11 w-full text-left p-4 rounded-2xl bg-blue-600 text-white active:scale-95 transition-transform"
-          >
-            <div className="font-black text-base flex items-center gap-2">📤 Livraison — remettre au client</div>
-            <div className="text-sm text-white/90 mt-1">Ouvrez votre tournée, arrêt par arrêt (scan, photo, signature).</div>
-          </button>
-          <button onClick={() => setShowScanChoice(false)} className="min-h-11 w-full py-3 text-slate-500 font-medium text-sm">Annuler</button>
-        </div>
-      </div>
-    </Modal>
-  );
+      </Modal>
+    );
 
   // Rattacher à l'arrêt courant les colis détectés au MÊME point de livraison mais
   // absents de l'arrêt (bandeau rouge). `otherAtAddress` est déjà restreint au même
@@ -666,7 +755,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
     setIsClaimingOthers(true);
     try {
       let location: { lat: number; lng: number } | undefined;
-      try { location = await getCurrentPosition({ timeout: 5000 }); } catch { /* optionnel au rattachement */ }
+      try { location = await getCurrentPosition({ timeout: 5000 }); } catch {}
       const n = await addPackagesToStop(
         activeMission.id,
         currentStop.id,
@@ -686,15 +775,29 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   // timeout 10 s, maximumAge 0 — équivalent aux anciennes options locales).
 
   // Message GPS personnalisé (prénom) + ciblé selon la cause de l'échec.
-  const buildGpsMessage = (err: any): { msg: string; isPermission: boolean } => {
+  const buildGpsMessage = (
+    err: any,
+  ): { msg: string; isPermission: boolean } => {
     const hi = currentUser.firstName ? `${currentUser.firstName}, ` : '';
     const code = err && typeof err.code === 'number' ? err.code : null;
-    if (code === 1) // PERMISSION_DENIED
-      return { msg: `${hi}autorise la localisation pour ce site dans les réglages du navigateur stp 🙏`, isPermission: true };
-    if (code === 2) // POSITION_UNAVAILABLE (GPS OS coupé)
-      return { msg: `${hi}active le GPS de votre téléphone pour continuer stp 🙏`, isPermission: false };
-    if (code === 3) // TIMEOUT
-      return { msg: `${hi}impossible de te localiser — vérifie que le GPS est bien activé, puis réessaie stp 🙏`, isPermission: false };
+    if (code === 1)
+      // PERMISSION_DENIED
+      return {
+        msg: `${hi}autorisez la localisation pour ce site dans les réglages du navigateur `,
+        isPermission: true,
+      };
+    if (code === 2)
+      // POSITION_UNAVAILABLE (GPS OS coupé)
+      return {
+        msg: `${hi}activez le GPS de votre téléphone pour continuer `,
+        isPermission: false,
+      };
+    if (code === 3)
+      // TIMEOUT
+      return {
+        msg: `${hi}position indisponible — vérifiez que le GPS est bien activé, puis réessayez `,
+        isPermission: false,
+      };
     return { msg: `${hi}activez votre localisation pour continuer`, isPermission: false };
   };
 
@@ -775,7 +878,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   };
 
   // === WORKFLOW RETOUR HUB ===
-  
+
   // Ouvrir le modal de retour pour un colis
   const openReturnModal = (pkg: Package) => {
     setReturningPackage(pkg);
@@ -845,10 +948,12 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
         reasonLabel: returningPackage.returnReason || 'Stop supprimé',
         photoUrls,
         signatureUrl,
-        coordinates: coords ?? null,
-        locationStatus: coords ? 'captured' as const : 'unavailable' as const,
+        coordinates:coords ?? null,
+        locationStatus: coords
+          ? ('captured' as const)
+          : ('unavailable' as const),
         timestamp: new Date().toISOString(),
-        notes: `Retourné par ${currentUser.firstName} ${currentUser.lastName}`
+        notes: `Retourné par ${currentUser.firstName} ${currentUser.lastName}`,
       };
 
       // Sauvegarder la preuve de retour dans le colis
@@ -892,7 +997,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
       });
       getCurrentPosition({ timeout: 5000 })
         .then(coords => commitStopOutcome({ missionId, stopId, stopPatch: { arrivalCoordinates: coords } }))
-        .catch(() => { /* GPS indispo : l'arrivée est déjà enregistrée */ });
+        .catch(() => {});
       showNotif('📍 Arrivée enregistrée');
     } catch (err) {
       reportError('driver.arrival', err, { silent: true });
@@ -1038,23 +1143,27 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
       const okDelivered = deliverIds, okFailed = failIds;
       observation = startUxTask('deliver', String(currentUser.role));
       const { allDone, stops: updatedStops } = await submitDelivery({
-        id: `${currentUser.id}/${activeMission.id}/${currentStop.id}`,
-        userId: currentUser.id, kind: 'success', createdAt: now,
+        id:`${currentUser.id}/${activeMission.id}/${currentStop.id}`,
+        userId:currentUser.id, kind: 'success', createdAt:now,
         action: {
           missionId: activeMission.id, stopId: currentStop.id,
-          stopPatch: { status: StopStatus.COMPLETED, completionTime: now, arrivalCoordinates: coords },
+          stopPatch: {
+          status: StopStatus.COMPLETED,
+          completionTime: now,
+          arrivalCoordinates: coords
+        },
           packageOutcomes: stopIds.map(packageId => ({
             packageId, status: deliverIds.includes(packageId) ? PackageStatus.DELIVERED : PackageStatus.FAILED,
             movement: { action: deliverIds.includes(packageId) ? 'DELIVERED' : 'FAILED',
-              driverId: currentUser.id, driverName: driverFullName,
+              driverId: currentUser.id, driverName:driverFullName,
               notes: deliverIds.includes(packageId) ? scanTrace : 'Colis déclaré non remis' }
           }))
         },
-        proof: { missionId:activeMission.id,stopId:currentStop.id,packageIds:deliverIds,
-          driverId:currentUser.id,driverName:driverFullName,vehicleId:activeMission.vehicleId || '',vehiclePlate:activeMission.vehiclePlate || '',
+        proof: { missionId: activeMission.id,stopId: currentStop.id,packageIds:deliverIds,
+          driverId: currentUser.id,driverName:driverFullName,vehicleId: activeMission.vehicleId || '',vehiclePlate: activeMission.vehiclePlate || '',
           recipientName:recipientName || undefined,deliveryLocation,merchandiseGoodCondition:merchandiseGood,
           reservesNote:merchandiseGood ? undefined : reservesNote,signatureBase64:signatureData || undefined,
-          photosBase64:capturedPhotos,coordinates:coords,notes:scanTrace }
+          photosBase64:capturedPhotos,coordinates: coords,notes:scanTrace }
       });
 
       observation.finish('success', { items: stopIds.length });
@@ -1071,7 +1180,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
       // 6. FIX BUG 2: Trouver le prochain stop en attente dans l'ORDRE TRIÉ (par sequence)
       const updatedSorted = [...updatedStops].sort((a, b) => a.sequence - b.sequence);
       const nextSortedIdx = updatedSorted.findIndex(s =>
-        s.status === StopStatus.PENDING || s.status === StopStatus.ARRIVED
+                      s.status === StopStatus.PENDING || s.status === StopStatus.ARRIVED
       );
       if (nextSortedIdx >= 0) {
         setActiveStopIndex(nextSortedIdx);
@@ -1118,12 +1227,12 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
       observation = startUxTask('deliver', String(currentUser.role));
       const { allDone, stops: updatedStops } = await submitDelivery({
         id:`${currentUser.id}/${activeMission.id}/${currentStop.id}`,userId:currentUser.id,kind:'failure',createdAt:now,
-        action:{missionId:activeMission.id,stopId:currentStop.id,
-          stopPatch:{status:StopStatus.FAILED,completionTime:now,arrivalCoordinates:coords},
+        action:{missionId: activeMission.id,stopId: currentStop.id,
+          stopPatch:{status:StopStatus.FAILED,completionTime: now,arrivalCoordinates: coords},
           packageOutcomes:currentStop.packageIds.map(packageId=>({packageId,status:PackageStatus.FAILED,
-            movement:{action:'FAILED',driverId:currentUser.id,driverName:`${currentUser.firstName} ${currentUser.lastName}`,notes:`${failureReason} ${failureNotes}`}}))},
-        proof:{missionId:activeMission.id,stopId:currentStop.id,packageIds:currentStop.packageIds,
-          driverId:currentUser.id,driverName:`${currentUser.firstName} ${currentUser.lastName}`,vehicleId:activeMission.vehicleId || '',vehiclePlate:activeMission.vehiclePlate || '',
+            movement:{action:'FAILED',driverId: currentUser.id,driverName: `${currentUser.firstName} ${currentUser.lastName}`,notes:`${failureReason} ${failureNotes}`}}))},
+        proof:{missionId: activeMission.id,stopId: currentStop.id,packageIds:currentStop.packageIds,
+          driverId: currentUser.id,driverName: `${currentUser.firstName} ${currentUser.lastName}`,vehicleId: activeMission.vehicleId || '',vehiclePlate: activeMission.vehiclePlate || '',
           failureReason,failureNotes,photosBase64:failurePhotos,coordinates:coords ?? null}
       });
 
@@ -1132,7 +1241,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
       // FIX BUG 2: Prochain arrêt dans l'ORDRE TRIÉ
       const updatedSorted = [...updatedStops].sort((a, b) => a.sequence - b.sequence);
       const nextSortedIdx = updatedSorted.findIndex(s =>
-        s.status === StopStatus.PENDING || s.status === StopStatus.ARRIVED
+                      s.status === StopStatus.PENDING || s.status === StopStatus.ARRIVED
       );
       if (nextSortedIdx >= 0) setActiveStopIndex(nextSortedIdx);
 
@@ -1200,9 +1309,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
     setIsOptimizing(true);
     try {
       let coords: { lat: number; lng: number };
-      try {
-        coords = await getCurrentPosition();
-      } catch {
+      try { coords = await getCurrentPosition(); } catch {
         showNotif('📍 Position GPS indisponible — activez la localisation');
         setIsOptimizing(false);
         return;
@@ -1351,7 +1458,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
       // 3. Prochain arrêt
       const updatedSorted = [...updatedStops].sort((a, b) => a.sequence - b.sequence);
       const nextIdx = updatedSorted.findIndex(s =>
-        s.status === StopStatus.PENDING || s.status === StopStatus.ARRIVED
+                      s.status === StopStatus.PENDING || s.status === StopStatus.ARRIVED
       );
       if (nextIdx >= 0) setActiveStopIndex(nextIdx);
 
@@ -1386,23 +1493,91 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
     window.open(`tel:${phone}`, '_self');
   };
 
-  const manualStopRecovery = (pendingManualStop || manualJournalError) && <div role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-left text-sm text-amber-950">
-    {manualJournalError ? <p>{manualJournalError}</p> : <><p className="font-semibold">Un ajout d’arrêt reste à confirmer — tournée du {pendingManualStop!.date}.</p><p>Votre demande est conservée sur ce téléphone. Vérifiez son résultat avant de créer un nouvel arrêt.</p><button type="button" disabled={isProcessing} onClick={openManualStop} className="mt-2 min-h-11 rounded-lg border border-amber-500 px-3 font-bold disabled:opacity-50">Reprendre la demande d’arrêt</button></>}
-  </div>;
-  const manualStopDialog = <Modal isOpen={showManualStop} onClose={() => { void closeManual(() => setShowManualStop(false)); }} title={pendingManualStop ? 'Vérifier l’ajout d’arrêt' : 'Ajouter un arrêt manuel'} preventClose={isProcessing} size="lg"
-    footer={<div className="flex flex-wrap gap-2"><button type="button" disabled={isProcessing || !!manualJournalError} onClick={handleAddManualStop} className="min-h-11 flex-1 rounded-xl bg-amber-800 px-3 py-3 text-sm font-bold text-white disabled:opacity-50">{isProcessing ? 'Vérification…' : pendingManualStop ? 'Vérifier cette demande' : 'Ajouter l’arrêt'}</button><button type="button" disabled={isProcessing} onClick={() => { void closeManual(() => setShowManualStop(false)); }} className="min-h-11 rounded-xl border border-slate-300 px-3 py-3 text-sm font-medium text-slate-700">{pendingManualStop ? 'Fermer — demande conservée' : 'Annuler'}</button></div>}>
-    <div className="space-y-3">
-      <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Cet arrêt n’a pas de colis rattaché et ne provient pas d’un import client. Il ne sera pas suivi dans le portail client. À utiliser uniquement pour un passage exceptionnel.</p>
-      {pendingManualStop && <p className="rounded-xl bg-blue-50 p-3 text-sm text-blue-900">Tournée du {pendingManualStop.date}. Les champs sont verrouillés jusqu’à confirmation de la demande initiale. Vous pourrez ensuite demander une modification au bureau.</p>}
-      {manualStopError && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-900">{manualStopError}</p>}
-      <fieldset disabled={isProcessing || !!pendingManualStop || !!manualJournalError} className="space-y-3">
-        <FormInput label="Nom du destinataire" value={manualStop.contactName} onChange={event => setManualStop(previous => ({ ...previous, contactName: event.target.value }))} hint="Optionnel" />
-        <FormInput label="Adresse" required value={manualStop.address} onChange={event => setManualStop(previous => ({ ...previous, address: event.target.value }))} />
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3"><FormInput label="Code postal" inputMode="numeric" autoComplete="postal-code" value={manualStop.postalCode} onChange={event => setManualStop(previous => ({ ...previous, postalCode: event.target.value }))} /><FormInput label="Ville" required value={manualStop.city} onChange={event => setManualStop(previous => ({ ...previous, city: event.target.value }))} /></div>
-        <FormInput label="Téléphone" type="tel" autoComplete="tel" value={manualStop.contactPhone} onChange={event => setManualStop(previous => ({ ...previous, contactPhone: event.target.value }))} hint="Optionnel" />
-      </fieldset>
+  const manualStopRecovery = (pendingManualStop || manualJournalError) && (
+    <div role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-left text-sm text-amber-950">
+      {manualJournalError ? (
+        <p>{manualJournalError}</p>
+      ) : (
+        <>
+          <p className="font-semibold">
+            Un ajout d’arrêt reste à confirmer — tournée du{" "}
+            {pendingManualStop!.date}.
+          </p>
+          <p>
+            Votre demande est conservée sur ce téléphone. Vérifiez son résultat
+            avant de créer un nouvel arrêt.
+          </p>
+          <button
+            type="button"
+            disabled={isProcessing}
+            onClick={openManualStop}
+            className="ui-button ui-button-secondary mt-2"
+          >
+            Reprendre la demande d’arrêt
+          </button>
+        </>
+      )}
     </div>
-  </Modal>;
+  );
+  const manualStopDialog = (
+    <Modal
+      mobileFullscreen
+      isOpen={showManualStop}
+      onClose={() => { void closeManual(() => setShowManualStop(false)); }}
+      title={pendingManualStop ? 'Vérifier l’ajout d’arrêt' : 'Ajouter un arrêt manuel'}
+      preventClose={isProcessing}
+      size="lg"
+      footer={
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={isProcessing || !!manualJournalError}
+            onClick={handleAddManualStop}
+            className="ui-button ui-button-primary flex-1"
+          >
+            {isProcessing ? 'Vérification…' : pendingManualStop ? 'Vérifier cette demande' : 'Ajouter l’arrêt'}
+          </button>
+          <button
+            type="button"
+            disabled={isProcessing}
+            onClick={() => { void closeManual(() => setShowManualStop(false)); }}
+            className="ui-button ui-button-secondary"
+          >
+            {pendingManualStop ? 'Fermer — demande conservée' : 'Annuler'}
+          </button>
+        </div>
+      }
+    >
+      <div className="space-y-3">
+        <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          Cet arrêt n’a pas de colis rattaché et ne provient pas d’un import
+          client. Il ne sera pas suivi dans le portail client. À utiliser
+          uniquement pour un passage exceptionnel.
+        </p>
+        {pendingManualStop && (
+          <p className="rounded-xl bg-blue-50 p-3 text-sm text-blue-900">
+            Tournée du {pendingManualStop.date}. Les champs sont verrouillés
+            jusqu’à confirmation de la demande initiale. Vous pourrez ensuite
+            demander une modification au bureau.
+          </p>
+        )}
+        {manualStopError && (
+          <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-900">
+            {manualStopError}
+          </p>
+        )}
+        <fieldset disabled={isProcessing || !!pendingManualStop || !!manualJournalError} className="space-y-3">
+          <FormInput label="Nom du destinataire" value={manualStop.contactName} onChange={event => setManualStop(previous => ({ ...previous, contactName: event.target.value }))} hint="Optionnel" />
+          <FormInput label="Adresse" required value={manualStop.address} onChange={event => setManualStop(previous => ({ ...previous, address: event.target.value }))} />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <FormInput label="Code postal" inputMode='numeric' autoComplete="postal-code" value={manualStop.postalCode} onChange={event => setManualStop(previous => ({ ...previous, postalCode: event.target.value }))} />
+            <FormInput label="Ville" required value={manualStop.city} onChange={event => setManualStop(previous => ({ ...previous, city: event.target.value }))} />
+          </div>
+          <FormInput label="Téléphone" type="tel" autoComplete="tel" value={manualStop.contactPhone} onChange={event => setManualStop(previous => ({ ...previous, contactPhone: event.target.value }))} hint="Optionnel" />
+        </fieldset>
+      </div>
+    </Modal>
+  );
 
   // ============================================================================
   // RENDU — Loading
@@ -1413,7 +1588,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
       <div className="flex items-center justify-center h-[60vh]">
         <div className="text-center">
           <Loader2 className="h-10 w-10 animate-spin text-blue-600 mx-auto mb-3" />
-          <p className="text-slate-500">Chargement de vos tournées...</p>
+          <p className='text-slate-500'>Chargement de vos tournées...</p>
         </div>
       </div>
     );
@@ -1426,44 +1601,57 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   if (missions.length === 0) {
     return (
       <div className="max-w-lg mx-auto px-6 pt-10 pb-6 text-center space-y-5">
-        {manualStopRecovery}{manualStopDialog}
+        {manualStopRecovery}
+        {manualStopDialog}
         {notification && (
-          <div role="status" className="bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg text-center text-sm font-medium animate-fade-in">{notification}</div>
+          <div role="status" className="bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg text-center text-sm font-medium animate-fade-in">
+            <NotificationText message={notification} />
+          </div>
         )}
         <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mx-auto">
           <Truck size={36} className="text-slate-600" />
         </div>
         <div>
-          <h2 className="text-xl font-bold text-slate-700 mb-2">Aucune tournée aujourd'hui</h2>
+          <h2 className="text-xl font-bold text-slate-700 mb-2">
+            Aucune tournée aujourd'hui
+          </h2>
           <p className="text-slate-500 text-sm">
-            Scannez des colis pour démarrer votre tournée, ou attendez que le bureau vous en affecte une.
+            Scannez des colis pour démarrer votre tournée, ou attendez que le
+            bureau vous en affecte une.
           </p>
         </div>
-        {/* Le chauffeur peut charger des colis même sans tournée pré-dispatchée */}
+        {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
         <button
           onClick={() => setShowScanChoice(true)}
-          className="min-h-11 w-full flex items-center justify-center gap-2 py-4 bg-green-700 text-white rounded-2xl text-base font-black active:scale-95 transition-transform"
+          className="ui-button ui-button-primary w-full gap-2"
         >
-          📷 Scanner des colis
+          <Camera
+            size={18}
+            className="inline shrink-0 align-text-bottom"
+            aria-hidden="true"
+          />{" "}
+          Scanner des colis
         </button>
 
         {renderScanChoice()}
         {showClaimModal && (
-          <ClaimScanModal
-            currentUser={currentUser}
-            clients={clients}
-            confirmLabel="Commencer ma tournée"
-            onClose={() => setShowClaimModal(false)}
-            onDone={(count) => {
-              setShowClaimModal(false);
-              if (count > 0) {
-                setActiveMissionId(`DLV-${currentUser.id}-${today}`);
-                setActiveStopIndex(0);
-                showNotif(`🚚 ${count} colis chargé${count > 1 ? 's' : ''} — en route !`);
-              }
-            }}
-          />
-        )}
+        <ClaimScanModal
+          currentUser={currentUser}
+          clients={clients}
+          confirmLabel="Commencer ma tournée"
+          onClose={() => setShowClaimModal(false)}
+          onDone={(count) => {
+            setShowClaimModal(false);
+            if (count > 0) {
+              setActiveMissionId(`DLV-${currentUser.id}-${today}`);
+              setActiveStopIndex(0);
+              showNotif(`🚚 ${count} colis chargé${count > 1 ? 's' : ''} — en route !`);
+            }
+          }}
+        />
+      )}
       </div>
     );
   }
@@ -1475,29 +1663,110 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   if (activeMission && activeMission.status === MissionStatus.IN_PROGRESS) {
     return (
       <div className="max-w-lg mx-auto pb-6 space-y-3 animate-fade-in">
-        {manualStopRecovery}{manualStopDialog}
-        {/* Notification toast */}
+        {manualStopRecovery}
+        {manualStopDialog}
+        {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
         {notification && (
           <div role="status" className="bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg text-center text-sm font-medium animate-fade-in">
-            {notification}<button type="button" onClick={() => setNotification(null)} className="min-h-11 ml-2 px-3 underline font-bold">Masquer</button>
+            <NotificationText message={notification} />
+            <button
+              type="button"
+              onClick={() => setNotification(null)}
+              className="ui-button ui-button-ghost !text-white ml-2 underline"
+            >
+              Masquer
+            </button>
           </div>
         )}
 
         <Modal isOpen={showFinishBlocked} onClose={() => setShowFinishBlocked(false)} title="Bilan avant de terminer la tournée" size="lg" preventClose={isProcessing}>
-          <p className="text-sm text-slate-600 mb-4">Vérifiez les arrêts, les retours au hub et l’envoi des preuves. La clôture est confirmée après vérification du serveur.</p>
+          <p className="text-sm text-slate-600 mb-4">
+            Vérifiez les arrêts, les retours au hub et l’envoi des preuves. La
+            clôture est confirmée après vérification du serveur.
+          </p>
           <div className="space-y-4">
-            <section><h4 className="font-bold text-base">{remainingStops} arrêt{remainingStops > 1 ? 's' : ''} à traiter</h4>
-              {sortedStops.map((stop, index) => ![StopStatus.COMPLETED, StopStatus.FAILED, StopStatus.SKIPPED].includes(stop.status) && <button key={stop.id} type="button" onClick={() => openStop(index)} className="mt-2 min-h-12 w-full rounded-xl border border-slate-200 p-3 text-left text-base"><b>Arrêt {stop.sequence}</b> · {stop.contactName || stop.address}<span className="block text-sm text-slate-600">{stop.address} · {stopStatusLabel(stop.status)} → Ouvrir l’arrêt</span></button>)}
+            <section>
+              <h4 className="font-bold text-base">
+                {remainingStops} arrêt{remainingStops > 1 ? 's' : ''} à traiter
+              </h4>
+              {sortedStops.map(
+                (stop, index) =>
+                  ![StopStatus.COMPLETED, StopStatus.FAILED, StopStatus.SKIPPED].includes(stop.status) && (
+                    <button
+                      key={stop.id}
+                      type="button"
+                      onClick={() => openStop(index)}
+                      className="ui-button ui-button-secondary mt-2 w-full text-left"
+                    >
+                      <b>Arrêt {stop.sequence}</b> ·{" "}
+                      {stop.contactName || stop.address}
+                      <span className="block text-sm text-slate-600">
+                        {stop.address} · {stopStatusLabel(stop.status)} → Ouvrir
+                        l’arrêt
+                      </span>
+                    </button>
+                  ),
+              )}
             </section>
-            <section><h4 className="font-bold text-base">{activeReturns.length} colis à remettre au hub</h4>
-              {activeReturns.map(pkg => <button type="button" key={pkg.id} onClick={() => { setShowFinishBlocked(false); openReturnModal(pkg); }} className="mt-2 min-h-12 w-full rounded-xl border border-amber-300 bg-amber-50 p-3 text-left text-base">{packageDisplayCode(pkg)} · {pkg.contactName}<span className="block text-sm">Confirmer la remise au hub →</span></button>)}
+            <section>
+              <h4 className="font-bold text-base">
+                {activeReturns.length} colis à remettre au hub
+              </h4>
+              {activeReturns.map((pkg) => (
+                <button
+                  type="button"
+                  key={pkg.id}
+                  onClick={() => { setShowFinishBlocked(false); openReturnModal(pkg); }}
+                  className="ui-button ui-button-secondary mt-2 w-full text-left"
+                >
+                  {packageDisplayCode(pkg)} · {pkg.contactName}
+                  <span className="block text-sm">
+                    Confirmer la remise au hub →
+                  </span>
+                </button>
+              ))}
             </section>
-            <section><h4 className="font-bold text-base">{proofStopIds.size} arrêt{proofStopIds.size > 1 ? 's' : ''} avec un envoi en attente</h4>
-              {pendingProofError && <p role="alert" className="text-sm text-red-800 mt-2">{pendingProofError}</p>}
-              <button type="button" onClick={openPendingProofs} className="min-h-11 mt-2 px-3 py-2 rounded-lg border border-slate-300 font-bold text-sm">Voir les preuves et réessayer l’envoi</button>
+            <section>
+              <h4 className="font-bold text-base">
+                {proofStopIds.size} arrêt{proofStopIds.size > 1 ? 's' : ''} avec
+                un envoi en attente
+              </h4>
+              {pendingProofError && (
+                <p role="alert" className="text-sm text-red-800 mt-2">
+                  {pendingProofError}
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={openPendingProofs}
+                className="ui-button ui-button-secondary mt-2"
+              >
+                Voir les preuves et réessayer l’envoi
+              </button>
             </section>
-            {!online && <p role="status" className="rounded-lg bg-amber-50 p-3 text-amber-950">Reconnectez le téléphone pour demander la clôture. Vos preuves restent conservées sur cet appareil.</p>}
-            {closureNeedsAttention ? <p className="text-sm text-slate-700">Ouvrez les éléments ci-dessus pour terminer ce qui reste à faire.</p> : <button type="button" disabled={isProcessing || !online} onClick={handleFinishTour} className="min-h-11 min-h-12 w-full rounded-xl bg-green-700 px-4 py-3 text-white font-bold disabled:opacity-50">{isProcessing ? 'Vérification de la tournée…' : 'Confirmer la fin de ma tournée'}</button>}
+            {!online && (
+              <p role="status" className="rounded-lg bg-amber-50 p-3 text-amber-950">
+                Reconnectez le téléphone pour demander la clôture. Vos preuves
+                restent conservées sur cet appareil.
+              </p>
+            )}
+            {closureNeedsAttention ? (
+              <p className="text-sm text-slate-700">
+                Ouvrez les éléments ci-dessus pour terminer ce qui reste à
+                faire.
+              </p>
+            ) : (
+              <button
+                type="button"
+                disabled={isProcessing || !online}
+                onClick={handleFinishTour}
+                className="ui-button ui-button-primary w-full"
+              >
+                {isProcessing ? 'Vérification de la tournée…' : 'Confirmer la fin de ma tournée'}
+              </button>
+            )}
           </div>
         </Modal>
 
@@ -1507,184 +1776,216 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
           </div>
         )}
 
-        {/* === FIN DE TOURNÉE : tous les arrêts sont faits → clôturer explicitement === */}
+        {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
         {allStopsDone && (
-          <div className="bg-green-600 rounded-2xl p-4 text-white shadow-sm text-center space-y-3">
-            <p className="text-lg font-black">Tous les arrêts sont traités</p>
-            <p className="text-sm text-white/90">Vérifiez les retours et les preuves avant de terminer la tournée.</p>
+          <div className="ui-panel p-4 space-y-3">
+            <p className="flex items-start gap-2 text-lg font-bold text-slate-900">
+              <CheckCircle size={22} className="text-green-700 shrink-0" />
+              Tous les arrêts sont traités
+            </p>
+            <p className="text-sm text-slate-700">
+              Vérifiez les retours et les preuves avant de terminer la tournée.
+            </p>
             <button
               onClick={requestFinishTour}
               disabled={isProcessing}
-              className="min-h-11 w-full py-4 bg-white text-green-700 rounded-xl font-black text-base active:scale-95 transition-transform disabled:opacity-60"
+              className="ui-button ui-button-primary w-full"
             >
-              {isProcessing ? <Loader2 size={18} className="animate-spin inline" /> : closureNeedsAttention ? 'Voir ce qu’il reste à faire' : 'Vérifier et terminer ma tournée'}
+              {isProcessing ? (
+                <Loader2 size={18} className="animate-spin inline" />
+              ) : closureNeedsAttention ? (
+                'Voir ce qu’il reste à faire'
+              ) : (
+                'Vérifier et terminer ma tournée'
+              )}
             </button>
           </div>
         )}
 
-        {/* === STOP ACTIF === */}
+        {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
         {currentStop && (
           <div ref={stopCardRef} className="scroll-mt-4 bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-            {/* Header stop */}
-            <div className={`p-4 ${
-              currentStop.status === StopStatus.COMPLETED ? 'bg-green-50' :
-              currentStop.status === StopStatus.FAILED ? 'bg-red-50' :
-              currentStop.status === StopStatus.ARRIVED ? 'bg-blue-50' :
-              'bg-white'
-            }`}>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-bold text-slate-500">
-                  ARRÊT {currentStop.sequence}/{sortedStops.length}
+            <div className="px-3 pt-2 pb-3 space-y-2">
+              <div className="flex items-center gap-2 min-h-11">
+                <span className="text-sm font-medium text-slate-600">
+                  Arrêt {currentStop.sequence}/{sortedStops.length}
                 </span>
-                <span className={`px-2 py-0.5 rounded-full text-sm font-bold ${
-                  currentStop.status === StopStatus.COMPLETED ? 'bg-green-100 text-green-700' :
-                  currentStop.status === StopStatus.FAILED ? 'bg-red-100 text-red-700' :
-                  currentStop.status === StopStatus.ARRIVED ? 'bg-blue-100 text-blue-700' :
-                  'bg-slate-100 text-slate-600'
-                }`}>
+                <span
+                  className={`text-sm font-semibold ${currentStop.status === StopStatus.COMPLETED ? "text-green-800" : currentStop.status === StopStatus.FAILED ? "text-red-800" : "text-brand-800"}`}
+                >
                   {stopStatusLabel(currentStop.status)}
                 </span>
-              </div>
-
-              {/* Contact + type badge */}
-              <div className="flex items-center gap-2 mb-1 min-w-0">
-                <h3 className="text-xl font-bold text-slate-800 min-w-0 break-words">{currentStop.contactName || 'Sans contact'}</h3>
                 {isPickupStop && (
-                  <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-sm font-bold uppercase tracking-wide flex-shrink-0 whitespace-nowrap">
-                    📦 Enlèvement
+                  <span className="inline-flex items-center gap-1 text-sm text-slate-700">
+                    <PackageIcon aria-hidden="true" size={16} />
+                    Enlèvement
                   </span>
                 )}
+                {!currentStopDone && currentStop.contactPhone && (
+                  <button
+                    type="button"
+                    onClick={() => callContact(currentStop.contactPhone!)}
+                    aria-label={`Appeler ${currentStop.contactName || 'le destinataire'}`}
+                    title="Appeler le destinataire"
+                    className="ui-button ui-button-secondary ml-auto shrink-0"
+                  >
+                    <Phone aria-hidden="true" size={18} />
+                    <span className="sr-only">Appeler</span>
+                  </button>
+                )}
               </div>
-
-              {/* Adresse */}
-              <p className="text-base text-slate-700 mb-2">
-                📍 {currentStop.address}, {currentStop.postalCode} {currentStop.city}
-              </p>
-
-              {/* Info rapides */}
-              <div className="flex flex-wrap gap-2 text-sm">
-                <span className="px-2 py-1 bg-white rounded-lg border border-slate-200 font-medium">
-                  📦 {currentStop.packageCount} colis
+              <h3 className="text-lg font-bold text-slate-900 break-words leading-snug">
+                {currentStop.contactName || 'Sans contact'}
+              </h3>
+              <p className="flex items-start gap-2 text-base text-slate-700 leading-snug">
+                <MapPin
+                  aria-hidden="true"
+                  size={18}
+                  className="mt-0.5 shrink-0"
+                />
+                <span>
+                  {currentStop.address}, {currentStop.postalCode}{" "}
+                  {currentStop.city}
                 </span>
-                <span className="px-2 py-1 bg-white rounded-lg border border-slate-200 font-medium">
-                  ⏱ ~{currentStop.serviceTime} min
+              </p>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-600">
+                <span className="inline-flex items-center gap-1.5">
+                  <PackageIcon aria-hidden="true" size={16} />
+                  {currentStop.packageCount} colis
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <Clock aria-hidden="true" size={16} />
+                  Environ {currentStop.serviceTime} min
                 </span>
                 {currentStop.floor != null && (
-                  <span className="px-2 py-1 bg-white rounded-lg border border-slate-200 font-medium">
-                    🏢 Étage {currentStop.floor} {currentStop.hasElevator ? '(asc.)' : ''}
+                  <span className="inline-flex items-center gap-1.5">
+                    <Building2 aria-hidden="true" size={16} />
+                    Étage {currentStop.floor}
+                    {currentStop.hasElevator ? " · ascenseur" : ''}
                   </span>
                 )}
                 {(currentStop.timeWindowStart || currentStop.timeWindowEnd) && (
-                  <span className="px-2 py-1 bg-amber-50 border border-amber-200 rounded-lg font-medium text-amber-700">
-                    🕐 {currentStop.timeWindowStart && currentStop.timeWindowEnd ? `${currentStop.timeWindowStart} – ${currentStop.timeWindowEnd}` : currentStop.timeWindowStart ? `À partir de ${currentStop.timeWindowStart}` : `Avant ${currentStop.timeWindowEnd}`}
+                  <span className="inline-flex items-center gap-1.5 font-medium text-amber-900">
+                    <Clock aria-hidden="true" size={16} />
+                    {currentStop.timeWindowStart && currentStop.timeWindowEnd ? `${currentStop.timeWindowStart} – ${currentStop.timeWindowEnd}` : currentStop.timeWindowStart ? `À partir de ${currentStop.timeWindowStart}` : `Avant ${currentStop.timeWindowEnd}`}
                   </span>
                 )}
               </div>
-
-              {/* Liste des colis à remettre — MASQUÉE quand l'arrêt est déjà livré/traité. */}
-              {!isPickupStop && !currentStopDone && stopPackages.length > 0 && (
-                <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded-lg">
-                  <p className="text-sm font-bold text-blue-700 uppercase tracking-wide mb-1.5">
-                    {stopPackages.length > 1 ? `${stopPackages.length} colis à remettre` : 'Colis à remettre'}
-                  </p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {stopPackages.map((p, i) => (
-                      <span
-                        key={p.id}
-                        className="px-2 py-1 bg-white border border-blue-200 rounded-lg text-sm font-mono font-bold text-blue-800"
-                      >
-                        {p.externalId || p.barcode}
-                        {stopPackages.length > 1 && (
-                          <span className="ml-1 font-sans font-medium text-blue-500">{i + 1}/{stopPackages.length}</span>
-                        )}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Filet de sécurité : colis à la même adresse hors de cet arrêt.
-                  Masqué si l'arrêt est déjà terminé (on n'y rattache plus rien). */}
-              {!isPickupStop && currentStop.status !== StopStatus.COMPLETED && otherAtAddress.length > 0 && (
-                <div className="mt-2 p-3 bg-red-50 border-2 border-red-300 rounded-lg">
-                  <p className="text-sm font-black text-red-700 flex items-center gap-1.5">
-                    <XCircle size={14} />
-                    ATTENTION — {otherAtAddress.length} autre{otherAtAddress.length > 1 ? 's' : ''} colis à cette adresse !
-                  </p>
-                  <p className="text-sm text-red-800 mt-1">
-                    {stopPackages.length + otherAtAddress.length} colis semblent destinés à ce client, vous n’en avez que <b>{stopPackages.length}</b> dans cet arrêt. Vérifiez avec le client avant de repartir.
-                  </p>
-                  <div className="flex flex-wrap gap-1.5 mt-1.5">
-                    {otherAtAddress.map(p => (
-                      <span key={p.id} className="px-2 py-1 bg-white border border-red-200 rounded-lg text-sm font-mono font-bold text-red-700">
-                        {p.externalId || p.barcode}
-                      </span>
-                    ))}
-                  </div>
-                  {claimableOthers.length > 0 && (
-                    <button
-                      onClick={handleClaimOthersToStop}
-                      disabled={isClaimingOthers}
-                      className="min-h-11 mt-2 w-full flex items-center justify-center gap-2 py-2.5 bg-red-600 text-white rounded-lg font-bold text-sm active:scale-95 transition-transform disabled:opacity-50"
-                    >
-                      {isClaimingOthers ? <Loader2 size={14} className="animate-spin" /> : <PackageIcon size={14} />}
-                      Ajouter {claimableOthers.length} colis à cet arrêt
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {!currentStopDone && currentStop.notes && (
-                <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
-                  📝 {currentStop.notes}
-                </div>
-              )}
-            </div>
-
-            {/* Actions rapides (Naviguer + Appeler) — MASQUÉES sur un arrêt déjà traité. */}
-            {!currentStopDone && (
-            <div className="p-3 border-t border-slate-100 flex gap-2">
-              {/* Naviguer — utile seulement AVANT d'arriver. Une fois « Arrivé » (en
-                  livraison), on le masque : le chauffeur est sur place, ça n'a plus de sens. */}
-              {currentStop.status !== StopStatus.ARRIVED && (
-                <button
-                  onClick={() => openNavigation(currentStop)}
-                  className="min-h-11 flex-1 flex items-center justify-center gap-2 py-3 bg-blue-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform"
-                >
-                  <Navigation size={18} />
-                  Naviguer
-                </button>
-              )}
-
-              {/* Appeler */}
-              {currentStop.contactPhone && (
-                <button
-                  onClick={() => callContact(currentStop.contactPhone!)} aria-label={`Appeler ${currentStop.contactName || 'le destinataire'}`}
-                  className="flex items-center justify-center w-12 h-12 bg-green-50 border border-green-200 rounded-xl text-green-700 active:scale-95 transition-transform"
-                >
-                  <Phone size={20} /><span className="sr-only">Appeler</span>
-                </button>
-              )}
-            </div>
-            )}
-
-            {/* === ACTIONS DE LIVRAISON === */}
-            {currentStop.status !== StopStatus.COMPLETED && currentStop.status !== StopStatus.FAILED && currentStop.status !== StopStatus.SKIPPED && (
-              <div className="p-3 border-t border-slate-100 space-y-2">
-                {/* Étape 1: Arrivée */}
-                {currentStop.status === StopStatus.PENDING && (
-                  <button
-                    onClick={handleArriveAtStop}
-                    disabled={isProcessing}
-                    className="min-h-11 w-full flex items-center justify-center gap-2 py-3.5 bg-blue-50 border-2 border-blue-200 text-blue-700 rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-50"
-                  >
-                    {isProcessing ? <Loader2 size={18} className="animate-spin" /> : <MapPinned size={18} />}
-                    Je suis arrivé
-                  </button>
+              {!isPickupStop && !currentStopDone &&
+                deliveryStep > 0 &&
+                stopPackages.length > 0 && (
+                  <details className="text-sm text-slate-700">
+                    <summary className="min-h-11 flex items-center cursor-pointer font-medium">
+                      Références des {stopPackages.length} colis
+                    </summary>
+                    <ul className="space-y-1 pb-2">
+                      {stopPackages.map((pkg) => (
+                        <li key={pkg.id} className="break-all font-mono">
+                          {packageDisplayCode(pkg) || "Sans code"}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
                 )}
 
-                {/* Étape 2: Actions selon le type de stop */}
-                {currentStop.status === StopStatus.ARRIVED && isPickupStop && (
+              {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+              {!isPickupStop && currentStop.status !== StopStatus.COMPLETED && otherAtAddress.length > 0 && (
+                  <div className="mt-2 p-3 bg-red-50 border-2 border-red-300 rounded-lg">
+                    <p className="text-sm font-black text-red-700 flex items-center gap-1.5">
+                      <XCircle size={14} />À vérifier : {otherAtAddress.length}{" "}
+                      autre{otherAtAddress.length > 1 ? 's' : ''} colis à cette
+                      adresse !
+                    </p>
+                    <p className="text-sm text-red-800 mt-1">
+                      {stopPackages.length + otherAtAddress.length} colis
+                      semblent destinés à ce client, vous n’en avez que{" "}
+                      <b>{stopPackages.length}</b> dans cet arrêt. Vérifiez avec
+                      le client avant de repartir.
+                    </p>
+                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                      {otherAtAddress.map((p) => (
+                        <span key={p.id} className="px-2 py-1 bg-white border border-red-200 rounded-lg text-sm font-mono font-bold text-red-700">
+                          {p.externalId || p.barcode}
+                        </span>
+                      ))}
+                    </div>
+                    {claimableOthers.length > 0 && (
+                      <button
+                        onClick={handleClaimOthersToStop}
+                        disabled={isClaimingOthers}
+                        className="ui-button ui-button-primary mt-2 w-full gap-2"
+                      >
+                        {isClaimingOthers ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          <PackageIcon size={14} />
+                        )}
+                        Ajouter {claimableOthers.length} colis à cet arrêt
+                      </button>
+                    )}
+                  </div>
+                )}
+
+              {!currentStopDone && currentStop.notes && (
+                <p className="flex items-start gap-2 border-l-2 border-amber-400 pl-2 text-sm text-amber-900">
+                  <StickyNote
+                    aria-hidden="true"
+                    size={16}
+                    className="mt-0.5 shrink-0"
+                  />
+                  <span className="whitespace-pre-wrap break-words">
+                    {currentStop.notes}
+                  </span>
+                </p>
+              )}
+            </div>
+
+            {!currentStopDone && currentStop.status !== StopStatus.ARRIVED && (
+              <div className="px-3 pb-3">
+                <button
+                  type="button"
+                  onClick={() => openNavigation(currentStop)}
+                  className="ui-button ui-button-secondary w-full"
+                >
+                  <Navigation aria-hidden="true" size={18} />
+                  Naviguer vers cet arrêt
+                </button>
+              </div>
+            )}
+
+            {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+            {currentStop.status !== StopStatus.COMPLETED && currentStop.status !== StopStatus.FAILED && currentStop.status !== StopStatus.SKIPPED && (
+                <div className="p-3 border-t border-slate-100 space-y-2">
+                  {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+                  {currentStop.status === StopStatus.PENDING && (
+                    <button
+                      onClick={handleArriveAtStop}
+                      disabled={isProcessing}
+                      className="ui-button ui-button-primary w-full gap-2"
+                    >
+                      {isProcessing ? (
+                        <Loader2 size={18} className="animate-spin" />
+                      ) : (
+                        <MapPinned size={18} />
+                      )}
+                      Je suis arrivé
+                    </button>
+                  )}
+
+                  {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+                  {currentStop.status === StopStatus.ARRIVED && isPickupStop && (
                   /* ===== MODE ENLÈVEMENT (PICKUP) ===== */
                   <PickupScanView
                     expectedPackages={stopPackages.map(p => ({
@@ -1707,202 +2008,331 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                   />
                 )}
 
-                {/* ===== MODE LIVRAISON (DELIVERY) ===== */}
-                {currentStop.status === StopStatus.ARRIVED && !isPickupStop && (
-                  <>
-                    {/* Progression de l'assistant de livraison */}
-                    <p role="status" aria-live="polite" className="text-base font-bold text-slate-900 px-1">Étape {deliveryStep + 1} sur {DELIVERY_STEPS.length} · {DELIVERY_STEPS[deliveryStep]}</p>
-                    <p className="sr-only" aria-live="polite">{stepAnnouncement}</p>
-                    <div aria-hidden="true" className="flex items-start gap-1 px-1 pb-1">
-                      {DELIVERY_STEPS.map((label, i) => (
-                        <div key={label} className="min-w-0 flex-1 flex flex-col items-center gap-1 text-center">
-                          <div className={`w-full h-1.5 rounded-full ${i <= deliveryStep ? 'bg-green-500' : 'bg-slate-200'}`} />
-                          <span className="sm:hidden text-sm font-bold text-slate-700">{i + 1}</span>
-                          <span className={`hidden sm:block text-sm font-bold ${i === deliveryStep ? 'text-green-700' : 'text-slate-600'}`}>{label}</span>
+                  {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+                  {currentStop.status === StopStatus.ARRIVED && !isPickupStop && (
+                      <>
+                        {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+                        <p role="status" aria-live="polite" className="text-base font-bold text-slate-900 px-1">
+                          Étape {deliveryStep + 1} sur {DELIVERY_STEPS.length} ·{" "}
+                          {DELIVERY_STEPS[deliveryStep]}
+                        </p>
+                        <p className="sr-only" aria-live="polite">
+                          {stepAnnouncement}
+                        </p>
+                        <div
+                          aria-hidden="true"
+                          className="flex gap-1 px-1 pb-1"
+                        >
+                          {DELIVERY_STEPS.map((label, index) => (
+                            <div
+                              key={label}
+                              title={label}
+                              className={`h-1 flex-1 rounded-full ${index <= deliveryStep ? "bg-brand-700" : 'bg-slate-200'}`}
+                            />
+                          ))}
                         </div>
-                      ))}
-                    </div>
 
-                    {/* ===== ÉTAPE 1 · COLIS ===== */}
-                    {deliveryStep === 0 && (
-                      <div className="space-y-2">
-                        <p className="text-lg font-black text-slate-800 px-1">Scannez {stopPackages.length > 1 ? `les ${stopPackages.length} colis` : 'le colis'}</p>
-                        {stopPackages.length > 0 ? (
-                          <div className="bg-white border border-slate-200 rounded-xl p-3 space-y-2">
-                            <div className="flex items-center justify-between">
-                              <p className="text-sm font-bold text-slate-700">
-                                📷 Colis scannés : {deliveryScannedCount}/{stopPackages.length}
-                              </p>
-                              <button
-                                onClick={() => setShowScanner(true)}
-                                className="min-h-11 flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-bold active:scale-95 transition-transform"
-                              >
-                                <Camera size={14} />
-                                Scanner
-                              </button>
-                            </div>
-                            <div className="flex flex-wrap gap-1.5">
-                              {stopPackages.map(p => {
-                                const ok = scannedStopIds.has(p.id);
-                                const noCode = packageScanCodes(p).length === 0;
-                                return (
-                                  <span
-                                    key={p.id}
-                                    title={noCode ? 'Ce colis n’a pas de code scannable — à valider en « Forcer »' : undefined}
-                                    className={`px-2 py-1 rounded-lg text-sm font-mono font-bold border ${
-                                      ok
+                        {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+                        {deliveryStep === 0 && (
+                          <div className="space-y-2">
+                            {stopPackages.length > 0 ? (
+                              <div className="space-y-3">
+                                <div className="flex items-center justify-between">
+                                  <p className="text-sm font-bold text-slate-700">
+                                    Colis scannés : {deliveryScannedCount}/
+                                    {stopPackages.length}
+                                  </p>
+                                  <button
+                                    onClick={() => setShowScanner(true)}
+                                    className={`ui-button ${allStopScanned ? "ui-button-secondary" : "ui-button-primary"} gap-1.5`}
+                                  >
+                                    <ScanLine aria-hidden="true" size={18} />
+                                    Scanner
+                                  </button>
+                                </div>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {stopPackages.map((p) => {
+                                    const ok = scannedStopIds.has(p.id);
+                                    const noCode = packageScanCodes(p).length === 0;
+                                    return (
+                                      <span
+                                        key={p.id}
+                                        title={noCode ? 'Ce colis n’a pas de code scannable — à valider en « Forcer »' : undefined}
+                                        className={`max-w-full break-all px-2 py-1 rounded-lg text-sm font-mono font-bold border ${
+                                          ok
                                         ? 'bg-green-50 border-green-300 text-green-700'
                                         : noCode
                                           ? 'bg-amber-50 border-amber-300 text-amber-700'
                                           : 'bg-slate-50 border-slate-200 text-slate-500'
                                     }`}
-                                  >
-                                    {ok ? '✓ ' : noCode ? '⚠️ ' : ''}{packageDisplayCode(p) || 'sans code'}
-                                  </span>
-                                );
-                              })}
-                            </div>
-                            {!allStopScanned && (
-                              <p className="text-sm text-amber-800 font-medium">
-                                ⚠️ {missingStopCodes.length} colis non scanné{missingStopCodes.length > 1 ? 's' : ''} — scannez-les, ou « Continuer » proposera de forcer / déclarer absents
+                                      >
+                                        {ok ? (
+                                          <CheckCircle
+                                            aria-hidden="true"
+                                            size={16}
+                                            className="inline mr-1"
+                                          />
+                                        ) : noCode ? (
+                                          <AlertTriangle
+                                            aria-hidden="true"
+                                            size={16}
+                                            className="inline mr-1"
+                                          />
+                                        ) : null}
+                                        {packageDisplayCode(p) || "Sans code"}
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                                {!allStopScanned && (
+                                  <p className="flex items-start gap-2 text-sm text-amber-900">
+                                    <AlertTriangle
+                                      aria-hidden="true"
+                                      size={18}
+                                      className="mt-0.5 shrink-0"
+                                    />
+                                    <span>
+                                      {missingStopCodes.length} colis non scanné
+                                      {missingStopCodes.length > 1 ? 's' : ''}.
+                                      Scannez{" "}
+                                      {missingStopCodes.length > 1
+                                        ? "les colis"
+                                        : 'le colis'}
+                                      , ou utilisez Continuer pour déclarer une
+                                      exception.
+                                    </span>
+                                  </p>
+                                )}
+                              </div>
+                            ) : (
+                              <p className="text-sm text-slate-500 px-1">
+                                Aucun colis listé pour ce point.
                               </p>
                             )}
                           </div>
-                        ) : (
-                          <p className="text-sm text-slate-500 px-1">Aucun colis listé pour ce point.</p>
                         )}
-                      </div>
-                    )}
 
-                    {/* ===== ÉTAPE 2 · ÉTAT MARCHANDISE (guidé, avance au tap) ===== */}
-                    {deliveryStep === 1 && (
-                      <div className="space-y-3">
-                        <p className="text-lg font-black text-slate-800 px-1">La marchandise est-elle en bon état ?</p>
-                        {!showReserves ? (
-                          <div className="grid grid-cols-2 gap-2.5">
-                            <button
-                              onClick={() => { setMerchandiseGood(true); setReservesNote(''); setShowReserves(false); setDeliveryStep(2); }}
-                              className="min-h-11 flex flex-col items-center justify-center gap-1.5 py-5 bg-green-700 text-white rounded-2xl font-black text-base active:scale-95 transition-transform"
-                            >
-                              <CheckCircle size={26} /> Oui, bon état
-                            </button>
-                            <button
-                              onClick={() => { setMerchandiseGood(false); setShowReserves(true); }}
-                              className="min-h-11 flex flex-col items-center justify-center gap-1.5 py-5 bg-white border-2 border-amber-400 text-amber-700 rounded-2xl font-black text-base active:scale-95 transition-transform"
-                            >
-                              <AlertTriangle size={26} /> Non, réserves
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="space-y-2 px-1">
-                            <div className="flex items-center justify-between">
-                              <label htmlFor="delivery-reserves" className="text-sm font-bold text-amber-700 block">⚠️ Décrivez la réserve :</label>
-                              {/* Revenir au choix Oui/Non (corriger un tap « Non » par erreur) */}
-                              <button
-                                onClick={() => { setShowReserves(false); setMerchandiseGood(true); setReservesNote(''); }}
-                                className="min-h-11 text-sm text-slate-500 underline font-medium"
-                              >
-                                ← Changer
-                              </button>
-                            </div>
-                            <textarea id="delivery-reserves"
+                        {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+                        {deliveryStep === 1 && (
+                          <div className="space-y-3">
+                            <p className="text-lg font-black text-slate-800 px-1">
+                              La marchandise est-elle en bon état ?
+                            </p>
+                            {!showReserves ? (
+                              <div className="grid grid-cols-2 gap-2.5">
+                                <button
+                                  onClick={() => { setMerchandiseGood(true); setReservesNote(''); setShowReserves(false); setDeliveryStep(2); }}
+                                  className="ui-button ui-button-primary flex-col gap-1.5"
+                                >
+                                  <CheckCircle size={26} /> Oui, bon état
+                                </button>
+                                <button
+                                  onClick={() => { setMerchandiseGood(false); setShowReserves(true); }}
+                                  className="ui-button ui-button-secondary flex-col gap-1.5"
+                                >
+                                  <AlertTriangle size={26} /> Non, réserves
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="space-y-2 px-1">
+                                <div className="flex items-center justify-between">
+                                  <label htmlFor="delivery-reserves" className="text-sm font-bold text-amber-700 block">
+                                    <AlertTriangle
+                                      size={18}
+                                      className="inline shrink-0 align-text-bottom"
+                                      aria-hidden="true"
+                                    />{" "}
+                                    Décrivez la réserve :
+                                  </label>
+                                  {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+                                  <button
+                                    onClick={() => { setShowReserves(false); setMerchandiseGood(true); setReservesNote(''); }}
+                                    className="ui-button ui-button-ghost underline"
+                                  >
+                                    ← Changer
+                                  </button>
+                                </div>
+                                <textarea id="delivery-reserves"
                               value={reservesNote}
                               onChange={(e) => setReservesNote(e.target.value)}
                               placeholder="Colis manquant, emballage endommagé, contenu non conforme…"
                               rows={3}
                               className="w-full px-3 py-2.5 border border-amber-300 rounded-lg text-base focus:ring-2 focus:ring-amber-200 outline-none"
                             />
-                            <button
-                              onClick={() => setDeliveryStep(2)}
-                              disabled={!reservesNote.trim()}
-                              className="min-h-11 w-full py-4 bg-amber-800 text-white rounded-2xl font-black text-base active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
-                            >
-                              Continuer →
-                            </button>
-                            {!reservesNote.trim() && (
-                              <p className="text-sm text-amber-800 font-medium text-center">Décrivez la réserve pour continuer</p>
+                                <button
+                                  onClick={() => setDeliveryStep(2)}
+                                  disabled={!reservesNote.trim()}
+                                  className="ui-button ui-button-primary w-full disabled:cursor-not-allowed"
+                                >
+                                  Continuer{" "}
+                                  <ChevronRight size={18} aria-hidden="true" />
+                                </button>
+                                {!reservesNote.trim() && (
+                                  <p className="text-sm text-amber-800 font-medium text-center">
+                                    Décrivez la réserve pour continuer
+                                  </p>
+                                )}
+                              </div>
                             )}
                           </div>
                         )}
-                      </div>
-                    )}
 
-                    {/* ===== ÉTAPE 3 · RÉCEPTION ===== */}
-                    {deliveryStep === 2 && (
-                      <div className="space-y-3">
-                        <p className="text-lg font-black text-slate-800 px-1">Qui réceptionne le colis ?</p>
-                        {/* Nom réceptionnaire */}
-                        <div className="px-1">
-                          <label htmlFor="delivery-recipient" className="text-sm font-medium text-slate-500 mb-1 block">
-                            Nom du réceptionnaire
-                            <span className="text-red-700 ml-1">*</span>
-                          </label>
-                          <input id="delivery-recipient" autoComplete="name"
-                            type="text"
-                            value={recipientName}
-                            onChange={(e) => setRecipientName(e.target.value)}
-                            placeholder="Nom de la personne qui réceptionne"
-                            className="w-full px-3 py-3 border border-slate-200 rounded-lg text-base focus:ring-2 focus:ring-green-200 focus:border-green-400 outline-none"
-                          />
-                        </div>
-                        {/* Lieu de remise */}
-                        <div className="px-1">
-                          <label className="text-sm font-medium text-slate-500 mb-1 block">
-                            📍 Lieu de remise
-                          </label>
-                          <div className="grid grid-cols-2 gap-1.5">
-                            {Object.values(DeliveryLocation).map(loc => (
-                              <button
-                                key={loc}
-                                onClick={() => setDeliveryLocation(loc as DeliveryLocation)}
-                                className={`px-2 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
-                                  deliveryLocation === loc
-                                    ? 'bg-green-100 border-2 border-green-400 text-green-800'
-                                    : 'bg-slate-50 border border-slate-200 text-slate-600 hover:bg-slate-100'
-                                }`}
-                              >
-                                {loc === DeliveryLocation.HAND_DELIVERY && '🤝 '}
-                                {loc === DeliveryLocation.NEIGHBOR && '🏠 '}
-                                {loc === DeliveryLocation.CONCIERGE && '🔑 '}
-                                {loc === DeliveryLocation.MAILBOX && '📬 '}
-                                {loc === DeliveryLocation.RECEPTION && '🏢 '}
-                                {loc === DeliveryLocation.SAFE_PLACE && '🔒 '}
-                                {loc === DeliveryLocation.OTHER && '📋 '}
-                                {loc}
-                              </button>
-                            ))}
+                        {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+                        {deliveryStep === 2 && (
+                          <div className="space-y-3">
+                            <p className="text-lg font-black text-slate-800 px-1">
+                              Qui réceptionne le colis ?
+                            </p>
+                            {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+                            <div className="px-1">
+                              <label htmlFor="delivery-recipient" className="text-sm font-medium text-slate-500 mb-1 block">
+                                Nom du réceptionnaire
+                                <span className="text-red-700 ml-1">*</span>
+                              </label>
+                              <input
+                                id="delivery-recipient"
+                                autoComplete="name"
+                                type="text"
+                                value={recipientName}
+                                onChange={(e) => setRecipientName(e.target.value)}
+                                placeholder="Nom de la personne qui réceptionne"
+                                className="w-full px-3 py-3 border border-slate-200 rounded-lg text-base focus:ring-2 focus:ring-brand-200 focus:border-brand-400 outline-none"
+                              />
+                            </div>
+                            {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+                            <div className="px-1">
+                              <label className="text-sm font-medium text-slate-500 mb-1 block">
+                                <MapPin
+                                  size={18}
+                                  className="inline shrink-0 align-text-bottom"
+                                  aria-hidden="true"
+                                />{" "}
+                                Lieu de remise
+                              </label>
+                              <div className="grid grid-cols-2 gap-1.5">
+                                {Object.values(DeliveryLocation).map((loc) => (
+                                  <button
+                                    key={loc}
+                                    onClick={() => setDeliveryLocation(loc as DeliveryLocation)}
+                                    aria-pressed={deliveryLocation === loc}
+                                    className={`ui-button ui-button-secondary !justify-start text-left ${deliveryLocation === loc ? "!border-brand-600 !bg-brand-50 !text-brand-900 ring-1 ring-brand-600" : ''}`}
+                                  >
+                                    {loc === DeliveryLocation.HAND_DELIVERY && (
+                                      <Handshake
+                                        size={18}
+                                        className="shrink-0"
+                                        aria-hidden="true"
+                                      />
+                                    )}
+                                    {loc === DeliveryLocation.NEIGHBOR && (
+                                      <Home
+                                        size={18}
+                                        className="shrink-0"
+                                        aria-hidden="true"
+                                      />
+                                    )}
+                                    {loc === DeliveryLocation.CONCIERGE && (
+                                      <KeyRound
+                                        size={18}
+                                        className="shrink-0"
+                                        aria-hidden="true"
+                                      />
+                                    )}
+                                    {loc === DeliveryLocation.MAILBOX && (
+                                      <Mail
+                                        size={18}
+                                        className="shrink-0"
+                                        aria-hidden="true"
+                                      />
+                                    )}
+                                    {loc === DeliveryLocation.RECEPTION && (
+                                      <Building2
+                                        size={18}
+                                        className="shrink-0"
+                                        aria-hidden="true"
+                                      />
+                                    )}
+                                    {loc === DeliveryLocation.SAFE_PLACE && (
+                                      <Lock
+                                        size={18}
+                                        className="shrink-0"
+                                        aria-hidden="true"
+                                      />
+                                    )}
+                                    {loc === DeliveryLocation.OTHER && (
+                                      <ClipboardList
+                                        size={18}
+                                        className="shrink-0"
+                                        aria-hidden="true"
+                                      />
+                                    )}
+                                    {loc}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                            {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+                            <button
+                              onClick={() => setDeliveryStep(3)}
+                              disabled={!recipientName.trim()}
+                              className="ui-button ui-button-primary w-full disabled:cursor-not-allowed"
+                            >
+                              C’est bon{" "}
+                              <ChevronRight size={18} aria-hidden="true" />
+                            </button>
+                            {!recipientName.trim() && (
+                              <p className="text-sm text-amber-800 font-medium text-center px-2">
+                                Saisissez le nom pour continuer
+                              </p>
+                            )}
                           </div>
-                        </div>
-                        {/* Avance sur tap explicite (le nom est du texte : pas d'auto) */}
-                        <button
-                          onClick={() => setDeliveryStep(3)}
-                          disabled={!recipientName.trim()}
-                          className="min-h-11 w-full py-4 bg-green-700 text-white rounded-2xl font-black text-base active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                          C'est bon →
-                        </button>
-                        {!recipientName.trim() && (
-                          <p className="text-sm text-amber-800 font-medium text-center px-2">Saisissez le nom pour continuer</p>
-                        )}
-                      </div>
-                    )}
-
-                    {/* ===== ÉTAPE 4 · PREUVE ===== */}
-                    {deliveryStep === 3 && (
-                      <div className="space-y-3">
-                        <p className="text-lg font-black text-slate-800 px-1">Prends 1 photo, puis fais signer</p>
-                        {/* Signature */}
-                        {!showSignature && !signatureData && (
-                          <button
-                            onClick={() => setShowSignature(true)}
-                            className="min-h-11 w-full flex items-center justify-center gap-2 py-3.5 bg-amber-50 border-2 border-dashed border-amber-300 text-amber-700 rounded-xl font-bold text-sm"
-                          >
-                            <PenTool size={16} />
-                            ✍️ Capturer la signature *
-                          </button>
                         )}
 
-                        {showSignature && (
+                        {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+                        {deliveryStep === 3 && (
+                          <div className="space-y-3">
+                            <p className="text-lg font-black text-slate-800 px-1">
+                              Prends 1 photo, puis fais signer
+                            </p>
+                            {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+                            {!showSignature && !signatureData && (
+                              <button
+                                onClick={() => setShowSignature(true)}
+                                className="ui-button ui-button-secondary w-full gap-2 border-dashed"
+                              >
+                                <PenTool size={16} />
+                                <PenTool
+                                  size={18}
+                                  className="inline shrink-0 align-text-bottom"
+                                  aria-hidden="true"
+                                />{" "}
+                                Capturer la signature *
+                              </button>
+                            )}
+
+                            {showSignature && (
                           <SignaturePad
                             onSave={(data) => { setSignatureData(data); setShowSignature(false); }}
                             onCancel={() => setShowSignature(false)}
@@ -1910,25 +2340,40 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                           />
                         )}
 
-                        {signatureData && (
-                          <div className="flex items-center gap-2 px-3 py-2.5 bg-green-50 border border-green-200 rounded-xl">
-                            <CheckCircle size={16} className="text-green-700" />
-                            <span className="text-sm text-green-700 font-bold flex-1">Signature enregistrée ✓</span>
-                            <button onClick={() => { setSignatureData(null); setShowSignature(true); }} className="min-h-11 text-sm text-green-700 underline font-medium">
-                              Refaire
-                            </button>
-                          </div>
-                        )}
+                            {signatureData && (
+                              <div className="flex items-center gap-2 px-3 py-2.5 bg-green-50 border border-green-200 rounded-xl">
+                                <CheckCircle size={16} className="text-green-700" />
+                                <span className="text-sm text-green-700 font-bold flex-1">
+                                  Signature enregistrée
+                                </span>
+                                <button
+                                  onClick={() => { setSignatureData(null); setShowSignature(true); }}
+                                  className="ui-button ui-button-ghost underline"
+                                >
+                                  Refaire
+                                </button>
+                              </div>
+                            )}
 
-                        {/* Photos — 1 minimum, max 5 */}
-                        <div className="px-1">
-                          <label className="text-sm font-medium text-slate-500 mb-1.5 block">
-                            📸 Photos de la livraison <span className="text-red-700">*</span>
-                            <span className="block text-sm text-slate-600 font-normal mt-0.5">
-                              1 photo minimum. Tu peux en ajouter d'autres (jusqu'à {MAX_PHOTOS}) en réappuyant sur le bouton.
-                            </span>
-                          </label>
-                          <button
+                            {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+                            <div className="px-1">
+                              <label className="text-sm font-medium text-slate-500 mb-1.5 block">
+                                <Camera
+                                  size={18}
+                                  className="inline shrink-0 align-text-bottom"
+                                  aria-hidden="true"
+                                />{" "}
+                                Photos de la livraison{" "}
+                                <span className="text-red-700">*</span>
+                                <span className="block text-sm text-slate-600 font-normal mt-0.5">
+                                  1 photo minimum. Tu peux en ajouter d'autres
+                                  (jusqu'à {MAX_PHOTOS}) en réappuyant sur le
+                                  bouton.
+                                </span>
+                              </label>
+                              <button
                             onClick={() => photoInputRef.current?.click()}
                             disabled={capturedPhotos.length >= MAX_PHOTOS}
                             className={`w-full flex items-center justify-center gap-2 py-3.5 rounded-xl font-bold text-sm disabled:opacity-40 disabled:cursor-not-allowed ${
@@ -1937,15 +2382,14 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                                 : 'bg-white border-2 border-blue-500 text-blue-700'
                             }`}
                           >
-                            <Camera size={18} />
-                            {capturedPhotos.length >= MAX_PHOTOS
-                              ? `Maximum atteint (${MAX_PHOTOS}/${MAX_PHOTOS})`
-                              : capturedPhotos.length === 0
-                                ? 'Prendre une photo'
-                                : `➕ Ajouter une autre photo (${capturedPhotos.length}/${MAX_PHOTOS})`
-                            }
-                          </button>
-                          <input
+                                <Camera size={18} />
+                                {capturedPhotos.length >= MAX_PHOTOS
+                                  ? `Maximum atteint (${MAX_PHOTOS}/${MAX_PHOTOS})`
+                                  : capturedPhotos.length === 0
+                                    ? 'Prendre une photo'
+                                    : `Ajouter une autre photo (${capturedPhotos.length}/${MAX_PHOTOS})`}
+                              </button>
+                              <input
                             ref={photoInputRef}
                             type="file"
                             accept="image/*"
@@ -1953,106 +2397,178 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                             className="hidden"
                             onChange={handlePhotoCapture}
                           />
-                        </div>
+                            </div>
 
-                        {capturedPhotos.length > 0 && (
-                          <div className="flex gap-2 px-1 overflow-x-auto pb-1">
-                            {capturedPhotos.map((photo, i) => (
-                              <div key={i} className="relative flex-shrink-0">
-                                <img src={photo} alt={`Photo ${i+1}`} className="w-20 h-20 rounded-lg object-cover border-2 border-slate-200" />
-                                <button
-                                  aria-label={`Supprimer la photo de livraison ${i + 1}`}
-                                  onClick={() => setCapturedPhotos(prev => prev.filter((_, idx) => idx !== i))}
-                                  className="absolute -top-1.5 -right-1.5 w-11 h-11 bg-red-700 text-white rounded-full flex items-center justify-center text-sm shadow-md"
-                                >
-                                  ✕
-                                </button>
-                                <span className="absolute bottom-0.5 left-0.5 bg-black/50 text-white text-sm px-1 rounded">
-                                  {i + 1}/{capturedPhotos.length}
-                                </span>
+                            {capturedPhotos.length > 0 && (
+                              <div className="flex gap-2 px-1 overflow-x-auto pb-1">
+                                {capturedPhotos.map((photo, i) => (
+                                  <div key={i} className="relative flex-shrink-0">
+                                    <img src={photo} alt={`Photo ${i + 1}`} className="w-20 h-20 rounded-lg object-cover border-2 border-slate-200" />
+                                    <button
+                                      aria-label={`Supprimer la photo de livraison ${i + 1}`}
+                                      onClick={() => setCapturedPhotos(prev => prev.filter((_, idx) => idx !== i))}
+                                      className="ui-button ui-button-danger absolute -top-1.5 -right-1.5 w-11 h-11"
+                                    >
+                                      <X
+                                        size={18}
+                                        className="inline shrink-0 align-text-bottom"
+                                        aria-hidden="true"
+                                      />
+                                    </button>
+                                    <span className="absolute bottom-0.5 left-0.5 bg-black/50 text-white text-sm px-1 rounded">
+                                      {i + 1}/{capturedPhotos.length}
+                                    </span>
+                                  </div>
+                                ))}
                               </div>
-                            ))}
+                            )}
+
+                            {!signatureData && (
+                              <p className="text-sm text-amber-800 font-medium text-center px-2">
+                                <AlertTriangle
+                                  size={18}
+                                  className="inline shrink-0 align-text-bottom"
+                                  aria-hidden="true"
+                                />{" "}
+                                Signature obligatoire pour valider la livraison
+                              </p>
+                            )}
+                            {capturedPhotos.length === 0 && (
+                              <p className="text-sm text-amber-800 font-medium text-center px-2">
+                                <AlertTriangle
+                                  size={18}
+                                  className="inline shrink-0 align-text-bottom"
+                                  aria-hidden="true"
+                                />{" "}
+                                Au moins 1 photo obligatoire (une seule photo du
+                                lot suffit)
+                              </p>
+                            )}
                           </div>
                         )}
 
-                        {!signatureData && (
-                          <p className="text-sm text-amber-800 font-medium text-center px-2">
-                            ⚠️ Signature obligatoire pour valider la livraison
-                          </p>
-                        )}
-                        {capturedPhotos.length === 0 && (
-                          <p className="text-sm text-amber-800 font-medium text-center px-2">
-                            ⚠️ Au moins 1 photo obligatoire (une seule photo du lot suffit)
-                          </p>
-                        )}
-                      </div>
-                    )}
-
-                    {/* ===== ÉTAPE 5 · VALIDATION ===== */}
-                    {deliveryStep === 4 && (
-                      <div className="space-y-3">
-                        <p className="text-lg font-black text-slate-800 px-1">Valide la livraison</p>
-                        {/* Récapitulatif */}
-                        <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm space-y-1.5">
-                          <div className="flex justify-between"><span className="text-slate-500">Colis</span><span className="font-bold">{stopPackages.length}</span></div>
-                          <div className="flex justify-between"><span className="text-slate-500">État marchandise</span><span className={`font-bold ${merchandiseGood ? 'text-green-700' : 'text-amber-700'}`}>{merchandiseGood ? 'Bon état' : 'Réserves'}</span></div>
-                          {!merchandiseGood && reservesNote.trim() && (
-                            <div className="text-sm text-amber-700 bg-amber-50 rounded-lg px-2 py-1.5">{reservesNote.trim()}</div>
-                          )}
-                          <div className="flex justify-between"><span className="text-slate-500">Réceptionné par</span><span className="font-bold">{recipientName || '—'}</span></div>
-                          <div className="flex justify-between"><span className="text-slate-500">Lieu de remise</span><span className="font-bold">{deliveryLocation}</span></div>
-                          <div className="flex justify-between"><span className="text-slate-500">Signature</span><span className="font-bold">{signatureData ? '✓' : '—'}</span></div>
-                          <div className="flex justify-between"><span className="text-slate-500">Photos</span><span className="font-bold">{capturedPhotos.length}</span></div>
-                        </div>
-
-                        {/* Barre de progression upload */}
-                        {uploadProgress && uploadProgress.step !== 'done' && uploadProgress.step !== 'error' && (
-                          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
-                            <div className="flex items-center gap-2">
-                              <Loader2 size={14} className="animate-spin text-blue-600" />
-                              <span className="text-sm font-bold text-blue-700">{uploadProgress.message}</span>
+                        {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+                        {deliveryStep === 4 && (
+                          <div className="space-y-3">
+                            <p className="text-lg font-black text-slate-800 px-1">
+                              Valide la livraison
+                            </p>
+                            {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+                            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm space-y-1.5">
+                              <div className="flex justify-between">
+                                <span className='text-slate-500'>Colis</span>
+                                <span className="font-bold">
+                                  {stopPackages.length}
+                                </span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className='text-slate-500'>
+                                  État marchandise
+                                </span>
+                                <span className={`font-bold ${merchandiseGood ? 'text-green-700' : 'text-amber-700'}`}>
+                                  {merchandiseGood ? 'Bon état' : 'Réserves'}
+                                </span>
+                              </div>
+                              {!merchandiseGood && reservesNote.trim() && (
+                                <div className="text-sm text-amber-700 bg-amber-50 rounded-lg px-2 py-1.5">
+                                  {reservesNote.trim()}
+                                </div>
+                              )}
+                              <div className="flex justify-between">
+                                <span className='text-slate-500'>
+                                  Réceptionné par
+                                </span>
+                                <span className="font-bold">
+                                  {recipientName || '—'}
+                                </span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className='text-slate-500'>
+                                  Lieu de remise
+                                </span>
+                                <span className="font-bold">
+                                  {deliveryLocation}
+                                </span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className='text-slate-500'>
+                                  Signature
+                                </span>
+                                <span className="font-bold">
+                                  {signatureData ? (
+                                    <CheckCircle
+                                      size={18}
+                                      aria-label="Enregistrée"
+                                    />
+                                  ) : (
+                                    '—'
+                                  )}
+                                </span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className='text-slate-500'>Photos</span>
+                                <span className="font-bold">
+                                  {capturedPhotos.length}
+                                </span>
+                              </div>
                             </div>
-                            <div className="w-full bg-blue-100 rounded-full h-2">
-                              <div
+
+                            {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+                            {uploadProgress && uploadProgress.step !== 'done' && uploadProgress.step !== 'error' && (
+                                <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
+                                  <div className="flex items-center gap-2">
+                                    <Loader2 size={14} className="animate-spin text-blue-600" />
+                                    <span className="text-sm font-bold text-blue-700">
+                                      {uploadProgress.message}
+                                    </span>
+                                  </div>
+                                  <div className="w-full bg-blue-100 rounded-full h-2">
+                                    <div
                                 className="bg-blue-600 h-2 rounded-full transition-all duration-300"
                                 style={{ width: `${Math.round((uploadProgress.current / uploadProgress.total) * 100)}%` }}
                               />
-                            </div>
+                                  </div>
+                                </div>
+                              )}
+
+                            <button
+                              onClick={() => { if (scanRequirementMet) { handleDeliverySuccess(); } else { setScanGateFrom('final'); setShowScanGate(true); } }}
+                              disabled={isProcessing || !signatureData || !recipientName.trim() || capturedPhotos.length === 0}
+                              className="ui-button ui-button-primary w-full gap-2 disabled:cursor-not-allowed"
+                            >
+                              {isProcessing ? (
+                                <Loader2 size={18} className="animate-spin" />
+                              ) : (
+                                <CheckCircle size={18} />
+                              )}
+                              Livré <CheckCircle size={18} aria-hidden="true" />
+                            </button>
                           </div>
                         )}
 
-                        <button
-                          onClick={() => { if (scanRequirementMet) { handleDeliverySuccess(); } else { setScanGateFrom('final'); setShowScanGate(true); } }}
-                          disabled={isProcessing || !signatureData || !recipientName.trim() || capturedPhotos.length === 0}
-                          className="min-h-11 w-full flex items-center justify-center gap-2 py-4 bg-green-700 text-white rounded-xl font-bold text-base active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                          {isProcessing ? <Loader2 size={18} className="animate-spin" /> : <CheckCircle size={18} />}
-                          Livré ✓
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Navigation. Le guide avance TOUT SEUL (étapes 1 & 4) ou au tap
-                        des boutons propres à chaque étape (Oui/Non, C'est bon, Livré).
-                        On garde « Retour » pour corriger, et un « Continuer » UNIQUEMENT
-                        sur les étapes auto (Colis, Preuve) — sinon revenir en arrière
-                        piégerait le chauffeur (plus de bouton pour repartir en avant).
-                        Étape Colis : « Continuer » ouvre le garde-fou scan ICI si tout
-                        n'est pas scanné (scanner plus / forcer / déclarer absents) → la
-                        décision se prend au DÉBUT, plus de blocage surprise à la fin. */}
-                    <div className="flex gap-2 pt-1">
-                      {deliveryStep > 0 && (
-                        <button
-                          onClick={() => setDeliveryStep(s => Math.max(0, s - 1))}
-                          disabled={isProcessing}
-                          className="min-h-11 px-4 py-3 bg-slate-100 text-slate-700 rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-40"
-                        >
-                          ← Retour
-                        </button>
-                      )}
-                      {(deliveryStep === 0 || deliveryStep === 3) && (
-                        <button
-                          onClick={() => {
+                        {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+                        <div className="flex gap-2 pt-1">
+                          {deliveryStep > 0 && (
+                            <button
+                              onClick={() => setDeliveryStep(s => Math.max(0, s - 1))}
+                              disabled={isProcessing}
+                              className="ui-button ui-button-secondary"
+                            >
+                              <ArrowLeft size={18} aria-hidden="true" />
+                              Retour
+                            </button>
+                          )}
+                          {(deliveryStep === 0 || deliveryStep === 3) && (
+                            <button
+                              onClick={() => {
                             // À l'étape SCAN : si tout n'est pas scanné, on ouvre le
                             // garde-fou ICI (scanner plus, ou déclarer absents / forcer)
                             // au lieu de laisser filer jusqu'à la fin puis bloquer.
@@ -2063,35 +2579,40 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                               setDeliveryStep(s => Math.min(4, s + 1));
                             }
                           }}
-                          disabled={deliveryStep === 3 && (!signatureData || capturedPhotos.length === 0)}
-                          className="min-h-11 flex-1 flex items-center justify-center gap-2 py-3 bg-green-700 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
+                              disabled={deliveryStep === 3 && (!signatureData || capturedPhotos.length === 0)}
+                              className={`ui-button ${deliveryStep === 0 && !allStopScanned ? "ui-button-secondary" : "ui-button-primary"} flex-1 gap-2 disabled:cursor-not-allowed`}
+                            >
+                              Continuer{" "}
+                              <ChevronRight size={18} aria-hidden="true" />
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+                        <button
+                          onClick={() => setShowFailureModal(true)}
+                          disabled={isProcessing}
+                          className="ui-button ui-button-secondary w-full gap-1.5"
                         >
-                          Continuer →
+                          <XCircle size={14} />
+                          Signaler un échec de livraison
                         </button>
-                      )}
-                    </div>
+                      </>
+                    )}
+                </div>
+              )}
 
-                    {/* Échec possible à tout moment */}
-                    <button
-                      onClick={() => setShowFailureModal(true)}
-                      disabled={isProcessing}
-                      className="min-h-11 w-full flex items-center justify-center gap-1.5 py-2.5 text-red-800 text-sm font-bold disabled:opacity-50"
-                    >
-                      <XCircle size={14} />
-                      Signaler un échec de livraison
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-
-            {/* Stop déjà traité */}
+            {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
             {(currentStop.status === StopStatus.COMPLETED || currentStop.status === StopStatus.FAILED) && (
               <div className={`p-4 border-t ${currentStop.status === StopStatus.COMPLETED ? 'bg-green-50' : 'bg-red-50'}`}>
                 <p className="text-sm font-bold text-center">
                   {currentStop.status === StopStatus.COMPLETED
-                    ? `✅ Livré${currentStop.packageCount > 0 ? ` · ${currentStop.packageCount} colis remis` : ''}`
-                    : '❌ Échec enregistré'}
+                    ? `Livré${currentStop.packageCount > 0 ? ` · ${currentStop.packageCount} colis remis` : ''}`
+                    : "Échec enregistré"}
                 </p>
                 {currentStop.completionTime && (
                   <p className="text-sm text-center text-slate-500 mt-1">
@@ -2103,209 +2624,296 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
           </div>
         )}
 
-        {/* Navigation entre arrêts : visible SAUF pendant la livraison guidée (Arrivé),
-            pour qu'un arrêt déjà fait garde Précédent/Suivant (sinon le chauffeur est coincé). */}
+        {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
         {currentStop?.status !== StopStatus.ARRIVED && (
-        <div className="flex gap-2">
-          <button
-            onClick={() => openStop(Math.max(0, activeStopIndex - 1))}
-            disabled={activeStopIndex === 0}
-            className="min-h-11 flex-1 flex items-center justify-center gap-1 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 disabled:opacity-30"
-          >
-            <ArrowLeft size={16} /> Précédent
-          </button>
-          {nextPendingStopIndex >= 0 && nextPendingStopIndex !== activeStopIndex && (
+          <div className="flex gap-2">
             <button
-              onClick={() => openStop(nextPendingStopIndex)}
-              className="min-h-11 flex-1 flex items-center justify-center gap-1 py-3 bg-blue-600 text-white rounded-xl text-sm font-bold"
+              onClick={() => openStop(Math.max(0, activeStopIndex - 1))}
+              disabled={activeStopIndex === 0}
+              className="ui-button ui-button-secondary flex-1 gap-1 disabled:opacity-30"
             >
-              Prochain arrêt <ChevronRight size={16} />
+              <ArrowLeft size={16} /> Précédent
             </button>
-          )}
-          <button
-            onClick={() => openStop(Math.min(sortedStops.length - 1, activeStopIndex + 1))}
-            disabled={activeStopIndex >= sortedStops.length - 1}
-            className="min-h-11 flex-1 flex items-center justify-center gap-1 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 disabled:opacity-30"
-          >
-            Suivant <ChevronRight size={16} />
-          </button>
-        </div>
+            {nextPendingStopIndex >= 0 && nextPendingStopIndex !== activeStopIndex && (
+                <button
+                  onClick={() => openStop(nextPendingStopIndex)}
+                  className="ui-button ui-button-primary flex-1 gap-1"
+                >
+                  Prochain arrêt <ChevronRight size={16} />
+                </button>
+              )}
+            <button
+              onClick={() => openStop(Math.min(sortedStops.length - 1, activeStopIndex + 1))}
+              disabled={activeStopIndex >= sortedStops.length - 1}
+              className="ui-button ui-button-secondary flex-1 gap-1 disabled:opacity-30"
+            >
+              Suivant <ChevronRight size={16} />
+            </button>
+          </div>
         )}
 
         <details className="rounded-2xl border border-slate-200 bg-white p-4" open={allStopsDone || undefined}>
-          <summary className="min-h-11 cursor-pointer text-base font-bold text-slate-800">Bilan et arrêts de la tournée · {missionProgress}%{returnPackages.length ? ` · ${returnPackages.length} retour(s) au hub` : ''}</summary>
+          <summary className="min-h-11 cursor-pointer text-base font-bold text-slate-800">
+            Bilan et arrêts de la tournée · {missionProgress}%
+            {returnPackages.length
+              ? ` · ${returnPackages.length} retour${returnPackages.length > 1 ? 's' : ''} au hub`
+              : ''}
+          </summary>
           <div className="mt-3 space-y-4">
-        {/* === ALERTE COLIS À RETOURNER === */}
-        {returnPackages.length > 0 && (
-          <div className="bg-yellow-50 border-2 border-yellow-400 rounded-2xl p-4 shadow-sm">
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 bg-yellow-100 rounded-full flex items-center justify-center flex-shrink-0">
-                <span className="text-xl">⚠️</span>
-              </div>
-              <div className="min-w-0 flex-1">
-                <h3 className="font-bold text-yellow-800 text-sm">
-                  {returnPackages.length} colis à retourner au hub
-                </h3>
-                <p className="text-sm text-yellow-700 mt-0.5">
-                  Ces colis ont été retirés de votre tournée. Ramenez-les au hub.
-                </p>
-                <div className="mt-2 space-y-1.5">
-                  {returnPackages.map(pkg => (
-                    <div key={pkg.id} className="flex flex-wrap gap-2 items-center justify-between bg-white rounded-lg px-3 py-2 border border-yellow-200">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-bold text-slate-800 truncate">{pkg.orderNumber}</p>
-                        <p className="text-sm text-slate-500 truncate">{pkg.contactName}</p>
-                      </div>
-                      <button
-                        onClick={() => openReturnModal(pkg)}
-                        className="min-h-11 ml-2 px-3 py-1.5 bg-yellow-700 text-white rounded-lg text-sm font-bold hover:bg-yellow-800 active:scale-95 transition-all"
-                      >
-                        Retour hub
-                      </button>
+            {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+            {returnPackages.length > 0 && (
+              <div className="bg-yellow-50 border-2 border-yellow-400 rounded-2xl p-4 shadow-sm">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 bg-yellow-100 rounded-full flex items-center justify-center flex-shrink-0">
+                    <span className="text-xl">
+                      <AlertTriangle
+                        size={18}
+                        className="inline shrink-0 align-text-bottom"
+                        aria-hidden="true"
+                      />
+                    </span>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="font-bold text-yellow-800 text-sm">
+                      {returnPackages.length} colis à retourner au hub
+                    </h3>
+                    <p className="text-sm text-yellow-700 mt-0.5">
+                      Ces colis ont été retirés de votre tournée. Ramenez-les au
+                      hub.
+                    </p>
+                    <div className="mt-2 space-y-1.5">
+                      {returnPackages.map((pkg) => (
+                        <div key={pkg.id} className="flex flex-wrap gap-2 items-center justify-between bg-white rounded-lg px-3 py-2 border border-yellow-200">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-bold text-slate-800 truncate">
+                              {pkg.orderNumber}
+                            </p>
+                            <p className="text-sm text-slate-500 truncate">
+                              {pkg.contactName}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => openReturnModal(pkg)}
+                            className="ui-button ui-button-primary ml-2"
+                          >
+                            Retour hub
+                          </button>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  </div>
                 </div>
               </div>
-            </div>
-          </div>
-        )}
+            )}
 
-        {/* === HEADER PROGRESSION === */}
-        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-          <div className="p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <h2 className="text-lg font-bold text-slate-800">Ma tournée — {activeMission.zone}</h2>
-                <p className="text-sm text-slate-500">
-                  {activeMission.vehiclePlate} • {activeMission.hubName}
-                </p>
+            {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+              <div className="p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h2 className="text-lg font-bold text-slate-800">
+                      Ma tournée — {activeMission.zone}
+                    </h2>
+                    <p className="text-sm text-slate-500">
+                      {activeMission.vehiclePlate} • {activeMission.hubName}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-2xl font-extrabold text-slate-800">
+                      {missionProgress}%
+                    </p>
+                    <p className="text-sm text-slate-500 uppercase font-medium">
+                      {activeMission.completedStops || 0}/{sortedStops.length}{" "}
+                      arrêts
+                    </p>
+                  </div>
+                </div>
+                <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{
+                      width: `${missionProgress}%`,
+                      background: "var(--ui-action)",
+                    }}
+                  />
+                </div>
+                <div className="flex items-center justify-between mt-2 text-sm text-slate-500">
+                  <span>
+                    <CheckCircle
+                      size={18}
+                      className="inline shrink-0 align-text-bottom"
+                      aria-hidden="true"
+                    />{" "}
+                    {activeMission.deliveredPackages || 0} livré
+                    {(activeMission.deliveredPackages || 0) > 1 ? 's' : ''}
+                  </span>
+                  {(activeMission.failedPackages || 0) > 0 && (
+                    <span className="text-red-700">
+                      <XCircle
+                        size={18}
+                        className="inline shrink-0 align-text-bottom"
+                        aria-hidden="true"
+                      />{" "}
+                      {activeMission.failedPackages} échec
+                      {(activeMission.failedPackages || 0) > 1 ? 's' : ''}
+                    </span>
+                  )}
+                  <span>
+                    <PackageIcon
+                      size={18}
+                      className="inline shrink-0 align-text-bottom"
+                      aria-hidden="true"
+                    />{" "}
+                    {activeMission.totalPackages} total
+                  </span>
+                </div>
               </div>
-              <div className="text-right">
-                <p className="text-2xl font-extrabold text-slate-800">{missionProgress}%</p>
-                <p className="text-sm text-slate-500 uppercase font-medium">
-                  {activeMission.completedStops || 0}/{sortedStops.length} arrêts
-                </p>
-              </div>
-            </div>
-            <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
-              <div
-                className="h-full rounded-full transition-all duration-500"
-                style={{
-                  width: `${missionProgress}%`,
-                  background: missionProgress >= 90 ? '#22c55e' : missionProgress >= 50 ? '#f59e0b' : '#3b82f6'
-                }}
-              />
-            </div>
-            <div className="flex items-center justify-between mt-2 text-sm text-slate-500">
-              <span>✅ {activeMission.deliveredPackages || 0} livrés</span>
-              {(activeMission.failedPackages || 0) > 0 && (
-                <span className="text-red-700">❌ {activeMission.failedPackages} échecs</span>
-              )}
-              <span>📦 {activeMission.totalPackages} total</span>
-            </div>
-          </div>
 
-          {/* Mini liste stops scrollable */}
-          <div className="border-t border-slate-100 px-2 py-2 flex gap-1.5 overflow-x-auto">
-            {sortedStops.map((stop, idx) => (
-              <button
-                key={stop.id}
-                onClick={() => openStop(idx)} aria-label={`Ouvrir l’arrêt ${stop.sequence}, ${stop.contactName || stop.address}, ${stopStatusLabel(stop.status)}`} aria-current={idx === activeStopIndex ? 'step' : undefined}
-                className={`flex-shrink-0 w-11 h-11 rounded-full text-sm font-bold flex items-center justify-center transition-all ${
-                  idx === activeStopIndex
-                    ? 'bg-blue-600 text-white ring-2 ring-blue-300 scale-110'
-                    : stop.status === StopStatus.COMPLETED
+              {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+              <div className="border-t border-slate-100 px-2 py-2 flex gap-1.5 overflow-x-auto">
+                {sortedStops.map((stop, idx) => (
+                  <button
+                    key={stop.id}
+                    onClick={() => openStop(idx)}
+                    aria-label={`Ouvrir l’arrêt ${stop.sequence}, ${stop.contactName || stop.address}, ${stopStatusLabel(stop.status)}`}
+                    aria-current={idx === activeStopIndex ? 'step' : undefined}
+                    className={`flex-shrink-0 w-11 h-11 rounded-full text-sm font-bold flex items-center justify-center transition-all ${
+                      idx === activeStopIndex
+                        ? "bg-brand-700 text-white ring-2 ring-brand-300"
+                        : stop.status === StopStatus.COMPLETED
                       ? 'bg-green-100 text-green-700'
                       : stop.status === StopStatus.FAILED || stop.status === StopStatus.SKIPPED
                         ? 'bg-red-100 text-red-700'
                         : stop.status === StopStatus.ARRIVED
                           ? 'bg-blue-100 text-blue-700'
                           : 'bg-slate-100 text-slate-600'
-                }`}
+                    }`}
+                  >
+                    {stop.status === StopStatus.COMPLETED ? (
+                      <CheckCircle size={18} aria-hidden="true" />
+                    ) : stop.status === StopStatus.FAILED ? (
+                      <XCircle size={18} aria-hidden="true" />
+                    ) : (
+                      stop.sequence
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+            {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+            {!allStopsDone && deliveryStep === 0 && (
+              <button
+                onClick={requestFinishTour}
+                disabled={isProcessing}
+                className="ui-button ui-button-secondary w-full gap-2"
               >
-                {stop.status === StopStatus.COMPLETED ? '✓' :
-                 stop.status === StopStatus.FAILED ? '✗' :
-                 stop.sequence}
+                Voir ce qu’il reste à faire · {remainingStops} arrêt
+                {remainingStops > 1 ? 's' : ''}, {activeReturns.length} retour
+                {activeReturns.length > 1 ? 's' : ''}, {proofStopIds.size}{" "}
+                preuve{proofStopIds.size > 1 ? 's' : ''}
               </button>
-            ))}
-          </div>
-        </div>
-
-        {/* === TERMINER MA TOURNÉE — toujours accessible === */}
-        {/* Quand tout est fait, la grande bannière verte s'affiche déjà (en haut).
-            Ici on garantit un accès PERMANENT à la clôture même s'il reste des
-            arrêts (ex. un arrêt coincé en « Arrivé » qui empêchait de finir) :
-            le chauffeur n'est jamais bloqué « en tournée » sans pouvoir la clore. */}
-        {!allStopsDone && deliveryStep === 0 && (
-          <button
-            onClick={requestFinishTour}
-            disabled={isProcessing}
-            className="min-h-11 w-full py-3.5 bg-slate-800 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-60 flex items-center justify-center gap-2"
-          >
-            Voir ce qu’il reste à faire · {remainingStops} arrêt{remainingStops > 1 ? 's' : ''}, {activeReturns.length} retour{activeReturns.length > 1 ? 's' : ''}, {proofStopIds.size} preuve{proofStopIds.size > 1 ? 's' : ''}
-          </button>
-        )}
-
+            )}
           </div>
         </details>
 
-        {/* Actions de GESTION (charger, optimiser, réorganiser, ajouter, signaler) :
-            seulement sur un arrêt EN ATTENTE (ni pendant le guide, ni sur un arrêt fait). */}
+        {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
         {currentStop?.status === StopStatus.PENDING && (
-        <>
-        {/* UN seul point d'entrée scan : Enlèvement (charger, transfert auto) ou Livraison.
-            Remplace les 2 boutons séparés (transfert / prise en charge) qui perdaient le chauffeur. */}
-        <button
-          onClick={() => setShowScanChoice(true)}
-          className="min-h-11 w-full flex items-center justify-center gap-2 py-3.5 bg-green-700 text-white rounded-xl text-base font-black active:scale-95 transition-transform"
-        >
-          📷 Scanner des colis
-        </button>
+          <>
+            {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+            <button
+              onClick={() => setShowScanChoice(true)}
+              className="ui-button ui-button-primary w-full gap-2"
+            >
+              <Camera
+                size={18}
+                className="inline shrink-0 align-text-bottom"
+                aria-hidden="true"
+              />{" "}
+              Scanner des colis
+            </button>
 
-        {/* Organisation de la tournée : optimiser / réorganiser / ajouter un arrêt */}
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            onClick={handleOptimizeTour}
-            disabled={isOptimizing}
-            className="min-h-11 flex items-center justify-center gap-2 py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold active:scale-95 transition-transform disabled:opacity-50"
-          >
-            {isOptimizing ? <Loader2 size={16} className="animate-spin" /> : '🧭'} Optimiser
-          </button>
-          <button
-            onClick={() => setShowReorder(true)}
-            className="min-h-11 flex items-center justify-center gap-2 py-3 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-700 active:scale-95 transition-transform"
-          >
-            ↕️ Réorganiser
-          </button>
-        </div>
-        <button
-          onClick={openManualStop}
-          className="min-h-11 w-full flex items-center justify-center gap-2 py-3 bg-white border border-amber-300 rounded-xl text-sm font-medium text-amber-700 active:scale-95 transition-transform"
-        >
-          {pendingManualStop ? 'Reprendre l’ajout d’arrêt' : '➕ Ajouter un arrêt manuel'}
-        </button>
+            {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={handleOptimizeTour}
+                disabled={isOptimizing}
+                className="ui-button ui-button-primary gap-2"
+              >
+                {isOptimizing ? (
+                  <Loader2 size={16} className="animate-spin" />
+                ) : (
+                  <Route size={18} />
+                )}{" "}
+                Optimiser
+              </button>
+              <button
+                onClick={() => setShowReorder(true)}
+                className="ui-button ui-button-secondary gap-2"
+              >
+                ↕️ Réorganiser
+              </button>
+            </div>
+            <button
+              onClick={openManualStop}
+              className="ui-button ui-button-secondary w-full gap-2"
+            >
+              {pendingManualStop
+                ? 'Reprendre l’ajout d’arrêt'
+                : 'Ajouter un arrêt manuel'}
+            </button>
 
-        {/* Signaler un problème au bureau (incident) */}
-        <button
-          onClick={() => setShowIssue(true)}
-          className="min-h-11 w-full flex items-center justify-center gap-2 py-3 bg-white border border-red-200 rounded-xl text-sm font-medium text-red-800 active:scale-95 transition-transform"
-        >
-          🛠️ Signaler un problème
-        </button>
-        </>
+            {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+            <button
+              onClick={() => setShowIssue(true)}
+              className="ui-button ui-button-secondary w-full gap-2"
+            >
+              <Wrench
+                size={18}
+                className="inline shrink-0 align-text-bottom"
+                aria-hidden="true"
+              />{" "}
+              Signaler un problème
+            </button>
+          </>
         )}
 
-        {/* Retour liste : visible sauf pendant la livraison guidée. */}
+        {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
         {currentStop?.status !== StopStatus.ARRIVED && (
-        <button
-          onClick={() => { void changeStop(() => setActiveMissionId(null)); }}
-          className="min-h-11 w-full flex items-center justify-center gap-2 py-3 text-slate-500 text-sm"
-        >
-          <ArrowLeft size={14} /> Voir toutes mes tournées
-        </button>
+          <button
+            onClick={() => { void changeStop(() => setActiveMissionId(null)); }}
+            className="ui-button ui-button-secondary w-full gap-2"
+          >
+            <ArrowLeft size={14} /> Voir toutes mes tournées
+          </button>
         )}
 
-        {/* === GARDE-FOU : colis manquants avant validation livraison === */}
+        {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
         {showScanGate && currentStop && (
           <ScanGateDialog
             clientName={currentStop.contactName || 'ce client'}
@@ -2332,7 +2940,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
           />
         )}
 
-        {/* === MODAL TRANSFERT EN ROUTE === */}
+        {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
         {showTransferModal && activeMission && (
           <TransferReceiveModal
             currentUser={currentUser}
@@ -2345,40 +2955,63 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
           />
         )}
 
-        {/* === MODAL GPS OBLIGATOIRE (action bloquée sans localisation) === */}
+        {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
         {gpsBlocked && (
           <Modal isOpen onClose={() => { setGpsBlocked(false); setGpsRetry(null); deliverIntentRef.current = null; }} title="Localisation requise pour cette action" closeOnOverlay={false} bodyClassName="!p-0">
             <div className="bg-white rounded-2xl max-w-sm w-full p-5 text-center space-y-3">
-              <div className="text-5xl">📍</div>
-              <h3 className="font-bold text-lg text-slate-900">Localisation obligatoire</h3>
+              <MapPin
+                size={24}
+                className="text-brand-700 mx-auto"
+                aria-hidden="true"
+              />
               <p className="text-sm font-semibold text-slate-800">
                 {gpsErrorMsg || `${currentUser.firstName ? currentUser.firstName + ', ' : ''}activez votre localisation pour continuer`}
               </p>
               <div className="text-left text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1.5">
                 {gpsIsPermission ? (
                   <>
-                    <p>1️⃣ Ouvrez le <b>menu du navigateur</b> (cadenas 🔒 dans la barre d'adresse)</p>
-                    <p>2️⃣ <b>Autorisez la localisation</b> pour ce site</p>
-                    <p>3️⃣ Revenez ici et appuyez sur <b>Réessayer</b></p>
+                    <p>
+                      1. Ouvrez le <b>menu du navigateur</b> (cadenas{" "}
+                      <Lock
+                        size={18}
+                        className="inline shrink-0 align-text-bottom"
+                        aria-hidden="true"
+                      />{" "}
+                      dans la barre d'adresse)
+                    </p>
+                    <p>
+                      2. <b>Autorisez la localisation</b> pour ce site
+                    </p>
+                    <p>
+                      3. Revenez ici et appuyez sur <b>Réessayer</b>
+                    </p>
                   </>
                 ) : (
                   <>
-                    <p>1️⃣ Ouvrez les <b>réglages</b> de votre téléphone</p>
-                    <p>2️⃣ Activez la <b>localisation / GPS</b></p>
-                    <p>3️⃣ Revenez ici et appuyez sur <b>Réessayer</b></p>
+                    <p>
+                      1. Ouvrez les <b>réglages</b> de votre téléphone
+                    </p>
+                    <p>
+                      2. Activez la <b>localisation / GPS</b>
+                    </p>
+                    <p>
+                      3. Revenez ici et appuyez sur <b>Réessayer</b>
+                    </p>
                   </>
                 )}
               </div>
               <div className="flex gap-2 pt-1">
                 <button
                   onClick={() => { setGpsBlocked(false); setGpsRetry(null); deliverIntentRef.current = null; }}
-                  className="min-h-11 flex-1 py-3 bg-slate-100 text-slate-700 rounded-xl font-bold text-sm active:scale-95 transition-transform"
+                  className="ui-button ui-button-secondary flex-1"
                 >
                   Annuler
                 </button>
                 <button
                   onClick={() => { setGpsBlocked(false); (gpsRetry || handleDeliverySuccess)(); }}
-                  className="min-h-11 flex-1 flex items-center justify-center gap-1.5 py-3 bg-green-700 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform"
+                  className="ui-button ui-button-primary flex-1 gap-1.5"
                 >
                   <MapPin size={16} /> Réessayer
                 </button>
@@ -2387,7 +3020,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
           </Modal>
         )}
 
-        {/* === MODAL PRISE EN CHARGE PAR SCAN === */}
+        {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
         {showClaimModal && (
           <ClaimScanModal
             currentUser={currentUser}
@@ -2407,7 +3042,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
 
         {renderScanChoice()}
 
-        {/* === MODAL RÉORGANISER (drag & drop) === */}
+        {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
         {showReorder && activeMission && (
           <StopReorderModal
             isOpen={showReorder}
@@ -2421,17 +3058,41 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
           />
         )}
 
-        {/* === MODAL SIGNALER UN PROBLÈME === */}
+        {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
         {showIssue && (
-          <Modal isOpen onClose={() => { void closeIssue(() => setShowIssue(false)); }} title="Signaler un problème" preventClose={issueSubmitting} bodyClassName="!p-0">
-            <div className="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-md animate-slide-up" onClick={e => e.stopPropagation()}>
-              <div className="p-4 border-b border-slate-200 flex items-center justify-between">
-                <h3 className="font-bold text-slate-800">🛠️ Signaler un problème</h3>
-                <button onClick={() => { void closeIssue(() => setShowIssue(false)); }} aria-label="Fermer cette fenêtre" className="min-h-11 min-w-11 p-2 rounded-full hover:bg-slate-100"><XCircle size={20} className="text-slate-600" /></button>
+          <Modal
+            mobileFullscreen
+            isOpen
+            onClose={() => { void closeIssue(() => setShowIssue(false)); }}
+            title="Signaler un problème"
+            preventClose={issueSubmitting}
+            bodyClassName="!p-0"
+            footer={
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={handleSubmitIssue}
+                  disabled={issueSubmitting}
+                  className="ui-button ui-button-primary flex-1"
+                >
+                  {issueSubmitting ? 'Envoi…' : 'Envoyer au bureau'}
+                </button>
+                <button
+                  onClick={() => { void closeIssue(() => setShowIssue(false)); }}
+                  className="ui-button ui-button-secondary"
+                >
+                  Annuler
+                </button>
               </div>
+            }
+          >
+            <div className="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-md animate-slide-up" onClick={e => e.stopPropagation()}>
               <div className="p-4 space-y-3">
                 <div>
-                  <label htmlFor="driver-issue-category" className="text-sm font-bold text-slate-500 block mb-1">Type de problème</label>
+                  <label htmlFor="driver-issue-category" className="text-sm font-bold text-slate-500 block mb-1">
+                    Type de problème
+                  </label>
                   <select id="driver-issue-category" value={issueForm.category} onChange={e => setIssueForm(f => ({ ...f, category: e.target.value }))}
                     className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-base focus:ring-2 focus:ring-brand-500 outline-none">
                     <option>Véhicule / panne</option>
@@ -2443,58 +3104,96 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                   </select>
                 </div>
                 <div>
-                  <label htmlFor="driver-issue-description" className="text-sm font-bold text-slate-500 block mb-1">Description *</label>
+                  <label htmlFor="driver-issue-description" className="text-sm font-bold text-slate-500 block mb-1">
+                    Description *
+                  </label>
                   <textarea id="driver-issue-description" value={issueForm.description} onChange={e => setIssueForm(f => ({ ...f, description: e.target.value }))}
                     rows={3} placeholder="Décrivez le problème…"
                     className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-base focus:ring-2 focus:ring-brand-500 outline-none" />
                 </div>
                 <div>
-                  <label className="text-sm font-bold text-slate-500 block mb-1">Urgence</label>
+                  <label className="text-sm font-bold text-slate-500 block mb-1">
+                    Urgence
+                  </label>
                   <div className="flex gap-2">
                     {([['Low', 'Basse'], ['Medium', 'Moyenne'], ['High', 'Haute']] as const).map(([val, label]) => (
-                      <button key={val} onClick={() => setIssueForm(f => ({ ...f, priority: val }))}
-                        className={`min-h-11 flex-1 py-2 rounded-lg text-sm font-bold border ${issueForm.priority === val ? (val === 'High' ? 'bg-red-600 text-white border-red-600' : val === 'Medium' ? 'bg-amber-700 text-white border-amber-500' : 'bg-slate-600 text-white border-slate-600') : 'bg-white text-slate-600 border-slate-300'}`}>
+                      <button
+                        key={val}
+                        aria-pressed={issueForm.priority === val}
+                        onClick={() => setIssueForm(f => ({ ...f, priority: val }))}
+                        className={`ui-button ui-button-secondary flex-1 ${issueForm.priority === val ? (val === 'High' ? "!bg-red-700 !text-white !border-red-700" : val === 'Medium' ? "!bg-amber-800 !text-white !border-amber-800" : "!bg-slate-700 !text-white !border-slate-700") : 'bg-white text-slate-600 border-slate-300'}`}
+                      >
                         {label}
                       </button>
                     ))}
                   </div>
                 </div>
               </div>
-              <div className="p-4 border-t border-slate-200 flex gap-2">
-                <button onClick={handleSubmitIssue} disabled={issueSubmitting} className="min-h-11 flex-1 py-3 bg-red-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-50">
-                  {issueSubmitting ? 'Envoi…' : 'Envoyer au bureau'}
-                </button>
-                <button onClick={() => { void closeIssue(() => setShowIssue(false)); }} className="min-h-11 px-5 py-3 bg-slate-100 text-slate-700 rounded-xl font-medium text-sm">
-                  Annuler
-                </button>
-              </div>
             </div>
           </Modal>
         )}
 
-        {/* === MODAL ÉCHEC === */}
+        {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
         {showFailureModal && (
-          <Modal isOpen onClose={() => { void closeFailure(() => setShowFailureModal(false)); }} title="Déclarer un échec de livraison" preventClose={isProcessing} closeOnOverlay={false} bodyClassName="!p-0">
-            <div className="bg-white w-full max-w-md rounded-t-2xl sm:rounded-2xl overflow-hidden animate-slide-up max-h-[85vh] overflow-y-auto">
+          <Modal
+            mobileFullscreen
+            isOpen
+            onClose={() => { void closeFailure(() => setShowFailureModal(false)); }}
+            title="Déclarer un échec de livraison"
+            preventClose={isProcessing}
+            closeOnOverlay={false}
+            bodyClassName="!p-0"
+            footer={
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => { void closeFailure(() => { setShowFailureModal(false); setFailureNotes(''); setFailurePhotos([]); }); }}
+                  className="ui-button ui-button-secondary flex-1"
+                >
+                  Annuler
+                </button>
+                <button
+                  onClick={handleDeliveryFailure}
+                  disabled={isProcessing || failurePhotos.length === 0}
+                  className="ui-button ui-button-danger flex-1"
+                >
+                  {isProcessing
+                    ? 'Envoi...'
+                    : failurePhotos.length === 0
+                      ? "Photo requise"
+                      : 'Confirmer échec'}
+                </button>
+              </div>
+            }
+          >
+            <div className="bg-white w-full max-w-md rounded-t-2xl sm:rounded-2xl overflow-hidden animate-slide-up ">
               <div className="p-4 bg-red-50 border-b border-red-100">
-                <h3 className="text-lg font-bold text-red-800">Raison de l'échec</h3>
-                <p className="text-sm text-red-800">Arrêt {currentStop?.sequence} — {currentStop?.contactName}</p>
+                <h3 className="text-lg font-bold text-red-800">
+                  Raison de l'échec
+                </h3>
+                <p className="text-sm text-red-800">
+                  Arrêt {currentStop?.sequence} — {currentStop?.contactName}
+                </p>
               </div>
               <div className="p-4 space-y-3">
-                {Object.values(FailureReason).map(reason => (
+                {Object.values(FailureReason).map((reason) => (
                   <button
                     key={reason}
                     onClick={() => setFailureReason(reason as FailureReason)}
-                    className={`w-full text-left px-4 py-3 rounded-xl border text-sm font-medium transition-colors ${
+                    aria-pressed={failureReason === reason}
+                    className={`ui-button ui-button-secondary !justify-start w-full text-left ${
                       failureReason === reason
-                        ? 'bg-red-50 border-red-300 text-red-800'
-                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                        ? "!bg-red-50 !border-red-300 !text-red-800"
+                        : ''
                     }`}
                   >
                     {reason}
                   </button>
                 ))}
-                <label htmlFor="failure-notes" className="block text-sm font-medium text-slate-700">Commentaire de l’échec (optionnel)</label>
+                <label htmlFor="failure-notes" className="block text-sm font-medium text-slate-700">
+                  Commentaire de l’échec (optionnel)
+                </label>
                 <textarea id="failure-notes"
                   value={failureNotes}
                   onChange={(e) => setFailureNotes(e.target.value)}
@@ -2502,16 +3201,27 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                   className="w-full px-3 py-2 border border-slate-200 rounded-xl text-base resize-none h-20"
                 />
 
-                {/* Photo preuve d'échec */}
+                {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
                 <div className="border-t border-slate-100 pt-3">
-                  <p className="text-sm font-bold text-slate-500 mb-2">📷 Photo preuve <span className="text-red-700">obligatoire</span></p>
+                  <p className="text-sm font-bold text-slate-500 mb-2">
+                    <Camera
+                      size={18}
+                      className="inline shrink-0 align-text-bottom"
+                      aria-hidden="true"
+                    />{" "}
+                    Photo preuve{" "}
+                    <span className="text-red-700">obligatoire</span>
+                  </p>
                   <button
                     onClick={() => failurePhotoInputRef.current?.click()}
                     disabled={failurePhotos.length >= MAX_PHOTOS}
-                    className="min-h-11 w-full flex items-center justify-center gap-2 py-2.5 bg-slate-50 border border-slate-200 text-slate-600 rounded-xl text-sm font-medium disabled:opacity-40"
+                    className="ui-button ui-button-secondary w-full gap-2"
                   >
                     <Camera size={14} />
-                    Photo porte / boîte aux lettres ({failurePhotos.length}/{MAX_PHOTOS})
+                    Photo porte / boîte aux lettres ({failurePhotos.length}/
+                    {MAX_PHOTOS})
                   </button>
                   <input
                     ref={failurePhotoInputRef}
@@ -2523,64 +3233,68 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                   />
                   {failurePhotos.length === 0 && (
                     <p className="text-sm text-red-700 font-medium mt-1.5 text-center">
-                      ⚠️ Au moins 1 photo requise pour confirmer l'échec
+                      <AlertTriangle
+                        size={18}
+                        className="inline shrink-0 align-text-bottom"
+                        aria-hidden="true"
+                      />{" "}
+                      Au moins 1 photo requise pour confirmer l'échec
                     </p>
                   )}
                   {failurePhotos.length > 0 && (
                     <div className="flex gap-2 mt-2 overflow-x-auto">
                       {failurePhotos.map((photo, i) => (
                         <div key={i} className="relative flex-shrink-0">
-                          <img src={photo} alt={`Échec ${i+1}`} className="w-16 h-16 rounded-lg object-cover border border-red-200" />
+                          <img src={photo} alt={`Échec ${i + 1}`} className="w-16 h-16 rounded-lg object-cover border border-red-200" />
                           <button
                             aria-label={`Supprimer la photo d’échec ${i + 1}`}
                             onClick={() => setFailurePhotos(prev => prev.filter((_, idx) => idx !== i))}
-                            className="absolute -top-1 -right-1 w-11 h-11 bg-red-700 text-white rounded-full flex items-center justify-center text-sm"
-                          >✕</button>
+                            className="ui-button ui-button-danger absolute -top-1 -right-1 w-11 h-11"
+                          >
+                            <X
+                              size={18}
+                              className="inline shrink-0 align-text-bottom"
+                              aria-hidden="true"
+                            />
+                          </button>
                         </div>
                       ))}
                     </div>
                   )}
                 </div>
 
-                {/* Barre progression si upload en cours */}
+                {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
                 {uploadProgress && uploadProgress.step !== 'done' && uploadProgress.step !== 'error' && (
-                  <div className="bg-red-50 border border-red-200 rounded-xl p-2">
-                    <div className="flex items-center gap-2">
-                      <Loader2 size={12} className="animate-spin text-red-800" />
-                      <span className="text-sm text-red-700">{uploadProgress.message}</span>
+                    <div className="bg-red-50 border border-red-200 rounded-xl p-2">
+                      <div className="flex items-center gap-2">
+                        <Loader2 size={12} className="animate-spin text-red-800" />
+                        <span className="text-sm text-red-700">
+                          {uploadProgress.message}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                )}
-              </div>
-              <div className="p-4 border-t border-slate-100 flex gap-2">
-                <button
-                  onClick={() => { void closeFailure(() => { setShowFailureModal(false); setFailureNotes(''); setFailurePhotos([]); }); }}
-                  className="min-h-11 flex-1 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-600"
-                >
-                  Annuler
-                </button>
-                <button
-                  onClick={handleDeliveryFailure}
-                  disabled={isProcessing || failurePhotos.length === 0}
-                  className="min-h-11 flex-1 py-3 bg-red-600 text-white rounded-xl text-sm font-bold disabled:opacity-50"
-                >
-                  {isProcessing ? 'Envoi...' : failurePhotos.length === 0 ? '📷 Photo requise' : 'Confirmer échec'}
-                </button>
+                  )}
               </div>
             </div>
           </Modal>
         )}
 
-        {/* Scanner code-barres (plein écran, lazy-loaded) */}
+        {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
         {showScanner && (
-          <Suspense fallback={
-            <div className="fixed inset-0 z-50 bg-black flex items-center justify-center">
-              <div className="text-center text-white">
-                <Loader2 size={32} className="animate-spin mx-auto mb-3" />
-                <p className="text-sm">Chargement du scanner...</p>
+          <Suspense
+            fallback={
+              <div className="fixed inset-0 z-50 bg-black flex items-center justify-center">
+                <div className="text-center text-white">
+                  <Loader2 size={32} className="animate-spin mx-auto mb-3" />
+                  <p className="text-sm">Chargement du scanner...</p>
+                </div>
               </div>
-            </div>
-          }>
+            }
+          >
             <BarcodeScanner
               onScan={handleBarcodeScan}
               onClose={() => setShowScanner(false)}
@@ -2595,101 +3309,24 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
           </Suspense>
         )}
 
-        {/* === MODAL RETOUR HUB === */}
+        {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
         {showReturnModal && returningPackage && (
-          <Modal isOpen onClose={() => { void closeReturn(() => setShowReturnModal(false)); }} title="Confirmer un retour au hub" size="lg" preventClose={isProcessing} bodyClassName="!p-0">
-            <div className="bg-white rounded-t-3xl w-full max-w-lg max-h-[90vh] overflow-y-auto animate-slide-up">
-              <p className="p-4 text-base font-semibold text-slate-800 break-words">{returningPackage.orderNumber} · {returningPackage.contactName}</p>
-
-              {/* Raison du retour */}
-              <div className="p-4 bg-amber-50 border-b border-amber-200">
-                <p className="text-sm text-amber-800 font-medium">
-                  ⚠️ {returningPackage.returnReason || 'Ce colis a été retiré de votre tournée'}
-                </p>
-              </div>
-
-              {/* Contenu */}
-              <div className="p-4 space-y-4">
-                {/* Photos (obligatoire) */}
-                <div>
-                  <label className="text-sm font-bold text-slate-700 flex items-center gap-1 mb-2">
-                    📷 Photo du colis <span className="text-red-700">*</span>
-                  </label>
-                  <input
-                    ref={returnPhotoInputRef}
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    onChange={handleReturnPhoto}
-                    className="hidden"
-                  />
-                  <div className="flex flex-wrap gap-2">
-                    {returnPhotos.map((photo, idx) => (
-                      <div key={idx} className="relative w-16 h-16 rounded-lg overflow-hidden border border-slate-200">
-                        <img src={photo} alt="" className="w-full h-full object-cover" />
-                        <button
-                          aria-label={`Supprimer la photo de retour ${idx + 1}`}
-                          onClick={() => setReturnPhotos(prev => prev.filter((_, i) => i !== idx))}
-                          className="absolute top-0.5 right-0.5 w-11 h-11 bg-red-700 text-white rounded-full text-sm flex items-center justify-center"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ))}
-                    {returnPhotos.length < 5 && (
-                      <button
-                        aria-label="Prendre une photo du colis retourné" onClick={() => returnPhotoInputRef.current?.click()}
-                        className="w-16 h-16 rounded-lg border-2 border-dashed border-slate-300 flex items-center justify-center text-slate-600 hover:border-yellow-400 hover:text-yellow-800"
-                      >
-                        <Camera size={24} />
-                      </button>
-                    )}
-                  </div>
-                  {returnPhotos.length === 0 && (
-                    <p className="text-sm text-red-700 mt-1">⚠️ Au moins 1 photo obligatoire</p>
-                  )}
-                </div>
-
-                {/* Signature (optionnelle) */}
-                <div>
-                  <label className="text-sm font-bold text-slate-700 flex items-center gap-1 mb-2">
-                    ✍️ Signature réception hub <span className="text-slate-600">(optionnel)</span>
-                  </label>
-                  {returnSignature ? (
-                    <div className="relative">
-                      <img src={returnSignature} alt="Signature" className="w-full h-20 object-contain border border-slate-200 rounded-lg bg-white" />
-                      <button
-                        aria-label="Supprimer la signature de réception au hub" onClick={() => setReturnSignature(null)}
-                        className="absolute top-1 right-1 w-11 h-11 bg-red-700 text-white rounded-full text-sm flex items-center justify-center"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => setShowReturnSignature(true)}
-                      className="min-h-11 w-full py-3 border-2 border-dashed border-slate-300 rounded-lg text-slate-500 text-sm flex items-center justify-center gap-2 hover:border-yellow-400"
-                    >
-                      <PenTool size={16} />
-                      Ajouter signature
-                    </button>
-                  )}
-                </div>
-
-                {/* Info géoloc */}
-                <div className="bg-slate-50 rounded-lg p-3">
-                  <p className="text-sm text-slate-500">
-                    📍 Votre position GPS sera enregistrée automatiquement pour confirmer la remise au hub.
-                  </p>
-                </div>
-              </div>
-
-              {/* Actions */}
-              <div className="p-4 border-t border-slate-200 space-y-2">
+          <Modal
+            mobileFullscreen
+            isOpen
+            onClose={() => { void closeReturn(() => setShowReturnModal(false)); }}
+            title="Confirmer un retour au hub"
+            size="lg"
+            preventClose={isProcessing}
+            bodyClassName="!p-0"
+            footer={
+              <div className="flex flex-wrap gap-2">
                 <button
                   onClick={handleConfirmReturn}
                   disabled={isProcessing || returnPhotos.length === 0}
-                  className="min-h-11 w-full py-3.5 bg-yellow-700 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50 active:scale-95 transition-all"
+                  className="ui-button ui-button-primary flex-1 gap-2"
                 >
                   {isProcessing ? (
                     <>
@@ -2706,16 +3343,160 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                 <button
                   onClick={() => { void closeReturn(() => setShowReturnModal(false)); }}
                   disabled={isProcessing}
-                  className="min-h-11 w-full py-2 text-slate-500 text-sm"
+                  className="ui-button ui-button-secondary"
                 >
                   Annuler
                 </button>
               </div>
+            }
+          >
+            <div className="bg-white rounded-t-3xl w-full max-w-lg animate-slide-up">
+              <p className="p-4 text-base font-semibold text-slate-800 break-words">
+                {returningPackage.orderNumber} · {returningPackage.contactName}
+              </p>
+
+              {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+              <div className="p-4 bg-amber-50 border-b border-amber-200">
+                <p className="text-sm text-amber-800 font-medium">
+                  <AlertTriangle
+                    size={18}
+                    className="inline shrink-0 align-text-bottom"
+                    aria-hidden="true"
+                  />{" "}
+                  {returningPackage.returnReason || 'Ce colis a été retiré de votre tournée'}
+                </p>
+              </div>
+
+              {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+              <div className="p-4 space-y-4">
+                {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+                <div>
+                  <label className="text-sm font-bold text-slate-700 flex items-center gap-1 mb-2">
+                    <Camera
+                      size={18}
+                      className="inline shrink-0 align-text-bottom"
+                      aria-hidden="true"
+                    />{" "}
+                    Photo du colis <span className="text-red-700">*</span>
+                  </label>
+                  <input
+                    ref={returnPhotoInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={handleReturnPhoto}
+                    className="hidden"
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    {returnPhotos.map((photo, idx) => (
+                      <div key={idx} className="relative w-16 h-16 rounded-lg overflow-hidden border border-slate-200">
+                        <img src={photo} alt="" className="w-full h-full object-cover" />
+                        <button
+                          aria-label={`Supprimer la photo de retour ${idx + 1}`}
+                          onClick={() => setReturnPhotos(prev => prev.filter((_, i) => i !== idx))}
+                          className="ui-button ui-button-danger absolute top-0.5 right-0.5 w-11 h-11"
+                        >
+                          <X
+                            size={18}
+                            className="inline shrink-0 align-text-bottom"
+                            aria-hidden="true"
+                          />
+                        </button>
+                      </div>
+                    ))}
+                    {returnPhotos.length < 5 && (
+                      <button
+                        aria-label="Prendre une photo du colis retourné"
+                        onClick={() => returnPhotoInputRef.current?.click()}
+                        className="ui-button ui-button-secondary w-16 h-16 border-dashed"
+                      >
+                        <Camera size={24} />
+                      </button>
+                    )}
+                  </div>
+                  {returnPhotos.length === 0 && (
+                    <p className="text-sm text-red-700 mt-1">
+                      <AlertTriangle
+                        size={18}
+                        className="inline shrink-0 align-text-bottom"
+                        aria-hidden="true"
+                      />{" "}
+                      Au moins 1 photo obligatoire
+                    </p>
+                  )}
+                </div>
+
+                {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+                <div>
+                  <label className="text-sm font-bold text-slate-700 flex items-center gap-1 mb-2">
+                    <PenTool
+                      size={18}
+                      className="inline shrink-0 align-text-bottom"
+                      aria-hidden="true"
+                    />{" "}
+                    Signature réception hub{" "}
+                    <span className="text-slate-600">(optionnel)</span>
+                  </label>
+                  {returnSignature ? (
+                    <div className="relative">
+                      <img src={returnSignature} alt="Signature" className="w-full h-20 object-contain border border-slate-200 rounded-lg bg-white" />
+                      <button
+                        aria-label="Supprimer la signature de réception au hub"
+                        onClick={() => setReturnSignature(null)}
+                        className="ui-button ui-button-danger absolute top-1 right-1 w-11 h-11"
+                      >
+                        <X
+                          size={18}
+                          className="inline shrink-0 align-text-bottom"
+                          aria-hidden="true"
+                        />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setShowReturnSignature(true)}
+                      className="ui-button ui-button-secondary w-full border-dashed gap-2"
+                    >
+                      <PenTool size={16} />
+                      Ajouter signature
+                    </button>
+                  )}
+                </div>
+
+                {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+                <div className="bg-slate-50 rounded-lg p-3">
+                  <p className="text-sm text-slate-500">
+                    <MapPin
+                      size={18}
+                      className="inline shrink-0 align-text-bottom"
+                      aria-hidden="true"
+                    />{" "}
+                    Votre position GPS sera enregistrée automatiquement pour
+                    confirmer la remise au hub.
+                  </p>
+                </div>
+              </div>
+
+              {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
             </div>
           </Modal>
         )}
 
-        {/* Modal signature retour */}
+        {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
         {showReturnSignature && (
           <Modal isOpen onClose={() => setShowReturnSignature(false)} title="Signature de réception au hub" size="lg" closeOnOverlay={false} bodyClassName="!p-0">
             <div className="flex-1 bg-white relative">
@@ -2740,15 +3521,20 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
 
   return (
     <div className="max-w-lg mx-auto pb-6 space-y-4 animate-fade-in">
-      {manualStopRecovery}{manualStopDialog}
-      {/* Notification toast */}
+      {manualStopRecovery}
+      {manualStopDialog}
+      {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
       {notification && (
         <div role="status" className="bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg text-center text-sm font-medium animate-fade-in">
-          {notification}
+          <NotificationText message={notification} />
         </div>
       )}
 
-      {/* Header */}
+      {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
       <div>
         <h2 className="text-xl font-bold text-slate-800">Mes tournées</h2>
         <p className="text-sm text-slate-500">
@@ -2756,18 +3542,24 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
         </p>
       </div>
 
-      {/* Point d'entrée scan unique : Enlèvement / Livraison */}
+      {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
       <button
         onClick={() => setShowScanChoice(true)}
-        className="min-h-11 w-full flex items-center justify-center gap-2 py-3.5 bg-green-700 text-white rounded-xl text-base font-black active:scale-95 transition-transform shadow-sm"
+        className="ui-button ui-button-primary w-full gap-2"
       >
-        📷 Scanner des colis
+        <Camera
+          size={18}
+          className="inline shrink-0 align-text-bottom"
+          aria-hidden="true"
+        />{" "}
+        Scanner des colis
       </button>
 
-      {/* Modal prise en charge (vue liste / sans tournée active) → « Commencer ma tournée » :
-          après le chargement, on SÉLECTIONNE la tournée du jour et on bascule sur la vue
-          active (corrige « je ne vois pas où commencer ma tournée » : la tournée créée par
-          scan n'était pas auto-sélectionnée). */}
+      {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
       {showClaimModal && (
         <ClaimScanModal
           currentUser={currentUser}
@@ -2787,12 +3579,14 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
 
       {renderScanChoice()}
 
-      {/* Onglets : En cours (actives / à démarrer) vs Historique (terminées / annulées).
-          Sépare le quotidien de l'archive → plus de confusion, historique consultable. */}
+      {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
       {(() => {
         const isHistorique = (m: Mission) => m.status === MissionStatus.COMPLETED || m.status === MissionStatus.CANCELLED;
         const enCours = missions.filter(m => !isHistorique(m));
-        const historique = [...missions.filter(isHistorique)].sort((a, b) =>
+        const historique = [...missions
+        .filter(isHistorique)].sort((a, b) =>
           (b.completedAt || b.date || '').localeCompare(a.completedAt || a.date || ''));
         const list = driverTab === 'encours' ? enCours : historique;
         return (
@@ -2808,7 +3602,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                 onClick={() => setDriverTab('historique')}
                 className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-colors ${driverTab === 'historique' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'}`}
               >
-                Historique{historique.length > 0 ? ` (${historique.length})` : ''}
+                Historique
+                {historique.length > 0 ? ` (${historique.length})` : ''}
               </button>
             </div>
             {list.length === 0 && (
@@ -2820,145 +3615,199 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
         );
       })()}
 
-      {/* Liste des missions (filtrée selon l'onglet) */}
+      {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
       {missions
-        .filter(m => driverTab === 'historique'
-          ? (m.status === MissionStatus.COMPLETED || m.status === MissionStatus.CANCELLED)
-          : (m.status !== MissionStatus.COMPLETED && m.status !== MissionStatus.CANCELLED))
+        .filter((m) =>
+          driverTab === 'historique'
+            ? m.status === MissionStatus.COMPLETED || m.status === MissionStatus.CANCELLED
+            : m.status !== MissionStatus.COMPLETED && m.status !== MissionStatus.CANCELLED,
+        )
         .sort((a, b) => driverTab === 'historique'
           ? (b.completedAt || b.date || '').localeCompare(a.completedAt || a.date || '')
-          : 0)
-        .map(mission => {
-        const progress = mission.totalPackages > 0
+          : 0,
+        )
+        .map((mission) => {
+          const progress = mission.totalPackages > 0
           ? Math.round(((mission.deliveredPackages || 0) / mission.totalPackages) * 100) : 0;
-        const statusColors = MISSION_STATUS_COLORS[mission.status];
-        const isCompleted = mission.status === MissionStatus.COMPLETED;
-        const isInProgress = mission.status === MissionStatus.IN_PROGRESS;
+          const statusColors = MISSION_STATUS_COLORS[mission.status];
+          const isCompleted = mission.status === MissionStatus.COMPLETED;
+          const isInProgress = mission.status === MissionStatus.IN_PROGRESS;
 
-        return (
-          <div key={mission.id} className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-            <div className="p-4">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <div className="flex items-center gap-2 mb-1">
-                    <h3 className="text-lg font-bold text-slate-800">Tournée {mission.zone}</h3>
-                    <span className={`px-2 py-0.5 rounded-full text-sm font-bold ${statusColors.bg} ${statusColors.text}`}>
-                      {missionStatusLabel(mission.status)}
-                    </span>
+          return (
+            <div key={mission.id} className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+              <div className="p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <h3 className="text-lg font-bold text-slate-800">
+                        Tournée {mission.zone}
+                      </h3>
+                      <span className={`px-2 py-0.5 rounded-full text-sm font-bold ${statusColors.bg} ${statusColors.text}`}>
+                        {missionStatusLabel(mission.status)}
+                      </span>
+                    </div>
+                    <p className="text-sm text-slate-500">
+                      {mission.vehiclePlate} • {mission.hubName} •{" "}
+                      {mission.stops.length} arrêts
+                    </p>
                   </div>
-                  <p className="text-sm text-slate-500">
-                    {mission.vehiclePlate} • {mission.hubName} • {mission.stops.length} arrêts
-                  </p>
+                  <div className="text-right">
+                    <p className="text-2xl font-extrabold text-slate-800">
+                      {mission.totalPackages}
+                    </p>
+                    <p className="text-sm text-slate-500 uppercase">colis</p>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <p className="text-2xl font-extrabold text-slate-800">{mission.totalPackages}</p>
-                  <p className="text-sm text-slate-500 uppercase">colis</p>
-                </div>
-              </div>
 
-              {/* Métriques */}
-              <div className="grid grid-cols-3 gap-2 mb-3">
-                <div className="bg-slate-50 rounded-lg p-2 text-center">
-                  <p className="text-sm text-slate-500">Distance</p>
-                  <p className="text-sm font-bold text-slate-800">{formatDistance(mission.totalDistance) || '-'}</p>
+                {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+                <div className="grid grid-cols-3 gap-2 mb-3">
+                  <div className="bg-slate-50 rounded-lg p-2 text-center">
+                    <p className="text-sm text-slate-500">Distance</p>
+                    <p className="text-sm font-bold text-slate-800">
+                      {formatDistance(mission.totalDistance) || '-'}
+                    </p>
+                  </div>
+                  <div className="bg-slate-50 rounded-lg p-2 text-center">
+                    <p className="text-sm text-slate-500">Durée est.</p>
+                    <p className="text-sm font-bold text-slate-800">
+                      {formatDuration(mission.estimatedDuration) || '-'}
+                    </p>
+                  </div>
+                  <div className="bg-slate-50 rounded-lg p-2 text-center">
+                    <p className="text-sm text-slate-500">Livrés</p>
+                    <p className="text-sm font-bold text-green-700">
+                      {mission.deliveredPackages || 0}
+                    </p>
+                  </div>
                 </div>
-                <div className="bg-slate-50 rounded-lg p-2 text-center">
-                  <p className="text-sm text-slate-500">Durée est.</p>
-                  <p className="text-sm font-bold text-slate-800">{formatDuration(mission.estimatedDuration) || '-'}</p>
-                </div>
-                <div className="bg-slate-50 rounded-lg p-2 text-center">
-                  <p className="text-sm text-slate-500">Livrés</p>
-                  <p className="text-sm font-bold text-green-700">{mission.deliveredPackages || 0}</p>
-                </div>
-              </div>
 
-              {/* Barre progression */}
-              {(isInProgress || isCompleted) && (
-                <div className="mb-3">
-                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                    <div
+                {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+                {(isInProgress || isCompleted) && (
+                  <div className="mb-3">
+                    <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <div
                       className={`h-full rounded-full transition-all ${isCompleted ? 'bg-green-500' : 'bg-blue-500'}`}
                       style={{ width: `${progress}%` }}
                     />
-                  </div>
-                  <p className="text-sm text-slate-500 mt-1 text-right">{progress}%</p>
-                </div>
-              )}
-
-              {/* Heure de départ prévue */}
-              {mission.plannedDepartureTime && mission.status === MissionStatus.DISPATCHED && (
-                <div className="flex items-center gap-2 mb-2 px-3 py-2 bg-blue-50 border border-blue-100 rounded-xl">
-                  <Clock size={14} className="text-blue-500" />
-                  <span className="text-sm text-blue-700 font-medium">Départ prévu : </span>
-                  <span className="text-sm font-bold text-blue-800 font-mono">{mission.plannedDepartureTime}</span>
-                </div>
-              )}
-
-              {/* Bouton action */}
-              {mission.status === MissionStatus.DISPATCHED && !isLoadingPhase && (
-                <button
-                  onClick={() => handleStartLoading(mission)}
-                  disabled={isProcessing}
-                  className="min-h-11 w-full flex items-center justify-center gap-2 py-3.5 bg-blue-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-50"
-                >
-                  {isProcessing ? <Loader2 size={18} className="animate-spin" /> : <Play size={18} />}
-                  📦 Commencer le chargement
-                </button>
-              )}
-
-              {/* Phase chargement en cours */}
-              {mission.status === MissionStatus.DISPATCHED && isLoadingPhase && activeMissionId === mission.id && (
-                <div className="space-y-2">
-                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Loader2 size={14} className="animate-spin text-amber-800" />
-                      <span className="text-sm font-bold text-amber-800">Chargement en cours...</span>
                     </div>
-                    <p className="text-sm text-amber-800">
-                      {mission.totalPackages} colis • {mission.stops.length} arrêts à charger
+                    <p className="text-sm text-slate-500 mt-1 text-right">
+                      {progress}%
                     </p>
                   </div>
-                  {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                )}
+
+                {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
                       Alerte si le colis est sur une autre tournée (passation) ;
                       ajoute les colis non affectés (prise en charge directe). */}
-                  <button
-                    onClick={() => setShowClaimModal(true)}
-                    disabled={isProcessing}
-                    className="min-h-11 w-full flex items-center justify-center gap-2 py-3 bg-blue-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-50"
-                  >
-                    <Camera size={18} />
-                    📷 Scanner les colis à l'embarquement
-                  </button>
-                  <button
-                    onClick={() => handleLoadingComplete(mission)}
-                    disabled={isProcessing}
-                    className="min-h-11 w-full flex items-center justify-center gap-2 py-3.5 bg-green-700 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-50"
-                  >
-                    {isProcessing ? (
-                      <>
-                        <Loader2 size={18} className="animate-spin" />
-                        Mise à jour en cours...
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle size={18} />
-                        ✅ Chargement terminé — Départ !
-                      </>
-                    )}
-                  </button>
-                  <button
-                    onClick={handleCancelLoading}
-                    disabled={isProcessing}
-                    className="min-h-11 w-full flex items-center justify-center gap-2 py-2 text-slate-500 text-sm font-medium"
-                  >
-                    Annuler
-                  </button>
-                </div>
-              )}
+                {mission.plannedDepartureTime && mission.status === MissionStatus.DISPATCHED && (
+                    <div className="flex items-center gap-2 mb-2 px-3 py-2 bg-blue-50 border border-blue-100 rounded-xl">
+                      <Clock size={14} className="text-blue-500" />
+                      <span className="text-sm text-blue-700 font-medium">
+                        Départ prévu :{" "}
+                      </span>
+                      <span className="text-sm font-bold text-blue-800 font-mono">
+                        {mission.plannedDepartureTime}
+                      </span>
+                    </div>
+                  )}
 
-              {isInProgress && (
-                <button
-                  onClick={() => {
+                {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+                {mission.status === MissionStatus.DISPATCHED && !isLoadingPhase && (
+                    <button
+                      onClick={() => handleStartLoading(mission)}
+                      disabled={isProcessing}
+                      className="ui-button ui-button-primary w-full gap-2"
+                    >
+                      {isProcessing ? (
+                        <Loader2 size={18} className="animate-spin" />
+                      ) : (
+                        <Play size={18} />
+                      )}
+                      <PackageIcon
+                        size={18}
+                        className="inline shrink-0 align-text-bottom"
+                        aria-hidden="true"
+                      />{" "}
+                      Commencer le chargement
+                    </button>
+                  )}
+
+                {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+                {mission.status === MissionStatus.DISPATCHED && isLoadingPhase && activeMissionId === mission.id && (
+                    <div className="space-y-2">
+                      <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                        <div className="flex items-center gap-2 mb-1">
+                          <Loader2 size={14} className="animate-spin text-amber-800" />
+                          <span className="text-sm font-bold text-amber-800">
+                            Chargement en cours...
+                          </span>
+                        </div>
+                        <p className="text-sm text-amber-800">
+                          {mission.totalPackages} colis • {mission.stops.length}{" "}
+                          arrêts à charger
+                        </p>
+                      </div>
+                      {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
+                      Alerte si le colis est sur une autre tournée (passation) ;
+                      ajoute les colis non affectés (prise en charge directe). */}
+                      <button
+                        onClick={() => setShowClaimModal(true)}
+                        disabled={isProcessing}
+                        className="ui-button ui-button-primary w-full gap-2"
+                      >
+                        <Camera size={18} />
+                        <Camera
+                          size={18}
+                          className="inline shrink-0 align-text-bottom"
+                          aria-hidden="true"
+                        />{" "}
+                        Scanner les colis à l'embarquement
+                      </button>
+                      <button
+                        onClick={() => handleLoadingComplete(mission)}
+                        disabled={isProcessing}
+                        className="ui-button ui-button-primary w-full gap-2"
+                      >
+                        {isProcessing ? (
+                          <>
+                            <Loader2 size={18} className="animate-spin" />
+                            Mise à jour en cours...
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle size={18} />
+                            <CheckCircle
+                              size={18}
+                              className="inline shrink-0 align-text-bottom"
+                              aria-hidden="true"
+                            />{" "}
+                            Chargement terminé — Départ !
+                          </>
+                        )}
+                      </button>
+                      <button
+                        onClick={handleCancelLoading}
+                        disabled={isProcessing}
+                        className="ui-button ui-button-secondary w-full gap-2"
+                      >
+                        Annuler
+                      </button>
+                    </div>
+                  )}
+
+                {isInProgress && (
+                  <button
+                    onClick={() => {
                     // FIX: Calculer le prochain stop en attente pour CETTE mission spécifique
                     const missionSortedStops = [...mission.stops].sort((a, b) => a.sequence - b.sequence);
                     const pendingIdx = missionSortedStops.findIndex(s =>
@@ -2967,23 +3816,23 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                     setActiveMissionId(mission.id);
                     setActiveStopIndex(pendingIdx >= 0 ? pendingIdx : 0);
                   }}
-                  className="min-h-11 w-full flex items-center justify-center gap-2 py-3.5 bg-orange-700 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform"
-                >
-                  <Navigation size={18} />
-                  Continuer la tournée
-                </button>
-              )}
+                    className="ui-button ui-button-primary w-full gap-2"
+                  >
+                    <Navigation size={18} />
+                    Continuer la tournée
+                  </button>
+                )}
 
-              {isCompleted && (
-                <div className="w-full flex items-center justify-center gap-2 py-3 bg-green-50 text-green-700 rounded-xl text-sm font-bold">
-                  <CheckCircle size={18} />
-                  Tournée terminée
-                </div>
-              )}
+                {isCompleted && (
+                  <div className="w-full flex items-center justify-center gap-2 py-3 bg-green-50 text-green-700 rounded-xl text-sm font-bold">
+                    <CheckCircle size={18} />
+                    Tournée terminée
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
     </div>
   );
 };

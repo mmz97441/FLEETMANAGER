@@ -1,24 +1,45 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import Modal from './shared/Modal';
+import PageHeader from './shared/PageHeader';
+import { FormInput } from './shared/FormInput';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { QuoteRequest, QuoteStatus } from '../types';
-import { Package, MapPin, Search, CheckCircle, Clock, XCircle, Euro, Send, Filter, ArrowRight, User, Phone, Box, Calendar, AlertTriangle, FileText, ChevronRight, Calculator, StickyNote, Printer } from 'lucide-react';
+import { Package, MapPin, Search, CheckCircle, Clock, XCircle, Euro, Send, Filter, ArrowRight, User, Phone, Box, Calendar, AlertTriangle, FileText, ChevronRight, Calculator, StickyNote, Printer, ArrowLeft } from 'lucide-react';
 import ShippingLabel, { quoteToLabelData, ShippingLabelData } from './ShippingLabel';
-import { formatEuro, formatWeight } from '../utils/format';
+import { formatEuro, formatWeight, formatNumberFr } from '../utils/format';
 
 interface QuoteManagerProps {
   quotes: QuoteRequest[];
-  onUpdateQuote: (quote: QuoteRequest) => void;
+  onUpdateQuote: (quote: QuoteRequest) => void | Promise<void>;
 }
 
 const QuoteManager: React.FC<QuoteManagerProps> = ({ quotes, onUpdateQuote }) => {
   const [filter, setFilter] = useState<'all' | 'pending' | 'sent' | 'done'>('all');
   const [selectedQuote, setSelectedQuote] = useState<QuoteRequest | null>(null);
-  
+
+  const opener = useRef<HTMLButtonElement | null>(null);
+  const detailHeading = useRef<HTMLHeadingElement | null>(null);
+  const listHeading = useRef<HTMLDivElement | null>(null);
+  const [priceError, setPriceError] = useState('');
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState('');
+  const sendLock = useRef(false);
   // Form State
   const [offerPrice, setOfferPrice] = useState<string>('');
   const [offerNote, setOfferNote] = useState<string>('');
-  
+
+  const dirty = !!selectedQuote && (offerPrice !== (selectedQuote.priceOffer?.toString() || '') || offerNote !== (selectedQuote.adminNotes || ''));
+  const requestLeave = useUnsavedChanges(dirty, sending);
+  const restoreListFocus = useRef(false);
+  useEffect(() => {
+      if (selectedQuote) detailHeading.current?.focus();
+      else if (restoreListFocus.current) { restoreListFocus.current = false; (opener.current?.isConnected ? opener.current : listHeading.current)?.focus(); }
+  }, [selectedQuote?.id]);
+  const returnToList = () => {
+      restoreListFocus.current = true;
+      setSelectedQuote(null);
+  };
   // Confirmation Modal State
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [labelData, setLabelData] = useState<ShippingLabelData | null>(null);
@@ -31,29 +52,36 @@ const QuoteManager: React.FC<QuoteManagerProps> = ({ quotes, onUpdateQuote }) =>
   }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   const handleOpenOffer = (quote: QuoteRequest) => {
+      setPriceError(''); setSendError('');
       setSelectedQuote(quote);
-      setOfferPrice(quote.priceOffer ? quote.priceOffer.toString() : '');
+      setOfferPrice(quote.priceOffer != null ? quote.priceOffer.toString() : '');
       setOfferNote(quote.adminNotes || '');
   };
 
   const handlePreSubmit = () => {
-      if (!selectedQuote || !offerPrice) return;
+      if (!selectedQuote) return;
+      if (!offerPrice.trim() || !Number.isFinite(Number(offerPrice)) || Number(offerPrice) < 0) { setPriceError('Saisissez un prix positif ou nul.'); document.getElementById('quote-offer-price')?.focus(); return; }
+      setPriceError('');
       setIsConfirmModalOpen(true);
   };
 
-  const handleConfirmSend = () => {
-      if (!selectedQuote) return;
-      
+  const handleConfirmSend = async () => {
+      if (!selectedQuote || sendLock.current) return;
+
       const updatedQuote: QuoteRequest = {
           ...selectedQuote,
           priceOffer: Number(offerPrice),
           adminNotes: offerNote,
           status: QuoteStatus.OFFER_SENT
       };
-      
-      onUpdateQuote(updatedQuote);
-      setIsConfirmModalOpen(false);
-      setSelectedQuote(null); // On ferme pour passer au suivant
+
+      sendLock.current = true; setSending(true); setSendError('');
+      try {
+          await onUpdateQuote(updatedQuote);
+          setIsConfirmModalOpen(false);
+          returnToList();
+      } catch (error) { setSendError(`L’offre n’a pas été enregistrée. Votre saisie est conservée. ${error instanceof Error ? error.message : ''}`); }
+      finally { sendLock.current = false; setSending(false); }
   };
 
   // Helper pour la timeline
@@ -68,71 +96,36 @@ const QuoteManager: React.FC<QuoteManagerProps> = ({ quotes, onUpdateQuote }) =>
   };
 
   return (
-    <div className="space-y-6 animate-fade-in pb-10 relative">
-        {/* En-tête */}
-        <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-            <div>
-                <h2 className="text-2xl font-bold text-slate-900">Gestion des Devis</h2>
-                <p className="text-slate-600">Traitez les demandes entrantes et suivez les opportunités.</p>
-            </div>
-            
-            <div className="flex bg-white p-1 rounded-xl border border-slate-200 shadow-sm">
-                <button onClick={() => setFilter('all')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${filter === 'all' ? 'bg-slate-100 text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}>Tous</button>
-                <button onClick={() => setFilter('pending')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${filter === 'pending' ? 'bg-orange-100 text-orange-800' : 'text-slate-500 hover:text-slate-700'}`}>À Traiter</button>
-                <button onClick={() => setFilter('sent')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${filter === 'sent' ? 'bg-blue-100 text-blue-800' : 'text-slate-500 hover:text-slate-700'}`}>Offres en cours</button>
-            </div>
+    <div className="min-w-0 space-y-4 pb-10 relative [overflow-wrap:anywhere]">
+        <PageHeader title="Gestion des devis" description="Traitez les demandes et suivez les offres." />
+        <div className={`flex flex-wrap gap-2 ${selectedQuote ? 'hidden lg:flex' : ''}`} aria-label="Filtrer les devis">
+          {([['all', 'Tous'], ['pending', 'À traiter'], ['sent', 'Offres en cours'], ['done', 'Décisions reçues']] as const).map(([value, label]) =>
+            <button type="button" key={value} className="ui-filter" aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>)}
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[calc(100vh-180px)]">
+        <div className="grid min-w-0 grid-cols-1 lg:grid-cols-12 gap-4">
             {/* Colonne Liste (Gauche) */}
-            <div className="lg:col-span-4 space-y-4 overflow-y-auto custom-scrollbar pr-2 h-full">
+            <div ref={listHeading} tabIndex={-1} aria-label="Liste des devis" className={`lg:col-span-4 min-w-0 space-y-3 ${selectedQuote ? 'hidden lg:block' : ''}`}>
                 {filteredQuotes.map(quote => (
-                    <div 
-                        key={quote.id} 
-                        onClick={() => handleOpenOffer(quote)}
-                        className={`p-5 rounded-xl border cursor-pointer transition-all hover:shadow-md relative overflow-hidden group ${
-                            selectedQuote?.id === quote.id 
-                            ? 'bg-blue-50 border-blue-500 ring-1 ring-blue-500' 
-                            : 'bg-white border-slate-200 hover:border-blue-300'
-                        }`}
-                    >
-                        {/* Indicateur visuel status */}
-                        <div className={`absolute left-0 top-0 bottom-0 w-1 ${
-                            quote.status === QuoteStatus.REQUESTED ? 'bg-orange-500' :
-                            quote.status === QuoteStatus.OFFER_SENT ? 'bg-blue-500' :
-                            quote.status === QuoteStatus.ACCEPTED ? 'bg-green-500' : 'bg-red-500'
-                        }`}></div>
-
-                        <div className="flex justify-between items-start mb-2 pl-2">
-                            <div>
-                                <h3 className="font-bold text-slate-900 text-sm truncate w-48" title={quote.clientName}>{quote.clientName}</h3>
-                                {quote.requesterName && (
-                                    <p className="text-[10px] text-slate-500 flex items-center gap-1"><User size={10}/> {quote.requesterName}</p>
-                                )}
-                                <p className="text-xs text-slate-400 font-medium mt-0.5">{new Date(quote.date).toLocaleDateString()}</p>
-                            </div>
-                            <div className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                                quote.status === QuoteStatus.REQUESTED ? 'bg-orange-100 text-orange-800' :
-                                quote.status === QuoteStatus.OFFER_SENT ? 'bg-blue-100 text-blue-800' :
-                                quote.status === QuoteStatus.ACCEPTED ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                            }`}>
-                                {quote.status === QuoteStatus.REQUESTED ? 'Nouveau' : quote.status}
-                            </div>
-                        </div>
-                        
-                        <div className="pl-2">
-                            <div className="flex items-center gap-2 mb-2 text-xs font-bold text-slate-700">
-                                <span className="truncate max-w-[80px]">{quote.origin}</span>
-                                <ArrowRight size={12} className="text-slate-400 flex-shrink-0" />
-                                <span className="truncate max-w-[80px]">{quote.destination}</span>
-                            </div>
-                            
-                            <div className="flex justify-between items-end">
-                                <span className="text-xs text-slate-600 truncate max-w-[150px] bg-slate-100 px-2 py-1 rounded">{quote.goodsDescription}</span>
-                                {quote.priceOffer && <span className="font-bold text-slate-900 text-sm">{formatEuro(quote.priceOffer)}</span>}
-                            </div>
-                        </div>
-                    </div>
+                  <button type="button" key={quote.id}
+                    aria-label={`Ouvrir le devis de ${quote.clientName}, du ${new Date(quote.date).toLocaleDateString('fr-FR')}, référence ${quote.id}`}
+                    aria-pressed={selectedQuote?.id === quote.id} aria-controls="quote-detail"
+                    onClick={event => { const button = event.currentTarget; void requestLeave(() => { opener.current = button; handleOpenOffer(quote); }); }}
+                    className={`ui-panel block w-full min-w-0 p-4 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 ${selectedQuote?.id === quote.id ? 'ring-2 ring-blue-700' : 'hover:border-slate-400'}`}>
+                    <span className="flex flex-wrap items-start justify-between gap-2">
+                      <span className="min-w-0 flex-1 basis-40 break-words text-base font-bold text-slate-900">{quote.clientName}</span>
+                      <span className="rounded-md bg-slate-100 px-2 py-1 text-sm font-medium text-slate-700">{quote.status === QuoteStatus.REQUESTED ? 'À traiter' : quote.status}</span>
+                    </span>
+                    {quote.requesterName && <span className="mt-1 block break-words text-sm text-slate-600">Contact : {quote.requesterName}</span>}
+                    <span className="mt-1 block text-sm text-slate-600">{new Date(quote.date).toLocaleDateString('fr-FR')}</span>
+                    <span className="mt-3 grid min-w-0 gap-1 text-sm text-slate-800">
+                      <span className="break-words"><span className="font-semibold">Départ : </span>{quote.origin}</span>
+                      <span className="break-words"><span className="font-semibold">Arrivée : </span>{quote.destination}</span>
+                    </span>
+                    <span className="mt-3 block break-words text-sm text-slate-600">{quote.goodsDescription}</span>
+                    {quote.priceOffer != null && <span className="mt-2 block text-base font-semibold tabular-nums">{formatEuro(quote.priceOffer)} HT</span>}
+                    <span className="mt-3 inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-blue-800">Consulter le devis <ChevronRight size={18} aria-hidden="true" /></span>
+                  </button>
                 ))}
                 {filteredQuotes.length === 0 && (
                     <div className="text-center py-12 bg-slate-50 rounded-xl border border-dashed border-slate-300 text-slate-500">
@@ -143,50 +136,52 @@ const QuoteManager: React.FC<QuoteManagerProps> = ({ quotes, onUpdateQuote }) =>
             </div>
 
             {/* Colonne Détail / Action (Droite) */}
-            <div className="lg:col-span-8 h-full">
+            <div id="quote-detail" className={`lg:col-span-8 min-w-0 ${selectedQuote ? '' : 'hidden lg:block'}`}>
                 {selectedQuote ? (
-                    <div className="bg-white rounded-2xl shadow-lg border border-slate-200 h-full flex flex-col overflow-hidden">
-                        
+                    <div className="ui-panel min-w-0 flex flex-col overflow-hidden">
+
+                        <div className="border-b border-slate-200 px-3 py-2"><button type="button" className="ui-button ui-button-ghost" onClick={() => void requestLeave(returnToList)}><ArrowLeft size={18} />Revenir aux devis</button></div>
                         {/* Header Detail */}
-                        <div className="p-6 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                        <div className="p-4 sm:p-6 border-b border-slate-200 flex flex-wrap justify-between items-start gap-4">
                             <div>
-                                <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                                <h3 ref={detailHeading} tabIndex={-1} className="text-xl font-bold text-slate-900 flex items-center gap-2 outline-none">
                                     <FileText size={20} className="text-blue-600" />
-                                    Dossier #{selectedQuote.id.slice(-6).toUpperCase()}
+                                    Détail du devis
                                 </h3>
-                                <p className="text-sm text-slate-600 font-medium mt-1">
+                                <p className="mt-2 break-all text-sm text-slate-600">Référence : {selectedQuote.id}</p>
+                                <p className="text-sm text-slate-600 font-medium mt-1 break-words">
                                     Client : <span className="text-slate-900 font-bold">{selectedQuote.clientName}</span>
                                     {selectedQuote.requesterName && (
-                                        <span className="ml-2 bg-slate-200 px-2 py-0.5 rounded text-xs text-slate-700 font-semibold">
+                                        <span className="ml-2 bg-slate-200 px-2 py-0.5 rounded text-sm text-slate-700 font-semibold">
                                             Contact: {selectedQuote.requesterName}
                                         </span>
                                     )}
                                 </p>
                             </div>
-                            
+
                             {/* STATUS TIMELINE */}
-                            <div className="hidden md:flex items-center gap-2">
-                                <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold ${getStepStatus(1, selectedQuote.status) === 'active' ? 'bg-orange-600 text-white' : 'bg-slate-200 text-slate-500'}`}>
+                            <div className="hidden xl:flex flex-wrap items-center gap-2">
+                                <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-sm font-bold ${getStepStatus(1, selectedQuote.status) === 'active' ? 'bg-orange-600 text-white' : 'bg-slate-200 text-slate-500'}`}>
                                     1. Demande
                                 </div>
                                 <div className="h-0.5 w-4 bg-slate-300"></div>
-                                <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold ${getStepStatus(2, selectedQuote.status) === 'active' ? 'bg-blue-600 text-white' : getStepStatus(2, selectedQuote.status) === 'completed' ? 'bg-blue-100 text-blue-800' : 'bg-slate-200 text-slate-500'}`}>
+                                <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-sm font-bold ${getStepStatus(2, selectedQuote.status) === 'active' ? 'bg-blue-600 text-white' : getStepStatus(2, selectedQuote.status) === 'completed' ? 'bg-blue-100 text-blue-800' : 'bg-slate-200 text-slate-500'}`}>
                                     2. Offre
                                 </div>
                                 <div className="h-0.5 w-4 bg-slate-300"></div>
-                                <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold ${selectedQuote.status === QuoteStatus.ACCEPTED ? 'bg-green-600 text-white' : selectedQuote.status === QuoteStatus.REJECTED ? 'bg-red-600 text-white' : 'bg-slate-200 text-slate-500'}`}>
+                                <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-sm font-bold ${selectedQuote.status === QuoteStatus.ACCEPTED ? 'bg-green-600 text-white' : selectedQuote.status === QuoteStatus.REJECTED ? 'bg-red-600 text-white' : 'bg-slate-200 text-slate-500'}`}>
                                     3. Décision
                                 </div>
                             </div>
                         </div>
-                        
-                        <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-                            
+
+                        <div className="min-w-0 p-4 sm:p-6">
+
                             {/* --- ALERTE NOTES CLIENT (SI EXISTE) --- */}
                             {selectedQuote.clientNotes && (
                                 <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-r-xl mb-6 shadow-sm">
                                     <h4 className="text-sm font-bold text-yellow-800 flex items-center gap-2 uppercase tracking-wide mb-1">
-                                        <StickyNote size={16} /> Remarques Client
+                                        <StickyNote size={16} /> Remarques du client
                                     </h4>
                                     <p className="text-slate-800 font-medium text-sm">
                                         "{selectedQuote.clientNotes}"
@@ -196,9 +191,9 @@ const QuoteManager: React.FC<QuoteManagerProps> = ({ quotes, onUpdateQuote }) =>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 {/* INFO MARCHANDISE */}
-                                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                                    <h4 className="text-xs font-bold text-slate-500 uppercase mb-3 flex items-center gap-2">
-                                        <Package size={14} /> Détails Marchandise
+                                <div className="min-w-0 border-b border-slate-200 pb-5">
+                                    <h4 className="text-sm font-bold text-slate-500 uppercase mb-3 flex items-center gap-2">
+                                        <Package size={14} /> Marchandise
                                     </h4>
                                     <div className="space-y-3">
                                         <div className="bg-slate-50 p-3 rounded-lg text-sm text-slate-900 font-medium border border-slate-100">
@@ -206,16 +201,16 @@ const QuoteManager: React.FC<QuoteManagerProps> = ({ quotes, onUpdateQuote }) =>
                                         </div>
                                         <div className="grid grid-cols-2 gap-4">
                                             <div>
-                                                <span className="text-xs text-slate-500 block">Poids</span>
+                                                <span className="text-sm text-slate-500 block">Poids</span>
                                                 <span className="text-sm font-bold text-slate-900">{formatWeight(selectedQuote.weight) || '-'}</span>
                                             </div>
                                             <div>
-                                                <span className="text-xs text-slate-500 block">Volume</span>
-                                                <span className="text-sm font-bold text-slate-900">{selectedQuote.volume ? `${selectedQuote.volume.toFixed(3)} m3` : '-'}</span>
+                                                <span className="text-sm text-slate-500 block">Volume</span>
+                                                <span className="text-sm font-bold text-slate-900">{selectedQuote.volume ? `${formatNumberFr(selectedQuote.volume, 3)} m³` : '-'}</span>
                                             </div>
                                             {selectedQuote.dimensions && (
-                                                <div className="col-span-2">
-                                                    <span className="text-xs text-slate-500 block">Dimensions</span>
+                                                <div className="md:col-span-2">
+                                                    <span className="text-sm text-slate-500 block">Dimensions</span>
                                                     <span className="text-sm font-bold text-slate-900">{selectedQuote.dimensions.length}x{selectedQuote.dimensions.width}x{selectedQuote.dimensions.height} cm</span>
                                                 </div>
                                             )}
@@ -224,32 +219,32 @@ const QuoteManager: React.FC<QuoteManagerProps> = ({ quotes, onUpdateQuote }) =>
                                 </div>
 
                                 {/* INFO TEMPORELLE */}
-                                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                                    <h4 className="text-xs font-bold text-slate-500 uppercase mb-3 flex items-center gap-2">
-                                        <Calendar size={14} /> Planning Souhaité
+                                <div className="min-w-0 border-b border-slate-200 pb-5">
+                                    <h4 className="text-sm font-bold text-slate-500 uppercase mb-3 flex items-center gap-2">
+                                        <Calendar size={14} /> Dates souhaitées
                                     </h4>
                                     <div className="space-y-4">
                                         <div className="flex items-start gap-3">
                                             <div className="mt-1 w-2 h-2 rounded-full bg-slate-400"></div>
                                             <div>
-                                                <span className="text-xs text-slate-500 font-bold uppercase block">Enlèvement</span>
-                                                <span className="text-sm font-bold text-slate-900">{new Date(selectedQuote.pickupDate).toLocaleString('fr-FR')}</span>
+                                                <span className="text-sm text-slate-500 font-bold uppercase block">Enlèvement</span>
+                                                <span className="text-sm font-bold text-slate-900">{new Date(selectedQuote.pickupDate).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}</span>
                                             </div>
                                         </div>
                                         <div className="h-4 border-l border-dashed border-slate-300 ml-1"></div>
                                         <div className="flex items-start gap-3">
                                             <div className="mt-1 w-2 h-2 rounded-full bg-blue-500"></div>
                                             <div>
-                                                <span className="text-xs text-blue-600 font-bold uppercase block">Livraison</span>
-                                                <span className="text-sm font-bold text-slate-900">{new Date(selectedQuote.deliveryDate).toLocaleString('fr-FR')}</span>
+                                                <span className="text-sm text-blue-600 font-bold uppercase block">Livraison</span>
+                                                <span className="text-sm font-bold text-slate-900">{new Date(selectedQuote.deliveryDate).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}</span>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
 
                                 {/* ITINÉRAIRE & CONTACTS */}
-                                <div className="col-span-1 md:col-span-2 bg-slate-50 p-5 rounded-xl border border-slate-200">
-                                    <h4 className="text-xs font-bold text-slate-500 uppercase mb-4 flex items-center gap-2">
+                                <div className="col-span-1 md:md:col-span-2 bg-slate-50 p-5 rounded-xl border border-slate-200">
+                                    <h4 className="text-sm font-bold text-slate-500 uppercase mb-4 flex items-center gap-2">
                                         <MapPin size={14} /> Itinéraire & Contacts
                                     </h4>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -260,13 +255,13 @@ const QuoteManager: React.FC<QuoteManagerProps> = ({ quotes, onUpdateQuote }) =>
                                                     <MapPin size={18}/>
                                                 </div>
                                             </div>
-                                            <div className="flex-1">
-                                                <p className="text-xs text-slate-500 uppercase font-bold mb-1">Départ</p>
+                                            <div className="min-w-0 flex-1">
+                                                <p className="text-sm text-slate-500 uppercase font-bold mb-1">Départ</p>
                                                 <p className="text-lg font-bold text-slate-900 leading-tight">{selectedQuote.origin}</p>
                                                 <p className="text-sm text-slate-600 mt-1">{selectedQuote.originAddress}</p>
-                                                
+
                                                 {selectedQuote.originContact && (
-                                                    <div className="mt-3 flex flex-wrap items-center gap-2 text-xs bg-white p-2 rounded border border-slate-200 shadow-sm w-fit">
+                                                    <div className="mt-3 flex flex-wrap items-center gap-2 text-sm bg-white p-2 rounded border border-slate-200 shadow-sm w-fit">
                                                         <User size={14} className="text-slate-400"/>
                                                         <span className="font-bold text-slate-800">{selectedQuote.originContact.name}</span>
                                                         <span className="text-slate-300">|</span>
@@ -284,13 +279,13 @@ const QuoteManager: React.FC<QuoteManagerProps> = ({ quotes, onUpdateQuote }) =>
                                                     <MapPin size={18}/>
                                                 </div>
                                             </div>
-                                            <div className="flex-1">
-                                                <p className="text-xs text-blue-600 uppercase font-bold mb-1">Arrivée</p>
+                                            <div className="min-w-0 flex-1">
+                                                <p className="text-sm text-blue-600 uppercase font-bold mb-1">Arrivée</p>
                                                 <p className="text-lg font-bold text-slate-900 leading-tight">{selectedQuote.destination}</p>
                                                 <p className="text-sm text-slate-600 mt-1">{selectedQuote.destinationAddress}</p>
-                                                
+
                                                 {selectedQuote.destinationContact && (
-                                                    <div className="mt-3 flex flex-wrap items-center gap-2 text-xs bg-white p-2 rounded border border-slate-200 shadow-sm w-fit">
+                                                    <div className="mt-3 flex flex-wrap items-center gap-2 text-sm bg-white p-2 rounded border border-slate-200 shadow-sm w-fit">
                                                         <User size={14} className="text-blue-400"/>
                                                         <span className="font-bold text-slate-800">{selectedQuote.destinationContact.name}</span>
                                                         <span className="text-slate-300">|</span>
@@ -306,39 +301,18 @@ const QuoteManager: React.FC<QuoteManagerProps> = ({ quotes, onUpdateQuote }) =>
                         </div>
 
                         {/* FOOTER ACTIONS */}
-                        <div className="p-6 border-t border-slate-200 bg-white shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-10">
+                        <div className="p-4 sm:p-6 border-t border-slate-200 bg-white">
                             {selectedQuote.status === QuoteStatus.REQUESTED || selectedQuote.status === QuoteStatus.OFFER_SENT ? (
                                 <div className="space-y-4">
                                     <div className="flex flex-col md:flex-row gap-4">
-                                        <div className="flex-1">
-                                            <label className="block text-xs font-bold text-slate-700 mb-1 uppercase">Prix de l'offre (HT)</label>
-                                            <div className="relative">
-                                                <Euro className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
-                                                <input 
-                                                    type="number" 
-                                                    className="w-full pl-10 pr-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-600 outline-none font-bold text-xl text-slate-900 bg-white"
-                                                    value={offerPrice}
-                                                    onChange={(e) => setOfferPrice(e.target.value)}
-                                                    placeholder="0.00"
-                                                />
-                                            </div>
-                                        </div>
-                                        <div className="flex-[2]">
-                                            <label className="block text-xs font-bold text-slate-700 mb-1 uppercase">Message / Conditions de l'offre</label>
-                                            <input 
-                                                type="text"
-                                                className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-600 outline-none text-slate-900 font-medium bg-white"
-                                                value={offerNote}
-                                                onChange={(e) => setOfferNote(e.target.value)}
-                                                placeholder="Ex: Inclus frais de péage, validité 48h..."
-                                            />
-                                        </div>
+                                        <div className="min-w-0 flex-1"><FormInput id="quote-offer-price" label="Prix de l’offre (HT)" icon={Euro} type="number" min="0" step="0.01" value={offerPrice} onChange={event => setOfferPrice(event.target.value)} error={priceError} placeholder="0,00" /></div>
+                                        <div className="min-w-0 flex-[2]"><FormInput label="Message ou conditions de l’offre" value={offerNote} onChange={event => setOfferNote(event.target.value)} placeholder="Frais inclus, durée de validité…" /></div>
                                     </div>
-                                    
+
                                     <div className="flex justify-end">
-                                        <button 
+                                        <button
                                             onClick={handlePreSubmit}
-                                            className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-lg shadow-blue-200 flex items-center gap-2 transition-transform active:scale-95"
+                                            className="ui-button ui-button-primary flex items-center gap-2"
                                         >
                                             <Send size={18} /> {selectedQuote.status === QuoteStatus.OFFER_SENT ? 'Mettre à jour l\'offre' : 'Envoyer l\'offre au client'}
                                         </button>
@@ -353,15 +327,15 @@ const QuoteManager: React.FC<QuoteManagerProps> = ({ quotes, onUpdateQuote }) =>
                                     {selectedQuote.status === QuoteStatus.ACCEPTED && (
                                         <button
                                             onClick={() => setLabelData(quoteToLabelData(selectedQuote))}
-                                            className="mt-2 flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-xl text-sm font-bold hover:bg-green-700 transition-colors"
+                                            className="ui-button ui-button-primary mt-2 flex items-center gap-2 text-sm"
                                         >
                                             <Printer size={14} />
                                             Imprimer l'étiquette
                                         </button>
                                     )}
                                     {selectedQuote.convertedToPackageId && (
-                                        <p className="text-xs text-green-600 mt-1">
-                                            Colis #{selectedQuote.convertedToPackageId.slice(-6)} créé automatiquement
+                                        <p className="break-all text-sm text-green-800 mt-1">
+                                            Colis #{selectedQuote.convertedToPackageId} créé automatiquement
                                         </p>
                                     )}
                                 </div>
@@ -382,24 +356,38 @@ const QuoteManager: React.FC<QuoteManagerProps> = ({ quotes, onUpdateQuote }) =>
 
         {/* --- CONFIRMATION MODAL --- */}
         <Modal
+      mobileFullscreen
             isOpen={isConfirmModalOpen && !!selectedQuote}
-            onClose={() => setIsConfirmModalOpen(false)}
+            onClose={() => setIsConfirmModalOpen(false)} busy={sending} preventClose={sending}
             size="sm"
-            showCloseButton={false}
+            title="Confirmer l’envoi de l’offre"
+            footer={<div className="flex gap-3">
+                        <button
+                            disabled={sending} onClick={() => setIsConfirmModalOpen(false)}
+                            className="ui-button ui-button-secondary flex-1"
+                        >
+                            Annuler
+                        </button>
+                        <button
+                            disabled={sending} aria-busy={sending} onClick={handleConfirmSend}
+                            className="ui-button ui-button-primary flex-1"
+                        >
+                            {sending ? 'Envoi…' : 'Confirmer'}
+                        </button>
+                    </div>}
         >
             {selectedQuote && (
                 <>
+                    {sendError && <p role="alert" className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-900">{sendError}</p>}
                     <div className="flex flex-col items-center text-center mb-6">
-                        <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mb-4">
-                            <Send size={32} className="text-blue-600" />
-                        </div>
-                        <h3 className="text-xl font-bold text-slate-900">Confirmer l'envoi ?</h3>
+
+
                         <p className="text-slate-600 mt-2 text-sm">
                             Vous êtes sur le point d'envoyer une offre de <strong className="text-slate-900 text-lg">{formatEuro(Number(offerPrice))} HT</strong> à <span className="font-bold">{selectedQuote.clientName}</span>.
                         </p>
                     </div>
-                    
-                    <div className="bg-slate-50 p-3 rounded-lg mb-6 text-xs text-slate-500 border border-slate-100">
+
+                    <div className="bg-slate-50 p-3 rounded-lg mb-6 text-sm text-slate-500 border border-slate-100">
                         <p className="flex gap-2 mb-1">
                             <span className="font-bold uppercase">Départ:</span> {selectedQuote.origin}
                         </p>
@@ -408,20 +396,7 @@ const QuoteManager: React.FC<QuoteManagerProps> = ({ quotes, onUpdateQuote }) =>
                         </p>
                     </div>
 
-                    <div className="flex gap-3">
-                        <button 
-                            onClick={() => setIsConfirmModalOpen(false)} 
-                            className="flex-1 py-3 bg-slate-100 text-slate-700 rounded-xl font-bold hover:bg-slate-200 transition-colors"
-                        >
-                            Annuler
-                        </button>
-                        <button 
-                            onClick={handleConfirmSend} 
-                            className="flex-1 py-3 text-white bg-blue-600 hover:bg-blue-700 rounded-xl font-bold shadow-lg transition-colors"
-                        >
-                            Confirmer
-                        </button>
-                    </div>
+
                 </>
             )}
         </Modal>

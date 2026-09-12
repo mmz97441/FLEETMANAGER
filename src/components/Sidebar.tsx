@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
+import CountBadge from './shared/CountBadge';
 import { 
   LayoutDashboard, Truck, Users, BrainCircuit, Droplet, Wrench, 
   AlertCircle, HelpCircle, LogOut, ShieldCheck, Building2,
@@ -69,7 +70,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
   // 3 blocs clairs : sa tournée, son véhicule, ses démarches (RH/docs) + aide.
   const driverMenuStructure: (NavItem | NavGroup)[] = [
     { id: 'dashboard', label: 'Accueil', icon: LayoutDashboard },
-    { id: 'driver_tour', label: 'Ma Tournée', icon: Navigation },
+    { id: 'driver_tour', label: 'Ma tournée', icon: Navigation },
     {
       id: 'vehicule', label: 'Véhicule', icon: Truck,
       items: [
@@ -81,7 +82,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
     {
       id: 'demarches', label: 'Mes démarches', icon: FileCheck,
       items: [
-        { id: 'leaves', label: 'Congés / Absences', icon: Palmtree, badgeKey: 'leaves' },
+        { id: 'leaves', label: 'Congés et absences', icon: Palmtree, badgeKey: 'leaves' },
         { id: 'documents', label: 'Mes documents', icon: FileCheck, badgeKey: 'docs' },
       ],
     },
@@ -119,7 +120,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
         { id: 'tours_overview', label: 'Suivi des tournées', icon: ClipboardList, permission: Permission.MISSIONS_VIEW },
         { id: 'hub_operations', label: 'Réception et chargement', icon: Package, permission: Permission.MISSIONS_VIEW },
         { id: 'quotes', label: 'Demandes de devis', icon: FileCheck, permission: Permission.QUOTES_VIEW, badgeKey: 'quotes' },
-        { id: 'driver_tour', label: 'Ma Tournée', icon: Navigation, permission: Permission.MISSIONS_VIEW_OWN },
+        { id: 'driver_tour', label: 'Ma tournée', icon: Navigation, permission: Permission.MISSIONS_VIEW_OWN },
       ]
     },
 
@@ -306,7 +307,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
         {!isCollapsed && (
           <div className="overflow-hidden whitespace-nowrap animate-fade-in">
             <h1 className="text-xl font-bold tracking-tight">FleetGenius</h1>
-            <p className="text-xs text-slate-400">Pro Edition</p>
+            <p className="text-sm text-slate-400">Gestion des livraisons</p>
           </div>
         )}
       </div>
@@ -362,9 +363,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
                       {/* Badge UNIQUE à côté de la flèche (quand le groupe est fermé).
                           Auparavant un 2ᵉ badge était aussi collé sur l'icône → doublon. */}
                       {!isOpen && groupBadge > 0 && (
-                        <span className="bg-red-500 text-white text-[10px] font-bold min-w-[18px] h-[18px] flex items-center justify-center rounded-full px-1">
-                          {groupBadge}
-                        </span>
+                        <CountBadge count={groupBadge} dark />
                       )}
                       {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                     </div>
@@ -374,9 +373,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
                     <item.icon size={20} className="text-slate-500" />
                     {/* Badge en mode collapsed */}
                     {groupBadge > 0 && (
-                      <span className="absolute -top-1 right-2 bg-red-500 text-white text-[9px] font-bold min-w-[16px] h-4 flex items-center justify-center rounded-full px-1 animate-pulse">
-                        {groupBadge}
-                      </span>
+                      <span className="absolute -top-2 right-0"><CountBadge count={groupBadge} dark compact /></span>
                     )}
                   </div>
                 )}
@@ -398,7 +395,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
                         className={`w-full flex items-center justify-between gap-3 px-3 py-3 min-h-11 rounded-lg transition-all duration-200 group relative
                           ${!isCollapsed ? 'pl-10' : 'justify-center'} 
                           ${isActive 
-                            ? 'bg-brand-600 text-white shadow-lg shadow-brand-900/50' 
+                            ? 'bg-brand-600 text-white '
                             : 'text-slate-400 hover:bg-slate-800 hover:text-white'
                           }
                         `}
@@ -409,9 +406,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
                               <subItem.icon size={20} className={isActive ? 'text-white' : 'text-slate-400 group-hover:text-white'} />
                               {/* Badge en mode collapsed */}
                               {itemBadge > 0 && (
-                                <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold min-w-[14px] h-[14px] flex items-center justify-center rounded-full px-0.5 animate-pulse">
-                                  {itemBadge}
-                                </span>
+                                <span className="absolute -top-3 -right-4"><CountBadge count={itemBadge} active={isActive} dark compact /></span>
                               )}
                             </div>
                           ) : (
@@ -421,11 +416,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
                         </div>
                         {/* Badge à droite de l'item */}
                         {!isCollapsed && itemBadge > 0 && (
-                          <span className={`text-[10px] font-bold min-w-[18px] h-[18px] flex-shrink-0 flex items-center justify-center rounded-full px-1 ${
-                            isActive ? 'bg-white text-brand-600' : 'bg-red-500 text-white animate-pulse'
-                          }`}>
-                            {itemBadge}
-                          </span>
+                          <CountBadge count={itemBadge} active={isActive} dark />
                         )}
                       </button>
                     );
@@ -445,10 +436,10 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
                 aria-current={isActive ? 'page' : undefined}
                 onClick={() => onChangeView(item.id)}
                 title={isCollapsed ? item.label : ''}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group
+                className={`w-full flex items-center gap-3 px-3 py-2.5 min-h-11 rounded-xl transition-colors group
                   ${isCollapsed ? 'justify-center' : ''} 
                   ${isActive 
-                    ? 'bg-brand-600 text-white shadow-lg shadow-brand-900/50' 
+                    ? 'bg-brand-600 text-white '
                     : 'text-slate-400 hover:bg-slate-800 hover:text-white'
                   }
                 `}
@@ -478,7 +469,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
           {!isCollapsed && (
             <div className="overflow-hidden">
               <p className="font-semibold text-white text-sm truncate">{currentUser.firstName} {currentUser.lastName}</p>
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wide inline-block ${getRoleBadgeStyle()}`}>
+              <span className="text-sm font-medium text-slate-300">
                 {displayRoleLabel}
               </span>
             </div>

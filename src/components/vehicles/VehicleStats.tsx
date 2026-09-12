@@ -15,7 +15,7 @@ const VehicleStats: React.FC<VehicleStatsProps> = ({ stats, onStatClick }) => {
   const cards = [
     {
       key: 'total' as const,
-      label: 'Total Parc',
+      label: 'Total du parc',
       value: stats.total,
       icon: Truck,
       bgColor: 'bg-slate-50',
@@ -24,7 +24,7 @@ const VehicleStats: React.FC<VehicleStatsProps> = ({ stats, onStatClick }) => {
     },
     {
       key: 'active' as const,
-      label: 'En Service',
+      label: 'En service',
       value: stats.active,
       icon: CheckCircle2,
       bgColor: 'bg-emerald-50',
@@ -62,31 +62,13 @@ const VehicleStats: React.FC<VehicleStatsProps> = ({ stats, onStatClick }) => {
   ];
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-      {cards.map(card => (
-        <div 
-          key={card.key}
-          onClick={() => onStatClick?.(card.key)}
-          className={`
-            bg-white p-4 rounded-2xl shadow-sm border border-slate-100 
-            flex items-center justify-between
-            ${onStatClick ? 'cursor-pointer hover:shadow-md transition-shadow' : ''}
-            ${card.pulse ? 'animate-pulse' : ''}
-          `}
-        >
-          <div>
-            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-              {card.label}
-            </p>
-            <h3 className={`text-2xl font-extrabold ${card.valueColor}`}>
-              {card.value}
-            </h3>
-          </div>
-          <div className={`${card.bgColor} p-3 rounded-xl ${card.iconColor}`}>
-            <card.icon size={24} />
-          </div>
-        </div>
-      ))}
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      {cards.map(card => {
+        const content = <><span className="flex min-w-0 items-start gap-2"><card.icon size={18} className="mt-0.5 shrink-0 text-slate-600" aria-hidden="true" /><span className="min-w-0 break-words text-sm font-medium text-slate-700">{card.label}</span></span><span className={`mt-2 block text-2xl font-bold tabular-nums ${card.valueColor}`}>{card.value}</span></>;
+        return onStatClick
+          ? <button key={card.key} type="button" className="ui-panel min-h-11 min-w-0 p-3 text-left" onClick={() => onStatClick(card.key)} aria-label={`${card.label} : ${card.value}, afficher les véhicules`}>{content}</button>
+          : <div key={card.key} className="ui-panel min-w-0 p-3">{content}</div>;
+      })}
     </div>
   );
 };

@@ -15,10 +15,12 @@ import {
 import { Vehicle, VehicleStatus, FuelLog, MaintenanceLog, MaintenanceStatus, User, UserRole, ViewState, QuoteRequest, Issue, IssueStatus, LeaveRequest, LeaveStatus, Absence, AbsenceStatus, AbsenceType } from '../types';
 import { MissionStatus } from '../types';
 import Modal from './shared/Modal';
+import PageHeader from './shared/PageHeader';
+import Trend from './shared/Trend';
 import { usePermissions, Permission } from '../usePermissions';
 import { useMissionStats } from '../hooks/useMissionStats';
 import { normalizeRole, roleKey } from '../utils/role';
-import { formatEuro, formatDistance } from '../utils/format';
+import { formatEuro, formatDistance, formatNumberFr } from '../utils/format';
 import { useUrlParam } from '../hooks/useUrlState';
 import { todayISO } from '../utils/date';
 
@@ -124,39 +126,24 @@ interface KpiCardProps {
 const KpiCard: React.FC<KpiCardProps> = ({ title, value, subtitle, icon, trend, onClick, color = 'blue' }) => {
   const colorClasses = {
     blue: 'bg-blue-50 text-blue-600',
-    green: 'bg-emerald-50 text-emerald-600',
-    orange: 'bg-orange-50 text-orange-600',
+    green: 'bg-emerald-50 text-emerald-700',
+    orange: 'bg-orange-50 text-orange-800',
     red: 'bg-red-50 text-red-600',
-    purple: 'bg-purple-50 text-purple-600',
+    purple: 'bg-brand-50 text-brand-700',
     slate: 'bg-slate-100 text-slate-600'
   };
 
   return (
     <div 
-      onClick={onClick}
-      role={onClick ? 'button' : undefined}
-      tabIndex={onClick ? 0 : undefined}
-      onKeyDown={event => { if (onClick && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onClick(); } }}
-      className={`bg-white p-5 rounded-2xl shadow-sm border border-slate-100 relative overflow-hidden group ${onClick ? 'cursor-pointer hover:shadow-md hover:border-brand-200 transition-all' : ''}`}
+      className={`ui-panel p-4 relative overflow-hidden group ${onClick ? 'hover:border-brand-600 transition-colors' : ''}`}
     >
-      {onClick && (
-        <div className="absolute top-0 right-0 bg-brand-50 p-2 rounded-bl-xl opacity-0 group-hover:opacity-100 transition-opacity z-10">
-          <ArrowUpRight size={16} className="text-brand-600" />
-        </div>
-      )}
+      {onClick && <button type="button" aria-label={`Voir le détail : ${title}`} onClick={onClick} className="absolute inset-0 rounded-xl text-brand-700"><ArrowUpRight size={16} aria-hidden="true" className="absolute bottom-2 right-2" /></button>}
       <div className="flex items-start justify-between">
         <div className="flex-1">
-          <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">{title}</p>
+          <p className="text-sm font-medium text-slate-600 mb-1">{title}</p>
           <p className="text-2xl font-extrabold text-slate-800">{value}</p>
           {subtitle && <p className="text-sm text-slate-500 mt-1">{subtitle}</p>}
-          {trend && (
-            <div className={`mt-2 flex items-center text-xs font-medium ${
-              (trend.inverse ? trend.value < 0 : trend.value > 0) ? 'text-emerald-600' : 'text-red-500'
-            }`}>
-              {trend.value > 0 ? <TrendingUp size={14} className="mr-1"/> : <TrendingDown size={14} className="mr-1"/>}
-              <span>{Math.abs(trend.value).toFixed(1)}% vs M-1</span>
-            </div>
-          )}
+          {trend && <div className="mt-2"><Trend value={trend.value} meaning={trend.inverse ? 'lower-is-better' : 'neutral'} /></div>}
         </div>
         <div className={`p-3 rounded-xl ${colorClasses[color]}`}>
           {icon}
@@ -176,7 +163,7 @@ const AlertBanner: React.FC<AlertBannerProps> = ({ alerts }) => {
   if (criticalAlerts.length === 0) return null;
 
   return (
-    <div className="bg-gradient-to-r from-red-600 to-red-700 rounded-2xl p-4 shadow-lg mb-6">
+    <div className="bg-red-800 rounded-xl p-4 mb-6">
       <div className="flex items-center gap-2 mb-3">
         <AlertOctagon className="text-white" size={20} />
         <span className="text-white font-bold">Alertes critiques</span>
@@ -186,11 +173,7 @@ const AlertBanner: React.FC<AlertBannerProps> = ({ alerts }) => {
           <button
             key={idx}
             onClick={alert.onClick}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl font-bold text-sm transition-all hover:scale-105 ${
-              alert.type === 'danger' 
-                ? 'bg-white/20 text-white hover:bg-white/30' 
-                : 'bg-orange-500/30 text-white hover:bg-orange-500/40'
-            }`}
+            className="ui-button ui-button-secondary"
           >
             {alert.icon}
             <span>{alert.count} {alert.label}</span>
@@ -223,7 +206,7 @@ const StatListCard: React.FC<StatListCardProps> = ({ title, icon, items }) => {
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+    <div className="ui-panel overflow-hidden">
       <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center gap-2">
         {icon}
         <h3 className="font-bold text-slate-800">{title}</h3>
@@ -233,16 +216,19 @@ const StatListCard: React.FC<StatListCardProps> = ({ title, icon, items }) => {
           <div 
             key={idx} 
             onClick={item.onClick}
+            role={item.onClick ? 'button' : undefined}
+            tabIndex={item.onClick ? 0 : undefined}
+            onKeyDown={event => { if (item.onClick && event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); item.onClick(); } }}
             className={`p-3 flex items-center justify-between ${item.onClick ? 'cursor-pointer hover:bg-slate-50' : ''}`}
           >
             <span className="text-sm text-slate-700">{item.label}</span>
-            <span className={`text-xs font-bold px-2 py-1 rounded-full ${statusStyles[item.status]}`}>
+            <span className={`text-sm font-bold px-2 py-1 rounded-full ${statusStyles[item.status]}`}>
               {item.value}
             </span>
           </div>
         ))}
         {items.length === 0 && (
-          <div className="p-6 text-center text-slate-400">
+          <div className="p-6 text-center text-slate-600">
             <CheckCircle2 size={32} className="mx-auto mb-2 text-green-400" />
             <p className="text-sm">Tout est OK</p>
           </div>
@@ -310,14 +296,14 @@ const Dashboard: React.FC<DashboardProps> = ({
   const operationalQueue = showOperationalQueue && <section aria-label="À traiter maintenant" className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 space-y-3">
     <div><h3 className="text-lg font-bold text-slate-900">À traiter maintenant</h3><p className="text-sm text-slate-600">Tournées du {new Date(`${todayISO()}T12:00:00`).toLocaleDateString('fr-FR')} et incidents bloquants encore ouverts. Les statistiques mensuelles sont présentées plus bas.</p></div>
     {canViewMissions && missionStats.loading && <p role="status" className="rounded-lg bg-blue-50 p-3 text-sm text-blue-900">Chargement des tournées et des colis…</p>}
-    {canViewMissions && missionStats.error && <div role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-900"><p>{missionStats.error}</p><button type="button" onClick={missionStats.retry} className="mt-2 min-h-11 rounded-lg border border-red-300 px-3 font-bold">Réessayer</button></div>}
+    {canViewMissions && missionStats.error && <div role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-900"><p>{missionStats.error}</p><button type="button" onClick={missionStats.retry} className="ui-button ui-button-secondary mt-2">Réessayer</button></div>}
     <div className="max-h-[28rem] overflow-y-auto space-y-2">
       {blockingIssues.map(issue => <button key={issue.id} type="button" onClick={() => setUrgentIssue(issue)} className="flex min-h-14 w-full items-center gap-3 rounded-xl border border-red-200 bg-red-50 p-3 text-left"><AlertTriangle size={20} className="shrink-0 text-red-800" /><span className="min-w-0 flex-1"><span className="block font-bold text-red-900">{issue.vehicleImmobilized ? 'Véhicule immobilisé' : 'Incident de priorité haute'}</span><span className="block break-words text-sm text-red-900">{vehicles.find(vehicle => vehicle.id === issue.vehicleId)?.plate || 'Véhicule'} · {issue.description}</span></span><ChevronRight size={20} className="shrink-0" /></button>)}
       {canViewMissions && missionStats.tasks.map(task => <button key={task.id} type="button" onClick={() => onNavigate('missions', { tab: 'missions', date: task.date, mission: task.missionId })} className={`flex min-h-14 w-full items-center gap-3 rounded-xl border p-3 text-left ${task.priority === 'urgent' ? 'border-amber-300 bg-amber-50 text-amber-950' : 'border-slate-200 bg-slate-50 text-slate-900'}`}><Route size={20} className="shrink-0" /><span className="min-w-0 flex-1"><span className="block font-bold">{task.label}</span><span className="block break-words text-sm">{task.detail}</span></span><ChevronRight size={20} className="shrink-0" /></button>)}
     </div>
     {!blockingIssues.length && (!canViewMissions || (!missionStats.loading && !missionStats.error && !missionStats.tasks.length)) && <p className="text-sm text-slate-700">Aucune action prioritaire détectée dans ce périmètre.</p>}
     <Modal isOpen={!!canReadUrgentIssue} onClose={() => setUrgentIssue(null)} title="Incident à traiter" size="lg">
-      {canReadUrgentIssue && urgentIssue && <div className="space-y-3"><p className="font-bold text-slate-900">{vehicles.find(vehicle => vehicle.id === urgentIssue.vehicleId)?.plate || 'Véhicule'} · {urgentIssue.status}</p><p className="whitespace-pre-wrap text-slate-800">{urgentIssue.description}</p><p className="text-sm text-slate-700">Signalé le {urgentIssue.date}{urgentIssue.vehicleImmobilized ? ' · Véhicule immobilisé' : ''}{urgentIssue.needsTowing ? ' · Dépannage nécessaire' : ''}</p><button type="button" onClick={() => onNavigate('issues', { issue: urgentIssue.id })} className="min-h-11 rounded-xl bg-brand-700 px-4 py-3 text-white font-bold">Ouvrir le dossier incident</button></div>}
+      {canReadUrgentIssue && urgentIssue && <div className="space-y-3"><p className="font-bold text-slate-900">{vehicles.find(vehicle => vehicle.id === urgentIssue.vehicleId)?.plate || 'Véhicule'} · {urgentIssue.status}</p><p className="whitespace-pre-wrap text-slate-800">{urgentIssue.description}</p><p className="text-sm text-slate-700">Signalé le {urgentIssue.date}{urgentIssue.vehicleImmobilized ? ' · Véhicule immobilisé' : ''}{urgentIssue.needsTowing ? ' · Dépannage nécessaire' : ''}</p><button type="button" onClick={() => onNavigate('issues', { issue: urgentIssue.id })} className="ui-button ui-button-primary">Ouvrir le dossier incident</button></div>}
     </Modal>
   </section>;
 
@@ -821,19 +807,16 @@ const Dashboard: React.FC<DashboardProps> = ({
 
     return (
       <div className="space-y-6 animate-fade-in pb-10">
-        <div className="mb-4">
-          <h2 className="text-2xl font-bold text-slate-800">Mon Espace Chauffeur</h2>
-          <p className="text-slate-500">Bonne route, {currentUser.firstName}.</p>
-        </div>
+        <PageHeader title="Mon espace chauffeur" description={<>Bonne route, {currentUser.firstName}.</>} />
 
         {/* MA TOURNÉE DU JOUR — carte cliquable en premier (le cœur du métier livreur) */}
         <button
           onClick={() => onNavigate('driver_tour')}
-          className="w-full text-left bg-gradient-to-r from-brand-600 to-brand-700 rounded-2xl p-5 shadow-lg active:scale-[0.99] transition-transform"
+          className="ui-button ui-button-primary ui-button-card w-full"
         >
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-white/80 text-[11px] font-bold uppercase tracking-wider">Ma tournée du jour</p>
+              <p className="text-white text-sm font-semibold">Ma tournée du jour</p>
               {missionStats.loading ? <p role="status" className="text-white mt-2">Chargement de votre tournée…</p> : missionStats.error ? <p role="alert" className="text-white mt-2">Votre tournée ne peut pas être chargée. Ouvrez Ma tournée pour réessayer.</p> : myTour ? (
                 <>
                   <p className="text-white text-2xl font-black mt-1 tabular-nums">
@@ -863,7 +846,7 @@ const Dashboard: React.FC<DashboardProps> = ({
 
         {/* Alertes critiques chauffeur */}
         {dangerAlerts.length > 0 && (
-          <div className="bg-gradient-to-r from-red-600 to-red-700 rounded-2xl p-4 shadow-lg">
+          <div className="bg-red-800 rounded-xl p-4">
             <div className="flex items-center gap-2 mb-3">
               <AlertOctagon className="text-white" size={20} />
               <span className="text-white font-bold">Attention !</span>
@@ -874,7 +857,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                   <div className="text-white">{alert.icon}</div>
                   <div>
                     <p className="text-white font-bold text-sm">{alert.label}</p>
-                    <p className="text-white/80 text-xs">{alert.detail}</p>
+                    <p className="text-white/80 text-sm">{alert.detail}</p>
                   </div>
                 </div>
               ))}
@@ -884,7 +867,7 @@ const Dashboard: React.FC<DashboardProps> = ({
 
         {/* Alertes warning chauffeur */}
         {warningAlerts.length > 0 && (
-          <div className="bg-gradient-to-r from-amber-800 to-amber-900 rounded-2xl p-4 shadow-lg">
+          <div className="bg-amber-900 rounded-xl p-4">
             <div className="flex items-center gap-2 mb-3">
               <AlertTriangle className="text-white" size={20} />
               <span className="text-white font-bold">À prévoir</span>
@@ -895,7 +878,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                   <div className="text-white">{alert.icon}</div>
                   <div>
                     <p className="text-white font-bold text-sm">{alert.label}</p>
-                    <p className="text-white/80 text-xs">{alert.detail}</p>
+                    <p className="text-white/80 text-sm">{alert.detail}</p>
                   </div>
                 </div>
               ))}
@@ -907,8 +890,8 @@ const Dashboard: React.FC<DashboardProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <KpiCard
             title="Ma conso (mon véhicule)"
-            value={myVehicleKpis.hasData ? `${myVehicleKpis.conso.toFixed(1)} L` : '—'}
-            subtitle={myVehicleKpis.hasData ? '/ 100km' : (assignedVehicle ? 'pas encore de plein ce mois' : 'aucun véhicule assigné')}
+            value={myVehicleKpis.hasData ? `${formatNumberFr(myVehicleKpis.conso, 1)} L` : '—'}
+            subtitle={myVehicleKpis.hasData ? '/ 100 km' : (assignedVehicle ? 'pas encore de plein ce mois' : 'aucun véhicule assigné')}
             icon={<Droplet size={24} />}
             color="blue"
             onClick={() => onNavigate('fuel')}
@@ -934,7 +917,7 @@ const Dashboard: React.FC<DashboardProps> = ({
         </div>
 
         {/* Mes échéances */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+        <div className="ui-panel overflow-hidden">
           <div className="p-4 border-b border-slate-100 bg-slate-50">
             <h3 className="font-bold text-slate-800 flex items-center gap-2">
               <Calendar size={18} className="text-blue-500" /> Mes échéances
@@ -947,11 +930,11 @@ const Dashboard: React.FC<DashboardProps> = ({
                   <div className="p-2 bg-blue-100 rounded-lg"><Truck size={16} className="text-blue-600" /></div>
                   <div>
                     <p className="font-bold text-slate-800 text-sm">Contrôle Technique</p>
-                    <p className="text-xs text-slate-500">{assignedVehicle.plate}</p>
+                    <p className="text-sm text-slate-500">{assignedVehicle.plate}</p>
                   </div>
                 </div>
                 <div className="text-right">
-                  <span className={`text-xs font-bold px-2 py-1 rounded-full ${
+                  <span className={`text-sm font-bold px-2 py-1 rounded-full ${
                     isExpired(assignedVehicle.technicalControlDate) ? 'bg-red-100 text-red-700' :
                     isExpiringSoon(assignedVehicle.technicalControlDate, 30) ? 'bg-orange-100 text-orange-700' :
                     'bg-green-100 text-green-700'
@@ -959,7 +942,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                     {isExpired(assignedVehicle.technicalControlDate) ? 'Expiré' : 
                      `J-${daysUntil(assignedVehicle.technicalControlDate)}`}
                   </span>
-                  <p className="text-[10px] text-slate-400 mt-1">
+                  <p className="text-sm text-slate-600 mt-1">
                     {new Date(assignedVehicle.technicalControlDate).toLocaleDateString()}
                   </p>
                 </div>
@@ -969,14 +952,14 @@ const Dashboard: React.FC<DashboardProps> = ({
             {currentUser.driverLicenseScanDate && (
               <div className="p-3 flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="p-2 bg-purple-100 rounded-lg"><BadgeCheck size={16} className="text-purple-600" /></div>
+                  <div className="p-2 bg-brand-50 rounded-lg"><BadgeCheck size={16} className="text-brand-700" /></div>
                   <div>
                     <p className="font-bold text-slate-800 text-sm">Permis de Conduire</p>
-                    <p className="text-xs text-slate-500">Validité</p>
+                    <p className="text-sm text-slate-500">Validité</p>
                   </div>
                 </div>
                 <div className="text-right">
-                  <span className={`text-xs font-bold px-2 py-1 rounded-full ${
+                  <span className={`text-sm font-bold px-2 py-1 rounded-full ${
                     isExpired(currentUser.driverLicenseScanDate) ? 'bg-red-100 text-red-700' :
                     isExpiringSoon(currentUser.driverLicenseScanDate, 30) ? 'bg-orange-100 text-orange-700' :
                     'bg-green-100 text-green-700'
@@ -984,7 +967,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                     {isExpired(currentUser.driverLicenseScanDate) ? 'Expiré' : 
                      `J-${daysUntil(currentUser.driverLicenseScanDate)}`}
                   </span>
-                  <p className="text-[10px] text-slate-400 mt-1">
+                  <p className="text-sm text-slate-600 mt-1">
                     {new Date(currentUser.driverLicenseScanDate).toLocaleDateString()}
                   </p>
                 </div>
@@ -997,11 +980,11 @@ const Dashboard: React.FC<DashboardProps> = ({
                   <div className="p-2 bg-amber-100 rounded-lg"><FileSignature size={16} className="text-amber-600" /></div>
                   <div>
                     <p className="font-bold text-slate-800 text-sm">FCO / FIMO</p>
-                    <p className="text-xs text-slate-500">Formation continue</p>
+                    <p className="text-sm text-slate-500">Formation continue</p>
                   </div>
                 </div>
                 <div className="text-right">
-                  <span className={`text-xs font-bold px-2 py-1 rounded-full ${
+                  <span className={`text-sm font-bold px-2 py-1 rounded-full ${
                     isExpired(currentUser.fcoDate) ? 'bg-red-100 text-red-700' :
                     isExpiringSoon(currentUser.fcoDate, 60) ? 'bg-orange-100 text-orange-700' :
                     'bg-green-100 text-green-700'
@@ -1009,7 +992,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                     {isExpired(currentUser.fcoDate) ? 'Expiré' : 
                      `J-${daysUntil(currentUser.fcoDate)}`}
                   </span>
-                  <p className="text-[10px] text-slate-400 mt-1">
+                  <p className="text-sm text-slate-600 mt-1">
                     {new Date(currentUser.fcoDate).toLocaleDateString()}
                   </p>
                 </div>
@@ -1022,11 +1005,11 @@ const Dashboard: React.FC<DashboardProps> = ({
                   <div className="p-2 bg-rose-100 rounded-lg"><Heart size={16} className="text-rose-600" /></div>
                   <div>
                     <p className="font-bold text-slate-800 text-sm">Visite Médicale</p>
-                    <p className="text-xs text-slate-500">Aptitude</p>
+                    <p className="text-sm text-slate-500">Aptitude</p>
                   </div>
                 </div>
                 <div className="text-right">
-                  <span className={`text-xs font-bold px-2 py-1 rounded-full ${
+                  <span className={`text-sm font-bold px-2 py-1 rounded-full ${
                     isExpired(currentUser.medicalVisitDate) ? 'bg-red-100 text-red-700' :
                     isExpiringSoon(currentUser.medicalVisitDate, 30) ? 'bg-orange-100 text-orange-700' :
                     'bg-green-100 text-green-700'
@@ -1034,7 +1017,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                     {isExpired(currentUser.medicalVisitDate) ? 'Expiré' : 
                      `J-${daysUntil(currentUser.medicalVisitDate)}`}
                   </span>
-                  <p className="text-[10px] text-slate-400 mt-1">
+                  <p className="text-sm text-slate-600 mt-1">
                     {new Date(currentUser.medicalVisitDate).toLocaleDateString()}
                   </p>
                 </div>
@@ -1044,7 +1027,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             {!assignedVehicle?.technicalControlDate && !currentUser.driverLicenseScanDate && 
              !(currentUser.isHeavyGoodsDriver && currentUser.fcoDate) && 
              !(currentUser.isHeavyGoodsDriver && currentUser.medicalVisitDate) && (
-              <div className="p-6 text-center text-slate-400">
+              <div className="p-6 text-center text-slate-600">
                 <CheckCircle2 size={32} className="mx-auto mb-2 text-green-400" />
                 <p className="text-sm">Aucune échéance enregistrée</p>
               </div>
@@ -1053,20 +1036,20 @@ const Dashboard: React.FC<DashboardProps> = ({
         </div>
 
         {/* Solde congés */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+        <div className="ui-panel p-5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="p-3 bg-green-100 rounded-xl">
-                <Calendar size={24} className="text-green-600" />
+                <Calendar size={24} className="text-green-700" />
               </div>
               <div>
-                <p className="text-xs font-bold text-slate-500 uppercase">Solde Congés</p>
-                <p className="text-2xl font-extrabold text-slate-800">{currentUser.leaveBalance || 0} <span className="text-sm font-medium text-slate-400">jours</span></p>
+                <p className="text-sm font-bold text-slate-500">Solde de congés</p>
+                <p className="text-2xl font-extrabold text-slate-800">{currentUser.leaveBalance || 0} <span className="text-sm font-medium text-slate-600">jours</span></p>
               </div>
             </div>
             <button 
               onClick={() => onNavigate('leaves')}
-              className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold text-sm transition-colors"
+              className="ui-button ui-button-secondary"
             >
               Poser des congés
             </button>
@@ -1083,26 +1066,13 @@ const Dashboard: React.FC<DashboardProps> = ({
   if (isMechanic) {
     return (
       <div className="space-y-6 animate-fade-in pb-10">
-        <div className="flex justify-between items-end mb-4">
-          <div>
-            <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-              <Wrench className="text-orange-500" /> Atelier & Maintenance
-            </h2>
-            <p className="text-slate-500">Bonjour {currentUser.firstName}, voici l'état de l'atelier.</p>
-          </div>
-          <button 
-            onClick={() => onNavigate('maintenance')}
-            className="px-4 py-2 bg-slate-900 text-white rounded-xl font-bold text-sm hover:bg-black transition-colors"
-          >
-            Voir tout l'atelier
-          </button>
-        </div>
+        <PageHeader title="Atelier et maintenance" description={<>Bonjour {currentUser.firstName}, voici l’état de l’atelier.</>} actions={<button type="button" onClick={() => onNavigate('maintenance')} className="ui-button ui-button-primary">Voir tout l’atelier</button>} />
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <KpiCard
             title="Incidents ouverts"
             value={commonKpis.openIssues.length}
-            subtitle={`${commonKpis.criticalIssues.length} critique(s)`}
+            subtitle={`${commonKpis.criticalIssues.length} critique${commonKpis.criticalIssues.length > 1 ? 's' : ''}`}
             icon={<AlertTriangle size={24} />}
             color="red"
             onClick={() => onNavigate('issues')}
@@ -1134,12 +1104,12 @@ const Dashboard: React.FC<DashboardProps> = ({
         </div>
 
         {/* Liste des incidents ouverts */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+        <div className="ui-panel overflow-hidden">
           <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
             <h3 className="font-bold text-slate-800 flex items-center gap-2">
-              <AlertTriangle size={18} className="text-red-500" /> Incidents à traiter
+              <AlertTriangle size={18} className="text-red-700" /> Incidents à traiter
             </h3>
-            <span className="text-xs font-bold bg-red-100 text-red-700 px-2 py-1 rounded-full">
+            <span className="text-sm font-bold bg-red-100 text-red-700 px-2 py-1 rounded-full">
               {commonKpis.openIssues.length}
             </span>
           </div>
@@ -1150,9 +1120,9 @@ const Dashboard: React.FC<DashboardProps> = ({
                 <div key={issue.id} className="p-3 hover:bg-slate-50 flex items-center justify-between">
                   <div>
                     <p className="font-bold text-slate-800 text-sm">{vehicle?.plate || 'Véhicule inconnu'}</p>
-                    <p className="text-xs text-slate-500 truncate max-w-[200px]">{issue.description}</p>
+                    <p className="text-sm text-slate-500 break-words">{issue.description}</p>
                   </div>
-                  <span className={`text-xs font-bold px-2 py-1 rounded-full ${
+                  <span className={`text-sm font-bold px-2 py-1 rounded-full ${
                     issue.priority === 'High' ? 'bg-red-100 text-red-700' :
                     issue.priority === 'Medium' ? 'bg-orange-100 text-orange-700' :
                     'bg-slate-100 text-slate-600'
@@ -1163,7 +1133,7 @@ const Dashboard: React.FC<DashboardProps> = ({
               );
             })}
             {commonKpis.openIssues.length === 0 && (
-              <div className="p-6 text-center text-slate-400">
+              <div className="p-6 text-center text-slate-600">
                 <CheckCircle2 size={32} className="mx-auto mb-2 text-green-400" />
                 <p className="text-sm">Aucun incident en attente</p>
               </div>
@@ -1182,19 +1152,13 @@ const Dashboard: React.FC<DashboardProps> = ({
     return (
       <div className="space-y-6 animate-fade-in pb-10">
         {/* Header */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 mb-2">
-          <div>
-            <h2 className="text-2xl font-bold text-slate-800">Tableau de Bord Stratégique</h2>
-            <p className="text-slate-500">Bonjour {currentUser.firstName}, voici la situation de votre flotte.</p>
-          </div>
-          <div className="flex items-center bg-white rounded-xl border border-slate-200 shadow-sm p-1">
-            <button aria-label="Mois précédent" onClick={() => handleNavigateDate(-1)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500"><ChevronLeft size={18} /></button>
+        <PageHeader title="Tableau de bord stratégique" description={<> Bonjour {currentUser.firstName}, voici la situation de votre flotte. </>} actions={<div className="flex items-center ui-panel p-1">
+            <button aria-label="Mois précédent" onClick={() => handleNavigateDate(-1)} className="ui-button ui-button-ghost ui-button-icon"><ChevronLeft size={18} /></button>
             <div className="px-3 min-w-[140px] text-center">
               <span className="block text-sm font-bold text-slate-800 capitalize">Période : {getPeriodLabel()}</span>
             </div>
-            <button aria-label="Mois suivant" onClick={() => handleNavigateDate(1)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500"><ChevronRight size={18} /></button>
-          </div>
-        </div>
+            <button aria-label="Mois suivant" onClick={() => handleNavigateDate(1)} className="ui-button ui-button-ghost ui-button-icon"><ChevronRight size={18} /></button>
+          </div>} />
 
         {operationalQueue}
         {periodNotice}
@@ -1205,7 +1169,7 @@ const Dashboard: React.FC<DashboardProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <KpiCard
             title="Disponibilité Flotte"
-            value={commonKpis.totalVehicles > 0 ? `${commonKpis.availabilityRate.toFixed(0)}%` : '—'}
+            value={commonKpis.totalVehicles > 0 ? `${formatNumberFr(commonKpis.availabilityRate, 0)}%` : '—'}
             subtitle={commonKpis.totalVehicles > 0 ? `${commonKpis.activeVehicles}/${commonKpis.totalVehicles} véhicules` : 'aucun véhicule'}
             icon={<Truck size={24} />}
             color={commonKpis.availabilityRate >= 85 ? 'green' : 'orange'}
@@ -1242,84 +1206,72 @@ const Dashboard: React.FC<DashboardProps> = ({
         {/* ============================================================================ */}
         {/* SECTION KPIs FINANCIERS & PERFORMANCE */}
         {/* ============================================================================ */}
-        <div className="bg-gradient-to-br from-slate-50 to-blue-50 p-6 rounded-2xl border border-slate-200">
+        <div className="ui-panel p-4 sm:p-6">
           <div className="flex items-center gap-3 mb-5">
             <div className="p-2 bg-blue-100 rounded-xl">
               <Wallet size={20} className="text-blue-600" />
             </div>
             <div>
               <h3 className="text-lg font-bold text-slate-800">Performance Financière</h3>
-              <p className="text-xs text-slate-500">Analyse détaillée de la période</p>
+              <p className="text-sm text-slate-500">Analyse détaillée de la période</p>
             </div>
           </div>
 
           {/* Première ligne : 4 KPIs */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
             {/* Km parcourus */}
-            <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
+            <div className="ui-panel p-4">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium text-slate-500 uppercase">Km parcourus</span>
-                <Route size={16} className="text-slate-400" />
+                <span className="text-sm font-medium text-slate-500">Km parcourus</span>
+                <Route size={16} className="text-slate-600" />
               </div>
               <div className="text-2xl font-bold text-slate-800">
                 {commonKpis.totalDistance.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} <span className="text-sm font-normal text-slate-500">km</span>
               </div>
               {commonKpis.distanceTrend !== 0 && (
-                <div className={`flex items-center gap-1 mt-1 text-xs ${commonKpis.distanceTrend > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {commonKpis.distanceTrend > 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-                  {commonKpis.distanceTrend > 0 ? '+' : ''}{commonKpis.distanceTrend.toFixed(1)}% vs M-1
-                </div>
+                <div className="mt-1"><Trend value={commonKpis.distanceTrend} meaning="neutral" /></div>
               )}
             </div>
 
             {/* Consommation moyenne */}
-            <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
+            <div className="ui-panel p-4">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium text-slate-500 uppercase">Consommation</span>
-                <Gauge size={16} className="text-slate-400" />
+                <span className="text-sm font-medium text-slate-500">Consommation</span>
+                <Gauge size={16} className="text-slate-600" />
               </div>
               <div className="text-2xl font-bold text-slate-800">
-                {commonKpis.avgConsumption.toFixed(1)} <span className="text-sm font-normal text-slate-500">L/100km</span>
+                {formatNumberFr(commonKpis.avgConsumption, 1)} <span className="text-sm font-normal text-slate-500">L / 100 km</span>
               </div>
               {commonKpis.consumptionTrend !== 0 && (
-                <div className={`flex items-center gap-1 mt-1 text-xs ${commonKpis.consumptionTrend < 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {commonKpis.consumptionTrend < 0 ? <TrendingDown size={12} /> : <TrendingUp size={12} />}
-                  {commonKpis.consumptionTrend > 0 ? '+' : ''}{commonKpis.consumptionTrend.toFixed(1)}% vs M-1
-                </div>
+                <div className="mt-1"><Trend value={commonKpis.consumptionTrend} meaning="lower-is-better" /></div>
               )}
             </div>
 
             {/* Coût/km carburant */}
-            <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
+            <div className="ui-panel p-4">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium text-slate-500 uppercase">Coût/km Carb.</span>
+                <span className="text-sm font-medium text-slate-500">Carburant par km</span>
                 <Droplet size={16} className="text-blue-400" />
               </div>
               <div className="text-2xl font-bold text-blue-600">
-                {commonKpis.fuelCostPerKm.toFixed(2)} <span className="text-sm font-normal text-slate-500">€/km</span>
+                {formatNumberFr(commonKpis.fuelCostPerKm, 2)} <span className="text-sm font-normal text-slate-500">€/km</span>
               </div>
               {commonKpis.fuelCostPerKmTrend !== 0 && (
-                <div className={`flex items-center gap-1 mt-1 text-xs ${commonKpis.fuelCostPerKmTrend < 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {commonKpis.fuelCostPerKmTrend < 0 ? <TrendingDown size={12} /> : <TrendingUp size={12} />}
-                  {commonKpis.fuelCostPerKmTrend > 0 ? '+' : ''}{commonKpis.fuelCostPerKmTrend.toFixed(1)}% vs M-1
-                </div>
+                <div className="mt-1"><Trend value={commonKpis.fuelCostPerKmTrend} meaning="lower-is-better" /></div>
               )}
             </div>
 
             {/* Coût/km maintenance */}
-            <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
+            <div className="ui-panel p-4">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium text-slate-500 uppercase">Coût/km Maint.</span>
+                <span className="text-sm font-medium text-slate-500">Maintenance par km</span>
                 <Wrench size={16} className="text-orange-400" />
               </div>
-              <div className="text-2xl font-bold text-orange-600">
-                {commonKpis.maintCostPerKm.toFixed(2)} <span className="text-sm font-normal text-slate-500">€/km</span>
+              <div className="text-2xl font-bold text-orange-800">
+                {formatNumberFr(commonKpis.maintCostPerKm, 2)} <span className="text-sm font-normal text-slate-500">€/km</span>
               </div>
               {commonKpis.maintCostPerKmTrend !== 0 && (
-                <div className={`flex items-center gap-1 mt-1 text-xs ${commonKpis.maintCostPerKmTrend < 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {commonKpis.maintCostPerKmTrend < 0 ? <TrendingDown size={12} /> : <TrendingUp size={12} />}
-                  {commonKpis.maintCostPerKmTrend > 0 ? '+' : ''}{commonKpis.maintCostPerKmTrend.toFixed(1)}% vs M-1
-                </div>
+                <div className="mt-1"><Trend value={commonKpis.maintCostPerKmTrend} meaning="lower-is-better" /></div>
               )}
             </div>
           </div>
@@ -1329,68 +1281,56 @@ const Dashboard: React.FC<DashboardProps> = ({
             {/* Coût total/km */}
             <div className="bg-white p-4 rounded-xl border border-blue-200 shadow-sm">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium text-blue-600 uppercase">Coût Total/km</span>
+                <span className="text-sm font-medium text-blue-600">Coût total par km</span>
                 <Calculator size={16} className="text-blue-500" />
               </div>
               <div className="text-2xl font-bold text-blue-700">
-                {commonKpis.totalCostPerKm.toFixed(2)} <span className="text-sm font-normal text-slate-500">€/km</span>
+                {formatNumberFr(commonKpis.totalCostPerKm, 2)} <span className="text-sm font-normal text-slate-500">€/km</span>
               </div>
               {commonKpis.totalCostPerKmTrend !== 0 && (
-                <div className={`flex items-center gap-1 mt-1 text-xs ${commonKpis.totalCostPerKmTrend < 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {commonKpis.totalCostPerKmTrend < 0 ? <TrendingDown size={12} /> : <TrendingUp size={12} />}
-                  {commonKpis.totalCostPerKmTrend > 0 ? '+' : ''}{commonKpis.totalCostPerKmTrend.toFixed(1)}% vs M-1
-                </div>
+                <div className="mt-1"><Trend value={commonKpis.totalCostPerKmTrend} meaning="lower-is-better" /></div>
               )}
             </div>
 
             {/* Litres consommés */}
-            <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
+            <div className="ui-panel p-4">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium text-slate-500 uppercase">Litres totaux</span>
-                <Droplet size={16} className="text-slate-400" />
+                <span className="text-sm font-medium text-slate-500">Litres totaux</span>
+                <Droplet size={16} className="text-slate-600" />
               </div>
               <div className="text-2xl font-bold text-slate-800">
                 {commonKpis.totalVolume.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} <span className="text-sm font-normal text-slate-500">L</span>
               </div>
               {commonKpis.volumeTrend !== 0 && (
-                <div className={`flex items-center gap-1 mt-1 text-xs ${commonKpis.volumeTrend < 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {commonKpis.volumeTrend < 0 ? <TrendingDown size={12} /> : <TrendingUp size={12} />}
-                  {commonKpis.volumeTrend > 0 ? '+' : ''}{commonKpis.volumeTrend.toFixed(1)}% vs M-1
-                </div>
+                <div className="mt-1"><Trend value={commonKpis.volumeTrend} meaning="neutral" /></div>
               )}
             </div>
 
             {/* Coût moyen/véhicule */}
-            <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
+            <div className="ui-panel p-4">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium text-slate-500 uppercase">Coût/véhicule</span>
-                <Truck size={16} className="text-slate-400" />
+                <span className="text-sm font-medium text-slate-500">Coût/véhicule</span>
+                <Truck size={16} className="text-slate-600" />
               </div>
               <div className="text-2xl font-bold text-slate-800">
                 {commonKpis.costPerVehicle.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} <span className="text-sm font-normal text-slate-500">€</span>
               </div>
               {commonKpis.costPerVehicleTrend !== 0 && (
-                <div className={`flex items-center gap-1 mt-1 text-xs ${commonKpis.costPerVehicleTrend < 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {commonKpis.costPerVehicleTrend < 0 ? <TrendingDown size={12} /> : <TrendingUp size={12} />}
-                  {commonKpis.costPerVehicleTrend > 0 ? '+' : ''}{commonKpis.costPerVehicleTrend.toFixed(1)}% vs M-1
-                </div>
+                <div className="mt-1"><Trend value={commonKpis.costPerVehicleTrend} meaning="lower-is-better" /></div>
               )}
             </div>
 
             {/* Coût moyen/chauffeur */}
-            <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
+            <div className="ui-panel p-4">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium text-slate-500 uppercase">Coût/chauffeur</span>
-                <UserIcon size={16} className="text-slate-400" />
+                <span className="text-sm font-medium text-slate-500">Coût/chauffeur</span>
+                <UserIcon size={16} className="text-slate-600" />
               </div>
               <div className="text-2xl font-bold text-slate-800">
                 {commonKpis.costPerDriver.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} <span className="text-sm font-normal text-slate-500">€</span>
               </div>
               {commonKpis.costPerDriverTrend !== 0 && (
-                <div className={`flex items-center gap-1 mt-1 text-xs ${commonKpis.costPerDriverTrend < 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {commonKpis.costPerDriverTrend < 0 ? <TrendingDown size={12} /> : <TrendingUp size={12} />}
-                  {commonKpis.costPerDriverTrend > 0 ? '+' : ''}{commonKpis.costPerDriverTrend.toFixed(1)}% vs M-1
-                </div>
+                <div className="mt-1"><Trend value={commonKpis.costPerDriverTrend} meaning="lower-is-better" /></div>
               )}
             </div>
           </div>
@@ -1409,7 +1349,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                     style={{ width: `${commonKpis.fleetUtilizationRate}%` }}
                   />
                 </div>
-                <span className="text-sm font-bold text-slate-700">{commonKpis.fleetUtilizationRate.toFixed(0)}%</span>
+                <span className="text-sm font-bold text-slate-700">{formatNumberFr(commonKpis.fleetUtilizationRate, 0)}%</span>
               </div>
             </div>
           </div>
@@ -1420,23 +1360,23 @@ const Dashboard: React.FC<DashboardProps> = ({
         {/* ============================================================================ */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Top 5 Véhicules les plus coûteux */}
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-            <div className="p-4 border-b border-slate-100 bg-gradient-to-r from-red-50 to-orange-50 flex items-center justify-between">
+          <div className="ui-panel overflow-hidden">
+            <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
               <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                <AlertTriangle size={18} className="text-red-500" /> Top 5 véhicules les plus coûteux
+                <AlertTriangle size={18} className="text-red-700" /> Top 5 véhicules les plus coûteux
               </h3>
-              <span className="text-xs font-medium text-slate-500">Ce mois</span>
+              <span className="text-sm font-medium text-slate-500">Ce mois</span>
             </div>
             <div className="divide-y divide-slate-100">
               {commonKpis.top5CostlyVehicles.length > 0 ? (
                 commonKpis.top5CostlyVehicles.map((v, idx) => (
-                  <div 
+                  <button type="button"
                     key={v.id} 
-                    className="p-3 hover:bg-slate-50 cursor-pointer transition-colors flex items-center justify-between"
+                    className="w-full min-h-11 p-3 text-left hover:bg-slate-50 transition-colors flex items-center justify-between gap-3"
                     onClick={() => onNavigate('vehicles')}
                   >
                     <div className="flex items-center gap-3 min-w-0">
-                      <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                      <span className={`w-6 h-6 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 ${
                         idx === 0 ? 'bg-red-100 text-red-700' :
                         idx === 1 ? 'bg-orange-100 text-orange-700' :
                         'bg-slate-100 text-slate-600'
@@ -1444,20 +1384,20 @@ const Dashboard: React.FC<DashboardProps> = ({
                         {idx + 1}
                       </span>
                       <div className="min-w-0">
-                        <div className="font-semibold text-slate-800 truncate">{v.plate}</div>
-                        <div className="text-xs text-slate-500 truncate">{v.model}</div>
+                        <div className="font-semibold text-slate-800 break-words">{v.plate}</div>
+                        <div className="text-sm text-slate-500 break-words">{v.model}</div>
                       </div>
                     </div>
                     <div className="text-right flex-shrink-0">
                       <div className="font-bold text-red-600">{formatEuro(v.totalCost)}</div>
-                      <div className="text-xs text-slate-500">
-                        {v.costPerKm > 0 ? `${v.costPerKm.toFixed(2)} €/km` : '—'}
+                      <div className="text-sm text-slate-500">
+                        {v.costPerKm > 0 ? `${formatNumberFr(v.costPerKm, 2)} €/km` : '—'}
                       </div>
                     </div>
-                  </div>
+                  </button>
                 ))
               ) : (
-                <div className="p-6 text-center text-slate-400">
+                <div className="p-6 text-center text-slate-600">
                   <CheckCircle2 size={32} className="mx-auto mb-2 text-green-400" />
                   <p className="text-sm">Aucune donnée ce mois</p>
                 </div>
@@ -1466,46 +1406,46 @@ const Dashboard: React.FC<DashboardProps> = ({
           </div>
 
           {/* Top 5 Chauffeurs les plus économes */}
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-            <div className="p-4 border-b border-slate-100 bg-gradient-to-r from-green-50 to-emerald-50 flex items-center justify-between">
+          <div className="ui-panel overflow-hidden">
+            <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
               <h3 className="font-bold text-slate-800 flex items-center gap-2">
                 <Trophy size={18} className="text-green-500" /> Top 5 chauffeurs les plus économes
               </h3>
-              <span className="text-xs font-medium text-slate-500">Ce mois</span>
+              <span className="text-sm font-medium text-slate-500">Ce mois</span>
             </div>
             <div className="divide-y divide-slate-100">
               {commonKpis.top5EconomicDrivers.length > 0 ? (
                 commonKpis.top5EconomicDrivers.map((d, idx) => (
-                  <div 
+                  <button type="button"
                     key={d.driver.id} 
-                    className="p-3 hover:bg-slate-50 cursor-pointer transition-colors flex items-center justify-between"
+                    className="w-full min-h-11 p-3 text-left hover:bg-slate-50 transition-colors flex items-center justify-between gap-3"
                     onClick={() => onNavigate('drivers')}
                   >
                     <div className="flex items-center gap-3 min-w-0">
-                      <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                      <span className={`w-6 h-6 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 ${
                         idx === 0 ? 'bg-yellow-100 text-yellow-700' :
                         idx === 1 ? 'bg-slate-200 text-slate-700' :
                         idx === 2 ? 'bg-orange-100 text-orange-700' :
                         'bg-slate-100 text-slate-600'
                       }`}>
-                        {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : idx + 1}
+                        {idx + 1}
                       </span>
                       <div className="min-w-0">
-                        <div className="font-semibold text-slate-800 truncate">{d.driver.firstName} {d.driver.lastName}</div>
-                        <div className="text-xs text-slate-500 truncate">{d.vehicle?.plate || '—'}</div>
+                        <div className="font-semibold text-slate-800 break-words">{d.driver.firstName} {d.driver.lastName}</div>
+                        <div className="text-sm text-slate-500 break-words">{d.vehicle?.plate || '—'}</div>
                       </div>
                     </div>
                     <div className="text-right flex-shrink-0">
-                      <div className="font-bold text-green-600">{d.consumption?.toFixed(1)} L/100km</div>
-                      <div className="text-xs text-slate-500">{formatDistance(d.distance)}</div>
+                      <div className="font-bold text-green-700">{d.consumption != null ? formatNumberFr(d.consumption, 1) : '—'} L / 100 km</div>
+                      <div className="text-sm text-slate-500">{formatDistance(d.distance)}</div>
                     </div>
-                  </div>
+                  </button>
                 ))
               ) : (
-                <div className="p-6 text-center text-slate-400">
+                <div className="p-6 text-center text-slate-600">
                   <UserIcon size={32} className="mx-auto mb-2 text-slate-300" />
                   <p className="text-sm">Données insuffisantes</p>
-                  <p className="text-xs mt-1">Min. 100 km requis</p>
+                  <p className="text-sm mt-1">Min. 100 km requis</p>
                 </div>
               )}
             </div>
@@ -1546,7 +1486,7 @@ const Dashboard: React.FC<DashboardProps> = ({
           />
           <StatListCard
             title="Suivi RH"
-            icon={<Users size={18} className="text-purple-500" />}
+            icon={<Users size={18} className="text-brand-700" />}
             items={[
               { 
                 label: 'Congés à valider', 
@@ -1605,12 +1545,12 @@ const Dashboard: React.FC<DashboardProps> = ({
         {/* Véhicules en surconsommation + État du parc */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Surconsommation */}
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+          <div className="ui-panel overflow-hidden">
             <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
               <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                <AlertTriangle size={18} className="text-orange-500" /> Véhicules en surconsommation
+                <AlertTriangle size={18} className="text-orange-800" /> Véhicules en surconsommation
               </h3>
-              <span className="text-xs font-bold bg-orange-100 text-orange-700 px-2 py-1 rounded-full">
+              <span className="text-sm font-bold bg-orange-100 text-orange-700 px-2 py-1 rounded-full">
                 +15% vs moyenne
               </span>
             </div>
@@ -1619,16 +1559,16 @@ const Dashboard: React.FC<DashboardProps> = ({
                 <div key={v.id} className="p-3 flex items-center justify-between hover:bg-slate-50">
                   <div>
                     <p className="font-bold text-slate-800 text-sm">{v.plate}</p>
-                    <p className="text-xs text-slate-500">{v.model}</p>
+                    <p className="text-sm text-slate-500">{v.model}</p>
                   </div>
                   <div className="text-right">
-                    <p className="font-bold text-orange-600">{v.consumption.toFixed(1)} L/100km</p>
-                    <p className="text-xs text-slate-400">+{((v.consumption / commonKpis.avgConsumption - 1) * 100).toFixed(0)}%</p>
+                    <p className="font-bold text-orange-800">{formatNumberFr(v.consumption, 1)} L / 100 km</p>
+                    <p className="text-sm text-slate-600">+{formatNumberFr((v.consumption / commonKpis.avgConsumption - 1) * 100)}%</p>
                   </div>
                 </div>
               ))}
               {commonKpis.overConsumingVehicles.length === 0 && (
-                <div className="p-6 text-center text-slate-400">
+                <div className="p-6 text-center text-slate-600">
                   <CheckCircle2 size={32} className="mx-auto mb-2 text-green-400" />
                   <p className="text-sm">Aucune anomalie détectée</p>
                 </div>
@@ -1651,7 +1591,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                 </ResponsiveContainer>
                 <div className="absolute inset-0 flex flex-col items-center justify-center">
                   <span className="text-3xl font-extrabold text-slate-800">{vehicles.length}</span>
-                  <span className="text-xs font-bold text-slate-400 uppercase">Total</span>
+                  <span className="text-sm font-bold text-slate-600">Total</span>
                 </div>
               </div>
             </div>
@@ -1660,9 +1600,9 @@ const Dashboard: React.FC<DashboardProps> = ({
                 <div key={index} className="flex items-center justify-between text-sm bg-slate-50 p-2 rounded-lg">
                   <div className="flex items-center gap-2">
                     <div className="w-2 h-2 rounded-full" style={{ backgroundColor: STATUS_COLORS[item.name] }}></div>
-                    <span className="text-slate-600 text-xs">{item.name}</span>
+                    <span className="text-slate-600 text-sm">{item.name}</span>
                   </div>
-                  <span className="font-bold text-slate-800 text-xs">{item.value}</span>
+                  <span className="font-bold text-slate-800 text-sm">{item.value}</span>
                 </div>
               ))}
             </div>
@@ -1679,19 +1619,13 @@ const Dashboard: React.FC<DashboardProps> = ({
   return (
     <div className="space-y-6 animate-fade-in pb-10">
       {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 mb-2">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">Tableau de Bord Opérationnel</h2>
-          <p className="text-slate-500">Bonjour {currentUser.firstName}, voici les actions du jour.</p>
-        </div>
-        <div className="flex items-center bg-white rounded-xl border border-slate-200 shadow-sm p-1">
-          <button aria-label="Mois précédent" onClick={() => handleNavigateDate(-1)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500"><ChevronLeft size={18} /></button>
+      <PageHeader title="Tableau de bord opérationnel" description={<> Bonjour {currentUser.firstName}, voici les actions du jour. </>} actions={<div className="flex items-center ui-panel p-1">
+          <button aria-label="Mois précédent" onClick={() => handleNavigateDate(-1)} className="ui-button ui-button-ghost ui-button-icon"><ChevronLeft size={18} /></button>
           <div className="px-3 min-w-[140px] text-center">
             <span className="block text-sm font-bold text-slate-800 capitalize">Période : {getPeriodLabel()}</span>
           </div>
-          <button aria-label="Mois suivant" onClick={() => handleNavigateDate(1)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500"><ChevronRight size={18} /></button>
-        </div>
-      </div>
+          <button aria-label="Mois suivant" onClick={() => handleNavigateDate(1)} className="ui-button ui-button-ghost ui-button-icon"><ChevronRight size={18} /></button>
+        </div>} />
       {operationalQueue}
         {periodNotice}
 
@@ -1700,7 +1634,7 @@ const Dashboard: React.FC<DashboardProps> = ({
         <KpiCard
           title="Véhicules disponibles"
           value={commonKpis.totalVehicles > 0 ? `${commonKpis.activeVehicles}/${commonKpis.totalVehicles}` : '—'}
-          subtitle={commonKpis.totalVehicles > 0 ? `${commonKpis.availabilityRate.toFixed(0)}% disponibilité` : 'aucun véhicule'}
+          subtitle={commonKpis.totalVehicles > 0 ? `${formatNumberFr(commonKpis.availabilityRate, 0)}% disponibilité` : 'aucun véhicule'}
           icon={<Truck size={24} />}
           color={commonKpis.availabilityRate >= 85 ? 'green' : 'orange'}
           onClick={() => onNavigate('vehicles')}
@@ -1708,7 +1642,7 @@ const Dashboard: React.FC<DashboardProps> = ({
         <KpiCard
           title="Incidents ouverts"
           value={commonKpis.openIssues.length}
-          subtitle={commonKpis.criticalIssues.length > 0 ? `${commonKpis.criticalIssues.length} critique(s)` : 'Aucun critique'}
+          subtitle={commonKpis.criticalIssues.length > 0 ? `${commonKpis.criticalIssues.length} critique${commonKpis.criticalIssues.length > 1 ? 's' : ''}` : 'Aucun critique'}
           icon={<AlertTriangle size={24} />}
           color={commonKpis.criticalIssues.length > 0 ? 'red' : commonKpis.openIssues.length > 0 ? 'orange' : 'green'}
           onClick={() => onNavigate('issues')}
@@ -1732,14 +1666,14 @@ const Dashboard: React.FC<DashboardProps> = ({
 
       {/* === BLOC OPÉRATIONS LIVRAISON DU JOUR === */}
       {canViewMissions && !missionStats.loading && !missionStats.error && missionStats.packagesAvailable && missionStats.totalMissions > 0 && (
-        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl border border-blue-200/50 overflow-hidden">
+        <div className="ui-panel overflow-hidden">
           <div className="p-4 border-b border-blue-200/30 flex items-center justify-between">
             <h3 className="font-bold text-slate-800 flex items-center gap-2">
               <Route size={18} className="text-blue-600" /> Livraisons du jour
             </h3>
             <button 
               onClick={() => onNavigate('missions')} 
-              className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1"
+              className="ui-button ui-button-ghost"
             >
               Voir détail <ArrowUpRight size={14} />
             </button>
@@ -1747,32 +1681,32 @@ const Dashboard: React.FC<DashboardProps> = ({
           
           {/* KPIs Livraison */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-4">
-            <div className="bg-white/80 rounded-xl p-3 text-center border border-white">
+            <div className="p-3 text-center">
               <p className="text-2xl font-extrabold text-slate-800">{missionStats.totalPackages}</p>
-              <p className="text-[11px] font-medium text-slate-500 uppercase">Colis des tournées</p>
+              <p className="text-sm font-medium text-slate-500">Colis des tournées</p>
             </div>
-            <div className="bg-white/80 rounded-xl p-3 text-center border border-white">
-              <p className="text-2xl font-extrabold text-green-600">{missionStats.deliveredPackages}</p>
-              <p className="text-[11px] font-medium text-slate-500 uppercase">Livrés</p>
+            <div className="p-3 text-center">
+              <p className="text-2xl font-extrabold text-green-700">{missionStats.deliveredPackages}</p>
+              <p className="text-sm font-medium text-slate-500">Livrés</p>
             </div>
-            <div className="bg-white/80 rounded-xl p-3 text-center border border-white">
-              <p className="text-2xl font-extrabold text-orange-500">{missionStats.inDeliveryPackages}</p>
-              <p className="text-[11px] font-medium text-slate-500 uppercase">En cours</p>
+            <div className="p-3 text-center">
+              <p className="text-2xl font-extrabold text-orange-800">{missionStats.inDeliveryPackages}</p>
+              <p className="text-sm font-medium text-slate-500">En cours</p>
             </div>
-            <div className="bg-white/80 rounded-xl p-3 text-center border border-white">
-              <p className="text-2xl font-extrabold text-red-500">{missionStats.failedPackages}</p>
-              <p className="text-[11px] font-medium text-slate-500 uppercase">Échecs</p>
+            <div className="p-3 text-center">
+              <p className="text-2xl font-extrabold text-red-700">{missionStats.failedPackages}</p>
+              <p className="text-sm font-medium text-slate-500">Échecs</p>
             </div>
           </div>
 
           {/* Barre de progression globale */}
           <div className="px-4 pb-3">
             <div className="flex items-center justify-between mb-1.5">
-              <span className="text-xs font-medium text-slate-600">
+              <span className="text-sm font-medium text-slate-600">
                 Taux de livraison
               </span>
-              <span className="text-xs font-bold text-slate-800">
-                {missionStats.deliveryRate.toFixed(0)}%
+              <span className="text-sm font-bold text-slate-800">
+                {formatNumberFr(missionStats.deliveryRate, 0)}%
               </span>
             </div>
             <div className="h-2.5 bg-white rounded-full overflow-hidden">
@@ -1781,10 +1715,10 @@ const Dashboard: React.FC<DashboardProps> = ({
                 style={{ 
                   width: `${Math.min(missionStats.deliveryRate, 100)}%`,
                   background: missionStats.deliveryRate >= 90 
-                    ? 'linear-gradient(90deg, #22c55e, #16a34a)' 
+                    ? '#15803d'
                     : missionStats.deliveryRate >= 70 
-                      ? 'linear-gradient(90deg, #f59e0b, #d97706)' 
-                      : 'linear-gradient(90deg, #ef4444, #dc2626)'
+                      ? '#b45309'
+                      : '#b91c1c'
                 }}
               />
             </div>
@@ -1794,8 +1728,8 @@ const Dashboard: React.FC<DashboardProps> = ({
           {missionStats.activeMissions.length > 0 && (
             <div className="border-t border-blue-200/30">
               <div className="px-4 py-2 bg-blue-50/50">
-                <p className="text-xs font-bold text-blue-700 uppercase">
-                  {missionStats.missionsInProgress} tournée(s) en cours
+                <p className="text-sm font-bold text-blue-700">
+                  {missionStats.missionsInProgress} tournée{missionStats.missionsInProgress > 1 ? 's' : ''} en cours
                 </p>
               </div>
               <div className="divide-y divide-blue-100/50 max-h-[200px] overflow-y-auto">
@@ -1803,11 +1737,11 @@ const Dashboard: React.FC<DashboardProps> = ({
                   <div key={m.id} className="px-4 py-2.5 flex items-center justify-between hover:bg-white/40 transition-colors">
                     <div className="flex items-center gap-3 min-w-0">
                       <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                        m.status === MissionStatus.IN_PROGRESS ? 'bg-green-500 animate-pulse' : 'bg-blue-400'
+                        m.status === MissionStatus.IN_PROGRESS ? 'bg-green-500 ' : 'bg-blue-400'
                       }`} />
                       <div className="min-w-0">
-                        <p className="text-sm font-bold text-slate-800 truncate">{m.driverName}</p>
-                        <p className="text-[11px] text-slate-500">
+                        <p className="text-sm font-bold text-slate-800 break-words">{m.driverName}</p>
+                        <p className="text-sm text-slate-500">
                           {m.vehiclePlate} • {m.zone} • {m.completedStops}/{m.totalStops} arrêts
                         </p>
                       </div>
@@ -1819,8 +1753,8 @@ const Dashboard: React.FC<DashboardProps> = ({
                           style={{ width: `${m.progress}%` }}
                         />
                       </div>
-                      <span className="text-xs font-bold text-slate-600 w-8 text-right">
-                        {m.progress.toFixed(0)}%
+                      <span className="text-sm font-bold text-slate-600 w-8 text-right">
+                        {formatNumberFr(m.progress, 0)}%
                       </span>
                     </div>
                   </div>
@@ -1835,9 +1769,9 @@ const Dashboard: React.FC<DashboardProps> = ({
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                 {missionStats.zoneStats.map(z => (
                   <div key={z.zone} className="bg-white/60 rounded-lg p-2 text-center">
-                    <p className="text-xs font-bold text-slate-700">{z.zone}</p>
+                    <p className="text-sm font-bold text-slate-700">{z.zone}</p>
                     <p className="text-sm font-extrabold text-slate-800">{z.delivered}/{z.totalPackages}</p>
-                    <p className="text-[10px] text-slate-500">{z.rate.toFixed(0)}% livré</p>
+                    <p className="text-sm text-slate-500">{formatNumberFr(z.rate, 0)}% livré</p>
                   </div>
                 ))}
               </div>
@@ -1850,18 +1784,18 @@ const Dashboard: React.FC<DashboardProps> = ({
       {canViewMissions && !missionStats.loading && !missionStats.error && missionStats.totalMissions === 0 && (
         <button 
           onClick={() => onNavigate('missions')} 
-          className="w-full bg-white rounded-2xl border border-dashed border-blue-300 p-6 text-center hover:bg-blue-50/50 transition-colors group"
+          className="ui-button ui-button-secondary ui-button-card w-full group"
         >
           <Route size={28} className="mx-auto mb-2 text-blue-400 group-hover:text-blue-600 transition-colors" />
           <p className="text-sm font-bold text-slate-700">Aucune tournée aujourd’hui</p>
-          <p className="text-xs text-slate-500 mt-1">Cliquez pour créer des tournées de livraison</p>
+          <p className="text-sm text-slate-500 mt-1">Cliquez pour créer des tournées de livraison</p>
         </button>
       )}
 
       {/* Deux colonnes : À traiter + Véhicules immobilisés */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* À traiter aujourd'hui */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+        <div className="ui-panel overflow-hidden">
           <div className="p-4 border-b border-slate-100 bg-slate-50">
             <h3 className="font-bold text-slate-800 flex items-center gap-2">
               <CheckSquare size={18} className="text-blue-500" /> À traiter aujourd'hui
@@ -1871,10 +1805,10 @@ const Dashboard: React.FC<DashboardProps> = ({
             {commonKpis.pendingLeaves.length > 0 && (
               <button onClick={() => onNavigate('leaves')} className="w-full p-3 flex items-center justify-between hover:bg-slate-50 text-left">
                 <div className="flex items-center gap-3">
-                  <div className="p-2 bg-purple-100 rounded-lg"><Calendar size={16} className="text-purple-600" /></div>
+                  <div className="p-2 bg-brand-50 rounded-lg"><Calendar size={16} className="text-brand-700" /></div>
                   <span className="text-sm text-slate-700">Valider les congés</span>
                 </div>
-                <span className="text-xs font-bold bg-purple-100 text-purple-700 px-2 py-1 rounded-full">
+                <span className="text-sm font-bold bg-brand-50 text-brand-700 px-2 py-1 rounded-full">
                   {commonKpis.pendingLeaves.length}
                 </span>
               </button>
@@ -1885,7 +1819,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                   <div className="p-2 bg-red-100 rounded-lg"><AlertTriangle size={16} className="text-red-600" /></div>
                   <span className="text-sm text-slate-700">Incidents à traiter</span>
                 </div>
-                <span className="text-xs font-bold bg-red-100 text-red-700 px-2 py-1 rounded-full">
+                <span className="text-sm font-bold bg-red-100 text-red-700 px-2 py-1 rounded-full">
                   {commonKpis.openIssues.length}
                 </span>
               </button>
@@ -1893,10 +1827,10 @@ const Dashboard: React.FC<DashboardProps> = ({
             {commonKpis.overConsumingVehicles.length > 0 && (
               <button onClick={() => onNavigate('fuel')} className="w-full p-3 flex items-center justify-between hover:bg-slate-50 text-left">
                 <div className="flex items-center gap-3">
-                  <div className="p-2 bg-orange-100 rounded-lg"><Droplet size={16} className="text-orange-600" /></div>
+                  <div className="p-2 bg-orange-100 rounded-lg"><Droplet size={16} className="text-orange-800" /></div>
                   <span className="text-sm text-slate-700">Vérifier surconsommations</span>
                 </div>
-                <span className="text-xs font-bold bg-orange-100 text-orange-700 px-2 py-1 rounded-full">
+                <span className="text-sm font-bold bg-orange-100 text-orange-700 px-2 py-1 rounded-full">
                   {commonKpis.overConsumingVehicles.length}
                 </span>
               </button>
@@ -1907,13 +1841,13 @@ const Dashboard: React.FC<DashboardProps> = ({
                   <div className="p-2 bg-slate-100 rounded-lg"><FileSignature size={16} className="text-slate-600" /></div>
                   <span className="text-sm text-slate-700">Documents en attente</span>
                 </div>
-                <span className="text-xs font-bold bg-slate-100 text-slate-700 px-2 py-1 rounded-full">
+                <span className="text-sm font-bold bg-slate-100 text-slate-700 px-2 py-1 rounded-full">
                   {pendingDocuments}
                 </span>
               </button>
             )}
             {commonKpis.pendingLeaves.length === 0 && commonKpis.openIssues.length === 0 && pendingDocuments === 0 && (
-              <div className="p-6 text-center text-slate-400">
+              <div className="p-6 text-center text-slate-600">
                 <CheckCircle2 size={32} className="mx-auto mb-2 text-green-400" />
                 <p className="text-sm font-medium">Tout est à jour !</p>
               </div>
@@ -1922,13 +1856,13 @@ const Dashboard: React.FC<DashboardProps> = ({
         </div>
 
         {/* Véhicules immobilisés */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+        <div className="ui-panel overflow-hidden">
           <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
             <h3 className="font-bold text-slate-800 flex items-center gap-2">
-              <XCircle size={18} className="text-red-500" /> Véhicules immobilisés
+              <XCircle size={18} className="text-red-700" /> Véhicules immobilisés
             </h3>
             {commonKpis.vehiclesInMaintenance.length > 0 && (
-              <span className="text-xs font-bold bg-red-100 text-red-700 px-2 py-1 rounded-full animate-pulse">
+              <span className="text-sm font-bold bg-red-100 text-red-700 px-2 py-1 rounded-full ">
                 {commonKpis.vehiclesInMaintenance.length}
               </span>
             )}
@@ -1942,14 +1876,14 @@ const Dashboard: React.FC<DashboardProps> = ({
                     <div className="p-2 bg-red-100 rounded-lg"><Truck size={16} className="text-red-600" /></div>
                     <div>
                       <p className="font-bold text-slate-800 text-sm">{v.plate}</p>
-                      <p className="text-xs text-slate-500 truncate max-w-[150px]">
+                      <p className="text-sm text-slate-500 break-words">
                         {issue?.description || 'En maintenance'}
                       </p>
                     </div>
                   </div>
                   <button 
                     onClick={() => onNavigate('issues')} 
-                    className="text-xs font-bold text-brand-600 hover:text-brand-700"
+                    className="ui-button ui-button-ghost"
                   >
                     Gérer
                   </button>
@@ -1957,7 +1891,7 @@ const Dashboard: React.FC<DashboardProps> = ({
               );
             })}
             {commonKpis.vehiclesInMaintenance.length === 0 && (
-              <div className="p-6 text-center text-slate-400">
+              <div className="p-6 text-center text-slate-600">
                 <CheckCircle2 size={32} className="mx-auto mb-2 text-green-400" />
                 <p className="text-sm">Tous les véhicules sont opérationnels</p>
               </div>
@@ -2003,7 +1937,7 @@ const Dashboard: React.FC<DashboardProps> = ({
               </ResponsiveContainer>
               <div className="absolute inset-0 flex flex-col items-center justify-center">
                 <span className="text-2xl font-extrabold text-slate-800">{vehicles.length}</span>
-                <span className="text-[10px] font-bold text-slate-400 uppercase">Total</span>
+                <span className="text-sm font-bold text-slate-600">Total</span>
               </div>
             </div>
           </div>
@@ -2012,9 +1946,9 @@ const Dashboard: React.FC<DashboardProps> = ({
               <div key={index} className="flex items-center justify-between text-sm">
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 rounded-full" style={{ backgroundColor: STATUS_COLORS[item.name] }}></div>
-                  <span className="text-slate-600 text-xs">{item.name}</span>
+                  <span className="text-slate-600 text-sm">{item.name}</span>
                 </div>
-                <span className="font-bold text-slate-800 text-xs">{item.value}</span>
+                <span className="font-bold text-slate-800 text-sm">{item.value}</span>
               </div>
             ))}
           </div>
@@ -2022,18 +1956,18 @@ const Dashboard: React.FC<DashboardProps> = ({
       </div>
 
       {/* Derniers pleins */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+      <div className="ui-panel overflow-hidden">
         <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
           <h3 className="font-bold text-slate-800 flex items-center gap-2">
             <Droplet size={18} className="text-blue-500" /> Derniers pleins de carburant
           </h3>
-          <button onClick={() => onNavigate('fuel')} className="text-xs font-bold text-brand-600 hover:text-brand-700">
-            Voir tout →
+          <button onClick={() => onNavigate('fuel')} className="ui-button ui-button-ghost">
+            Voir tout <ChevronRight size={16} aria-hidden="true" />
           </button>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-slate-50 text-xs text-slate-500 uppercase">
+          <table className="ui-table w-full" aria-label="Derniers pleins de carburant">
+            <thead className="bg-slate-50 text-sm text-slate-500">
               <tr>
                 <th className="px-4 py-3 text-left">Véhicule</th>
                 <th className="px-4 py-3 text-left">Date</th>
@@ -2052,7 +1986,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                       <p className="font-bold text-slate-800 text-sm">{vehicle?.plate || 'N/A'}</p>
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-600">
-                      {new Date(log.date).toLocaleDateString()}
+                      {new Date(log.date).toLocaleDateString('fr-FR')}
                     </td>
                     <td className="px-4 py-3 text-right text-sm font-medium text-slate-800">
                       {log.volume} L
@@ -2062,11 +1996,11 @@ const Dashboard: React.FC<DashboardProps> = ({
                     </td>
                     <td className="px-4 py-3 text-center">
                       {isOverConsuming ? (
-                        <span className="text-xs font-bold bg-orange-100 text-orange-700 px-2 py-1 rounded-full">
-                          ⚠️ Surconso
+                        <span className="text-sm font-bold bg-orange-100 text-orange-700 px-2 py-1 rounded-full">
+                          <AlertTriangle size={14} className="inline mr-1" aria-hidden="true" />Surconsommation
                         </span>
                       ) : (
-                        <span className="text-xs font-bold bg-green-100 text-green-700 px-2 py-1 rounded-full">
+                        <span className="text-sm font-bold bg-green-100 text-green-700 px-2 py-1 rounded-full">
                           ✓ OK
                         </span>
                       )}

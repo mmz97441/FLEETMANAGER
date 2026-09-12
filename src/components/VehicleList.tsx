@@ -22,6 +22,7 @@ import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 
 // Composants modulaires
+import PageHeader from './shared/PageHeader';
 import VehicleStats from './vehicles/VehicleStats';
 import VehicleFilters from './vehicles/VehicleFilters';
 import VehicleRow from './vehicles/VehicleRow';
@@ -216,6 +217,7 @@ export const VehicleList: React.FC<VehicleListProps> = ({
   return (
     <div className="space-y-6 animate-fade-in relative pb-10">
       
+      <PageHeader title="Parc de véhicules" />
       {/* KPIs */}
       <VehicleStats stats={stats} />
 
@@ -235,18 +237,18 @@ export const VehicleList: React.FC<VehicleListProps> = ({
 
       {/* Vue Liste */}
       {viewMode === 'list' && (
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div className="ui-panel hidden overflow-hidden md:block">
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
+            <table className="ui-table w-full text-left border-collapse">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
-                  <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Véhicule</th>
-                  <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Type</th>
-                  <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Statut</th>
-                  <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Usure Maint.</th>
-                  <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Kilométrage</th>
-                  <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Prochain CT</th>
-                  <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Actions</th>
+                  <th className="px-6 py-4 text-sm font-bold text-slate-500 uppercase tracking-wider">Véhicule</th>
+                  <th className="px-6 py-4 text-sm font-bold text-slate-500 uppercase tracking-wider text-center">Type</th>
+                  <th className="px-6 py-4 text-sm font-bold text-slate-500 uppercase tracking-wider text-center">Statut</th>
+                  <th className="px-6 py-4 text-sm font-bold text-slate-500 uppercase tracking-wider">Entretien</th>
+                  <th className="px-6 py-4 text-sm font-bold text-slate-500 uppercase tracking-wider text-right">Kilométrage</th>
+                  <th className="px-6 py-4 text-sm font-bold text-slate-500 uppercase tracking-wider text-center">Contrôle technique</th>
+                  <th className="px-6 py-4 text-sm font-bold text-slate-500 uppercase tracking-wider text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -288,7 +290,7 @@ export const VehicleList: React.FC<VehicleListProps> = ({
                 {canManage && !searchTerm && filterStatus === 'all' && (
                   <button 
                     onClick={openAdd}
-                    className="mt-4 bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded-xl font-bold text-sm"
+                    className="ui-button ui-button-primary mt-4 text-sm"
                   >
                     Ajouter un véhicule
                   </button>
@@ -300,8 +302,8 @@ export const VehicleList: React.FC<VehicleListProps> = ({
       )}
 
       {/* Vue Grille */}
-      {viewMode === 'grid' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      {(
+        <div className={`grid min-w-0 grid-cols-1 gap-4 ${viewMode === 'grid' ? 'md:grid-cols-2 xl:grid-cols-3' : 'md:hidden'}`}>
           {filteredVehicles.map(vehicle => (
             <VehicleCard
               key={vehicle.id}
@@ -314,6 +316,7 @@ export const VehicleList: React.FC<VehicleListProps> = ({
               onSelect={() => onSelectVehicle?.(vehicle.id)}
               onViewIncidents={() => onViewIncidents?.(vehicle.id)}
               onEdit={() => openEdit(vehicle)}
+              onDelete={() => requestDelete(vehicle)}
               onAssignDriver={() => openAssignmentModal(vehicle)}
               onAssignReplacement={() => openReplacementModal(vehicle)}
             />

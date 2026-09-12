@@ -309,24 +309,42 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
       setComplete(true);
       onImported(confirmedRef.current.size);
     } catch (cause) {
-      setError(`${confirmedRef.current.size} ligne(s) confirmée(s). Les autres restent à vérifier. ${cause instanceof Error ? cause.message : 'La connexion a été interrompue.'} Reprendre vérifie les mêmes références sans recréer les colis existants.`);
+      setError(`${confirmedRef.current.size} ligne${confirmedRef.current.size > 1 ? 's' : ''} confirmée${confirmedRef.current.size > 1 ? 's' : ''}. Les autres restent à vérifier. ${cause instanceof Error ? cause.message : 'La connexion a été interrompue.'} Reprendre vérifie les mêmes références sans recréer les colis existants.`);
     } finally { importingRef.current = false; setBusy(false); }
   };
 
   return (
-    <Modal subtitle={access.contextLabel} isOpen onClose={onClose} title={complete ? 'Bilan de l’import' : 'Importer mes expéditions'} headerIcon={<FileSpreadsheet size={22} />} size="2xl" preventClose={busy} dirty={Boolean(rows) && !complete}>
-        {attempted && <div ref={resultRef} tabIndex={-1} role="status" className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 mb-4 text-sm text-indigo-900">
+    <Modal mobileFullscreen subtitle={access.contextLabel} isOpen onClose={onClose} title={complete ? 'Bilan de l’import' : 'Importer mes expéditions'} headerIcon={<FileSpreadsheet size={22} />} size="2xl" preventClose={busy} dirty={Boolean(rows) && !complete} footer={rows ? (!complete && <div className="flex flex-col sm:flex-row gap-2">
+              <button
+                disabled={busy || attempted}
+                onClick={resetFile}
+                className="ui-button ui-button-secondary text-sm"
+              >
+                Changer de fichier
+              </button>
+              <button
+                onClick={handleImport}
+                disabled={validCount === 0 || busy}
+                className="ui-button ui-button-primary flex-1 flex items-center justify-center gap-2 text-sm disabled:opacity-40"
+              >
+                <CheckCircle size={16} />
+                {busy
+                  ? 'Import en cours…'
+                  : attempted ? `Reprendre ${outcomes.pending} ligne${outcomes.pending > 1 ? 's' : ''} non confirmée${outcomes.pending > 1 ? 's' : ''}` : `Importer ${validCount} expédition${validCount > 1 ? 's' : ''} valide${validCount > 1 ? 's' : ''}`}
+              </button>
+            </div>) : undefined}>
+        {attempted && <div ref={resultRef} tabIndex={-1} role="status" className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 mb-4 text-sm text-brand-900">
           <p className="font-bold">{complete ? 'Import terminé' : busy ? 'Import en cours…' : 'Import interrompu'}</p>
-          <p className="mt-1">{outcomes.total} lignes : {outcomes.confirmed} confirmées · {outcomes.invalid} rejetées · {outcomes.duplicates} doublons dans le fichier · {outcomes.pending} non confirmées.</p>
+          <p className="mt-1">{outcomes.total} ligne{outcomes.total > 1 ? 's' : ''} : {outcomes.confirmed} confirmée{outcomes.confirmed > 1 ? 's' : ''} · {outcomes.invalid} rejetée{outcomes.invalid > 1 ? 's' : ''} · {outcomes.duplicates} doublon{outcomes.duplicates > 1 ? 's' : ''} dans le fichier · {outcomes.pending} non confirmée{outcomes.pending > 1 ? 's' : ''}.</p>
           <p className="mt-1">Une référence confirmée est enregistrée, créée maintenant ou déjà présente. Les références existantes ne sont pas recréées.</p>
         </div>}
         {confirmed.size > 0 && <div className="space-y-3 mb-4">
-          <details><summary className="cursor-pointer text-sm font-semibold text-slate-700 min-h-11">Voir les {confirmed.size} codes confirmés</summary><ul className="max-h-40 overflow-auto text-sm font-mono break-all">{[...confirmed].map(([line, parcel]) => <li key={line}>Ligne {line} : {parcel.externalId || parcel.barcode || parcel.orderNumber}</li>)}</ul></details>
+          <details><summary className="cursor-pointer text-sm font-semibold text-slate-700 min-h-11">Référence{confirmed.size > 1 ? 's' : ''} confirmée{confirmed.size > 1 ? 's' : ''} ({confirmed.size})</summary><ul className="max-h-40 overflow-auto text-sm font-mono break-all">{[...confirmed].map(([line, parcel]) => <li key={line}>Ligne {line} : {parcel.externalId || parcel.barcode || parcel.orderNumber}</li>)}</ul></details>
           <label htmlFor="import-label-format" className="block text-sm font-semibold">Format d’étiquette</label>
           <select id="import-label-format" value={format} onChange={event => setFormat(event.target.value as LabelFormat)} className="w-full min-h-11 border rounded-xl px-3">{['A4', 'A5', 'A6'].map(value => <option key={value}>{value}</option>)}</select>
-          <button type="button" disabled={busy} onClick={printConfirmed} className="w-full min-h-11 rounded-xl border text-indigo-800 font-semibold flex items-center justify-center gap-2"><Printer size={18} /> Imprimer les colis confirmés</button>
+          <button type="button" disabled={busy} onClick={printConfirmed} className="ui-button ui-button-secondary w-full min-h-11 border flex items-center justify-center gap-2"><Printer size={18} /> Imprimer les colis confirmés</button>
           {printError && <p role="alert" className="text-sm text-red-800">{printError}</p>}
-          {complete && <button type="button" onClick={() => { onClose(); onViewPackages?.(); }} className="w-full min-h-11 rounded-xl bg-indigo-700 text-white font-semibold">{onViewPackages ? 'Voir mes colis' : 'Terminer'}</button>}
+          {complete && <button type="button" onClick={() => { onClose(); onViewPackages?.(); }} className="ui-button ui-button-primary w-full min-h-11">{onViewPackages ? 'Voir mes colis' : 'Terminer'}</button>}
         </div>}
         {/* Étape 1 : choisir un fichier */}
         {!rows && (
@@ -340,7 +358,7 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
             </p>
             <button
               onClick={() => inputRef.current?.click()}
-              className="w-full flex flex-col items-center justify-center gap-2 py-10 border-2 border-dashed border-indigo-300 rounded-xl text-indigo-600 hover:bg-indigo-50"
+              className="ui-button ui-button-primary w-full flex flex-col items-center justify-center gap-2"
             >
               <Upload size={28} />
               <span className="font-bold text-sm">Choisir un fichier .xlsx / .xls / .csv</span>
@@ -354,11 +372,11 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
             />
             <button
               onClick={downloadTemplate}
-              className="mt-3 w-full flex items-center justify-center gap-2 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-sm font-bold"
+              className="ui-button ui-button-secondary mt-3 w-full flex items-center justify-center gap-2 text-sm"
             >
               <Download size={16} /> Télécharger le fichier modèle
             </button>
-            <p className="text-[11px] text-slate-400 text-center mt-1">
+            <p className="text-sm text-slate-600 text-center mt-1">
               Remplissez le modèle avec vos expéditions, puis importez-le. Chaque numéro de colis doit commencer par BR.
             </p>
           </>
@@ -373,7 +391,7 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
         {/* Étape 2 : rapport de contrôle qualité */}
         {rows && (
           <>
-            <p className="text-xs text-slate-500 mb-2">{fileName}</p>
+            <p className="text-sm text-slate-600 mb-2">{fileName}</p>
 
             {/* Bandeau de synthèse */}
             <div
@@ -384,7 +402,7 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
               }`}
             >
               {errorCount === 0 ? <CheckCircle size={18} className="shrink-0" /> : <AlertTriangle size={18} className="shrink-0" />}
-              <span>{totalCount} ligne(s) lue(s) · {validCount} valide(s) · {errorCount} avec erreur(s)</span>
+              <span>{totalCount} ligne{totalCount > 1 ? 's' : ''} lue{totalCount > 1 ? 's' : ''} · {validCount} valide{validCount > 1 ? 's' : ''} · {errorCount} avec erreur</span>
             </div>
 
             {/* DATE DE LIVRAISON SOUHAITÉE — chaque colis est daté pour CE jour
@@ -400,47 +418,29 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
                 value={deliveryDate}
                 min={todayISOLocal}
                 onChange={(e) => setDeliveryDate(e.target.value)}
-                className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 outline-none"
+                className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-base focus:ring-2 focus:ring-brand-500 outline-none min-h-11"
               />
-              <p className="text-[11px] text-slate-500 mt-1">Date demandée pour préparer la tournée ; elle sera confirmée par le transporteur.</p>
+              <p className="text-sm text-slate-600 mt-1">Date demandée pour préparer la tournée ; elle sera confirmée par le transporteur.</p>
             </div>
 
             <div className="flex flex-wrap gap-3 mb-3 items-center">
               <label className="flex items-center gap-2 text-sm min-h-11"><input type="checkbox" checked={onlyErrors} onChange={event => { setOnlyErrors(event.target.checked); setDisplayLimit(100); }} /> Erreurs uniquement ({errorCount})</label>
-              {(errorCount > 0 || (attempted && outcomes.pending > 0)) && <button type="button" disabled={busy} onClick={exportRejected} className="min-h-11 px-3 rounded-xl border text-sm text-slate-700 flex items-center gap-2"><Download size={16} /> Exporter les lignes à corriger ou vérifier</button>}
+              {(errorCount > 0 || (attempted && outcomes.pending > 0)) && <button type="button" disabled={busy} onClick={exportRejected} className="ui-button ui-button-secondary min-h-11 border text-sm flex items-center gap-2"><Download size={16} /> Exporter les lignes à corriger ou vérifier</button>}
             </div>
-            <div className="max-h-72 overflow-y-auto border border-slate-200 rounded-xl divide-y mb-3">
+            <div className="sm:max-h-72 sm:overflow-y-auto border-t border-slate-200 divide-y mb-3">
               {visibleRows.map(row => <div key={row.line} className={`p-3 text-sm ${row.errors.length ? 'bg-red-50 text-red-900' : 'text-slate-700'}`}>
                 <p className="font-semibold break-words">Ligne {row.line} · {row.colisNumber || '(sans numéro)'} · {row.contactName || '(sans destinataire)'}</p>
                 {row.errors.length ? <ul className="mt-1 list-disc pl-5">{row.errors.map(message => <li key={message}>{message}</li>)}</ul> : <p>{confirmed.has(row.line) ? 'Confirmé : enregistré' : attempted ? 'Non confirmé' : 'Prêt à importer'} · {row.city}</p>}
               </div>)}
               {visibleRows.length === 0 && <p className="p-3 text-sm text-slate-600">Aucune ligne en erreur.</p>}
-              {orderedRows.length > displayLimit && <button type="button" onClick={() => setDisplayLimit(limit => limit + 100)} className="w-full min-h-11 text-indigo-800 text-sm font-semibold">Afficher 100 lignes supplémentaires ({visibleRows.length}/{orderedRows.length})</button>}
+              {orderedRows.length > displayLimit && <button type="button" onClick={() => setDisplayLimit(limit => limit + 100)} className="ui-button ui-button-ghost w-full min-h-11 text-sm">Afficher 100 lignes supplémentaires ({visibleRows.length}/{orderedRows.length})</button>}
             </div>
             {/* Note : les lignes en erreur ne sont pas importées */}
-            <p className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 mb-3">
+            <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 mb-3">
               Les lignes rejetées et les doublons du fichier ne sont pas importés. Exportez-les pour corriger uniquement ces lignes ; conservez leurs références.
             </p>
 
-            {!complete && <div className="flex flex-col sm:flex-row gap-2">
-              <button
-                disabled={busy || attempted}
-                onClick={resetFile}
-                className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-xl font-bold text-sm"
-              >
-                Changer de fichier
-              </button>
-              <button
-                onClick={handleImport}
-                disabled={validCount === 0 || busy}
-                className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-indigo-600 text-white rounded-xl font-bold text-sm disabled:opacity-40"
-              >
-                <CheckCircle size={16} />
-                {busy
-                  ? 'Import en cours…'
-                  : attempted ? `Reprendre les ${outcomes.pending} lignes non confirmées` : `Importer les ${validCount} expédition(s) valide(s)`}
-              </button>
-            </div>}
+
           </>
         )}
     </Modal>

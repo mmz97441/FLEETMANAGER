@@ -26,9 +26,9 @@ const EmptyState: React.FC<EmptyStateProps> = ({
       wrapper: 'p-4',
       icon: 32,
       iconWrapper: 'w-12 h-12',
-      title: 'text-sm',
-      description: 'text-xs',
-      button: 'text-xs py-2 px-3'
+      title: 'text-base',
+      description: 'text-sm',
+      button: ''
     },
     md: {
       wrapper: 'p-6',
@@ -69,7 +69,8 @@ const EmptyState: React.FC<EmptyStateProps> = ({
       {action && (
         <button
           onClick={action.onClick}
-          className={`mt-4 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl transition-colors ${s.button}`}
+          type="button"
+          className="ui-button ui-button-primary mt-4"
         >
           {action.label}
         </button>

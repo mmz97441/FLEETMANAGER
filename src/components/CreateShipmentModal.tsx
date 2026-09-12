@@ -179,29 +179,33 @@ const CreateShipmentModal: React.FC<CreateShipmentModalProps> = ({ currentUser, 
   };
 
   return (
-    <Modal subtitle={access.contextLabel} isOpen onClose={onClose} title={created ? 'Expédition enregistrée' : requestLocked ? 'Vérifier cette demande' : 'Créer une expédition'} headerIcon={<PackageIcon size={22} />} size="lg" dirty={dirty && !journalSaved} preventClose={busy}
-      footer={!created ? <button type="submit" form={formId} disabled={busy || access.readOnly} className="w-full min-h-12 bg-indigo-700 text-white rounded-xl font-bold disabled:opacity-50">{busy ? (requestLocked ? 'Vérification en cours…' : 'Création en cours…') : requestLocked ? 'Vérifier cette demande' : 'Créer l’expédition'}</button> : undefined}>
+    <Modal mobileFullscreen subtitle={access.contextLabel} isOpen onClose={onClose} title={created ? 'Expédition enregistrée' : requestLocked ? 'Vérifier cette demande' : 'Créer une expédition'} headerIcon={<PackageIcon size={22} />} size="lg" dirty={dirty && !journalSaved} preventClose={busy}
+      footer={!created ? <button type="submit" form={formId} disabled={busy || access.readOnly} className="ui-button ui-button-primary w-full">{busy ? (requestLocked ? 'Vérification en cours…' : 'Création en cours…') : requestLocked ? 'Vérifier cette demande' : 'Créer l’expédition'}</button> : <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+        <button type="button" onClick={print} className="ui-button ui-button-primary"><Printer size={18} aria-hidden="true" />{printed ? 'Imprimer à nouveau' : 'Imprimer les étiquettes'}</button>
+        <button type="button" disabled={busy} onClick={() => { onClose(); onViewPackages?.(); }} className="ui-button ui-button-secondary">{onViewPackages ? 'Voir mes colis' : 'Terminer'}</button>
+      </div>}>
 
       {created ? (
         <div className="space-y-4">
-          <div ref={resultRef} tabIndex={-1} role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-800">
-            <p className="font-bold flex items-center gap-2"><Check size={20} /> {created.length} colis enregistré(s)</p>
-            <p className="mt-1 text-sm">Ils sont en attente de collecte. L’impression des étiquettes peut être faite maintenant ou depuis Mes colis.</p>
+          <div ref={resultRef} tabIndex={-1} role="status" className="space-y-2">
+            <p className="text-lg font-semibold text-slate-900 flex items-center gap-2"><Check size={22} aria-hidden="true" className="text-emerald-700 shrink-0" />{created.length} colis enregistré{created.length > 1 ? 's' : ''}</p>
+            <p className="text-base font-medium text-slate-800 break-words">{contactName}</p>
+            <p className="text-sm text-slate-600 break-words">{address}, {postalCode} {city}</p>
+            <p className="text-sm text-slate-700">En attente de collecte. Préparez vos étiquettes maintenant ou retrouvez-les dans Mes colis.</p>
           </div>
-          <ul aria-label="Codes des colis enregistrés" className="max-h-64 overflow-auto rounded-xl border p-3 space-y-3">
-            {created.map(p => <li key={p.id}><ShipmentReference reference={p.externalId || p.barcode || p.orderNumber} /></li>)}
-          </ul>
           {busy && <p role="status" className="text-sm text-slate-700">Enregistrement du destinataire dans le carnet…</p>}
-          {journalWarning && <p role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{journalWarning}</p>}
-          {bookSaved && <p className="text-sm text-emerald-800">Destinataire ajouté à votre carnet.</p>}
-          {bookError && <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{bookError}</p>}
-          {zoneWarn && <p className="text-sm text-amber-900 flex gap-2"><MapPin size={18} /> Zone à vérifier par le transporteur : l’adresse n’a pas pu être reconnue automatiquement.</p>}
-          <fieldset><legend className="font-medium text-sm mb-2">Format d’étiquette</legend><div className="flex gap-2">
-            {(['A4', 'A5', 'A6'] as LabelFormat[]).map(f => <button type="button" key={f} aria-pressed={format === f} onClick={() => setFormat(f)} className={`flex-1 min-h-11 rounded-xl border font-semibold ${format === f ? 'bg-indigo-700 text-white' : 'text-slate-700'}`}>{f}</button>)}
-          </div><p className="mt-2 text-sm text-slate-600">A6 : une étiquette par page. A4 : quatre par page.</p></fieldset>
-          {printError && <p role="alert" className="text-sm text-red-800">{printError}</p>}
-          <button type="button" onClick={print} className="w-full min-h-12 bg-indigo-700 text-white rounded-xl font-semibold flex items-center justify-center gap-2"><Printer size={18} /> {printed ? 'Imprimer à nouveau' : 'Imprimer les étiquettes'}</button>
-          <button type="button" disabled={busy} onClick={() => { onClose(); onViewPackages?.(); }} className="w-full min-h-11 rounded-xl border text-slate-700 font-semibold disabled:opacity-50">{onViewPackages ? 'Voir mes colis' : 'Terminer'}</button>
+          {journalWarning && <p role="status" className="ui-notice ui-notice-warning">{journalWarning}</p>}
+          {bookError && <p role="alert" className="ui-notice ui-notice-warning">{bookError}</p>}
+          {zoneWarn && <p className="ui-notice ui-notice-warning flex items-start gap-2"><MapPin size={18} className="shrink-0" aria-hidden="true" />Zone à vérifier par le transporteur : l’adresse n’a pas pu être reconnue automatiquement.</p>}
+          {printError && <p role="alert" className="ui-notice ui-notice-danger">{printError}</p>}
+          <fieldset className="border-t border-slate-200 pt-4"><legend className="font-semibold text-sm pr-2">Préparer les étiquettes</legend>
+            <label className="flex flex-wrap items-center gap-3 text-sm text-slate-700">Format<select value={format} onChange={event => setFormat(event.target.value as LabelFormat)} className="min-h-11 rounded-lg border border-slate-300 bg-white px-3 text-base"><option value="A6">A6 · une par page</option><option value="A5">A5 · deux par page</option><option value="A4">A4 · quatre par page</option></select></label>
+          </fieldset>
+          <div className="border-t border-slate-200 pt-4 space-y-3">
+            <h3 className="text-sm font-semibold text-slate-700">Références des colis</h3>
+            <ul aria-label="Codes des colis enregistrés" className="divide-y divide-slate-200">{created.map(p => <li key={p.id} className="py-3 first:pt-0"><ShipmentReference reference={p.externalId || p.barcode || p.orderNumber} /></li>)}</ul>
+          </div>
+          {bookSaved && <p className="text-sm text-slate-600 flex items-start gap-2"><BookUser size={18} aria-hidden="true" className="shrink-0" />Destinataire ajouté à votre carnet.</p>}
         </div>
       ) : (
         <form id={formId} onSubmit={handleSubmit} noValidate className="space-y-4" aria-busy={busy}>
@@ -211,15 +215,15 @@ const CreateShipmentModal: React.FC<CreateShipmentModalProps> = ({ currentUser, 
             <p className="mt-2 font-semibold">{contactName} · {packageCount} colis</p>
             <p>{address}, {postalCode} {city}</p>
             <p className="mt-2">Choisissez « Vérifier cette demande ». Nous reprenons les mêmes références pour éviter les doublons. Les informations ci-dessous sont verrouillées jusqu’à confirmation.</p>
-            {onViewPackages && <button type="button" disabled={busy} onClick={() => { onClose(); onViewPackages(); }} className="mt-2 min-h-11 underline font-semibold">Consulter Mes colis en conservant cette demande</button>}
+            {onViewPackages && <button type="button" disabled={busy} onClick={() => { onClose(); onViewPackages(); }} className="ui-button ui-button-ghost mt-2 min-h-11 underline">Consulter Mes colis en conservant cette demande</button>}
           </div>}
           <p className="text-sm text-slate-600">La collecte sera organisée par le transporteur après création. Les champs marqués * sont obligatoires.</p>
-          {Object.keys(fieldErrors).length > 0 && <div role="alert" className="rounded-xl bg-red-50 border border-red-200 p-3 text-sm text-red-800"><p className="font-bold">Complétez les informations suivantes :</p><ul className="mt-1 space-y-1">{Object.entries(fieldErrors).map(([key, message]) => <li key={key}><button type="button" className="text-left underline min-h-11" onClick={() => { if (key === 'contactEmail' || key === 'weight') setOptionsOpen(true); requestAnimationFrame(() => document.getElementById(`shipment-${key}`)?.focus()); }}>{message}</button></li>)}</ul></div>}
-          <fieldset disabled={busy || requestLocked || access.readOnly} className="rounded-xl border border-slate-200 p-3 sm:p-4 space-y-3">
-            <legend className="px-1 font-bold text-base text-slate-900">1. Destinataire</legend>
-            {deliveryBook.length > 0 && <div className="rounded-xl border bg-slate-50 p-3">
-              <button type="button" onClick={() => setShowBook(!showBook)} aria-expanded={showBook} className="text-sm text-indigo-800 min-h-11 flex items-center gap-2"><BookUser size={18} /> {showBook ? 'Masquer le carnet' : 'Choisir dans mon carnet'}</button>
-              {(showBook || (contactName && !linkedId)) && nameMatches.length > 0 && <ul className="max-h-40 overflow-auto">{nameMatches.map(a => <li key={a.id}><button type="button" onClick={() => pickAddress(a)} className="w-full text-left px-2 py-3 rounded-lg hover:bg-indigo-100 text-sm"><span className="block font-semibold">{a.contactName || a.label}</span><span className="text-slate-600">{a.address} · {a.city}</span></button></li>)}</ul>}
+          {Object.keys(fieldErrors).length > 0 && <div role="alert" className="rounded-xl bg-red-50 border border-red-200 p-3 text-sm text-red-800"><p className="font-bold">Complétez les informations suivantes :</p><ul className="mt-1 space-y-1">{Object.entries(fieldErrors).map(([key, message]) => <li key={key}><button type="button" className="ui-button ui-button-ghost text-left underline min-h-11" onClick={() => { if (key === 'contactEmail' || key === 'weight') setOptionsOpen(true); requestAnimationFrame(() => document.getElementById(`shipment-${key}`)?.focus()); }}>{message}</button></li>)}</ul></div>}
+          <fieldset disabled={busy || requestLocked || access.readOnly} className="border-t border-slate-200 pt-3 space-y-3">
+            <legend className="pr-2 font-semibold text-base text-slate-900">1. Destinataire</legend>
+            {deliveryBook.length > 0 && <div className="space-y-2">
+              <button type="button" onClick={() => setShowBook(!showBook)} aria-expanded={showBook} className="ui-button ui-button-ghost text-sm min-h-11 flex items-center gap-2"><BookUser size={18} /> {showBook ? 'Masquer le carnet' : 'Choisir dans mon carnet'}</button>
+              {(showBook || (contactName && !linkedId)) && nameMatches.length > 0 && <ul className="max-h-40 overflow-auto">{nameMatches.map(a => <li key={a.id}><button type="button" onClick={() => pickAddress(a)} className="ui-button ui-button-ghost w-full text-left text-sm"><span className="block font-semibold">{a.contactName || a.label}</span><span className="text-slate-600">{a.address} · {a.city}</span></button></li>)}</ul>}
               {linkedId && <p role="status" className="text-sm text-emerald-800">Destinataire du carnet sélectionné.</p>}
             </div>}
             <FormInput id="shipment-contactName" label="Nom du destinataire" required autoComplete="shipping name" value={contactName} onChange={e => { setContactName(e.target.value); setLinkedId(null); }} error={fieldErrors.contactName} />
@@ -231,11 +235,11 @@ const CreateShipmentModal: React.FC<CreateShipmentModalProps> = ({ currentUser, 
             <FormInput id="shipment-contactPhone" label="Téléphone du destinataire" required type="tel" autoComplete="shipping tel" value={contactPhone} onChange={e => setContactPhone(e.target.value)} error={fieldErrors.contactPhone} />
             {!linkedId && onSaveRecipient && <label className="flex items-start gap-3 text-sm text-slate-700 py-2"><input type="checkbox" checked={saveToBook} onChange={e => setSaveToBook(e.target.checked)} className="w-5 h-5" /> Ajouter ce destinataire à mon carnet</label>}
           </fieldset>
-          <fieldset disabled={busy || requestLocked || access.readOnly} className="rounded-xl border border-slate-200 p-3 sm:p-4">
-            <legend className="px-1 font-bold text-base text-slate-900">2. Colis</legend>
+          <fieldset disabled={busy || requestLocked || access.readOnly} className="border-t border-slate-200 pt-3">
+            <legend className="pr-2 font-semibold text-base text-slate-900">2. Colis</legend>
             <FormInput id="shipment-packageCount" label="Nombre de colis" required type="number" min={1} max={50} step={1} inputMode="numeric" value={packageCount || ''} onChange={e => setPackageCount(Number(e.target.value))} error={fieldErrors.packageCount} />
           </fieldset>
-          <details open={optionsOpen} onToggle={event => setOptionsOpen(event.currentTarget.open)} className="rounded-xl border border-slate-200 p-3 sm:p-4">
+          <details open={optionsOpen} onToggle={event => setOptionsOpen(event.currentTarget.open)} className="border-t border-slate-200 pt-3">
             <summary className="min-h-11 cursor-pointer font-bold text-base text-slate-900">3. Options (facultatif)</summary>
             <fieldset disabled={busy || requestLocked || access.readOnly} className="space-y-3 pt-2">
               <FormInput id="shipment-contactEmail" label="Email du destinataire" type="email" autoComplete="shipping email" hint="Pour la copie du bon de livraison." value={contactEmail} onChange={e => setContactEmail(e.target.value)} error={fieldErrors.contactEmail} />
@@ -245,7 +249,7 @@ const CreateShipmentModal: React.FC<CreateShipmentModalProps> = ({ currentUser, 
             </fieldset>
           </details>
           {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800 flex gap-2"><AlertTriangle size={18} className="shrink-0" />{error}</p>}
-          {journalSaved && !busy && <details className="rounded-xl border border-slate-200 p-3 text-sm text-slate-700"><summary className="min-h-11 cursor-pointer font-semibold">Options avancées de reprise</summary><p>Vérifiez d’abord les colis de votre compte. Si le refus persiste, vous pouvez abandonner le rappel après cette vérification. Aucun colis existant ne sera annulé.</p><label className="my-3 flex items-start gap-3"><input type="checkbox" checked={verifiedBeforeAbandon} onChange={event => setVerifiedBeforeAbandon(event.target.checked)} className="mt-1 w-5 h-5 shrink-0" /> J’ai vérifié Mes colis et je souhaite abandonner cette reprise.</label><button type="button" disabled={!verifiedBeforeAbandon} onClick={() => void abandonPending()} className="min-h-11 rounded-xl border border-red-300 px-3 text-red-800 font-semibold disabled:opacity-50">Abandonner la reprise après vérification</button></details>}
+          {journalSaved && !busy && <details className="rounded-xl border border-slate-200 p-3 text-sm text-slate-700"><summary className="min-h-11 cursor-pointer font-semibold">Options avancées de reprise</summary><p>Vérifiez d’abord les colis de votre compte. Si le refus persiste, vous pouvez abandonner le rappel après cette vérification. Aucun colis existant ne sera annulé.</p><label className="my-3 flex items-start gap-3"><input type="checkbox" checked={verifiedBeforeAbandon} onChange={event => setVerifiedBeforeAbandon(event.target.checked)} className="mt-1 w-5 h-5 shrink-0" /> J’ai vérifié Mes colis et je souhaite abandonner cette reprise.</label><button type="button" disabled={!verifiedBeforeAbandon} onClick={() => void abandonPending()} className="ui-button ui-button-secondary min-h-11 border disabled:opacity-50">Abandonner la reprise après vérification</button></details>}
 
         </form>
       )}

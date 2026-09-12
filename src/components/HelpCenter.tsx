@@ -1,6 +1,6 @@
 /**
  * HelpCenter - Centre d'aide et guide utilisateur complet
- * 
+ *
  * ADAPTÉ PAR RÔLE:
  * - Président/Directeur : Guide complet
  * - Secrétariat : Admin, documents, absences
@@ -11,14 +11,34 @@
 
 import React, { useState, useMemo } from 'react';
 import {
-  HelpCircle, Book, MessageSquare, Mail, Phone,
-  ChevronDown, ChevronRight, Search, Truck, Fuel, Wrench,
-  AlertTriangle, Users, Calendar, FileText, BarChart3,
-  CheckCircle, Send,
-  XOctagon, Building2, UserCircle, Shield
+  HelpCircle,
+  Book,
+  MessageSquare,
+  Mail,
+  Phone,
+  ChevronDown,
+  ChevronRight,
+  Search,
+  Truck,
+  Fuel,
+  Wrench,
+  AlertTriangle,
+  Users,
+  Calendar,
+  FileText,
+  BarChart3,
+  CheckCircle,
+  Send,
+  XOctagon,
+  Building2,
+  UserCircle,
+  Shield,
+  Lightbulb,
+  Smartphone,
 } from 'lucide-react';
 import { User, UserRole } from '../types';
 import { roleKey } from '../utils/role';
+import PageHeader from "./shared/PageHeader";
 import SupportRequest from './SupportRequest';
 import DeviceDiagnostics from './DeviceDiagnostics';
 import UxMetricsPanel from './UxMetricsPanel';
@@ -57,7 +77,7 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
 
   // Déterminer le profil utilisateur
   const userRoleNorm = roleKey(currentUser.role).replace(/[^a-z]/g, '');
-  
+
   const isPresident = userRoleNorm.includes('president') || userRoleNorm.includes('gerant');
   const isDirector = userRoleNorm.includes('directeur') || userRoleNorm.includes('director');
   const isAdmin = userRoleNorm.includes('admin') || userRoleNorm.includes('secretar') || userRoleNorm.includes('administrat');
@@ -65,7 +85,7 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
   const isMechanic = userRoleNorm.includes('mecanic') || userRoleNorm.includes('technic') || userRoleNorm.includes('atelier');
   const isIntern = userRoleNorm.includes('stagiai') || userRoleNorm.includes('intern');
   const isManager = isPresident || isDirector;
-  
+
   // Définir les tags de rôle pour le filtrage
   const userRoleTags: string[] = [];
   if (isPresident) userRoleTags.push('president', 'manager', 'all');
@@ -78,13 +98,13 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
 
   // Nom du profil pour l'affichage
   const getProfileName = () => {
-    if (isPresident) return '👑 Président / Gérant';
-    if (isDirector) return '📊 Directeur';
-    if (isAdmin) return '📝 Secrétariat / Admin';
-    if (isDriver) return '🚚 Chauffeur';
-    if (isMechanic) return '🔧 Mécanicien';
-    if (isIntern) return '🎓 Stagiaire';
-    return '👤 Utilisateur';
+    if (isPresident) return "Président / Gérant";
+    if (isDirector) return "Directeur";
+    if (isAdmin) return "Secrétariat / Admin";
+    if (isDriver) return "Chauffeur";
+    if (isMechanic) return "Mécanicien";
+    if (isIntern) return "Stagiaire";
+    return "Utilisateur";
   };
 
   // ============================================
@@ -141,7 +161,7 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
         }
       ]
     },
-    
+
     // === SECTION VÉHICULES (MANAGERS) ===
     {
       id: 'vehicles-manager',
@@ -165,12 +185,12 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
           title: 'Comprendre les statuts',
           description: 'Les différents états d\'un véhicule.',
           steps: [
-            '🟢 En service : Véhicule opérationnel en circulation',
-            '🟠 Maintenance : Au garage pour entretien planifié',
-            '🔴 Immobilisé : En panne, ne peut pas rouler',
-            '⚪ Disponible : Prêt mais non assigné',
-            '🟡 Remplacement : Véhicule temporaire (location/prêt)'
-          ]
+            "En service : Véhicule opérationnel en circulation",
+            "Maintenance : Au garage pour entretien planifié",
+            "Immobilisé : En panne, ne peut pas rouler",
+            "Disponible : Prêt mais non assigné",
+            "Remplacement : Véhicule temporaire (location/prêt)",
+          ],
         },
         {
           title: 'Affecter un véhicule de remplacement',
@@ -197,8 +217,8 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
             'Sélectionnez le chauffeur dans la liste',
             'Confirmez l\'assignation'
           ]
-        }
-      ]
+        },
+      ],
     },
 
     // === SECTION MON VÉHICULE (CHAUFFEUR) ===
@@ -245,7 +265,7 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
       id: 'fuel-driver',
       title: 'Mes pleins de carburant',
       icon: Fuel,
-      color: 'text-amber-600 bg-amber-100',
+      color: "text-amber-800 bg-amber-100",
       roles: ['driver'],
       content: [
         {
@@ -260,10 +280,10 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
             'Prenez en photo le ticket et ajoutez-le'
           ],
           tips: [
-            '⚠️ Le ticket est OBLIGATOIRE pour justifier la dépense',
+            "Le ticket est OBLIGATOIRE pour justifier la dépense",
             'Faites vos pleins complets pour un meilleur suivi conso',
-            'Renseignez l\'AdBlue si votre véhicule en utilise'
-          ]
+            'Renseignez l\'AdBlue si votre véhicule en utilise',
+          ],
         },
         {
           title: 'Consulter mon historique',
@@ -273,8 +293,8 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
             'La consommation moyenne est calculée automatiquement',
             'Vous pouvez filtrer par période'
           ]
-        }
-      ]
+        },
+      ],
     },
 
     // === SECTION CARBURANT (MANAGER) ===
@@ -282,7 +302,7 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
       id: 'fuel-manager',
       title: 'Suivi carburant flotte',
       icon: Fuel,
-      color: 'text-amber-600 bg-amber-100',
+      color: "text-amber-800 bg-amber-100",
       roles: ['manager', 'admin'],
       content: [
         {
@@ -308,7 +328,7 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
             'Téléchargez au format Excel'
           ]
         }
-      ]
+      ],
     },
 
     // === SECTION MAINTENANCE (MÉCANICIEN) ===
@@ -410,15 +430,15 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
             'Votre véhicule est pré-sélectionné',
             'Décrivez le problème précisément',
             'Choisissez la priorité :',
-            '   🟢 Faible : peut attendre (voyant, bruit léger)',
-            '   🟠 Moyenne : à traiter rapidement (freins mous, fuite)',
-            '   🔴 Critique : danger immédiat (panne totale, accident)',
-            'Ajoutez des photos du problème'
+            "   Faible : peut attendre (voyant, bruit léger)",
+            "   Moyenne : à traiter rapidement (freins mous, fuite)",
+            "   Critique : danger immédiat (panne totale, accident)",
+            'Ajoutez des photos du problème',
           ],
           tips: [
-            '📷 Les photos accélèrent la prise en charge',
-            '🔴 Un incident critique alerte immédiatement le bureau'
-          ]
+            "Les photos accélèrent la prise en charge",
+            "Un incident critique alerte immédiatement le bureau",
+          ],
         },
         {
           title: 'Déclarer une immobilisation',
@@ -441,13 +461,13 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
           description: 'Voir l\'avancement de vos incidents.',
           steps: [
             'Vos incidents sont listés avec leur statut :',
-            '📝 Nouveau : Vient d\'être signalé',
-            '👀 Pris en compte : L\'atelier a vu',
-            '🔧 En réparation : Travaux en cours',
-            '✅ Résolu : Problème réglé'
-          ]
-        }
-      ]
+            "Nouveau : Vient d'être signalé",
+            "Pris en compte : L'atelier a vu",
+            "En réparation : Travaux en cours",
+            "Résolu : Problème réglé",
+          ],
+        },
+      ],
     },
 
     // === SECTION INCIDENTS (MANAGER/MECHANIC) ===
@@ -517,12 +537,12 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
           description: 'Voir le statut de vos demandes.',
           steps: [
             'Vos demandes sont listées avec leur statut :',
-            '⏳ En attente : En cours de validation',
-            '✅ Approuvée : Congé accordé',
-            '❌ Refusée : Non accordé (voir le motif)'
-          ]
-        }
-      ]
+            "En attente : En cours de validation",
+            "Approuvée : Congé accordé",
+            "Refusée : Non accordé (voir le motif)",
+          ],
+        },
+      ],
     },
 
     // === SECTION ABSENCES (MANAGER) ===
@@ -609,15 +629,15 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
           title: 'Comprendre les rôles',
           description: 'Chaque rôle a des permissions différentes.',
           steps: [
-            '👑 Président : Accès complet à tout',
-            '📊 Directeur : Gestion opérationnelle complète',
-            '📝 Secrétariat : Admin, documents, absences',
-            '🚗 Chauffeur : Son véhicule, carburant, incidents',
-            '🔧 Mécanicien : Maintenance, incidents',
-            '🎓 Stagiaire : Consultation limitée'
-          ]
-        }
-      ]
+            "Président : Accès complet à tout",
+            "Directeur : Gestion opérationnelle complète",
+            "Secrétariat : Admin, documents, absences",
+            "Chauffeur : Son véhicule, carburant, incidents",
+            "Mécanicien : Maintenance, incidents",
+            "Stagiaire : Consultation limitée",
+          ],
+        },
+      ],
     },
 
     // === SECTION MON COMPTE ===
@@ -654,7 +674,7 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
           ]
         }
       ]
-    }
+    },
   ];
 
   // Filtrer les sections selon le rôle de l'utilisateur
@@ -745,120 +765,102 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
   }, [userRoleTags]);
 
   // Filtrer selon la recherche
-  const filteredSections = guideSections.filter(section => {
+  const filteredSections = guideSections.filter((section) => {
     if (!searchTerm) return true;
     const term = searchTerm.toLowerCase();
-    return section.title.toLowerCase().includes(term) ||
+    return (
+      section.title.toLowerCase().includes(term) ||
       section.content.some(item => 
         item.title.toLowerCase().includes(term) ||
         item.description.toLowerCase().includes(term)
-      );
+      )
+    );
   });
 
-  const filteredFaq = faqItems.filter(item => {
+  const filteredFaq = faqItems.filter((item) => {
     if (!searchTerm) return true;
     const term = searchTerm.toLowerCase();
-    return item.question.toLowerCase().includes(term) ||
-      item.answer.toLowerCase().includes(term);
+    return (
+      item.question.toLowerCase().includes(term) ||
+      item.answer.toLowerCase().includes(term)
+    );
   });
 
   return (
     <div className="space-y-6 animate-fade-in pb-10">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-2xl p-8 text-white">
-        <div className="flex items-center justify-between flex-wrap gap-4 mb-4">
-          <div className="flex items-center gap-4">
-            <div className="bg-white/20 p-3 rounded-xl">
-              <HelpCircle size={32} />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold">Centre d'Aide</h1>
-              <p className="text-indigo-100">Guide personnalisé pour votre profil</p>
-            </div>
-          </div>
-          
-          {/* Badge profil */}
-          <div className="bg-white/20 px-4 py-2 rounded-xl flex items-center gap-2">
-            <Shield size={18} />
-            <span className="font-bold">{getProfileName()}</span>
-          </div>
-        </div>
-        
-        {/* Recherche */}
-        <div className="relative max-w-xl">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-indigo-300" size={20} />
-          <input
-            type="text"
-            aria-label="Rechercher dans l’aide"
-            placeholder="Rechercher dans l'aide..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-12 pr-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-indigo-200 focus:bg-white/20 focus:outline-none focus:ring-2 focus:ring-white/30"
-          />
-        </div>
+      <PageHeader
+        title="Aide"
+        description={`Guides et assistance pour ${getProfileName().toLocaleLowerCase("fr-FR")}.`}
+      />
+      <div className="relative max-w-xl">
+        <Search
+          aria-hidden="true"
+          className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"
+          size={18}
+        />
+        <input
+          type="search"
+          aria-label="Rechercher dans l’aide"
+          placeholder="Rechercher une action ou une question"
+          value={searchTerm}
+          onChange={(event) => setSearchTerm(event.target.value)}
+          className="ui-filter w-full !pl-10"
+        />
       </div>
+      <nav aria-label="Rubriques d’aide" className="flex flex-wrap gap-2">
+        {(
+          [
+            { id: 'guide', label: "Guides", icon: Book },
+            { id: 'faq', label: "Questions", icon: MessageSquare },
+            { id: 'contact', label: "Contact", icon: Mail },
+            { id: 'diagnostic', label: "Appareil", icon: Smartphone },
+          ] as const
+        ).map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setActiveTab(tab.id)}
+            aria-current={activeTab === tab.id ? "page" : undefined}
+            className={`ui-button ${activeTab === tab.id ? "ui-button-primary" : "ui-button-secondary"}`}
+          >
+            <tab.icon aria-hidden="true" size={18} />
+            {tab.label}
+          </button>
+        ))}
+      </nav>
 
-      {/* Tabs */}
-      <div className="flex gap-2 bg-white p-2 rounded-xl shadow-sm border border-slate-200">
-        <button
-          onClick={() => setActiveTab('guide')}
-          className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg font-bold transition-all ${
-            activeTab === 'guide'
-              ? 'bg-indigo-600 text-white'
-              : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          <Book size={18} />
-          Guide
-        </button>
-        <button
-          onClick={() => setActiveTab('faq')}
-          className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg font-bold transition-all ${
-            activeTab === 'faq'
-              ? 'bg-indigo-600 text-white'
-              : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          <MessageSquare size={18} />
-          FAQ
-        </button>
-        <button
-          onClick={() => setActiveTab('contact')}
-          className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg font-bold transition-all ${
-            activeTab === 'contact'
-              ? 'bg-indigo-600 text-white'
-              : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          <Mail size={18} />
-          Contact
-        </button>
-      </div>
-
-      {/* Contenu Guide */}
+      {/* Version */}
       {activeTab === 'guide' && (
         <div className="space-y-4">
           {filteredSections.length === 0 ? (
-            <div className="bg-white rounded-2xl p-12 text-center border border-slate-200">
-              <Search size={48} className="mx-auto text-slate-300 mb-4" />
-              <h3 className="text-lg font-bold text-slate-700">Aucun résultat</h3>
+            <div className="ui-panel p-6 text-center">
+              <Search size={24} className="mx-auto text-slate-300 mb-4" />
+              <h3 className="text-lg font-bold text-slate-700">
+                Aucun résultat
+              </h3>
               <p className="text-slate-500">Essayez avec d'autres mots-clés</p>
             </div>
           ) : (
-            filteredSections.map(section => (
-              <div key={section.id} className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-                {/* Section Header */}
+            filteredSections.map((section) => (
+              <div key={section.id} className="ui-panel overflow-hidden">
+                {/* Version */}
                 <button
                   onClick={() => setExpandedSection(expandedSection === section.id ? null : section.id)}
-                  className="w-full flex items-center justify-between p-5 hover:bg-slate-50 transition-colors"
+                  aria-expanded={expandedSection === section.id}
+                  className="ui-button ui-button-ghost w-full !justify-between !p-4 !border-0 !rounded-none gap-3"
                 >
-                  <div className="flex items-center gap-4">
-                    <div className={`p-3 rounded-xl ${section.color}`}>
-                      <section.icon size={24} />
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="text-brand-700 shrink-0">
+                      <section.icon aria-hidden="true" size={20} />
                     </div>
                     <div className="text-left">
-                      <h2 className="text-lg font-bold text-slate-800">{section.title}</h2>
-                      <p className="text-sm text-slate-500">{section.content.length} article(s)</p>
+                      <h2 className="text-lg font-bold text-slate-800">
+                        {section.title}
+                      </h2>
+                      <p className="text-sm text-slate-500">
+                        {section.content.length}{" "}
+                        {section.content.length > 1 ? "articles" : "article"}
+                      </p>
                     </div>
                   </div>
                   {expandedSection === section.id ? (
@@ -867,35 +869,43 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
                     <ChevronRight size={24} className="text-slate-400" />
                   )}
                 </button>
-                
-                {/* Section Content */}
+
+                {/* Version */}
                 {expandedSection === section.id && (
                   <div className="border-t border-slate-100 divide-y divide-slate-100">
                     {section.content.map((item, idx) => (
-                      <div key={idx} className="p-5 bg-slate-50/50">
+                      <div key={idx} className="p-4">
                         <div className="flex items-start gap-3 mb-3">
-                          <h3 className="font-bold text-slate-800">{item.title}</h3>
+                          <h3 className="font-bold text-slate-800">
+                            {item.title}
+                          </h3>
                           {item.new && (
-                            <span className="bg-green-100 text-green-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                              NOUVEAU
+                            <span className="bg-green-100 text-green-700 text-sm font-bold px-2 py-0.5 rounded-full">
+                              Nouveau
                             </span>
                           )}
                         </div>
-                        <p className="text-slate-600 mb-4">{item.description}</p>
-                        
+                        <p className="text-slate-600 mb-4">
+                          {item.description}
+                        </p>
+
                         {item.steps && (
-                          <div className="bg-white rounded-xl p-4 border border-slate-200 mb-3">
+                          <div className="mb-3">
                             <ol className="space-y-2">
                               {item.steps.map((step, stepIdx) => (
                                 <li key={stepIdx} className="flex items-start gap-3">
                                   {step.startsWith('   ') ? (
-                                    <span className="text-slate-600 pl-9">{step.trim()}</span>
+                                    <span className="text-slate-600 pl-9">
+                                      {step.trim()}
+                                    </span>
                                   ) : (
                                     <>
-                                      <span className="flex-shrink-0 w-6 h-6 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center text-xs font-bold">
+                                      <span className="flex-shrink-0 w-6 h-6 bg-brand-50 text-brand-800 rounded-full flex items-center justify-center text-sm font-bold">
                                         {stepIdx + 1}
                                       </span>
-                                      <span className="text-slate-700 pt-0.5">{step}</span>
+                                      <span className="text-slate-700 pt-0.5">
+                                        {step}
+                                      </span>
                                     </>
                                   )}
                                 </li>
@@ -903,14 +913,20 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
                             </ol>
                           </div>
                         )}
-                        
+
                         {item.tips && item.tips.length > 0 && (
-                          <div className="bg-amber-50 rounded-xl p-4 border border-amber-200">
-                            <p className="text-xs font-bold text-amber-700 uppercase mb-2">💡 Conseils</p>
+                          <div className="border-l-2 border-amber-300 pl-3 py-1">
+                            <p className="text-sm font-semibold text-amber-900 flex items-center gap-2 mb-2">
+                              <Lightbulb aria-hidden="true" size={16} />
+                              Conseils
+                            </p>
                             <ul className="space-y-1">
                               {item.tips.map((tip, tipIdx) => (
                                 <li key={tipIdx} className="text-amber-800 text-sm flex items-start gap-2">
-                                  <CheckCircle size={14} className="flex-shrink-0 mt-0.5 text-amber-600" />
+                                  <CheckCircle
+                                    size={14}
+                                    className="flex-shrink-0 mt-0.5 text-amber-800"
+                                  />
                                   {tip}
                                 </li>
                               ))}
@@ -927,13 +943,15 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
         </div>
       )}
 
-      {/* Contenu FAQ */}
+      {/* Version */}
       {activeTab === 'faq' && (
         <div className="bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100">
           {filteredFaq.length === 0 ? (
             <div className="p-12 text-center">
-              <Search size={48} className="mx-auto text-slate-300 mb-4" />
-              <h3 className="text-lg font-bold text-slate-700">Aucun résultat</h3>
+              <Search size={24} className="mx-auto text-slate-300 mb-4" />
+              <h3 className="text-lg font-bold text-slate-700">
+                Aucun résultat
+              </h3>
               <p className="text-slate-500">Essayez avec d'autres mots-clés</p>
             </div>
           ) : (
@@ -941,9 +959,11 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
               <div key={idx}>
                 <button
                   onClick={() => setExpandedFaq(expandedFaq === idx ? null : idx)}
-                  className="w-full flex items-center justify-between p-5 hover:bg-slate-50 transition-colors text-left"
+                  className="ui-button ui-button-secondary w-full justify-between text-left"
                 >
-                  <span className="font-bold text-slate-800 pr-4">{item.question}</span>
+                  <span className="font-bold text-slate-800 pr-4">
+                    {item.question}
+                  </span>
                   {expandedFaq === idx ? (
                     <ChevronDown size={20} className="flex-shrink-0 text-slate-400" />
                   ) : (
@@ -963,20 +983,25 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
         </div>
       )}
 
-      {/* Contenu Contact */}
+      {/* Version */}
       {activeTab === 'contact' && (
         <div className="grid md:grid-cols-2 gap-6">
           <SupportRequest />
 
-          {/* Infos de contact */}
+          {/* Version */}
           <div className="space-y-4">
             <div className="bg-white rounded-2xl p-6 border border-slate-200">
               <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
                 <Phone className="text-emerald-600" size={20} />
                 Par téléphone
               </h3>
-              <a href="tel:+262692303333" className="inline-flex min-h-11 items-center text-2xl font-bold text-slate-800 mb-2 underline">0692 303 333</a>
-              <p className="text-slate-600 text-sm">Horaires indiqués : lun–ven, 8 h–17 h, heure de La Réunion. Confirmez les disponibilités avec l’exploitation.</p>
+              <a href="tel:+262692303333" className="inline-flex min-h-11 items-center text-2xl font-bold text-slate-800 mb-2 underline">
+                0692 303 333
+              </a>
+              <p className="text-slate-600 text-sm">
+                Horaires indiqués : lun–ven, 8 h–17 h, heure de La Réunion.
+                Confirmez les disponibilités avec l’exploitation.
+              </p>
             </div>
 
             <div className="bg-white rounded-2xl p-6 border border-slate-200">
@@ -989,17 +1014,22 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
               </a>
             </div>
 
-            <div className="bg-gradient-to-r from-red-50 to-orange-50 rounded-2xl p-6 border border-red-100">
+            <div className="rounded-xl border-l-4 border-red-600 bg-red-50 p-4">
               <h3 className="text-lg font-bold text-red-800 mb-2">
-                🚨 Contact exploitation urgent
+                Contact exploitation urgent
               </h3>
               <p className="text-red-700 text-sm mb-4">
-                Pour tout problème critique concernant un transport<br/>
+                Pour tout problème critique concernant un transport
+                <br/>
                 en cours hors horaires de bureau.
               </p>
-              <div className="bg-white/80 rounded-xl p-4 text-center">
-                <p className="text-xs text-slate-500 mb-1">Numéro d'urgence exploitation</p>
-                <a href="tel:+262692826551" className="inline-flex min-h-11 items-center text-2xl font-bold text-red-700 underline">0692 826 551</a>
+              <div className="mt-3">
+                <p className="text-sm text-slate-600 mb-1">
+                  Numéro d'urgence exploitation
+                </p>
+                <a href="tel:+262692826551" className="inline-flex min-h-11 items-center text-2xl font-bold text-red-700 underline">
+                  0692 826 551
+                </a>
               </div>
             </div>
           </div>
@@ -1007,13 +1037,26 @@ const HelpCenter: React.FC<HelpCenterProps> = ({ currentUser }) => {
       )}
 
       <section className="space-y-4">
-        <button type="button" aria-expanded={activeTab === 'diagnostic'} onClick={() => setActiveTab(activeTab === 'diagnostic' ? 'guide' : 'diagnostic')} className="min-h-11 w-full rounded-xl border border-slate-300 bg-white p-3 font-bold text-slate-800">Diagnostic de l’appareil et séance terrain</button>
-        {activeTab === 'diagnostic' && <><DeviceDiagnostics /><UxMetricsPanel /></>}
+        <button
+          type="button"
+          aria-expanded={activeTab === 'diagnostic'}
+          onClick={() => setActiveTab(activeTab === 'diagnostic' ? 'guide' : 'diagnostic')}
+          className="ui-button ui-button-secondary w-full"
+        >
+          Diagnostic de l’appareil et séance terrain
+        </button>
+        {activeTab === 'diagnostic' && (
+          <>
+            <DeviceDiagnostics />
+            <UxMetricsPanel />
+          </>
+        )}
       </section>
 
       {/* Version */}
       <div className="text-center text-sm text-slate-400">
-        FleetGenius v{__APP_VERSION__} • Guide adapté à votre profil {getProfileName()}
+        FleetGenius v{__APP_VERSION__} • Guide adapté à votre profil{" "}
+        {getProfileName()}
       </div>
     </div>
   );

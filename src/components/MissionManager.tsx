@@ -51,6 +51,7 @@ import { ActivityAction } from '../types';
 import { dispatchMissionsCF } from '../services/cloudFunctions';
 import { usePermissions, Permission } from '../usePermissions';
 import Modal from './shared/Modal';
+import PageHeader from './shared/PageHeader';
 import MissionStopFields from './MissionStopFields';
 import OfficeSavedViews from './OfficeSavedViews';
 import { startUxTask } from '../utils/uxMetrics';
@@ -873,11 +874,16 @@ const MissionManager: React.FC<MissionManagerProps> = ({
       ...(canManageHubs ? [{ id: 'hubs', label: 'Configurer les hubs', icon: Building2 }] : []),
     ];
     return <>
-      <label className="mb-3 block sm:hidden text-sm font-semibold text-slate-700">Vue de l’exploitation
-        <select value={activeTab} onChange={event => setActiveTab(event.target.value as TabType)} className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-base font-medium">
-          {tabs.map(tab => <option key={tab.id} value={tab.id}>{tab.label}</option>)}
-        </select>
-      </label>
+      <div className="mb-2 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-end gap-2 sm:flex sm:flex-wrap">
+        <label className="min-w-0 text-sm font-semibold text-slate-700 sm:hidden">Vue
+          <select aria-label="Vue de l’exploitation" value={activeTab} onChange={event => setActiveTab(event.target.value as TabType)} className="mt-1 min-h-11 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-2 text-base font-normal">
+            {tabs.map(tab => <option key={tab.id} value={tab.id}>{tab.label}</option>)}
+          </select>
+        </label>
+        <label htmlFor="office-working-date" className="min-w-0 text-sm font-semibold text-slate-700 sm:flex sm:items-center sm:gap-2">Date de travail
+          <input type="date" id="office-working-date" aria-label="Date des tournées" value={selectedDate} onChange={event => setSelectedDate(event.target.value)} className="mt-1 min-h-11 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-2 text-base sm:mt-0 sm:w-auto" />
+        </label>
+      </div>
       <div className="hidden sm:flex border-b border-slate-200 mb-3 overflow-x-auto" aria-label="Vues de l’exploitation">
         {tabs.map(tab => <button type="button" key={tab.id} onClick={() => setActiveTab(tab.id as TabType)} aria-current={activeTab === tab.id ? 'page' : undefined}
           className={`flex items-center gap-2 min-h-11 px-4 py-3 font-medium border-b-2 transition-colors whitespace-nowrap ${activeTab === tab.id ? 'border-brand-700 text-brand-700' : 'border-transparent text-slate-600 hover:text-slate-800'}`}>
@@ -926,7 +932,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
         <div className="flex justify-end">
           <button
             onClick={() => setShowImportModal(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-brand-500 text-white rounded-xl font-medium hover:bg-brand-600 transition-colors"
+            className="ui-button ui-button-primary flex items-center gap-2"
           >
             <Upload size={18} />
             Importer un fichier
@@ -948,58 +954,58 @@ const MissionManager: React.FC<MissionManagerProps> = ({
         ) : (
           <div className="divide-y divide-slate-100">
             {importBatches.map(batch => (
-              <div
+              <button type="button"
                 key={batch.id}
                 onClick={() => openBatch(batch)}
-                title="Cliquer pour revoir les colis importés"
-                className="p-4 hover:bg-slate-50 transition-colors cursor-pointer"
+                aria-label={`Consulter les colis de l’import ${batch.fileName}`}
+                className="min-h-11 w-full p-4 text-left hover:bg-slate-50 focus-visible:outline-blue-700"
               >
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center">
+                <span className="flex flex-wrap items-start justify-between gap-3">
+                  <span className="flex min-w-0 items-center gap-3">
+                    <span className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center">
                       <FileSpreadsheet size={20} className="text-slate-600" />
-                    </div>
-                    <div>
-                      <p className="font-medium text-slate-800">{batch.fileName}</p>
-                      <p className="text-sm text-slate-500">
+                    </span>
+                    <span>
+                      <span className="block min-w-0 break-words font-medium text-slate-800">{batch.fileName}</span>
+                      <span className="block text-sm text-slate-500">
                         {batch.clientName} • {new Date(batch.importedAt).toLocaleString('fr-FR')}
-                      </p>
-                    </div>
-                  </div>
+                      </span>
+                    </span>
+                  </span>
 
-                  <div className="text-right">
-                    <div className="flex items-center gap-2">
+                  <span className="text-right">
+                    <span className="flex items-center gap-2">
                       <span className="text-sm font-medium text-green-600">
-                        {batch.successCount} ✓
+                        {batch.successCount} réussis
                       </span>
                       {batch.errorCount > 0 && (
                         <span className="text-sm font-medium text-red-600">
-                          {batch.errorCount} ✗
+                          {batch.errorCount} erreurs
                         </span>
                       )}
-                    </div>
-                    <p className="text-xs text-slate-500 mt-1">
+                    </span>
+                    <span className="block text-sm text-slate-500 mt-1">
                       {batch.totalRows} lignes
-                    </p>
-                  </div>
-                </div>
+                    </span>
+                  </span>
+                </span>
 
                 {/* Répartition par zone */}
-                <div className="mt-3 flex flex-wrap gap-2">
+                <span className="mt-3 flex flex-wrap gap-2">
                   {batch.zoneBreakdown.map(zb => {
                     const colors = ZONE_COLORS[zb.zone];
                     return (
                       <span
                         key={zb.zone}
-                        className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium ${colors.bg} ${colors.text}`}
+                        className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-sm font-medium ${colors.bg} ${colors.text}`}
                       >
                         {zb.zone}: {zb.count}
-                        {zb.dispatched && <CheckCircle size={12} />}
+                        {zb.dispatched && <CheckCircle size={16} />}
                       </span>
                     );
                   })}
-                </div>
-              </div>
+                </span>
+              </button>
             ))}
           </div>
         )}
@@ -1007,12 +1013,12 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
       {/* Modal consultation d'un lot d'import */}
       {viewingBatch && (
-        <Modal isOpen onClose={() => { batchRequest.current += 1; setViewingBatch(null); }} title={viewingBatch.fileName} subtitle={`${viewingBatch.clientName} · ${viewingBatch.totalRows} lignes`} size="3xl" footer={<p className="text-sm text-slate-600">{batchPackages.length} colis retrouvés · {viewingBatch.successCount} réussis / {viewingBatch.totalRows} lignes</p>}>
+        <Modal mobileFullscreen isOpen onClose={() => { batchRequest.current += 1; setViewingBatch(null); }} title={viewingBatch.fileName} subtitle={`${viewingBatch.clientName} · ${viewingBatch.totalRows} lignes`} size="3xl" footer={<p className="text-sm text-slate-600">{batchPackages.length} colis retrouvés · {viewingBatch.successCount} réussis / {viewingBatch.totalRows} lignes</p>}>
             {/* Erreurs du lot */}
             {viewingBatch.errors && viewingBatch.errors.length > 0 && (
               <div className="mx-4 mt-3 p-2 bg-red-50 border border-red-200 rounded-lg shrink-0">
-                <p className="text-xs font-bold text-red-700 mb-1">{viewingBatch.errors.length} ligne(s) en erreur (non importées) :</p>
-                <ul className="text-[11px] text-red-600 list-disc list-inside max-h-20 overflow-y-auto">
+                <p className="text-sm font-bold text-red-700 mb-1">{viewingBatch.errors.length} ligne(s) en erreur (non importées) :</p>
+                <ul className="text-sm text-red-600 list-disc list-inside max-h-20 overflow-y-auto">
                   {viewingBatch.errors.slice(0, 20).map((e, i) => (
                     <li key={i}>{e.row > 0 ? `Ligne ${e.row}: ` : ''}{e.message}</li>
                   ))}
@@ -1022,12 +1028,12 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
             {/* Contenu : colis importés */}
             <div className="overflow-auto p-4">
-              {batchError ? (<div role="alert" className="rounded-lg bg-red-50 p-3 text-red-900"><p>{batchError}</p><button type="button" onClick={() => void openBatch(viewingBatch)} className="mt-2 min-h-11 rounded-lg border border-red-300 px-3">Réessayer</button></div>) : loadingBatch ? (
+              {batchError ? (<div role="alert" className="rounded-lg bg-red-50 p-3 text-red-900"><p>{batchError}</p><button type="button" onClick={() => void openBatch(viewingBatch)} className="ui-button ui-button-secondary mt-2 min-h-11 border">Réessayer</button></div>) : loadingBatch ? (
                 <div className="py-10 text-center text-slate-400"><Loader2 size={24} className="animate-spin mx-auto mb-2" /> Chargement des colis…</div>
               ) : batchPackages.length === 0 ? (
                 <div className="py-10 text-center text-slate-400">Aucun colis rattaché à ce lot.</div>
               ) : (
-                <table className="w-full text-xs">
+                <table className="ui-table w-full text-sm">
                   <thead>
                     <tr className="bg-slate-50 border-b border-slate-200 text-left">
                       <th className="px-2 py-2 font-bold text-slate-500">N° Colis</th>
@@ -1050,8 +1056,8 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                           <td className="px-2 py-2">{p.contactName}</td>
                           <td className="px-2 py-2 text-slate-500">{p.address}</td>
                           <td className="px-2 py-2 text-slate-500">{p.postalCode} {p.city}</td>
-                          <td className="px-2 py-2 text-center"><span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${zc.bg} ${zc.text}`}>{p.zone}</span></td>
-                          <td className="px-2 py-2 text-center"><span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${sc.bg} ${sc.text}`}>{packageStatusLabel(p.status)}</span></td>
+                          <td className="px-2 py-2 text-center"><span className={`px-1.5 py-0.5 rounded text-sm font-bold ${zc.bg} ${zc.text}`}>{p.zone}</span></td>
+                          <td className="px-2 py-2 text-center"><span className={`px-1.5 py-0.5 rounded text-sm font-bold ${sc.bg} ${sc.text}`}>{packageStatusLabel(p.status)}</span></td>
                         </tr>
                       );
                     })}
@@ -1065,12 +1071,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
     </div>
   );
 
-  // Render Missions
-  const renderMissions = () => (
-    <div className="space-y-6">
-      {/* Filtres */}
-      <details className="rounded-xl border border-slate-200 bg-white">
-        <summary className="min-h-11 cursor-pointer px-3 py-3 text-sm font-semibold">Filtres des tournées{missionSearch || selectedZone !== 'all' ? ' — actifs' : ''}</summary>
+  const renderMissionFilters = () => (
         <div className="flex flex-col md:flex-row gap-3 p-3 pt-0">
         <div className="flex-1 relative">
           <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -1095,11 +1096,13 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           ))}
         </select>
 
-        <button type="button" onClick={() => updateUrlParams({ missionQ: null, zone: null, mission: null })} className="min-h-11 rounded-lg border border-slate-300 px-3 text-sm">Réinitialiser les filtres</button>
+        <button type="button" onClick={() => updateUrlParams({ missionQ: null, zone: null, mission: null })} className="ui-button ui-button-secondary min-h-11 border text-sm">Réinitialiser les filtres</button>
         </div>
-      </details>
+  );
 
-      {renderSavedViews()}
+  // Render Missions
+  const renderMissions = () => (
+    <div className="space-y-6">
       {/* Liste des missions */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         {filteredMissions.length === 0 ? (
@@ -1134,7 +1137,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                           </div>
                           <p className="mt-1 break-words text-sm text-slate-600">{mission.vehiclePlate || 'Pas de véhicule'} · {mission.hubName}</p>
                           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-sm text-slate-700">
-                            <span>{mission.stops.length} arrêts</span><span>{mission.totalPackages} colis</span>
+                            <span>{mission.stops.length} arrêt{mission.stops.length > 1 ? 's' : ''}</span><span>{mission.totalPackages} colis</span>
                             {mission.totalDistance != null && <span>{formatDistance(mission.totalDistance)}</span>}
                             {mission.estimatedDuration != null && <span>{formatDuration(mission.estimatedDuration)}</span>}
                           </div>
@@ -1150,7 +1153,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       <a href={`/missions?tab=missions&date=${encodeURIComponent(mission.date)}&mission=${encodeURIComponent(mission.id)}`} className="min-h-11 inline-flex items-center px-2 text-sm text-blue-800 underline">Lien vers cette tournée</a>
-                      <button type="button" onClick={() => handlePrintMission(mission)} className="ml-auto min-h-11 inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 text-sm text-slate-700" title="Imprimer la feuille de route"><Printer size={18} />Imprimer</button>
+                      <button type="button" onClick={() => handlePrintMission(mission)} className="ui-button ui-button-secondary ml-auto min-h-11 inline-flex items-center gap-2 border text-sm" title="Imprimer la feuille de route"><Printer size={18} />Imprimer</button>
                     </div>
                   </div>
 
@@ -1178,7 +1181,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                                   e.stopPropagation();
                                   openNewStop(mission);
                                 }}
-                                className="min-h-11 flex items-center gap-1.5 px-3 py-1.5 bg-green-50 border border-green-200 rounded-lg text-green-700 hover:bg-green-100 hover:border-green-300 transition-colors text-xs font-medium"
+                                className="ui-button ui-button-primary min-h-11 flex items-center gap-1.5 border text-sm"
                                 title="Ajouter un arrêt"
                               >
                                 <Plus size={14} />
@@ -1191,7 +1194,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                                   e.stopPropagation();
                                   setReorderingMission(mission);
                                 }}
-                                className="min-h-11 flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 hover:bg-amber-100 hover:border-amber-300 transition-colors text-xs font-medium"
+                                className="ui-button ui-button-secondary min-h-11 flex items-center gap-1.5 border text-sm"
                                 title="Réordonner les arrêts"
                               >
                                 <GripVertical size={14} />
@@ -1200,7 +1203,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                             )}
                             <button
                               onClick={(e) => { e.stopPropagation(); handlePrintMission(mission); }}
-                              className="min-h-11 flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 hover:border-blue-300 transition-colors text-xs font-medium"
+                              className="ui-button ui-button-secondary min-h-11 flex items-center gap-1.5 border text-sm"
                               title="Imprimer la feuille de route"
                             >
                               <Printer size={14} />
@@ -1213,11 +1216,11 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
                       {/* Départ Hub */}
                       <div className="px-4 py-2.5 flex items-center gap-3 border-b border-slate-200">
-                        <div className="flex items-center justify-center w-8 h-8 rounded-full bg-blue-100 text-blue-600 text-xs font-bold">
+                        <div className="flex items-center justify-center w-8 h-8 rounded-full bg-blue-100 text-blue-600 text-sm font-bold">
                           <Building2 size={16} />
                         </div>
                         <div className="flex-1">
-                          <p className="text-sm font-semibold text-blue-700">🏁 Départ — {mission.hubName}</p>
+                          <p className="text-sm font-semibold text-blue-700">Départ — {mission.hubName}</p>
                         </div>
                       </div>
 
@@ -1242,7 +1245,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                             <div className="flex flex-wrap items-start gap-3">
                               {/* Numéro du stop */}
                               <div className="flex flex-col items-center">
-                                <div className={`flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold ${
+                                <div className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold ${
                                   stop.status === 'Terminé' ? 'bg-green-100 text-green-700' :
                                   stop.status === 'Échec' ? 'bg-red-100 text-red-700' :
                                   'bg-slate-200 text-slate-600'
@@ -1261,7 +1264,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                                   <p className="min-w-0 break-words font-semibold text-slate-800">
                                     {stop.contactName}
                                   </p>
-                                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                                  <span className={`px-1.5 py-0.5 rounded text-sm font-medium ${
                                     stop.status === 'Terminé' ? 'bg-green-100 text-green-700' :
                                     stop.status === 'Échec' ? 'bg-red-100 text-red-700' :
                                     stop.status === 'Passé' ? 'bg-amber-100 text-amber-700' :
@@ -1272,7 +1275,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                                   </span>
                                 </div>
                                 <p className="text-sm text-slate-600">
-                                  <MapPin size={12} className="inline mr-1" />
+                                  <MapPin size={16} className="inline mr-1" />
                                   {stop.address}, {stop.postalCode} {stop.city}
                                 </p>
                                 <div className="flex flex-wrap items-center gap-x-3 gap-y-2 mt-1 text-sm text-slate-600">
@@ -1297,17 +1300,17 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                                   )}
                                 </div>
                                 {stop.timeWindowStart && stop.timeWindowEnd && (
-                                  <p className="text-xs text-blue-600 mt-1">
-                                    🕐 Créneau: {stop.timeWindowStart} - {stop.timeWindowEnd}
+                                  <p className="text-sm text-blue-600 mt-1">
+                                    Créneau : {stop.timeWindowStart} - {stop.timeWindowEnd}
                                   </p>
                                 )}
                                 {stop.notes && (
                                   <p className="text-sm text-amber-800 mt-1 italic">
-                                    📝 {stop.notes}
+                                    Notes : {stop.notes}
                                   </p>
                                 )}
                                 {stop.distanceFromPrevious != null && stop.distanceFromPrevious > 0 && (
-                                  <p className="text-xs text-slate-400 mt-1">
+                                  <p className="text-sm text-slate-400 mt-1">
                                     ↳ {formatDistance(stop.distanceFromPrevious)} depuis l’arrêt précédent
                                     {stop.durationFromPrevious ? ` (~${formatDuration(stop.durationFromPrevious)})` : ''}
                                   </p>
@@ -1323,14 +1326,14 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                                   return stopPkg?.pod ? (
                                     <button
                                       onClick={(e) => { e.stopPropagation(); setViewingPOD({ pod: stopPkg.pod!, pkg: stopPkg }); }}
-                                      className="inline-flex items-center gap-1.5 mt-2 px-2.5 py-1 bg-emerald-100 text-emerald-700 rounded-lg text-xs font-bold hover:bg-emerald-200 transition-colors cursor-pointer"
+                                      className="ui-button ui-button-primary inline-flex items-center gap-1.5 mt-2 text-sm cursor-pointer"
                                     >
-                                      {stopPkg.pod?.signatureUrl ? '✍️' : '📷'}
+                                      <Eye size={18} />
                                       {stopPkg.pod?.signatureUrl ? 'Signé' : 'Photo'} — Voir la preuve
                                     </button>
                                   ) : (
-                                    <span className="inline-flex items-center gap-1 mt-2 px-2 py-0.5 bg-amber-50 text-amber-800 rounded text-[10px] font-medium">
-                                      ⚠️ POD manquante
+                                    <span className="inline-flex items-center gap-1 mt-2 px-2 py-0.5 bg-amber-50 text-amber-800 rounded text-sm font-medium">
+                                      Preuve de livraison manquante
                                     </span>
                                   );
                                 })()}
@@ -1339,8 +1342,8 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                                     stop.packageIds?.includes(p.id)
                                   );
                                   return (
-                                    <span className="inline-flex items-center gap-1 mt-2 px-2 py-0.5 bg-red-50 text-red-500 rounded text-[10px] font-medium">
-                                      ❌ {stop.completionTime ? new Date(stop.completionTime).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : 'Échec'}
+                                    <span className="inline-flex items-center gap-1 mt-2 px-2 py-0.5 bg-red-50 text-red-500 rounded text-sm font-medium">
+                                      Échec · {stop.completionTime ? new Date(stop.completionTime).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : 'Échec'}
                                     </span>
                                   );
                                 })()}
@@ -1353,7 +1356,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                                   <button
                                     onClick={(e) => { e.stopPropagation(); handleMoveStopUp(mission, stop); }}
                                     disabled={isSavingPkg || index === 0}
-                                    className="min-h-11 min-w-11 inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white hover:bg-slate-200 text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                                    className="ui-button ui-button-secondary min-h-11 min-w-11 inline-flex items-center justify-center border disabled:opacity-40 disabled:cursor-not-allowed"
                                     aria-label="Monter" title="Monter"
                                   >
                                     <ArrowUp size={14} />
@@ -1362,7 +1365,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                                   <button
                                     onClick={(e) => { e.stopPropagation(); handleMoveStopDown(mission, stop); }}
                                     disabled={isSavingPkg || index === sortedStops.length - 1}
-                                    className="min-h-11 min-w-11 inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white hover:bg-slate-200 text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                                    className="ui-button ui-button-secondary min-h-11 min-w-11 inline-flex items-center justify-center border disabled:opacity-40 disabled:cursor-not-allowed"
                                     aria-label="Descendre" title="Descendre"
                                   >
                                     <ArrowDown size={14} />
@@ -1374,7 +1377,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                                       setEditStopForm(createStopForm(stop)); setStopErrors({}); setStopSaveError('');
                                       setEditingStop({ mission, stop });
                                     }}
-                                    className="min-h-11 min-w-11 inline-flex items-center justify-center rounded-lg border border-blue-300 bg-blue-50 hover:bg-blue-100 text-blue-800"
+                                    className="ui-button ui-button-secondary min-h-11 min-w-11 inline-flex items-center justify-center border"
                                     aria-label="Modifier" title="Modifier"
                                   >
                                     <Edit size={14} />
@@ -1382,7 +1385,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                                   {/* Supprimer */}
                                   <button
                                     onClick={(e) => { e.stopPropagation(); setStopSaveError(''); setDeletingStop({ mission, stop }); }}
-                                    className="ml-auto sm:ml-0 sm:mt-3 min-h-11 min-w-11 inline-flex items-center justify-center rounded-lg border border-red-300 bg-red-50 hover:bg-red-100 text-red-800"
+                                    className="ui-button ui-button-secondary ml-auto sm:ml-0 sm:mt-3 min-h-11 min-w-11 inline-flex items-center justify-center border"
                                     aria-label="Supprimer" title="Supprimer"
                                   >
                                     <Trash2 size={14} />
@@ -1396,11 +1399,11 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
                       {/* Retour Hub */}
                       <div className="px-4 py-2.5 flex items-center gap-3">
-                        <div className="flex items-center justify-center w-8 h-8 rounded-full bg-blue-100 text-blue-600 text-xs font-bold">
+                        <div className="flex items-center justify-center w-8 h-8 rounded-full bg-blue-100 text-blue-600 text-sm font-bold">
                           <Building2 size={16} />
                         </div>
                         <div className="flex-1">
-                          <p className="text-sm font-semibold text-blue-700">🏁 Retour — {mission.hubName}</p>
+                          <p className="text-sm font-semibold text-blue-700">Retour — {mission.hubName}</p>
                         </div>
                       </div>
                     </div>
@@ -1469,8 +1472,8 @@ const MissionManager: React.FC<MissionManagerProps> = ({
         { status: PackageStatus.SORTED, label: '↩ Trié', color: 'bg-purple-100 text-purple-700' },
       ],
       [PackageStatus.IN_DELIVERY]: [
-        { status: PackageStatus.DELIVERED, label: '✅ Livré', color: 'bg-green-100 text-green-700' },
-        { status: PackageStatus.FAILED, label: '❌ Échec', color: 'bg-red-100 text-red-700' },
+        { status: PackageStatus.DELIVERED, label: 'Livré', color: 'bg-green-100 text-green-700' },
+        { status: PackageStatus.FAILED, label: 'Échec', color: 'bg-red-100 text-red-700' },
       ],
       [PackageStatus.FAILED]: [
         { status: PackageStatus.PENDING, label: '↩ Remettre en attente', color: 'bg-slate-100 text-slate-700' },
@@ -1587,27 +1590,27 @@ const MissionManager: React.FC<MissionManagerProps> = ({
             ? <>Suivi global — <b>{colisView.length}</b> colis (toutes dates)</>
             : <>Colis du <b>{new Date(selectedDate).toLocaleDateString('fr-FR')}</b> — <b>{colisView.length}</b></>}
         </p>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={handleResyncStatuses}
             disabled={isResyncing}
             title="Vérifie les statuts et les rétablit uniquement à partir d’une preuve de remise existante"
-            className="px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition-colors flex items-center gap-1.5 disabled:opacity-50"
+            className="ui-button ui-button-secondary text-sm border flex items-center gap-1.5 disabled:opacity-50"
           >
-            <RefreshCw size={13} className={isResyncing ? 'animate-spin' : ''} />
+            <RefreshCw size={16} className={isResyncing ? 'animate-spin' : ''} />
             {isResyncing ? 'Resync…' : 'Resynchroniser les statuts'}
           </button>
           <button
-            onClick={() => setColisAllDates(v => !v)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${colisAllDates ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-slate-600 border-slate-300'}`}
+            onClick={() => setColisAllDates(v => !v)} aria-pressed={colisAllDates}
+            className="ui-filter"
           >
-            {colisAllDates ? '🌐 Toutes les dates' : '📅 Date sélectionnée'}
+            <Calendar size={18} />{colisAllDates ? 'Toutes les dates' : 'Date sélectionnée'}
           </button>
         </div>
       </div>
 
       {/* Stats colis — cartes cliquables pour filtrer la liste par statut */}
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+      <div className="flex flex-wrap gap-2">
         {([
           { status: 'all' as const, label: 'Tous', bg: 'bg-slate-100', text: 'text-slate-700' },
           { status: PackageStatus.PENDING, label: 'En attente' },
@@ -1629,12 +1632,9 @@ const MissionManager: React.FC<MissionManagerProps> = ({
             <button
               key={status}
               onClick={() => setPkgStatusFilter(prev => prev === status ? 'all' : status)}
-              className={`${colors.bg} rounded-xl p-4 text-left transition-all hover:shadow-md ${
-                isActive ? 'ring-2 ring-brand-500 ring-offset-1' : 'ring-0'
-              }`}
+              aria-pressed={isActive} className="ui-filter"
             >
-              <p className={`text-2xl font-bold ${colors.text}`}>{count}</p>
-              <p className={`text-sm ${colors.text} opacity-80`}>{label}</p>
+              <span>{label}</span><span className="font-semibold tabular-nums">{count}</span>
             </button>
           );
         })}
@@ -1648,18 +1648,17 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           </span>
           <button
             onClick={() => setPkgStatusFilter('all')}
-            className="ml-auto text-xs font-bold text-brand-600 hover:underline"
+            className="ui-button ui-button-secondary ml-auto text-sm hover:underline"
           >
             Effacer le filtre
           </button>
         </div>
       )}
 
-      {renderSavedViews()}
       <div className="flex flex-wrap items-center gap-2 text-sm text-slate-700" aria-label="Filtres actifs des colis">
         <span>Zone : {selectedZone === 'all' ? 'toutes' : selectedZone}</span><span>· {colisAllDates ? 'Toutes les dates' : 'Colis actifs et date sélectionnée'}</span>
         {searchTerm && <span className="break-all">· Recherche : {searchTerm}</span>}
-        <button type="button" onClick={() => updateUrlParams({ q: null, zone: null, status: null, scope: null, sort: null, dir: null, page: null, package: null, edit: null })} className="min-h-11 rounded-lg border border-slate-300 px-3">Réinitialiser la vue</button>
+        <button type="button" onClick={() => updateUrlParams({ q: null, zone: null, status: null, scope: null, sort: null, dir: null, page: null, package: null, edit: null })} className="ui-button ui-button-secondary min-h-11 border">Réinitialiser la vue</button>
       </div>
       {/* Recherche */}
       <div className="relative">
@@ -1677,16 +1676,16 @@ const MissionManager: React.FC<MissionManagerProps> = ({
       <nav aria-label="Pagination des colis" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3 text-sm">
         <div>
           <p aria-live="polite">{filteredPackages.length ? packagePageStart + 1 : 0}–{Math.min(packagePageStart + packagePageSize, filteredPackages.length)} sur <strong>{filteredPackages.length}</strong> colis filtrés</p>
-          <p className="text-xs text-slate-500">La case d’en-tête sélectionne les colis disponibles de cette page. La sélection est conservée entre les pages.</p>
+          <p className="text-sm text-slate-500">La case d’en-tête sélectionne les colis disponibles de cette page. La sélection est conservée entre les pages.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <label htmlFor="package-page-size">Par page</label>
           <select id="package-page-size" value={packagePageSizeParam} onChange={event => updateUrlParams({ pageSize: event.target.value === '50' ? null : event.target.value, page: null })} className="rounded-lg border border-slate-300 p-2">
             <option value="50">50</option><option value="100">100</option>
           </select>
-          <button type="button" aria-label="Page précédente de colis" disabled={packagePage <= 1} onClick={() => setPackagePage(String(packagePage - 1))} className="rounded-lg border border-slate-300 p-2 disabled:opacity-40">Précédente</button>
+          <button type="button" aria-label="Page précédente de colis" disabled={packagePage <= 1} onClick={() => setPackagePage(String(packagePage - 1))} className="ui-button ui-button-secondary border disabled:opacity-40">Précédente</button>
           <span>Page {packagePage} / {packagePageCount}</span>
-          <button type="button" aria-label="Page suivante de colis" disabled={packagePage >= packagePageCount} onClick={() => setPackagePage(String(packagePage + 1))} className="rounded-lg border border-slate-300 p-2 disabled:opacity-40">Suivante</button>
+          <button type="button" aria-label="Page suivante de colis" disabled={packagePage >= packagePageCount} onClick={() => setPackagePage(String(packagePage + 1))} className="ui-button ui-button-secondary border disabled:opacity-40">Suivante</button>
         </div>
       </nav>
       {selectedPackageIds.size > 0 && (
@@ -1698,7 +1697,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
             </span>
             <button
               onClick={() => setSelectedPackageIds(new Set())}
-              className="text-xs text-brand-600 hover:underline"
+              className="ui-button ui-button-secondary text-sm hover:underline"
             >
               Tout désélectionner
             </button>
@@ -1718,7 +1717,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                 setQuickDispatchTime(`${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`);
                 setShowQuickDispatch(true);
               }}
-              className="min-h-11 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-gradient-to-r from-brand-500 to-blue-500 text-white hover:from-brand-600 hover:to-blue-600 transition-all shadow-sm"
+              className="ui-button ui-button-primary min-h-11 flex items-center gap-1.5 text-sm"
             >
               <Zap size={14} />
               Affecter
@@ -1726,7 +1725,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
             <div className="w-px h-5 bg-slate-300 mx-1" />
 
-            <span className="text-xs text-slate-500">Statut :</span>
+            <span className="text-sm text-slate-500">Statut :</span>
             {[
               { status: PackageStatus.PENDING, label: 'En attente', color: 'bg-slate-100 text-slate-700' },
               { status: PackageStatus.AT_HUB, label: 'Au hub', color: 'bg-indigo-100 text-indigo-700' },
@@ -1759,7 +1758,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                   if (actionIds.length > failedIds.length) notifySuccess(`${actionIds.length - failedIds.length} colis modifiés.`);
                   setIsChangingStatus(false);
                 }}
-                className={`px-2.5 py-1 rounded-lg text-xs font-medium ${color} hover:opacity-80 transition-opacity disabled:opacity-50`}
+                className={`ui-button ui-button-secondary text-sm ${color} hover:opacity-80 disabled:opacity-50 `}
               >
                 {label}
               </button>
@@ -1771,7 +1770,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
       {/* Liste des colis */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full">
+          <table className="ui-table w-full">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
                 <th className="px-2 py-3 text-center">
@@ -1791,24 +1790,24 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                   const SortTh = ({ label, k, align = 'left' }: { label: string; k: PkgSortKey; align?: 'left' | 'center' }) => (
                     <th
                       aria-sort={pkgSort.key === k ? (pkgSort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
-                      className={`px-3 py-3 text-${align} text-xs font-bold text-slate-500 uppercase cursor-pointer select-none hover:text-slate-700`}
+                      className={`px-3 py-3 text-${align} text-sm font-bold text-slate-500 uppercase cursor-pointer select-none hover:text-slate-700`}
                     >
-                      <button type="button" onClick={() => togglePkgSort(k)} className="min-h-11 text-inherit font-inherit uppercase" aria-label={`Trier par ${label}`}>{label}{pkgSort.key === k ? (pkgSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}</button>
+                      <button type="button" onClick={() => togglePkgSort(k)} className="ui-button ui-button-secondary min-h-11 text-inherit uppercase" aria-label={`Trier par ${label}`}>{label}{pkgSort.key === k ? (pkgSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}</button>
                     </th>
                   );
                   return (
                     <>
                       <SortTh label="N° Commande" k="orderNumber" />
                       <SortTh label="Destinataire" k="contactName" />
-                      <th className="px-3 py-3 text-left text-xs font-bold text-slate-500 uppercase">Adresse</th>
+                      <th className="px-3 py-3 text-left text-sm font-bold text-slate-500 uppercase">Adresse</th>
                       <SortTh label="Zone" k="zone" align="center" />
-                      <th className="px-2 py-3 text-center text-xs font-bold text-slate-500 uppercase">Créneau début</th>
-                      <th className="px-2 py-3 text-center text-xs font-bold text-slate-500 uppercase">Créneau fin</th>
+                      <th className="px-2 py-3 text-center text-sm font-bold text-slate-500 uppercase">Créneau début</th>
+                      <th className="px-2 py-3 text-center text-sm font-bold text-slate-500 uppercase">Créneau fin</th>
                       <SortTh label="Statut" k="status" align="center" />
                       <SortTh label="Importé le" k="createdAt" align="center" />
-                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-500 uppercase">Affecté à</th>
-                      <th className="px-2 py-3 text-center text-xs font-bold text-slate-500 uppercase">Actions</th>
-                      <th className="px-2 py-3 text-center text-xs font-bold text-slate-500 uppercase">Gérer</th>
+                      <th className="px-3 py-3 text-center text-sm font-bold text-slate-500 uppercase">Affecté à</th>
+                      <th className="px-2 py-3 text-center text-sm font-bold text-slate-500 uppercase">Actions</th>
+                      <th className="px-2 py-3 text-center text-sm font-bold text-slate-500 uppercase">Gérer</th>
                     </>
                   );
                 })()}
@@ -1870,25 +1869,25 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                             {pkg.orderNumber}
                           </span>
                           {pkg.externalId && (
-                            <p className="font-mono text-[10px] text-slate-400">{pkg.externalId}</p>
+                            <p className="font-mono text-sm text-slate-400">{pkg.externalId}</p>
                           )}
                         </td>
                         {/* Destinataire */}
                         <td className="px-3 py-2">
                           <p className="font-medium text-slate-800 text-sm">{pkg.contactName}</p>
                           {pkg.contactPhone && (
-                            <p className="text-xs text-slate-500">{pkg.contactPhone}</p>
+                            <p className="text-sm text-slate-500">{pkg.contactPhone}</p>
                           )}
                         </td>
                         {/* Adresse */}
                         <td className="px-3 py-2">
                           <p className="text-sm text-slate-700">{pkg.address}</p>
                           <a href={`/missions?tab=packages&package=${encodeURIComponent(pkg.id)}`} className="text-sm text-blue-700 underline">Lien vers ce colis</a>
-                          <p className="text-xs text-slate-500">{pkg.postalCode} {pkg.city}</p>
+                          <p className="text-sm text-slate-500">{pkg.postalCode} {pkg.city}</p>
                         </td>
                         {/* Zone */}
                         <td className="px-3 py-2 text-center">
-                          <span className={`px-2 py-1 rounded-lg text-xs font-bold ${zoneColors.bg} ${zoneColors.text}`}>
+                          <span className={`px-2 py-1 rounded-lg text-sm font-bold ${zoneColors.bg} ${zoneColors.text}`}>
                             {pkg.zone}
                           </span>
                         </td>
@@ -1896,7 +1895,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                         <td className="px-2 py-2 text-center">
                           <input
                             type="time"
-                            value={pkg.timeWindowStart || ''}
+                            aria-label={`Début du créneau de ${pkg.contactName}`} value={pkg.timeWindowStart || ''}
                             onChange={async (e) => {
                               e.stopPropagation();
                               try {
@@ -1905,7 +1904,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                                 notifyError('Le créneau n’a pas été enregistré. Réessayez dans la fiche du colis.');
                               }
                             }}
-                            className="w-20 px-1.5 py-1 border border-slate-200 rounded text-xs font-mono text-center focus:ring-2 focus:ring-brand-200 outline-none"
+                            className="min-h-11 w-32 px-2 py-2 border border-slate-300 rounded-lg text-base text-center focus:ring-2 focus:ring-brand-700 outline-none"
                             onClick={(e) => e.stopPropagation()}
                           />
                         </td>
@@ -1913,7 +1912,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                         <td className="px-2 py-2 text-center">
                           <input
                             type="time"
-                            value={pkg.timeWindowEnd || ''}
+                            aria-label={`Fin du créneau de ${pkg.contactName}`} value={pkg.timeWindowEnd || ''}
                             onChange={async (e) => {
                               e.stopPropagation();
                               try {
@@ -1922,27 +1921,27 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                                 notifyError('Le créneau n’a pas été enregistré. Réessayez dans la fiche du colis.');
                               }
                             }}
-                            className="w-20 px-1.5 py-1 border border-slate-200 rounded text-xs font-mono text-center focus:ring-2 focus:ring-brand-200 outline-none"
+                            className="min-h-11 w-32 px-2 py-2 border border-slate-300 rounded-lg text-base text-center focus:ring-2 focus:ring-brand-700 outline-none"
                             onClick={(e) => e.stopPropagation()}
                           />
                         </td>
                         {/* Statut */}
                         <td className="px-3 py-2 text-center">
-                          <span className={`px-2 py-1 rounded-lg text-xs font-medium ${statusColors.bg} ${statusColors.text}`}>
+                          <span className={`px-2 py-1 rounded-lg text-sm font-medium ${statusColors.bg} ${statusColors.text}`}>
                             {packageStatusLabel(pkg.status)}
                           </span>
                           {isDispatched && (
-                            <span className="ml-1 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-blue-100 text-blue-700">
-                              🚚 En mission
+                            <span className="ml-1 px-2 py-0.5 rounded-lg text-sm font-bold bg-blue-100 text-blue-700">
+                              En tournée
                             </span>
                           )}
                         </td>
                         {/* Importé le */}
-                        <td className="px-3 py-2 text-center text-xs text-slate-500 whitespace-nowrap">
+                        <td className="px-3 py-2 text-center text-sm text-slate-500 whitespace-nowrap">
                           {pkg.createdAt ? (
                             <>
                               {new Date(pkg.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit' })}
-                              <span className="block text-[10px] text-slate-400">
+                              <span className="block text-sm text-slate-400">
                                 {new Date(pkg.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
                               </span>
                             </>
@@ -1951,14 +1950,14 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                         {/* Affecté à */}
                         <td className="px-3 py-2 text-center">
                           {pkg.currentDriverId ? (
-                            <span className="text-xs font-medium text-blue-700 bg-blue-50 px-2 py-1 rounded-lg">
+                            <span className="text-sm font-medium text-blue-700 bg-blue-50 px-2 py-1 rounded-lg">
                               {(() => {
                                 const driver = users.find(u => u.id === pkg.currentDriverId);
                                 return driver ? `${driver.firstName} ${driver.lastName}` : 'Chauffeur inconnu';
                               })()}
                             </span>
                           ) : (
-                            <span className="text-xs text-slate-300">—</span>
+                            <span className="text-sm text-slate-300">—</span>
                           )}
                         </td>
                         {/* Actions statut */}
@@ -1972,14 +1971,14 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                                       key={t.status}
                                       disabled={isChangingStatus}
                                       onClick={(e) => { e.stopPropagation(); handleStatusChange(pkg, t.status); }}
-                                      className={`px-2 py-1 rounded-lg text-xs font-medium ${t.color} hover:opacity-80 transition-opacity disabled:opacity-50`}
+                                      className={`ui-button ui-button-secondary text-sm ${t.color} hover:opacity-80 disabled:opacity-50 `}
                                     >
                                       {isChangingStatus ? '...' : t.label}
                                     </button>
                                   ))}
                                   <button
                                     onClick={(e) => { e.stopPropagation(); setStatusChangePkg(null); }}
-                                    className="px-2 py-1 rounded-lg text-xs text-slate-500 hover:bg-slate-100"
+                                    className="ui-button ui-button-secondary text-sm"
                                   >
                                     Annuler
                                   </button>
@@ -1987,14 +1986,14 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                               ) : (
                                 <button
                                   onClick={(e) => { e.stopPropagation(); setStatusChangePkg(pkg); }}
-                                  className="px-2 py-1 rounded-lg text-xs font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors"
+                                  className="ui-button ui-button-secondary text-sm"
                                 >
-                                  Changer ▾
+                                  Changer <ChevronDown size={18} />
                                 </button>
                               )}
                             </div>
                           ) : (
-                            <span className="text-xs text-slate-300">—</span>
+                            <span className="text-sm text-slate-300">—</span>
                           )}
                         </td>
                         {/* Gérer (éditer/supprimer) */}
@@ -2005,7 +2004,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                                 e.stopPropagation();
                                 setExpandedPkgTimelineId(isTimelineOpen ? null : pkg.id);
                               }}
-                              className="min-h-11 min-w-11 inline-flex items-center justify-center p-1.5 rounded-lg text-slate-500 hover:bg-blue-50 hover:text-blue-600 transition-colors"
+                              className="ui-button ui-button-secondary min-h-11 min-w-11 inline-flex items-center justify-center"
                               title={isTimelineOpen ? 'Masquer le suivi' : 'Suivi du colis (timeline)'}
                             >
                               {isTimelineOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
@@ -2027,7 +2026,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                                 });
                                 setEditingPkg(pkg);
                               }}
-                              className="min-h-11 min-w-11 inline-flex items-center justify-center p-1.5 rounded-lg text-blue-500 hover:bg-blue-50 transition-colors"
+                              className="ui-button ui-button-secondary min-h-11 min-w-11 inline-flex items-center justify-center"
                               title="Modifier ce colis"
                             >
                               <Edit size={14} />
@@ -2038,7 +2037,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                                   e.stopPropagation();
                                   setDeletingPkg(pkg);
                                 }}
-                                className="min-h-11 min-w-11 inline-flex items-center justify-center p-1.5 rounded-lg text-red-400 hover:bg-red-50 transition-colors"
+                                className="ui-button ui-button-secondary min-h-11 min-w-11 inline-flex items-center justify-center"
                                 title="Supprimer ce colis"
                               >
                                 <Trash2 size={14} />
@@ -2052,7 +2051,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                       {isTimelineOpen && (
                         <tr>
                           <td colSpan={12} className="px-8 py-3 bg-slate-50/70 border-t border-slate-100">
-                            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">
+                            <p className="text-sm font-bold text-slate-500 uppercase tracking-wide mb-1">
                               Suivi du colis {pkg.externalId || pkg.barcode || pkg.orderNumber}
                             </p>
                             <PackageTimeline movements={pkg.movements || []} showActors showInternalDetails pod={pkg.pod} />
@@ -2070,71 +2069,71 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
       {/* === MODAL ÉDITION COLIS === */}
       {editingPkg && (
-        <Modal isOpen={true} onClose={closePackageEditor} title="Modifier le colis" preventClose={isSavingPkg} size="lg">
+        <Modal mobileFullscreen isOpen={true} onClose={closePackageEditor} title="Modifier le colis" preventClose={isSavingPkg} size="lg">
           <div>
             <p className="break-all text-sm font-mono text-slate-600">{editingPkg.orderNumber}</p>
             <div className="p-4 space-y-3">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label htmlFor="office-field-1" className="text-xs font-medium text-slate-500 block mb-1">Destinataire</label>
+                  <label htmlFor="office-field-1" className="text-sm font-medium text-slate-500 block mb-1">Destinataire</label>
                   <input id="office-field-1" disabled={isSavingPkg} type="text" aria-label="Destinataire" value={editPkgForm.contactName || ''} onChange={e => setEditPkgForm(f => ({...f, contactName: e.target.value}))}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
                 </div>
                 <div>
-                  <label htmlFor="office-field-2" className="text-xs font-medium text-slate-500 block mb-1">Téléphone</label>
+                  <label htmlFor="office-field-2" className="text-sm font-medium text-slate-500 block mb-1">Téléphone</label>
                   <input id="office-field-2" disabled={isSavingPkg} type="text" aria-label="Téléphone du destinataire" value={editPkgForm.contactPhone || ''} onChange={e => setEditPkgForm(f => ({...f, contactPhone: e.target.value}))}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
                 </div>
               </div>
               <div>
-                <label htmlFor="office-field-3" className="text-xs font-medium text-slate-500 block mb-1">Adresse</label>
+                <label htmlFor="office-field-3" className="text-sm font-medium text-slate-500 block mb-1">Adresse</label>
                 <input id="office-field-3" disabled={isSavingPkg} type="text" aria-label="Adresse de livraison" value={editPkgForm.address || ''} onChange={e => setEditPkgForm(f => ({...f, address: e.target.value}))}
                   className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label htmlFor="office-field-4" className="text-xs font-medium text-slate-500 block mb-1">Code postal</label>
+                  <label htmlFor="office-field-4" className="text-sm font-medium text-slate-500 block mb-1">Code postal</label>
                   <input id="office-field-4" disabled={isSavingPkg} type="text" aria-label="Code postal" value={editPkgForm.postalCode || ''} onChange={e => setEditPkgForm(f => ({...f, postalCode: e.target.value}))}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
                 </div>
                 <div>
-                  <label htmlFor="office-field-5" className="text-xs font-medium text-slate-500 block mb-1">Ville</label>
+                  <label htmlFor="office-field-5" className="text-sm font-medium text-slate-500 block mb-1">Ville</label>
                   <input id="office-field-5" disabled={isSavingPkg} type="text" aria-label="Ville" value={editPkgForm.city || ''} onChange={e => setEditPkgForm(f => ({...f, city: e.target.value}))}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
                 </div>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label htmlFor="office-field-6" className="text-xs font-medium text-slate-500 block mb-1">Créneau début</label>
+                  <label htmlFor="office-field-6" className="text-sm font-medium text-slate-500 block mb-1">Créneau début</label>
                   <input id="office-field-6" disabled={isSavingPkg} type="time" aria-label="Début du créneau demandé" value={editPkgForm.timeWindowStart || ''} onChange={e => setEditPkgForm(f => ({...f, timeWindowStart: e.target.value}))}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
                 </div>
                 <div>
-                  <label htmlFor="office-field-7" className="text-xs font-medium text-slate-500 block mb-1">Créneau fin</label>
+                  <label htmlFor="office-field-7" className="text-sm font-medium text-slate-500 block mb-1">Créneau fin</label>
                   <input id="office-field-7" disabled={isSavingPkg} type="time" aria-label="Fin du créneau demandé" value={editPkgForm.timeWindowEnd || ''} onChange={e => setEditPkgForm(f => ({...f, timeWindowEnd: e.target.value}))}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
                 </div>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label htmlFor="office-field-8" className="text-xs font-medium text-slate-500 block mb-1">Poids (kg)</label>
+                  <label htmlFor="office-field-8" className="text-sm font-medium text-slate-500 block mb-1">Poids (kg)</label>
                   <input id="office-field-8" disabled={isSavingPkg} type="number" step="0.1" aria-label="Poids en kilogrammes" value={editPkgForm.weight || ''} onChange={e => setEditPkgForm(f => ({...f, weight: e.target.value ? parseFloat(e.target.value) : ''}))}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
                 </div>
                 <div>
-                  <label htmlFor="office-field-9" className="text-xs font-medium text-slate-500 block mb-1">Volume (m³)</label>
+                  <label htmlFor="office-field-9" className="text-sm font-medium text-slate-500 block mb-1">Volume (m³)</label>
                   <input id="office-field-9" disabled={isSavingPkg} type="number" step="0.01" aria-label="Volume en mètres cubes" value={editPkgForm.volume || ''} onChange={e => setEditPkgForm(f => ({...f, volume: e.target.value ? parseFloat(e.target.value) : ''}))}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
                 </div>
               </div>
               <div>
-                <label htmlFor="office-field-10" className="text-xs font-medium text-slate-500 block mb-1">Commentaire</label>
+                <label htmlFor="office-field-10" className="text-sm font-medium text-slate-500 block mb-1">Commentaire</label>
                 <textarea id="office-field-10" disabled={isSavingPkg} aria-label="Commentaire" value={editPkgForm.comment || ''} onChange={e => setEditPkgForm(f => ({...f, comment: e.target.value}))}
                   className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none resize-none h-16" />
               </div>
             </div>
             <div className="p-4 border-t border-slate-100 flex gap-2">
-              <button onClick={closePackageEditor} className="flex-1 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-600">
+              <button onClick={closePackageEditor} className="ui-button ui-button-secondary flex-1 border text-sm">
                 Annuler
               </button>
               <button
@@ -2169,7 +2168,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                   }
                   setIsSavingPkg(false);
                 }}
-                className="flex-1 py-2.5 bg-brand-500 text-white rounded-xl text-sm font-bold hover:bg-brand-600 transition-colors disabled:opacity-50"
+                className="ui-button ui-button-primary flex-1 text-sm disabled:opacity-50"
               >
                 {isSavingPkg ? '⏳ Enregistrement...' : '✓ Enregistrer'}
               </button>
@@ -2190,12 +2189,12 @@ const MissionManager: React.FC<MissionManagerProps> = ({
               <p className="text-sm text-slate-500 mb-1">
                 <span className="font-mono font-bold">{deletingPkg.orderNumber}</span> — {deletingPkg.contactName}
               </p>
-              <p className="text-xs text-red-500 font-medium">
+              <p className="text-sm text-red-500 font-medium">
                 Cette action est irréversible.
               </p>
             </div>
             <div className="p-4 border-t border-slate-100 flex gap-2">
-              <button disabled={isSavingPkg} onClick={() => setDeletingPkg(null)} className="flex-1 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-600">
+              <button disabled={isSavingPkg} onClick={() => setDeletingPkg(null)} className="ui-button ui-button-secondary flex-1 border text-sm">
                 Annuler
               </button>
               <button
@@ -2216,9 +2215,9 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                   }
                   setIsSavingPkg(false);
                 }}
-                className="flex-1 py-2.5 bg-red-600 text-white rounded-xl text-sm font-bold hover:bg-red-700 transition-colors disabled:opacity-50"
+                className="ui-button ui-button-danger flex-1 text-sm disabled:opacity-50"
               >
-                {isSavingPkg ? '⏳ Suppression...' : '🗑 Supprimer'}
+                {isSavingPkg ? 'Suppression…' : 'Supprimer'}
               </button>
             </div>
           </div>
@@ -2238,7 +2237,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
         </div>
         <button
           onClick={() => openHubModal()}
-          className="inline-flex items-center gap-2 px-4 py-2.5 bg-brand-500 text-white rounded-xl font-medium hover:bg-brand-600 transition-colors"
+          className="ui-button ui-button-primary inline-flex items-center gap-2"
         >
           <Plus size={18} />
           Ajouter un hub
@@ -2256,7 +2255,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
             </p>
             <button
               onClick={() => openHubModal()}
-              className="inline-flex items-center gap-2 px-6 py-3 bg-brand-500 text-white rounded-xl font-medium hover:bg-brand-600 transition-colors"
+              className="ui-button ui-button-primary inline-flex items-center gap-2"
             >
               <Plus size={18} />
               Créer votre premier hub
@@ -2278,12 +2277,12 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                       </div>
                       <div>
                         <h3 className={`font-bold ${colors.text}`}>{hub.name}</h3>
-                        <span className={`text-xs font-medium ${colors.text} opacity-75`}>Zone {hub.zone}</span>
+                        <span className={`text-sm font-medium ${colors.text} opacity-75`}>Zone {hub.zone}</span>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
                       {!hub.isActive && (
-                        <span className="px-2 py-1 bg-red-500 text-white text-xs font-bold rounded-lg">
+                        <span className="px-2 py-1 bg-red-500 text-white text-sm font-bold rounded-lg">
                           Inactif
                         </span>
                       )}
@@ -2322,26 +2321,26 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                   <div className="flex gap-4 pt-2">
                     <div className="flex-1 bg-slate-50 rounded-lg p-3 text-center">
                       <p className="text-2xl font-bold text-slate-800">{zoneDrivers.length}</p>
-                      <p className="text-xs text-slate-500">Chauffeurs</p>
+                      <p className="text-sm text-slate-500">Chauffeurs</p>
                     </div>
                     <div className="flex-1 bg-slate-50 rounded-lg p-3 text-center">
                       <p className="text-2xl font-bold text-slate-800">{hub.assignedPostalCodes?.length || 0}</p>
-                      <p className="text-xs text-slate-500">Codes postaux</p>
+                      <p className="text-sm text-slate-500">Codes postaux</p>
                     </div>
                   </div>
 
                   {/* Codes postaux (affichage condensé) */}
                   {hub.assignedPostalCodes && hub.assignedPostalCodes.length > 0 && (
                     <div className="pt-2 border-t border-slate-100">
-                      <p className="text-xs font-bold text-slate-500 uppercase mb-2">Codes postaux desservis</p>
+                      <p className="text-sm font-bold text-slate-500 uppercase mb-2">Codes postaux desservis</p>
                       <div className="flex flex-wrap gap-1">
                         {hub.assignedPostalCodes.slice(0, 8).map(cp => (
-                          <span key={cp} className="px-2 py-0.5 bg-slate-100 text-slate-600 text-xs rounded">
+                          <span key={cp} className="px-2 py-0.5 bg-slate-100 text-slate-600 text-sm rounded">
                             {cp}
                           </span>
                         ))}
                         {hub.assignedPostalCodes.length > 8 && (
-                          <span className="px-2 py-0.5 bg-slate-200 text-slate-600 text-xs rounded font-medium">
+                          <span className="px-2 py-0.5 bg-slate-200 text-slate-600 text-sm rounded font-medium">
                             +{hub.assignedPostalCodes.length - 8}
                           </span>
                         )}
@@ -2354,21 +2353,21 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                 <div className="px-4 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
                   <button
                     onClick={() => toggleHubActive(hub)}
-                    className={`text-sm font-medium ${hub.isActive ? 'text-orange-600 hover:text-orange-700' : 'text-green-600 hover:text-green-700'}`}
+                    className="ui-button ui-button-secondary"
                   >
                     {hub.isActive ? 'Désactiver' : 'Activer'}
                   </button>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => openHubModal(hub)}
-                      className="min-h-11 min-w-11 inline-flex items-center justify-center p-2 text-slate-500 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors"
+                      className="ui-button ui-button-secondary min-h-11 min-w-11 inline-flex items-center justify-center"
                       aria-label="Modifier" title="Modifier"
                     >
                       <Edit size={18} />
                     </button>
                     <button
                       onClick={() => { setHubError(''); setHubToDelete(hub); }}
-                      className="min-h-11 min-w-11 inline-flex items-center justify-center p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      className="ui-button ui-button-secondary min-h-11 min-w-11 inline-flex items-center justify-center"
                       aria-label="Supprimer" title="Supprimer"
                     >
                       <Trash2 size={18} />
@@ -2385,7 +2384,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
       {hubs.length > 0 && (
         <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
           <p className="text-blue-800 text-sm">
-            <strong>💡 Astuce :</strong> Les codes postaux déterminent automatiquement la zone de livraison des colis importés.
+            <strong>À savoir :</strong> Les codes postaux déterminent automatiquement la zone de livraison des colis importés.
             Assurez-vous que chaque code postal de La Réunion est assigné à un hub.
           </p>
         </div>
@@ -2410,49 +2409,30 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   const visibleSources = activeTab === 'missions' ? [...neededSources, 'packages' as const] : neededSources;
 
   return (
-    <div className="p-4 md:p-6">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-3">
-        <div className="min-w-0">
-          <h1 className="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">
-            <Route className="text-brand-500" />
-            Exploitation des livraisons
-          </h1>
-          <p className="hidden sm:block text-slate-500 text-sm mt-1">
-            Colis, préparation des tournées et suivi des livraisons
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <label htmlFor="office-working-date" className="text-sm font-semibold text-slate-700">Date de travail</label>
-          <input
-            type="date"
-            id="office-working-date" aria-label="Date des tournées" value={selectedDate}
-            onChange={(e) => setSelectedDate(e.target.value)}
-            className="px-3 py-2 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-brand-500 outline-none"
-          />
-        </div>
-      </div>
-
+    <div className="p-3 sm:p-4 md:p-6" data-office-root>
+      <PageHeader title="Exploitation des livraisons" className="mb-3" />
+      {renderTabs()}
       <details className="mb-3 rounded-xl border border-slate-200 bg-white" open={globalSearchOpen} onToggle={event => setGlobalSearchOpen(event.currentTarget.open)}>
-        <summary className="min-h-11 cursor-pointer px-3 py-3 text-sm font-semibold text-slate-700">Retrouver un colis dans tout l’historique</summary>
+        <summary className="min-h-11 cursor-pointer px-3 py-3 text-sm font-semibold text-slate-700">Outils et filtres{(activeTab === 'missions' && (missionSearch || selectedZone !== 'all')) || (activeTab === 'packages' && (searchTerm || selectedZone !== 'all' || pkgStatusFilter !== 'all')) ? ' — filtres actifs' : ''}</summary>
+        <p className="px-3 pb-2 text-sm font-semibold text-slate-800">Retrouver un colis dans tout l’historique</p>
         <form className="flex flex-wrap items-end gap-2 px-3 pb-3" onSubmit={event => { event.preventDefault(); packageSearchTask.current?.finish('cancelled'); packageSearchTask.current = startUxTask('find_package', currentUser.role); setPackageSearchVersion(value => value + 1); setSelectedPackageIds(new Set()); updateUrlParams({ tab: 'packages', q: globalPackageSearch.trim() || null, scope: null, status: null, zone: null, mission: null, package: null, edit: null, page: null }); setGlobalSearchOpen(false); }}>
           <label className="flex-1 min-w-0 basis-64 text-sm font-medium text-slate-700">Code colis, commande, destinataire ou adresse
             <input type="search" value={globalPackageSearch} onChange={event => setGlobalPackageSearch(event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 px-3 py-2" />
           </label>
-          <button type="submit" className="min-h-11 rounded-xl bg-blue-700 px-4 text-white font-semibold">Rechercher</button>
+          <button type="submit" className="ui-button ui-button-primary min-h-11">Rechercher</button>
           <a href="/hub-operations" className="min-h-11 inline-flex items-center rounded-xl border border-slate-300 px-4 text-sm font-semibold">Opérations hub</a>
         </form>
+        {activeTab === 'missions' && <div className="border-t border-slate-200 pt-3"><h2 className="px-3 pb-2 text-sm font-semibold">Filtrer les tournées</h2>{renderMissionFilters()}</div>}
+        {(activeTab === 'missions' || activeTab === 'packages') && <div className="border-t border-slate-200">{renderSavedViews()}</div>}
       </details>
+      {activeTab === 'missions' && (missionSearch || selectedZone !== 'all') && <p className="mb-3 break-words text-sm text-slate-700">Filtres actifs : {missionSearch && `« ${missionSearch} »`}{missionSearch && selectedZone !== 'all' ? ' · ' : ''}{selectedZone !== 'all' ? selectedZone : ''}</p>}
       {pendingStopJournalError && <p role="alert" className="mb-3 rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-900">{pendingStopJournalError}</p>}
       {pendingStop && <div role="status" className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
         <p className="font-semibold">Une demande d’arrêt reste à confirmer — tournée du {pendingStop.date}.</p>
         <p>Reprenez la même demande pour vérifier si elle a été enregistrée.</p>
-        <button type="button" onClick={resumePendingStop} className="mt-2 min-h-11 rounded-lg border border-amber-400 bg-white px-3 font-semibold">Reprendre la demande</button>
+        <button type="button" onClick={resumePendingStop} className="ui-button ui-button-secondary mt-2 min-h-11 border">Reprendre la demande</button>
       </div>}
       {linkError && <p role="alert" className="mb-4 rounded-xl bg-amber-50 p-3 text-amber-900">{linkError}</p>}
-      {/* Tabs */}
-      {renderTabs()}
 
       {!visibleSources.every(sourceReady) && <div className="mb-4 space-y-3">
         {visibleSources.filter(key => !sourceReady(key)).map(key => <div key={key} role={sourceStates[key].status === 'error' ? 'alert' : 'status'} className={`rounded-xl border p-4 ${sourceStates[key].status === 'error' ? 'border-red-200 bg-red-50 text-red-900' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
@@ -2460,7 +2440,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
             <p className="font-semibold">{sourceLabels[key]} : lecture impossible.</p>
             <p className="mt-1 text-sm">Vérifiez votre connexion et vos droits d’accès, puis réessayez. Ce message ne signifie pas que la liste est vide.</p>
             {sourceStates[key].receivedAt && <p className="mt-1 text-sm">Dernière réception : {new Date(sourceStates[key].receivedAt!).toLocaleString('fr-FR')}. Les données ne sont plus à jour.</p>}
-            <button type="button" onClick={() => setSourceRetries(previous => ({ ...previous, [key]: previous[key] + 1 }))} className="mt-3 min-h-11 rounded-lg border border-red-300 bg-white px-4 font-semibold">Réessayer — {sourceLabels[key]}</button>
+            <button type="button" onClick={() => setSourceRetries(previous => ({ ...previous, [key]: previous[key] + 1 }))} className="ui-button ui-button-secondary mt-3 min-h-11 border">Réessayer — {sourceLabels[key]}</button>
           </> : <p className="flex items-center gap-2"><Loader2 size={20} className="animate-spin shrink-0" />Chargement : {sourceLabels[key].toLowerCase()}{key === 'missions' ? ` du ${new Date(`${selectedDate}T12:00:00`).toLocaleDateString('fr-FR')}` : ''}…</p>}
         </div>)}
       </div>}
@@ -2521,6 +2501,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
       {/* Modal Import */}
       <Modal
+      mobileFullscreen
         isOpen={showImportModal}
         onClose={closeImportModal}
         preventClose={isImporting}
@@ -2590,7 +2571,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
               {importResult.success ? (
                 <>
                   <p className="font-bold text-green-800 mb-2">
-                    ✅ Import réussi !
+                    Import réussi
                   </p>
                   <p className="text-sm text-green-700">
                     {importResult.successCount} colis importés sur {importResult.totalRows} lignes
@@ -2600,7 +2581,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                       {importResult.zoneBreakdown.map((zb: any) => (
                         <span
                           key={zb.zone}
-                          className={`px-2 py-1 rounded-lg text-xs font-medium ${ZONE_COLORS[zb.zone as Zone].bg} ${ZONE_COLORS[zb.zone as Zone].text}`}
+                          className={`px-2 py-1 rounded-lg text-sm font-medium ${ZONE_COLORS[zb.zone as Zone].bg} ${ZONE_COLORS[zb.zone as Zone].text}`}
                         >
                           {zb.zone}: {zb.count} colis
                         </span>
@@ -2611,7 +2592,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
               ) : (
                 <>
                   <p className="font-bold text-red-800 mb-2">
-                    ❌ Erreurs détectées
+                    Erreurs détectées
                   </p>
                   <ul className="text-sm text-red-700 list-disc list-inside">
                     {importResult.errors?.slice(0, 5).map((err: any, i: number) => (
@@ -2632,7 +2613,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
             <button
               disabled={isImporting} onClick={closeImportModal}
-              className="px-4 py-2 text-slate-700 font-medium hover:bg-slate-100 rounded-xl transition-colors"
+              className="ui-button ui-button-secondary"
             >
               {importResult?.success ? 'Fermer' : 'Annuler'}
             </button>
@@ -2640,7 +2621,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
               <button
                 onClick={handleImport}
                 disabled={!importFile || !selectedClient || isImporting}
-                className="flex items-center gap-2 px-6 py-2 bg-brand-500 text-white rounded-xl font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="ui-button ui-button-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isImporting ? (
                   <>
@@ -2661,6 +2642,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
       {/* Modal Hub (Création/Édition) */}
       <Modal
+      mobileFullscreen
         isOpen={showHubModal}
         onClose={closeHubModal}
         preventClose={isSavingHub}
@@ -2794,7 +2776,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
               rows={3}
               className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none resize-none"
             />
-            <p className="text-xs text-slate-500 mt-1">
+            <p className="text-sm text-slate-500 mt-1">
               Séparez les codes postaux par des virgules. Ces codes déterminent quels colis seront routés vers ce hub.
             </p>
           </div>
@@ -2803,7 +2785,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           {!editingHub && hubForm.zone && (
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
               <p className="text-blue-800 text-sm">
-                💡 Les codes postaux par défaut de la zone <strong>{hubForm.zone}</strong> ont été pré-remplis.
+                Les codes postaux par défaut de la zone <strong>{hubForm.zone}</strong> ont été pré-remplis.
                 Vous pouvez les modifier selon vos besoins.
               </p>
             </div>
@@ -2813,14 +2795,14 @@ const MissionManager: React.FC<MissionManagerProps> = ({
           <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
             <button
               disabled={isSavingHub} onClick={closeHubModal}
-              className="px-4 py-2 text-slate-700 font-medium hover:bg-slate-100 rounded-xl transition-colors"
+              className="ui-button ui-button-secondary"
             >
               Annuler
             </button>
             <button
               onClick={handleSaveHub}
               disabled={!hubForm.name || !hubForm.zone || !hubForm.address || !hubForm.city || !hubForm.postalCode || isSavingHub}
-              className="flex items-center gap-2 px-6 py-2 bg-brand-500 text-white rounded-xl font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="ui-button ui-button-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isSavingHub ? (
                 <>
@@ -2840,6 +2822,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
       {/* Modal Confirmation Suppression */}
       <Modal
+      mobileFullscreen
         isOpen={!!hubToDelete}
         onClose={() => setHubToDelete(null)}
         preventClose={isDeletingHub}
@@ -2857,21 +2840,21 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                 Vous êtes sur le point de supprimer le hub <strong>{hubToDelete.name}</strong> (Zone {hubToDelete.zone}).
               </p>
               <p className="text-red-700 text-sm mt-2">
-                ⚠️ Cette action est irréversible. Les codes postaux associés ne seront plus rattachés à aucun hub.
+                Cette action est irréversible. Les codes postaux associés ne seront plus rattachés à aucun hub.
               </p>
             </div>
 
             <div className="flex justify-end gap-3 pt-2">
               <button
                 disabled={isDeletingHub} onClick={() => setHubToDelete(null)}
-                className="px-4 py-2 text-slate-700 font-medium hover:bg-slate-100 rounded-xl transition-colors"
+                className="ui-button ui-button-secondary"
               >
                 Annuler
               </button>
               <button
                 disabled={isDeletingHub}
                 onClick={handleDeleteHub}
-                className="flex items-center gap-2 px-6 py-2 bg-red-500 text-white rounded-xl font-medium hover:bg-red-600 transition-colors"
+                className="ui-button ui-button-danger flex items-center gap-2"
               >
                 <Trash2 size={18} />
                 Supprimer
@@ -2881,8 +2864,8 @@ const MissionManager: React.FC<MissionManagerProps> = ({
         )}
       </Modal>
 
-      {editingStop && <Modal isOpen onClose={closeStopEditor} title="Modifier l’arrêt" subtitle={`Arrêt ${editingStop.stop.sequence} — ${editingStop.mission.zone}`} size="lg" preventClose={isSavingPkg} busy={isSavingPkg}
-        footer={<div className="flex gap-3"><button type="button" disabled={isSavingPkg} onClick={closeStopEditor} className="min-h-11 flex-1 rounded-xl border border-slate-300 bg-white px-3 font-semibold">Annuler</button><button type="submit" form="edit-mission-stop" disabled={isSavingPkg} className="min-h-11 flex-1 rounded-xl bg-blue-700 px-3 font-semibold text-white disabled:opacity-50">{isSavingPkg ? 'Enregistrement…' : stopSaveError ? 'Réessayer' : 'Enregistrer'}</button></div>}>
+      {editingStop && <Modal mobileFullscreen isOpen onClose={closeStopEditor} title="Modifier l’arrêt" subtitle={`Arrêt ${editingStop.stop.sequence} — ${editingStop.mission.zone}`} size="lg" preventClose={isSavingPkg} busy={isSavingPkg}
+        footer={<div className="flex gap-3"><button type="button" disabled={isSavingPkg} onClick={closeStopEditor} className="ui-button ui-button-secondary min-h-11 flex-1 border">Annuler</button><button type="submit" form="edit-mission-stop" disabled={isSavingPkg} className="ui-button ui-button-primary min-h-11 flex-1 disabled:opacity-50">{isSavingPkg ? 'Enregistrement…' : stopSaveError ? 'Réessayer' : 'Enregistrer'}</button></div>}>
         <form id="edit-mission-stop" noValidate onSubmit={event => { event.preventDefault(); void handleSaveEditStop(); }} className="space-y-4">
           {stopSaveError && <p role="alert" className="rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-900">{stopSaveError}</p>}
           <p className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">Modifier l’adresse, le créneau ou la durée annule les anciennes estimations. Un nouveau calcul d’itinéraire est nécessaire pour obtenir de nouveaux horaires.</p>
@@ -2891,7 +2874,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
       </Modal>}
 
       {deletingStop && <Modal isOpen onClose={() => setDeletingStop(null)} role="alertdialog" title="Supprimer cet arrêt ?" size="sm" preventClose={isSavingPkg} busy={isSavingPkg}
-        footer={<div className="flex gap-3"><button type="button" disabled={isSavingPkg} onClick={() => setDeletingStop(null)} className="min-h-11 flex-1 rounded-xl border border-slate-300 bg-white px-3">Annuler</button><button type="button" disabled={isSavingPkg} onClick={handleDeleteStop} className="min-h-11 flex-1 rounded-xl bg-red-700 px-3 font-bold text-white disabled:opacity-50">{isSavingPkg ? 'Suppression…' : 'Supprimer'}</button></div>}>
+        footer={<div className="flex gap-3"><button type="button" disabled={isSavingPkg} onClick={() => setDeletingStop(null)} className="ui-button ui-button-secondary min-h-11 flex-1 border">Annuler</button><button type="button" disabled={isSavingPkg} onClick={handleDeleteStop} className="ui-button ui-button-danger min-h-11 flex-1 disabled:opacity-50">{isSavingPkg ? 'Suppression…' : 'Supprimer'}</button></div>}>
         <div className="space-y-3 text-sm text-slate-700">
           <p className="font-bold text-base">{deletingStop.stop.contactName}</p><p>{deletingStop.stop.address}, {deletingStop.stop.postalCode} {deletingStop.stop.city}</p>
           {deletingStop.stop.packageCount > 0 && <p className="rounded-lg bg-amber-50 p-3 text-amber-900">Les colis encore affectés à cet arrêt seront marqués « Retour à remettre ». Le chauffeur devra les remettre au hub. Un colis déjà livré ne peut pas être supprimé par cette action.</p>}
@@ -2900,8 +2883,8 @@ const MissionManager: React.FC<MissionManagerProps> = ({
         </div>
       </Modal>}
 
-      {addingStopToMission && <Modal isOpen onClose={closeNewStop} title="Ajouter un arrêt" subtitle={`${addingStopToMission.zone} — ${addingStopToMission.driverName || 'Non affecté'}`} size="lg" preventClose={isSavingPkg} busy={isSavingPkg}
-        footer={<div className="flex gap-3"><button type="button" disabled={isSavingPkg} onClick={closeNewStop} className="min-h-11 flex-1 rounded-xl border border-slate-300 bg-white px-3 font-semibold">Annuler</button><button type="submit" form="add-mission-stop" disabled={isSavingPkg} className="min-h-11 flex-1 rounded-xl bg-green-700 px-3 font-semibold text-white disabled:opacity-50">{isSavingPkg ? 'Vérification…' : pendingStop?.requestId === newStopRequestId.current ? 'Vérifier cette demande' : 'Ajouter l’arrêt'}</button></div>}>
+      {addingStopToMission && <Modal mobileFullscreen isOpen onClose={closeNewStop} title="Ajouter un arrêt" subtitle={`${addingStopToMission.zone} — ${addingStopToMission.driverName || 'Non affecté'}`} size="lg" preventClose={isSavingPkg} busy={isSavingPkg}
+        footer={<div className="flex gap-3"><button type="button" disabled={isSavingPkg} onClick={closeNewStop} className="ui-button ui-button-secondary min-h-11 flex-1 border">Annuler</button><button type="submit" form="add-mission-stop" disabled={isSavingPkg} className="ui-button ui-button-primary min-h-11 flex-1 disabled:opacity-50">{isSavingPkg ? 'Vérification…' : pendingStop?.requestId === newStopRequestId.current ? 'Vérifier cette demande' : 'Ajouter l’arrêt'}</button></div>}>
         <form id="add-mission-stop" noValidate onSubmit={event => { event.preventDefault(); void handleAddNewStop(); }} className="space-y-4">
           {stopSaveError && <p role="alert" className="rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-900">{stopSaveError}</p>}
           {pendingStop?.requestId === newStopRequestId.current && <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-900">Les champs sont verrouillés pour vérifier la demande initiale sans créer un deuxième arrêt. Après confirmation, vous pourrez modifier l’arrêt dans la tournée.</p>}
@@ -2927,7 +2910,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
       {/* === MODAL DISPATCH RAPIDE === */}
       {showQuickDispatch && (
-        <Modal isOpen={showQuickDispatch} onClose={closeQuickDispatch} title="Affecter la sélection" preventClose={isQuickDispatching} size="lg">
+        <Modal mobileFullscreen isOpen={showQuickDispatch} onClose={closeQuickDispatch} title="Affecter la sélection" preventClose={isQuickDispatching} size="lg">
           <div>
             <div className="p-4 border-b border-slate-200 bg-gradient-to-r from-brand-500 to-blue-500">
               <h3 className="font-bold text-white flex items-center gap-2">
@@ -2994,16 +2977,16 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
               {/* Récapitulatif colis */}
               <div className="bg-slate-50 rounded-lg p-3">
-                <p className="text-xs font-bold text-slate-600 mb-2">Colis à dispatcher :</p>
+                <p className="text-sm font-bold text-slate-600 mb-2">Colis à dispatcher :</p>
                 <div className="max-h-32 overflow-y-auto space-y-1">
                   {Array.from(selectedPackageIds).map(pkgId => {
                     const pkg = packages.find(p => p.id === pkgId);
                     if (!pkg) return null;
                     return (
-                      <div key={pkgId} className="text-xs text-slate-600 flex items-center gap-2">
+                      <div key={pkgId} className="text-sm text-slate-600 flex items-center gap-2">
                         <span className="font-mono text-slate-400">{pkg.orderNumber}</span>
                         <span>{pkg.contactName}</span>
-                        <span className={`ml-auto px-1.5 py-0.5 rounded text-[10px] font-bold ${ZONE_COLORS[pkg.zone]?.bg} ${ZONE_COLORS[pkg.zone]?.text}`}>
+                        <span className={`ml-auto px-1.5 py-0.5 rounded text-sm font-bold ${ZONE_COLORS[pkg.zone]?.bg} ${ZONE_COLORS[pkg.zone]?.text}`}>
                           {pkg.zone}
                         </span>
                       </div>
@@ -3016,7 +2999,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
             <div className="p-4 border-t border-slate-200 flex justify-end gap-2">
               <button
                 onClick={closeQuickDispatch}
-                className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                className="ui-button ui-button-secondary text-sm"
               >
                 Annuler
               </button>
@@ -3142,7 +3125,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                     setIsQuickDispatching(false);
                   }
                 }}
-                className="flex items-center gap-2 px-4 py-2 text-sm font-bold bg-gradient-to-r from-brand-500 to-blue-500 text-white rounded-lg hover:from-brand-600 hover:to-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                className="ui-button ui-button-primary flex items-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isQuickDispatching ? (
                   <>

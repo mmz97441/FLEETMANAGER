@@ -1,0 +1,181 @@
+{
+  "checkedAt": "2026-09-12T01:10:07.706Z",
+  "checks": [
+    {
+      "name": "Galerie sans débordement 320",
+      "pass": true
+    },
+    {
+      "name": "Actions et champs 44px 320",
+      "pass": true
+    },
+    {
+      "name": "Tableau lisible et adresse entière 320",
+      "pass": true
+    },
+    {
+      "name": "Texte de variation neutre 320",
+      "pass": true
+    },
+    {
+      "name": "Aucune variation et volume ne donnent pas de faux succès 320",
+      "pass": true
+    },
+    {
+      "name": "Compteur neutre exact et compact 320",
+      "pass": true
+    },
+    {
+      "name": "Titre complet sur ligne dédiée 320",
+      "pass": true
+    },
+    {
+      "name": "Galerie sans débordement 390",
+      "pass": true
+    },
+    {
+      "name": "Actions et champs 44px 390",
+      "pass": true
+    },
+    {
+      "name": "Tableau lisible et adresse entière 390",
+      "pass": true
+    },
+    {
+      "name": "Texte de variation neutre 390",
+      "pass": true
+    },
+    {
+      "name": "Aucune variation et volume ne donnent pas de faux succès 390",
+      "pass": true
+    },
+    {
+      "name": "Compteur neutre exact et compact 390",
+      "pass": true
+    },
+    {
+      "name": "Titre complet sur ligne dédiée 390",
+      "pass": true
+    },
+    {
+      "name": "Galerie sans débordement 1365",
+      "pass": true
+    },
+    {
+      "name": "Actions et champs 44px 1365",
+      "pass": true
+    },
+    {
+      "name": "Tableau lisible et adresse entière 1365",
+      "pass": true
+    },
+    {
+      "name": "Texte de variation neutre 1365",
+      "pass": true
+    },
+    {
+      "name": "Aucune variation et volume ne donnent pas de faux succès 1365",
+      "pass": true
+    },
+    {
+      "name": "Compteur neutre exact et compact 1365",
+      "pass": true
+    },
+    {
+      "name": "Carte indicateur native activable Entrée",
+      "pass": true
+    },
+    {
+      "name": "Focus clavier visible",
+      "pass": true
+    },
+    {
+      "name": "Grand bouton garde taille 48px et texte16",
+      "pass": true
+    },
+    {
+      "name": "Chargement bloque activation",
+      "pass": true
+    },
+    {
+      "name": "Contraste texte actions ≥4,5:1",
+      "pass": true,
+      "measurements": [
+        {
+          "id": "primary",
+          "ratio": 7.562998081458594
+        },
+        {
+          "id": "secondary",
+          "ratio": 10.35474573184942
+        },
+        {
+          "id": "danger",
+          "ratio": 6.4700447145121895
+        }
+      ]
+    },
+    {
+      "name": "Formulaire plein écran sur viewport court",
+      "pass": true
+    },
+    {
+      "name": "Champ mobile 16px",
+      "pass": true
+    },
+    {
+      "name": "Envoi occupe la fenêtre sans masquer action",
+      "pass": true
+    },
+    {
+      "name": "Échap pendant envoi conserve saisie",
+      "pass": true
+    },
+    {
+      "name": "Fenêtre imbriquée rend le focus au formulaire",
+      "pass": true
+    },
+    {
+      "name": "Annulation conserve brouillon",
+      "pass": true
+    },
+    {
+      "name": "Fermeture confirmée rend focus au déclencheur",
+      "pass": true
+    },
+    {
+      "name": "Priorité haute distincte urgence réelle",
+      "pass": true
+    },
+    {
+      "name": "Notifications sans débordement mobile court",
+      "pass": true
+    },
+    {
+      "name": "Navigation compteurs neutres sans pulsation",
+      "pass": true
+    },
+    {
+      "name": "Indicateurs réels distance et volume neutres, coût contextualisé",
+      "pass": true,
+      "measurements": [
+        {
+          "label": "Km parcourus",
+          "text": "Km parcourus2 000 kmHausse de 100 %par rapport au mois précédent",
+          "color": "rgb(71, 85, 105)"
+        },
+        {
+          "label": "Litres totaux",
+          "text": "Litres totaux150 LHausse de 50 %par rapport au mois précédent",
+          "color": "rgb(71, 85, 105)"
+        },
+        {
+          "label": "Carburant par km",
+          "text": "Carburant par km0,14 €/kmBaisse de 25 %par rapport au mois précédent",
+          "color": "rgb(22, 101, 52)"
+        }
+      ]
+    }
+  ],
+  "exceptions": []
+}
