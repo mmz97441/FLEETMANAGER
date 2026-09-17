@@ -147,3 +147,7 @@ Mesurer les demandes d’aide, retours en arrière, erreurs et abandons avant/ap
 - Chauffeur et bureau : [tournée](../../src/components/DriverMissionView.tsx), [exploitation](../../src/components/MissionManager.tsx), [préparation](../../src/components/DispatchManager.tsx), [dépôt](../../src/components/HubOperations.tsx).
 - Client : [portail](../../src/components/ClientPortal.tsx), [création](../../src/components/CreateShipmentModal.tsx), [compte](../../src/components/AccountHub.tsx), [statistiques](../../src/components/ClientAnalytics.tsx).
 - Preuves de validation du scan : [tests navigateur](../validation/scans/browser.json), [tests métier](../../scripts/test-scan-package.cjs), [tests de reprise réseau](../../src/services/scanService.test.ts).
+
+## Repères méthodologiques
+
+Les choix de libellés communs s’appuient sur les explications du W3C concernant l’[identification cohérente des fonctions](https://www.w3.org/WAI/WCAG22/Understanding/consistent-identification.html). La réduction de l’effort de compréhension suit les recommandations complémentaires sur l’[utilisabilité pour les personnes ayant des difficultés cognitives](https://www.w3.org/TR/coga-usable/). Les dimensions de boutons proposées ici sont des objectifs de confort ; le [critère WCAG sur les cibles tactiles](https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html) possède son propre seuil et ses exceptions. Ces références ne constituent pas une déclaration de conformité de l’application.

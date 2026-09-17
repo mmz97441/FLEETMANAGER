@@ -22,7 +22,7 @@ Les scans de chargement au dépôt suivent désormais cette règle de prise en c
 - 264 tests unitaires, dont 4 tests du service de scan : réponse incertaine et rechargement, callbacks concurrents, nouvelle lecture physique, contexte partagé et changement de jour.
 - Suite émulateurs : 35 contrôles de règles, 32 tests d’intégration, 41 contrôles serveur existants, 13 contrôles de clôture et 10 contrôles de stockage.
 - 22 scénarios du nouveau serveur de scan : voir `scripts/test-scan-package.cjs`. Aucun colis réel utilisé.
-- Audit UI statique sans écart ; 21 contrôles navigateur sur les vrais composants de scan/historique avec services simulés : `browser.json`. Captures à 320, 390 et 1365 px.
+- Audit UI statique sans écart ; 25 contrôles navigateur sur les vrais composants de scan/historique avec services simulés : `browser.json` et `driver-first-tour.json`. Le véritable écran chauffeur conserve deux scans lors de la création de sa première tournée, puis ouvre l’identifiant retourné par le serveur. Captures à 320, 390 et 1365 px.
 - Lecture seule du projet réel : filtre chauffeur + date accepté par Firestore (HTTP 200) ; pas d’index supplémentaire nécessaire pour cette requête.
 
 Les tests automatisés ne constituent pas un essai de caméra sur les téléphones des chauffeurs. La saisie, les états d’attente, la reprise, les messages et le rendu ont été vérifiés ; la reconnaissance optique dépend toujours de la caméra et de l’étiquette physique.
@@ -47,3 +47,5 @@ Pour les essais visuels, démarrer `node scripts/scan/fixture.mjs` (port 5245), 
 L’heure et le jour de rattachement sont décidés par le serveur, pas par l’horloge du téléphone. Aucune migration de masse des colis historiques : une reprise nécessite un scan effectif. Les anciens événements sans heure de scan fiable ne reçoivent pas d’horodatage inventé. La création manuelle utilise une identité stable pour éviter un second colis lors d’une reprise après échec de confirmation.
 
 Le diagnostic global de simplification est fourni dans `docs/ux/DIAGNOSTIC-SIMPLIFICATION-2026-09-17.md`. Il s’agit de recommandations pour une prochaine évolution, distinctes de cette correction.
+
+Pour rejouer le cas de la première tournée, démarrer également `node scripts/scan/driver-fixture.mjs` (port 5246), puis exécuter `node scripts/scan/driver-probe.mjs` avec la même instance Chrome isolée. Le composant `DriverMissionView` est réel ; les services sont simulés.
