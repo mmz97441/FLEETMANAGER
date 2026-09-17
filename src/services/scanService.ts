@@ -2,6 +2,7 @@ import { getFunctions, httpsCallable } from 'firebase/functions';
 import app from '../firebaseConfig';
 import { reportError } from './logService';
 import { operationalDay } from '../utils/operationalDay';
+import { beginDiagnosticOperation } from '../utils/runtimeDiagnostics';
 
 export type ScanSource = 'driver-claim' | 'driver-delivery' | 'driver-pickup' | 'hub-loading' | 'quick-scan' | 'transfer' | 'manual-create';
 export interface ScanReceipt {
@@ -42,15 +43,18 @@ export function scanPackage(input: ScanInput): Promise<ScanReceipt> {
     };
     pending.set(key, request);
     try { localStorage.setItem(key, JSON.stringify(request)); } catch { /* memory fallback */ }
+    const operation = beginDiagnosticOperation('scan.confirm');
     try {
       const call = httpsCallable<Request, ScanReceipt>(getFunctions(app, 'europe-west1'), 'scanPackage', { timeout: 20000 });
       // Firebase rejects undefined values in callable payloads.
       const { data } = await call(JSON.parse(JSON.stringify(request)));
+      operation.finish(data.accepted ? 'success' : 'refused');
       pending.delete(key);
       try { localStorage.removeItem(key); } catch { /* memory fallback */ }
       if (data.accepted && data.missionId && data.missionDate) rememberScanMission(input.driverId, data.missionId, data.missionDate);
       return data;
     } catch (error) {
+      operation.finish('failure');
       const code = String((error as { code?: string })?.code || '');
       if (['functions/permission-denied', 'functions/unauthenticated', 'functions/invalid-argument', 'functions/failed-precondition'].includes(code)) {
         pending.delete(key);

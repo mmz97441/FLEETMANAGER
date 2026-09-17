@@ -17,6 +17,7 @@
 
 import { db } from '../firebaseConfig';
 import { recordSupportErrorReference } from '../utils/supportContext';
+import { captureRuntimeDiagnostics, resetRuntimeDiagnostics } from '../utils/runtimeDiagnostics';
 import { collection, addDoc, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
 
 export type LogLevel = 'error' | 'warning' | 'info' | 'success';
@@ -45,6 +46,7 @@ export interface UserMessage {
   message: string;
   /** durée d'affichage en ms (0 = ne pas auto-fermer) */
   durationMs: number;
+  group?: 'runtime';
 }
 
 // ============================================================================
@@ -57,6 +59,7 @@ let currentContext: { userId?: string; userName?: string; userRole?: string } = 
 export const setLogUser = (
   u?: { id: string; firstName?: string; lastName?: string; role?: unknown } | null
 ): void => {
+  if (currentContext.userId !== u?.id) resetRuntimeDiagnostics();
   currentContext = u
     ? {
         userId: u.id,
@@ -82,12 +85,13 @@ export const onUserMessage = (cb: (m: UserMessage) => void): (() => void) => {
 
 const genId = () => `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 
-const emit = (level: LogLevel, message: string, durationMs?: number): void => {
+const emit = (level: LogLevel, message: string, durationMs?: number, group?: 'runtime'): void => {
   const msg: UserMessage = {
     id: genId(),
     level,
     message,
     durationMs: durationMs ?? (level === 'error' ? 8000 : level === 'warning' ? 6000 : 4000),
+    ...(group ? { group } : {}),
   };
   listeners.forEach(l => { try { l(msg); } catch { /* un listener ne doit pas casser les autres */ } });
 };
@@ -110,7 +114,8 @@ const LS_MAX = 50;
 const readLocal = (): Record<string, unknown>[] => {
   try {
     const raw = localStorage.getItem(LS_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const entries = raw ? JSON.parse(raw) : [];
+    return Array.isArray(entries) ? entries.filter(entry => entry && typeof entry === 'object').slice(-LS_MAX) : [];
   } catch { return []; }
 };
 
@@ -126,22 +131,28 @@ const bufferLocal = (entry: Record<string, unknown>): void => {
 /** Erreurs bufferisées localement (consultable même hors-ligne). */
 export const getLocalErrorLogs = (): Record<string, unknown>[] => readLocal();
 
-/** Tente de renvoyer vers Firestore les erreurs stockées localement. */
-export const flushLocalErrorLogs = async (): Promise<void> => {
-  const arr = readLocal();
-  if (arr.length === 0) return;
-  const remaining: Record<string, unknown>[] = [];
-  for (const entry of arr) {
-    try {
-      await addDoc(collection(db, 'error_logs'), entry);
-    } catch {
-      remaining.push(entry); // toujours pas possible : on garde pour plus tard
+let flushing: Promise<void> | null = null;
+/** One flush per tab. Remove only confirmed entries, never overwrite errors buffered during a request. */
+export const flushLocalErrorLogs = (): Promise<void> => {
+  if (flushing) return flushing;
+  const task = (async () => {
+    for (const entry of readLocal()) {
+      try { await addDoc(collection(db, 'error_logs'), entry); }
+      catch { break; }
+      try {
+        const remaining = readLocal();
+        const index = remaining.findIndex(candidate => entry.referenceId
+          ? candidate.referenceId === entry.referenceId
+          : JSON.stringify(candidate) === JSON.stringify(entry));
+        if (index >= 0) remaining.splice(index, 1);
+        if (remaining.length) localStorage.setItem(LS_KEY, JSON.stringify(remaining));
+        else localStorage.removeItem(LS_KEY);
+      } catch { /* Storage is best-effort; never touch business outboxes. */ }
     }
-  }
-  try {
-    if (remaining.length > 0) localStorage.setItem(LS_KEY, JSON.stringify(remaining));
-    else localStorage.removeItem(LS_KEY);
-  } catch { /* ignore */ }
+  })();
+  flushing = task;
+  void task.finally(() => { flushing = null; }).catch(() => {});
+  return task;
 };
 
 // ============================================================================
@@ -149,9 +160,13 @@ export const flushLocalErrorLogs = async (): Promise<void> => {
 // ============================================================================
 
 const serializeError = (error: unknown): { message: string; stack: string | null } => {
-  if (error instanceof Error) return { message: error.message, stack: error.stack ?? null };
+  // Errors from another window/realm do not pass instanceof Error.
+  if (error && typeof error === 'object' && typeof (error as Error).message === 'string') return {
+    message: (error as Error).message,
+    stack: typeof (error as Error).stack === 'string' ? (error as Error).stack! : null,
+  };
   if (typeof error === 'string') return { message: error, stack: null };
-  try { return { message: JSON.stringify(error), stack: null }; }
+  try { return { message: JSON.stringify(error) ?? String(error), stack: null }; }
   catch { return { message: String(error), stack: null }; }
 };
 
@@ -193,11 +208,15 @@ export const reportError = (context: string, error: unknown, opts: ReportOptions
     context,
     message,
     stack,
-    extra: opts.extra ?? null,
+    extra: {
+      ...opts.extra,
+      errorCode: error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string' ? String((error as { code: string }).code).slice(0, 100) : null,
+      diagnostics: captureRuntimeDiagnostics(),
+    },
     userId: currentContext.userId ?? null,
     userName: currentContext.userName ?? null,
     userRole: currentContext.userRole ?? null,
-    url: typeof location !== 'undefined' ? location.href : null,
+    url: typeof location !== 'undefined' ? `${location.origin}${location.pathname}` : null,
     userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : null,
     appVersion: typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : null,
     createdAt: new Date().toISOString(),
@@ -212,7 +231,7 @@ export const reportError = (context: string, error: unknown, opts: ReportOptions
       level === 'warning'
         ? `Attention : ${message}`
         : `Un problème est survenu (${context}). Il a été enregistré, réessayez ou contactez la direction.`;
-    emit(level, opts.userMessage || fallback);
+    emit(level, opts.userMessage || fallback, undefined, ['window.error', 'window.unhandledrejection', 'resource.load'].includes(context) ? 'runtime' : undefined);
   }
 
   // 3) persistance (best-effort, non bloquante)

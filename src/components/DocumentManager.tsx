@@ -15,6 +15,7 @@ import Modal from './shared/Modal';
 import ConfirmModal from './ConfirmModal';
 import { usePermissions, Permission } from '../usePermissions';
 import { normalizeRole } from '../utils/role';
+import { recordDiagnosticAction } from '../utils/runtimeDiagnostics';
 
 interface DocumentManagerProps {
   documents: CompanyDocument[];
@@ -180,6 +181,7 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
   };
 
   const handleOpenView = (doc: CompanyDocument) => {
+    recordDiagnosticAction('document.open');
     setSelectedDocument(doc);
     setReadStartTime(Date.now());
     setHasReadDocument(false);
@@ -220,11 +222,13 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
   };
 
   const handleMarkAsRead = () => {
+    recordDiagnosticAction('document.read');
     setHasReadDocument(true);
   };
 
   const handleSign = async () => {
     if (!selectedDocument || !hasReadDocument) return;
+    recordDiagnosticAction('document.sign');
     
     const readDuration = readStartTime ? Math.round((Date.now() - readStartTime) / 1000) : 0;
     

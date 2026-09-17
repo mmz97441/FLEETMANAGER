@@ -24,6 +24,7 @@ import { Vehicle, FuelLog, MaintenanceLog, Issue, VehicleStatus, User, UserRole,
 import { reportError } from "./logService";
 import { cleanUndefined } from "../utils/firestore";
 import { mapDbStatusToApp } from '../utils/vehicleStatus';
+import { subscribeToTeamDirectory } from './teamDirectoryService';
 
 // --- HELPER UTILS ---
 
@@ -99,18 +100,7 @@ export const linkAuthToProfile = async (email: string, authUid: string) => {
 // --- USERS ---
 export const subscribeToUsers = (currentUser: User, callback: (data: User[]) => void) => {
   if (![UserRole.CLIENT, UserRole.ADMIN, UserRole.PRESIDENT, UserRole.DIRECTOR, UserRole.SECRETARY].includes(currentUser.role)) {
-    let cancelled = false;
-    const refresh = async () => {
-      try {
-        const result = await httpsCallable<unknown, {users: User[]}>(getFunctions(app, 'europe-west1'), 'getTeamDirectory')({});
-        if (!cancelled) callback(result.data.users.map(user => user.id === currentUser.id ? currentUser : user));
-      } catch (error) {
-        if (!cancelled) reportError('directory.load', error, {silent: true});
-      }
-    };
-    void refresh();
-    const interval = window.setInterval(refresh, 60000);
-    return () => {cancelled = true; window.clearInterval(interval);};
+    return subscribeToTeamDirectory(currentUser, callback);
   }
   let q: Query<DocumentData, DocumentData>;
   
