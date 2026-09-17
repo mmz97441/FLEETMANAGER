@@ -1,0 +1,21 @@
+{
+  "checks": [
+    {
+      "name": "First tour snapshot does not unmount the claim scanner",
+      "pass": true
+    },
+    {
+      "name": "Second scan survives first tour creation with both receipts",
+      "pass": true
+    },
+    {
+      "name": "Done opens the actual server tour, not a guessed DLV identifier",
+      "pass": true
+    },
+    {
+      "name": "No runtime exception",
+      "pass": true
+    }
+  ],
+  "errors": []
+}

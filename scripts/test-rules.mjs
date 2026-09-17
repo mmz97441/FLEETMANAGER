@@ -286,6 +286,14 @@ await check(
 await check('Client can reject its own offer', 'allowed', () =>
   updateDoc(doc(db('clientA'), 'quotes', 'offer'), { status: 'Refusé' }),
 );
+await check('Driver cannot forge confirmed scan timestamp', 'denied', () =>
+  updateDoc(doc(db('driverB'), 'packages', 'pB'), { lastScannedAt: '2026-09-17T05:00:00Z' }));
+await check('Driver cannot forge server scan audit', 'denied', () =>
+  setDoc(doc(db('driverA'), 'activity_logs', 'fake-scan'), { userId: 'driverA', action: 'PACKAGE_SCANNED' }));
+await check('Client cannot forge scan receipt for replay', 'denied', () =>
+  setDoc(doc(db('driverA'), 'scan_requests', 'fake-receipt'), { result: { accepted: true } }));
+await check('Driver can still record ordinary field activity', 'allowed', () =>
+  setDoc(doc(db('driverA'), 'activity_logs', 'ordinary-field-event'), { userId: 'driverA', action: 'PACKAGE_PICKED_UP' }));
 if (process.env.TEST_RESULTS_PATH)
   await writeFile(
     process.env.TEST_RESULTS_PATH,

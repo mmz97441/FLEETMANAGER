@@ -4,7 +4,7 @@ import { Camera, MapPin, Download, Printer, Smartphone } from 'lucide-react';
 import { FormInput, FormSelect } from './shared/FormInput';
 import { buildDeviceDiagnosticReport, downloadDiagnosticJson, fieldScenarios, initialFieldResults, DiagnosticOutcome } from '../utils/deviceDiagnostic';
 
-const BarcodeScanner = lazy(() => import('./BarcodeScanner'));
+import BarcodeScanner from './Scanner';
 const testCode = 'TEST-FLEETGENIUS-0000';
 
 export default function DeviceDiagnostics() {

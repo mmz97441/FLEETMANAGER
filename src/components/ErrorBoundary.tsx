@@ -36,6 +36,7 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
 
   render() {
     if (this.state.hasError) {
+      const moduleUnavailable = /dynamically imported module|Importing a module script failed|Loading chunk|module script|MIME type/i.test(String(this.state.error));
       return (
         <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full text-center border border-red-100">
@@ -43,9 +44,9 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
                 <ShieldAlert className="text-red-500 w-10 h-10" />
             </div>
             
-            <h1 className="text-2xl font-bold text-slate-900 mb-2">Oups ! Un problème est survenu.</h1>
+            <h1 className="text-2xl font-bold text-slate-900 mb-2">{moduleUnavailable ? 'Cet écran doit être rechargé' : 'Un problème est survenu'}</h1>
             <p className="text-slate-500 mb-6">
-              L'application a rencontré une erreur inattendue. Nos systèmes de sécurité ont bloqué le processus pour protéger vos données.
+              {moduleUnavailable ? 'Le chargement de cet écran a échoué. Vérifiez votre connexion puis rechargez l’application pour ouvrir la version disponible. Les scans déjà confirmés restent enregistrés.' : 'Cet écran a rencontré une erreur. Rechargez l’application, puis vérifiez la dernière opération avant de la recommencer.'}
             </p>
             
             <div className="bg-slate-100 p-3 rounded-lg text-left mb-6 overflow-hidden">

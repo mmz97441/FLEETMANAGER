@@ -1,3 +1,7 @@
+import PackageScanInfo from './PackageScanInfo';
+import PackageTimeline from './PackageTimeline';
+import { scanPackage, scanReceiptLabel, rememberScanMission } from '../services/scanService';
+import { useOperationalDay } from '../hooks/useOperationalDay';
 import { assertMissionReadyToClose, submitDelivery, pendingDeliveries, outboxChangeEvent } from '../services/deliveryOutbox';
 /**
  * DRIVER MISSION VIEW — Interface Mobile Chauffeur
@@ -59,7 +63,7 @@ import { sameDeliveryPoint } from '../utils/address';
 import { getTourProgress } from '../utils/missionProgress';
 import { getCurrentPosition } from '../utils/geo';
 import { formatDistance, formatDuration } from '../utils/format';
-const BarcodeScanner = lazy(() => import('./BarcodeScanner'));
+import BarcodeScanner from './Scanner';
 import {
   Truck,
   Package as PackageIcon,
@@ -376,6 +380,10 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
 
   // Pickup/Scan state
   const [showScanner, setShowScanner] = useState(false);
+  const [scanPending, setScanPending] = useState(0);
+  const [scanFeedback, setScanFeedback] = useState<{ type: 'ok' | 'warn'; text: string } | null>(null);
+  const stopScanQueue = useRef(Promise.resolve());
+  const scanContextRef = useRef('');
   const [scannedBarcodes, setScannedBarcodes] = useState<string[]>([]);
   const [scanBypass, setScanBypass] = useState(false); // validation sans scan complet (tracée)
   const [showScanGate, setShowScanGate] = useState(false); // garde-fou "colis manquants"
@@ -446,7 +454,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   const closeIssue = useUnsavedChanges(showIssue && (!!issueForm.description.trim() || issueForm.category !== 'Véhicule / panne' || issueForm.priority !== 'Medium'), issueSubmitting);
   const closeFailure = useUnsavedChanges(showFailureModal && (!!failureNotes || failurePhotos.length > 0 || failureReason !== FailureReason.ABSENT), isProcessing);
   const closeReturn = useUnsavedChanges(showReturnModal && (returnPhotos.length > 0 || !!returnSignature), isProcessing);
-  const changeStop = useUnsavedChanges(!!signatureData || capturedPhotos.length > 0 || !!recipientName || !!reservesNote || scannedBarcodes.length > 0, isProcessing);
+  const changeStop = useUnsavedChanges(!!signatureData || capturedPhotos.length > 0 || !!recipientName || !!reservesNote || scannedBarcodes.length > 0, isProcessing || scanPending > 0);
   useEffect(() => () => clearTimeout(notificationTimer.current), []);
   useEffect(() => {
     let active = true;
@@ -458,7 +466,16 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
     return () => { active = false; window.removeEventListener(outboxChangeEvent, refresh); };
   }, [currentUser.id, activeMissionId]);
 
-  const today = todayISO();
+  const today = useOperationalDay();
+  const claimOpenRef = useRef(false);
+  claimOpenRef.current = showClaimModal || showTransferModal;
+  const deferredScanMissions = useRef<Mission[] | null>(null);
+  useEffect(() => {
+    if (!showClaimModal && !showTransferModal && deferredScanMissions.current) {
+      setMissions(deferredScanMissions.current);
+      deferredScanMissions.current = null;
+    }
+  }, [showClaimModal, showTransferModal]);
 
   // Raccourci scan venu d'un autre écran → ouvre le choix Récupérer/Livraison.
   useEffect(() => {
@@ -474,7 +491,10 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
     const unsub = subscribeToMissions((data) => {
       // Les filtres sont appliqués par subscribeToMissions
       const myMissions = data.filter(m => m.status !== MissionStatus.CANCELLED);
-      setMissions(myMissions);
+      // Keep the modal mounted while a first scan creates the driver's first tour.
+      // Switching from the empty page to the tour page would discard its queue and receipts.
+      if (claimOpenRef.current) deferredScanMissions.current = myMissions;
+      else setMissions(myMissions);
       setLoading(false);
 
       // Auto-sélectionner la mission active. On ne VERROUILLE qu'une fois une
@@ -482,7 +502,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
       // sans tournée puis récupère des colis, la mission créée juste après n'était
       // jamais auto-sélectionnée (verrou posé au 1er callback vide) → écran sans
       // tournée. Ici, tant qu'aucune tournée EN COURS n'existe, on reste à l'écoute.
-      if (!hasAutoSelectedRef.current) {
+      if (!hasAutoSelectedRef.current && !claimOpenRef.current) {
         const active = myMissions.find(m => m.status === MissionStatus.IN_PROGRESS);
         if (active) {
           setActiveMissionId(active.id);
@@ -518,6 +538,11 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   const activeMission = useMemo(() =>
     missions.find(m => m.id === activeMissionId) || null
   , [missions, activeMissionId]);
+
+  useEffect(() => {
+    if (activeMission && activeMission.date === today && [MissionStatus.IN_PROGRESS, MissionStatus.DISPATCHED].includes(activeMission.status))
+      rememberScanMission(currentUser.id, activeMission.id, today);
+  }, [activeMission?.id, activeMission?.status, currentUser.id, today]);
 
   const sortedStops = useMemo(() =>
     activeMission ? [...activeMission.stops].sort((a, b) => a.sequence - b.sequence) : []
@@ -1296,10 +1321,33 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   // SCAN / ENLÈVEMENT
   // ============================================================================
 
+  scanContextRef.current = `${activeMissionId}/${currentStop?.id}`;
   const handleBarcodeScan = (barcode: string) => {
-    setScannedBarcodes(prev => {
-      if (prev.some(b => b.toUpperCase() === barcode.toUpperCase())) return prev;
-      return [...prev, barcode];
+    if (!activeMission || !currentStop) return;
+    const expected = stopPackages.filter(p => packageMatchesCode(p, barcode));
+    const context = `${activeMission.id}/${currentStop.id}`;
+    const missionId = activeMission.id, stopId = currentStop.id;
+    const source = isPickupStop ? 'driver-pickup' : 'driver-delivery';
+    setScanFeedback({ type: 'warn', text: `${barcode} — confirmation en cours…` });
+    setScanPending(n => n + 1);
+    stopScanQueue.current = stopScanQueue.current.then(async () => {
+      try {
+        setScanFeedback({ type: 'warn', text: `${barcode} — confirmation en cours…` });
+        const receipt = await scanPackage({ code: barcode, ...(expected.length === 1 ? { packageId: expected[0].id } : {}),
+          driverId: currentUser.id, targetMissionId: missionId, stopId, source });
+        const here = receipt.missionId === missionId && receipt.stopId === stopId;
+        const text = `${scanReceiptLabel(receipt)}${receipt.accepted && !here ? ' — visible dans sa tournée, à un autre arrêt.' : ''}`;
+        setScanFeedback({ type: receipt.accepted && receipt.outcome !== 'already_scanned' ? 'ok' : 'warn', text });
+        showNotif(text);
+        if (receipt.accepted && here && scanContextRef.current === context) {
+          setScannedBarcodes(prev => prev.includes(barcode) ? prev : [...prev, barcode]);
+          setStopPackages(prev => prev.map(p => p.id === receipt.packageId ? { ...p, lastScannedAt: receipt.scannedAt,
+            lastScannedMissionId: receipt.missionId!, missionDate: receipt.missionDate! } : p));
+        }
+      } catch {
+        const text = `${barcode} — scan non confirmé. Vérifiez la connexion puis scannez à nouveau.`;
+        setScanFeedback({ type: 'warn', text }); showNotif(text);
+      } finally { setScanPending(n => Math.max(0, n - 1)); }
     });
   };
 
@@ -1642,10 +1690,10 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
           clients={clients}
           confirmLabel="Commencer ma tournée"
           onClose={() => setShowClaimModal(false)}
-          onDone={(count) => {
+          onDone={(count, missionId) => {
             setShowClaimModal(false);
             if (count > 0) {
-              setActiveMissionId(`DLV-${currentUser.id}-${today}`);
+              if (missionId) { hasAutoSelectedRef.current = true; setActiveMissionId(missionId); }
               setActiveStopIndex(0);
               showNotif(`🚚 ${count} colis chargé${count > 1 ? 's' : ''} — en route !`);
             }
@@ -2090,6 +2138,14 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                                     );
                                   })}
                                 </div>
+                                <details className="rounded-xl border border-slate-200 px-3">
+                                  <summary className="min-h-11 cursor-pointer py-3 text-sm font-semibold">Voir les scans et les tournées de ces colis</summary>
+                                  {stopPackages.map(pkg => <div key={pkg.id} className="border-t border-slate-100 py-3">
+                                    <p className="text-sm font-semibold">{packageDisplayCode(pkg)}</p>
+                                    <PackageScanInfo pkg={pkg} />
+                                    <PackageTimeline movements={(pkg.movements || []).filter(m => m.action === 'SCANNED')} showActors showInternalDetails />
+                                  </div>)}
+                                </details>
                                 {!allStopScanned && (
                                   <p className="flex items-start gap-2 text-sm text-amber-900">
                                     <AlertTriangle
@@ -2948,8 +3004,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
             currentUser={currentUser}
             toMission={activeMission}
             onClose={() => setShowTransferModal(false)}
-            onDone={(count) => {
+            onDone={(count, missionId) => {
               setShowTransferModal(false);
+              if (missionId) { hasAutoSelectedRef.current = true; setActiveMissionId(missionId); }
               showNotif(`🔁 ${count} colis récupéré${count > 1 ? 's' : ''} dans votre tournée`);
             }}
           />
@@ -3033,8 +3090,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
             // n'apparaissent jamais dans la tournée livrée.
             targetMissionId={activeMission?.id}
             onClose={() => setShowClaimModal(false)}
-            onDone={(count) => {
+            onDone={(count, missionId) => {
               setShowClaimModal(false);
+              if (missionId) { hasAutoSelectedRef.current = true; setActiveMissionId(missionId); }
               if (count > 0) showNotif(`📦 ${count} colis ajouté${count > 1 ? 's' : ''} à votre tournée`);
             }}
           />
@@ -3297,13 +3355,16 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
           >
             <BarcodeScanner
               onScan={handleBarcodeScan}
+              forwardDuplicates
+              busy={scanPending > 0}
+              flashMessage={scanFeedback}
               onClose={() => setShowScanner(false)}
-              expectedBarcodes={stopPackages.flatMap(p => packageScanCodes(p))}
+              expectedBarcodes={[]}
               alreadyScanned={scannedBarcodes}
               title={`${isPickupStop ? 'Scan enlèvement' : 'Scan livraison'} — ${currentStop?.contactName || ''}`}
               hint={isPickupStop ? undefined : 'Scannez le code DELIVREX — le petit carré (DataMatrix) en bas à gauche'}
               progress={stopPackages.length > 0 ? { done: deliveryScannedCount, total: stopPackages.length } : undefined}
-              isMatch={(code) => stopPackages.some(p => packageMatchesCode(p, code))}
+
               checklist={stopPackages.map(p => ({ code: packageDisplayCode(p) || 'sans code', done: scannedStopIds.has(p.id) }))}
             />
           </Suspense>
@@ -3566,10 +3627,10 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
           clients={clients}
           confirmLabel="Commencer ma tournée"
           onClose={() => setShowClaimModal(false)}
-          onDone={(count) => {
+          onDone={(count, missionId) => {
             setShowClaimModal(false);
             if (count > 0) {
-              setActiveMissionId(`DLV-${currentUser.id}-${today}`);
+              if (missionId) { hasAutoSelectedRef.current = true; setActiveMissionId(missionId); }
               setActiveStopIndex(0);
               showNotif(`🚚 ${count} colis chargé${count > 1 ? 's' : ''} — en route !`);
             }

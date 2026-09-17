@@ -119,6 +119,7 @@ const getActionLabel = (action: ActivityAction): string => {
     [ActivityAction.PACKAGE_DELIVERED]: 'a livré un colis',
     [ActivityAction.PACKAGE_DELIVERY_FAILED]: 'a échoué la livraison',
     [ActivityAction.PACKAGE_PICKED_UP]: 'a récupéré des colis',
+    [ActivityAction.PACKAGE_SCANNED]: 'a scanné un colis',
     [ActivityAction.PACKAGE_TRANSFERRED]: 'a transféré des colis',
     [ActivityAction.PACKAGE_CREATED_ADHOC]: 'a créé un colis hors import',
     

@@ -731,6 +731,7 @@ export enum ActivityAction {
   PACKAGE_DELIVERED = 'PACKAGE_DELIVERED',
   PACKAGE_DELIVERY_FAILED = 'PACKAGE_DELIVERY_FAILED',
   PACKAGE_PICKED_UP = 'PACKAGE_PICKED_UP',
+  PACKAGE_SCANNED = 'PACKAGE_SCANNED',
   PACKAGE_TRANSFERRED = 'PACKAGE_TRANSFERRED',
   PACKAGE_CREATED_ADHOC = 'PACKAGE_CREATED_ADHOC',
 
@@ -848,8 +849,17 @@ export const PACKAGE_STATUS_COLORS: Record<PackageStatus, { bg: string; text: st
 };
 
 export interface PackageMovement {
+  missionId?: string;
+  missionDate?: string;
+  fromMissionId?: string;
+  fromMissionDate?: string;
+  stopId?: string;
+  source?: string;
+  outcome?: string;
+  requestId?: string;
+  recordedBy?: string;
   timestamp: string;
-  action: 'IMPORTED' | 'COLLECTED' | 'HUB_ARRIVAL' | 'SORTED' | 'LOADED' | 'TRANSFERRED' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'FAILED' | 'RETURN_REQUESTED' | 'RETURNED' | 'STOP_DELETED' | 'MANUAL_STATUS_CHANGE' | 'LOADING_COMPLETE';
+  action: 'SCANNED' | 'IMPORTED' | 'COLLECTED' | 'HUB_ARRIVAL' | 'SORTED' | 'LOADED' | 'TRANSFERRED' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'FAILED' | 'RETURN_REQUESTED' | 'RETURNED' | 'STOP_DELETED' | 'MANUAL_STATUS_CHANGE' | 'LOADING_COMPLETE';
   vehicleId?: string;
   vehiclePlate?: string;
   driverId?: string;
@@ -913,6 +923,13 @@ export interface Package {
   missionId?: string;
   stopId?: string;
   
+  missionDate?: string;
+  lastScannedAt?: string;
+  lastScannedMissionId?: string;
+  lastScannedBy?: string;
+  lastScanSource?: string;
+  firstScannedForMissionAt?: string;
+
   // Tracking
   movements: PackageMovement[];    // Historique complet
   estimatedDeliveryAt?: string;    // Heure de passage prévue (dénormalisée depuis l'arrêt) — affichée au client
