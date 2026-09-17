@@ -33,8 +33,9 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.interpretAnalytics = exports.acceptQuote = exports.getTeamDirectory = exports.notifyPackageStatus = exports.returnPackage = exports.deleteAbsence = exports.deleteVehicle = exports.importPackages = exports.assignVehicle = exports.askFleetGenius = exports.sendBusinessNotification = exports.transferPackages = exports.dispatchMissions = exports.finishMission = exports.receivePackagesAtHub = exports.saveAbsence = exports.revokeOwnSessions = exports.linkAuthToProfile = exports.createInvitation = exports.activateAccount = exports.validateInvitationToken = exports.forcePasswordReset = exports.toggleUserStatus = exports.cleanupExpiredInvitations = exports.deleteUserCompletely = exports.optimizeTours = void 0;
+exports.interpretAnalytics = exports.acceptQuote = exports.getTeamDirectory = exports.notifyPackageStatus = exports.returnPackage = exports.deleteAbsence = exports.deleteVehicle = exports.importPackages = exports.assignVehicle = exports.askFleetGenius = exports.sendBusinessNotification = exports.transferPackages = exports.scanPackage = exports.dispatchMissions = exports.finishMission = exports.receivePackagesAtHub = exports.saveAbsence = exports.revokeOwnSessions = exports.linkAuthToProfile = exports.createInvitation = exports.activateAccount = exports.validateInvitationToken = exports.forcePasswordReset = exports.toggleUserStatus = exports.cleanupExpiredInvitations = exports.deleteUserCompletely = exports.optimizeTours = void 0;
 const hubReception_1 = require("./hubReception");
+const scanPackage_1 = require("./scanPackage");
 const missionLifecycle_1 = require("./missionLifecycle");
 const deliveryAddress_1 = require("./deliveryAddress");
 const dispatchMissions_1 = require("./dispatchMissions");
@@ -1132,6 +1133,7 @@ exports.dispatchMissions = functions
         throw new functions.https.HttpsError('permission-denied', 'Dispatch réservé à l’exploitation.');
     return (0, dispatchMissions_1.dispatchMissionsTransaction)(db, data, caller);
 });
+exports.scanPackage = functions.region('europe-west1').https.onCall((data, context) => (0, scanPackage_1.scanPackageHandler)(data, context, { db, requireActiveCaller, isAdminCaller }));
 exports.transferPackages = functions
     .region('europe-west1')
     .https.onCall(async (data, context) => {

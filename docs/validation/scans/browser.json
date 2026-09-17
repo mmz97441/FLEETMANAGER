@@ -1,0 +1,89 @@
+{
+  "checks": [
+    {
+      "name": "No false confirmation while server pending 320",
+      "pass": true
+    },
+    {
+      "name": "Current tour, scan time visible 320",
+      "pass": true
+    },
+    {
+      "name": "Duplicate confirmed without duplicate parcel 320",
+      "pass": true
+    },
+    {
+      "name": "Network failure never offered as unknown creation 320",
+      "pass": true
+    },
+    {
+      "name": "No horizontal overflow 320",
+      "pass": true
+    },
+    {
+      "name": "Done opens actual returned tour 320",
+      "pass": true
+    },
+    {
+      "name": "No false confirmation while server pending 390",
+      "pass": true
+    },
+    {
+      "name": "Current tour, scan time visible 390",
+      "pass": true
+    },
+    {
+      "name": "Duplicate confirmed without duplicate parcel 390",
+      "pass": true
+    },
+    {
+      "name": "Network failure never offered as unknown creation 390",
+      "pass": true
+    },
+    {
+      "name": "No horizontal overflow 390",
+      "pass": true
+    },
+    {
+      "name": "Done opens actual returned tour 390",
+      "pass": true
+    },
+    {
+      "name": "No false confirmation while server pending 1365",
+      "pass": true
+    },
+    {
+      "name": "Current tour, scan time visible 1365",
+      "pass": true
+    },
+    {
+      "name": "Duplicate confirmed without duplicate parcel 1365",
+      "pass": true
+    },
+    {
+      "name": "Network failure never offered as unknown creation 1365",
+      "pass": true
+    },
+    {
+      "name": "No horizontal overflow 1365",
+      "pass": true
+    },
+    {
+      "name": "Done opens actual returned tour 1365",
+      "pass": true
+    },
+    {
+      "name": "Fallback preserves business scan and displays confirmation",
+      "pass": true
+    },
+    {
+      "name": "Timeline displays original and current tours with full timestamp",
+      "pass": true
+    },
+    {
+      "name": "No runtime exception",
+      "pass": true
+    }
+  ],
+  "errors": []
+}

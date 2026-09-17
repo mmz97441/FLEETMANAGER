@@ -25,9 +25,11 @@ import {
   FlashlightOff,
 } from 'lucide-react';
 
-interface BarcodeScannerProps {
+export interface BarcodeScannerProps {
   onScan: (barcode: string) => void;
   onClose: () => void;
+  forwardDuplicates?: boolean;
+  busy?: boolean;
   expectedBarcodes?: string[];        // Liste des codes attendus (pour feedback couleur)
   alreadyScanned?: string[];          // Codes déjà scannés (pour anti-doublon visuel)
   title?: string;
@@ -62,7 +64,9 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   isMatch,
   checklist,
   countLabel,
-  flashMessage
+  flashMessage,
+  forwardDuplicates = false,
+  busy = false
 }) => {
   const [isScanning, setIsScanning] = useState(false);
   const [manualMode, setManualMode] = useState(false);
@@ -103,6 +107,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
       // Vibration courte = doublon
       try { navigator.vibrate?.(100); } catch {}
       setTimeout(() => setLastScanResult(null), 2000);
+      if (forwardDuplicates) onScan(barcode);
       return;
     }
 
@@ -132,7 +137,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
     onScan(barcode);
 
     setTimeout(() => setLastScanResult(null), 2000);
-  }, [onScan, expectedBarcodes, alreadyScanned, lastScanned, isMatch, recordScan]);
+  }, [onScan, expectedBarcodes, alreadyScanned, lastScanned, isMatch, recordScan, forwardDuplicates]);
 
   // Référence toujours à jour vers feedbackScan, pour que l'effet caméra ne
   // dépende PAS de feedbackScan (sinon il redémarre la caméra à chaque scan,
@@ -145,16 +150,18 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   // dernière coche verte). Le chauffeur n'a plus à fermer manuellement.
   const onCloseRef = useRef(onClose);
   useEffect(() => { onCloseRef.current = onClose; });
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
   const autoClosedRef = useRef(false);
   const autoCloseTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(autoCloseTimer.current), []);
   useEffect(() => {
-    if (!checklist || checklist.length === 0 || autoClosedRef.current) return;
+    if (busy || !checklist || checklist.length === 0 || autoClosedRef.current) return;
     if (checklist.every(c => c.done)) {
       autoClosedRef.current = true;
-      autoCloseTimer.current = setTimeout(() => onCloseRef.current(), 1200);
+      autoCloseTimer.current = setTimeout(() => { if (!busyRef.current) onCloseRef.current(); else autoClosedRef.current = false; }, 1200);
     }
-  }, [checklist]);
+  }, [checklist, busy]);
 
   // Arrêt propre : clear() UNIQUEMENT après que stop() soit terminé, sinon
   // html5-qrcode lève "Cannot clear while scan is ongoing, close it first".
@@ -308,6 +315,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
 
   // Fermer proprement
   const handleClose = async () => {
+    if (busyRef.current) return;
     await stopAndClear();
     onClose();
   };
@@ -317,7 +325,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   // son bas (checklist/infos) passait sous la barre de navigation. En portail, il est
   // VRAIMENT plein écran, quel que soit l'écran d'où on l'ouvre.
   return (
-    <Modal isOpen onClose={() => { void handleClose(); }} ariaLabel={title} size="full" showCloseButton={false} closeOnOverlay={false} bodyClassName="!p-0 bg-black">
+    <Modal isOpen busy={busy} onClose={() => { void handleClose(); }} ariaLabel={title} size="full" showCloseButton={false} closeOnOverlay={false} bodyClassName="!p-0 bg-black">
       <div className="bg-black flex flex-col h-[calc(100dvh-3rem)] min-h-[22rem]">
         {/* Footer — Switch mode */}
         <style>{`
@@ -347,7 +355,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
                 )}
               </button>
             )}
-            <button onClick={handleClose} aria-label="Fermer le scanner" className="min-w-11 min-h-11 text-white/70 hover:text-white p-1">
+            <button disabled={busy} onClick={handleClose} aria-label="Fermer le scanner" className="min-w-11 min-h-11 text-white/70 hover:text-white p-1">
               <X size={22} />
             </button>
           </div>

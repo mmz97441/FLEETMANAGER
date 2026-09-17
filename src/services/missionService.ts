@@ -1,3 +1,4 @@
+import { scanPackage } from './scanService';
 import { listenClientPackages } from './clientPackageSubscription';
 import { getFunctions, httpsCallable } from "firebase/functions";
 import app from "../firebaseConfig";
@@ -1373,24 +1374,14 @@ export const claimPackagesForDelivery = async (params: {
   // dans la tournée qu'il livre (« j'ai pris le colis mais il n'est pas là »).
   targetMissionId?: string;
 }): Promise<number> => {
-  const { packages: pkgs, driver, vehicle, date, location, targetMissionId } = params;
-  if (pkgs.length === 0) throw new Error('Aucun colis à prendre en charge');
-  let mission: Mission | null = null;
-  if (targetMissionId) {
-    const snap = await getDoc(doc(db, MISSIONS_COLLECTION, targetMissionId));
-    if (snap.exists()) mission = { id: snap.id, ...snap.data() } as Mission;
+  if (!params.packages.length) throw new Error('Aucun colis à prendre en charge');
+  let count = 0;
+  for (const pkg of params.packages) {
+    const receipt = await scanPackage({ packageId: pkg.id, driverId: params.driver.id, targetMissionId: params.targetMissionId, source: 'quick-scan' });
+    if (!receipt.accepted) throw new Error(receipt.message);
+    count++;
   }
-  // Pas de mission active fournie (ou introuvable) → tournée de récupération du jour.
-  if (!mission) mission = await getOrCreateDriverDeliveryMission(driver, date, vehicle);
-  return transferPackagesToDriver({
-    packages: pkgs,
-    toMission: mission,
-    toDriver: driver,
-    reason: TransferReason.OTHER,
-    location,
-    claimMode: true,
-    newStatus: PackageStatus.IN_DELIVERY
-  });
+  return count;
 };
 
 /**
@@ -1445,18 +1436,20 @@ export const createAndClaimPackage = async (params: {
     updatedAt: now
   });
 
-  const ref = await addDoc(collection(db, PACKAGES_COLLECTION), pkgData);
-  const created = { id: ref.id, ...pkgData } as Package;
-
-  // Prise en charge immédiate dans la tournée en cours (ou celle du jour).
-  await claimPackagesForDelivery({
-    packages: [created],
-    driver: params.driver,
-    date: params.date,
-    location: params.location,
-    targetMissionId: params.targetMissionId
+  // A failed confirmation must not create a second physical parcel on retry.
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`adhoc/${params.clientId}/${code.toUpperCase()}`));
+  const id = `adhoc-${Array.from(new Uint8Array(hash), b => b.toString(16).padStart(2, '0')).join('')}`;
+  const ref = doc(db, PACKAGES_COLLECTION, id);
+  const created = await runTransaction(db, async tx => {
+    const existing = await tx.get(ref);
+    if (existing.exists()) return { id, ...existing.data() } as Package;
+    tx.set(ref, pkgData);
+    return { id, ...pkgData } as Package;
   });
-  return created;
+  const receipt = await scanPackage({ packageId: created.id, driverId: params.driver.id, targetMissionId: params.targetMissionId, source: 'manual-create' });
+  if (!receipt.accepted) throw new Error(receipt.message);
+  return { ...created, missionId: receipt.missionId!, missionDate: receipt.missionDate!, stopId: receipt.stopId!, status: receipt.status as PackageStatus,
+    lastScannedAt: receipt.scannedAt, lastScannedBy: receipt.driverId, lastScannedMissionId: receipt.missionId! };
 };
 
 // ---- Optimisation & édition de tournée côté chauffeur ----

@@ -1,3 +1,5 @@
+import ClaimScanModal from './ClaimScanModal';
+import PackageScanInfo from './PackageScanInfo';
 /**
  * BOUTON FLOTTANT DE SCAN RAPIDE
  *
@@ -41,7 +43,7 @@ interface QuickScanButtonProps {
   clients?: User[];
 }
 
-const BarcodeScanner = lazy(() => import('./BarcodeScanner'));
+import BarcodeScanner from './Scanner';
 
 const StatusIcon = ({ status }: { status: PackageStatus }) => {
   const Icon =
@@ -164,9 +166,10 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
   // Un colis est "prenable en charge" s'il n'est pas déjà livré/retourné,
   // et pas déjà dans la tournée de la personne qui scanne.
   const canClaim = (pkg: Package): boolean =>
+    normalizeRole(currentUser.role) === UserRole.DRIVER &&
     pkg.status !== PackageStatus.DELIVERED &&
     pkg.status !== PackageStatus.RETURNED &&
-    !(pkg.currentDriverId === currentUser.id && !!pkg.missionId);
+    pkg.status !== PackageStatus.RETURN_REQUESTED;
 
   const handleClaim = async () => {
     if (!result?.pkg || isClaiming) return;
@@ -200,7 +203,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
       // Enlèvement d'un client à fichier : si le colis scanné appartient à un
       // client qui a PLUSIEURS colis « En attente », on passe en mode MANIFESTE
       // (liste attendue + complétude) au lieu de la fiche 1 colis.
-      if (pkg && pkg.clientId && pkg.status === PackageStatus.PENDING) {
+      if (normalizeRole(currentUser.role) === UserRole.DRIVER && pkg && pkg.clientId && pkg.status === PackageStatus.PENDING) {
         try {
           // Scopé au LOT d'import du colis scanné → le manifeste reflète l'enlèvement
           // du jour, sans colis fantômes d'anciens lots jamais enlevés.
@@ -266,7 +269,8 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
       </button>
 
       {/* Prise en charge : bouton principal quand le colis est disponible */}
-      {showScanner && (
+      {showScanner && normalizeRole(currentUser.role) === UserRole.DRIVER && <ClaimScanModal currentUser={currentUser} clients={clients} source="quick-scan" onClose={close} onDone={close} />}
+      {showScanner && normalizeRole(currentUser.role) !== UserRole.DRIVER && (
         <Suspense
           fallback={
             <div className="fixed inset-0 z-50 bg-black flex items-center justify-center">
@@ -477,7 +481,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
                   )}
                 </button>
               )}
-              {showCreate && !claimed && (
+              {showCreate && !claimed && normalizeRole(currentUser.role) === UserRole.DRIVER && (
                 <button
                   onClick={handleCreate}
                   disabled={creating}
@@ -580,6 +584,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
                     Suivi du colis
                   </p>
                   {/* Prise en charge : bouton principal quand le colis est disponible */}
+                  <PackageScanInfo pkg={result.pkg} />
                   <PackageTimeline
                       movements={result.pkg.movements || []}
                       showActors={normalizeRole(currentUser.role) !== UserRole.DRIVER}
@@ -600,15 +605,14 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
                 {result.scannedCode}
               </p>
               <p className="text-sm text-slate-600 mt-2">
-                Ce carton n'a pas été importé. Vous pouvez le créer et le
-                prendre en charge maintenant.
+                Vérifiez le code individuel du colis ou son import. Pour charger des colis, utilisez l’écran Chargement et choisissez le chauffeur.
               </p>
-              <button
+              {normalizeRole(currentUser.role) === UserRole.DRIVER && <button
                 onClick={() => setShowCreate(true)}
                 className="ui-button ui-button-primary mt-4 w-full gap-2"
               >
                 <Plus size={18} /> Créer et prendre en charge
-              </button>
+              </button>}
             </div>
           ) : (
             /* Formulaire de création à la volée */

@@ -15,6 +15,7 @@ import React from 'react';
 import { PackageMovement, ProofOfDelivery } from '../types';
 
 const MOVEMENT_META: Record<PackageMovement['action'], { label: string; icon: string; tone?: 'success' | 'error' }> = {
+  SCANNED: { label: 'Colis scanné', icon: '📷' },
   IMPORTED: { label: 'Colis enregistré', icon: '📥' },
   COLLECTED: { label: "Collecté chez l'expéditeur", icon: '📦' },
   HUB_ARRIVAL: { label: 'Arrivé au centre de tri', icon: '🏭' },
@@ -34,7 +35,7 @@ const MOVEMENT_META: Record<PackageMovement['action'], { label: string; icon: st
 const formatDateTime = (iso: string): string => {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
-  return `${d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })} à ${d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`;
+  return `${d.toLocaleDateString('fr-FR', { timeZone: 'Indian/Reunion', day: '2-digit', month: '2-digit', year: 'numeric' })} à ${d.toLocaleTimeString('fr-FR', { timeZone: 'Indian/Reunion', hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
 };
 
 interface PackageTimelineProps {
@@ -140,10 +141,15 @@ const PackageTimeline: React.FC<PackageTimelineProps> = ({ movements, showIntern
             {/* Contenu */}
             <div className="pb-3 min-w-0 flex-1">
               <p className={`text-xs font-bold ${isLast ? 'text-slate-800' : 'text-slate-600'}`}>
-                {meta.icon} {meta.label}
+                {meta.icon} {move.action === 'SCANNED' && move.outcome === 'already_scanned' ? 'Déjà scanné — contrôle répété' : move.action === 'SCANNED' && move.outcome === 'reassigned' ? 'Scanné et repris dans une nouvelle tournée' : meta.label}
                 {move.hubName && <span className="font-medium text-slate-500"> — {move.hubName}</span>}
               </p>
               <p className="text-[11px] text-slate-400">{formatDateTime(move.timestamp)}</p>
+              {move.action === 'SCANNED' && move.missionDate && <p className="text-sm text-slate-700">
+                Tournée du {move.missionDate.split('-').reverse().join('/')}
+                {showInternalDetails && <> · <span className="break-all">{move.missionId}</span></>}
+                {move.fromMissionDate && <> · reprise de la tournée du {move.fromMissionDate.split('-').reverse().join('/')}{showInternalDetails && <> ({move.fromMissionId})</>}</>}
+              </p>}
               {actors.length > 0 && (
                 <p className="text-[11px] text-slate-600 mt-0.5 font-medium">{actors.join('  ·  ')}</p>
               )}

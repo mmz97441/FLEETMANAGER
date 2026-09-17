@@ -1,12 +1,15 @@
+import { scanPackage, scanReceiptLabel } from '../services/scanService';
+import { useOperationalDay } from '../hooks/useOperationalDay';
+import PackageScanInfo from './PackageScanInfo';
 /**
  * HUB OPERATIONS — v3.2.1
- * 
+ *
  * 2 workflows :
- * 
+ *
  * 1. RÉCEPTION — Colis collectés (COLLECTED) → arrivée hub (AT_HUB)
- *    Scan ou réception en masse. 
+ *    Scan ou réception en masse.
  *    Après ça, le Dispatch (GMPRO) peut optimiser.
- *    
+ *
  * 2. CHARGEMENT — Le chauffeur scanne SES colis pré-assignés par GMPRO
  *    Colis SORTED assignés à ce chauffeur → LOADED
  *    Si mauvais colis → alerte avec nom du bon chauffeur
@@ -36,7 +39,7 @@ import {
 import Modal from './shared/Modal';
 import { receivePackagesAtHubCF } from '../services/cloudFunctions';
 
-const BarcodeScanner = lazy(() => import('./BarcodeScanner'));
+import BarcodeScanner from './Scanner';
 
 // ============================================================================
 // TYPES
@@ -73,7 +76,7 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
   const [scanHistory, setScanHistory] = useState<{ type: 'success' | 'error' | 'warning'; message: string; time: string }[]>([]);
   const [confirmReceptionAll, setConfirmReceptionAll] = useState(false);
   const notificationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  
+
   // UI
   const [activeTab, setActiveTab] = useState<HubOpsTab>('reception');
   const [selectedHubId, setSelectedHubId] = useState<string>('');
@@ -82,17 +85,19 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
   const [processing, setProcessing] = useState(false);
   const receptionLock = useRef(false);
   const [notification, setNotification] = useState<{ type: 'success' | 'error' | 'warning'; message: string } | null>(null);
-  
+
   // Scan state
   const [scannedCodes, setScannedCodes] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  
+
   // Loading
   const [selectedDriverId, setSelectedDriverId] = useState<string>('');
   const [wrongColisAlert, setWrongColisAlert] = useState<WrongColisAlert | null>(null);
   const [loadingComplete, setLoadingComplete] = useState(false);
 
-  const today = todayISO();
+  const today = useOperationalDay();
+  const loadingQueue = useRef(Promise.resolve());
+  const [scanPending, setScanPending] = useState(0);
   const isDriver = currentUser.role === UserRole.DRIVER;
 
   // ============================================================================
@@ -136,14 +141,14 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
 
   const selectedHub = useMemo(() => hubs.find(h => h.id === selectedHubId), [hubs, selectedHubId]);
   const activeHubs = useMemo(() => hubs.filter(h => h.isActive), [hubs]);
-  
-  const drivers = useMemo(() => 
+
+  const drivers = useMemo(() =>
     users.filter(u => u.role === UserRole.DRIVER && !u.isDisabled),
     [users]
   );
 
   // --- RÉCEPTION : colis PENDING ou COLLECTED à réceptionner ---
-  const receptionPackages = useMemo(() => 
+  const receptionPackages = useMemo(() =>
     packages.filter(p => (
       p.status === PackageStatus.COLLECTED || p.status === PackageStatus.PENDING ||
       (p.status === PackageStatus.AT_HUB && (p.missionId || p.stopId || p.currentDriverId || p.currentVehicleId))
@@ -154,28 +159,28 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
   // --- CHARGEMENT : colis SORTED assignés au chauffeur sélectionné ---
   const driverPackages = useMemo(() => {
     if (!selectedDriverId) return { toLoad: [], loaded: [], all: [] };
-    
+
     // Colis assignés à ce chauffeur par GMPRO (currentDriverId set au dispatch)
-    const assigned = packages.filter(p => 
+    const assigned = packages.filter(p =>
       p.currentDriverId === selectedDriverId &&
-      (p.status === PackageStatus.SORTED || p.status === PackageStatus.LOADED)
+      (p.status === PackageStatus.SORTED || p.status === PackageStatus.LOADED || p.status === PackageStatus.IN_DELIVERY)
     );
 
     const toLoad = assigned
       .filter(p => p.status === PackageStatus.SORTED)
       .sort((a, b) => a.contactName.localeCompare(b.contactName, 'fr'));
-    
+
     const loaded = assigned
-      .filter(p => p.status === PackageStatus.LOADED)
+      .filter(p => [PackageStatus.LOADED, PackageStatus.IN_DELIVERY].includes(p.status) && (p.missionDate === today || missions.some(m => m.id === p.missionId && m.date === today)))
       .sort((a, b) => a.contactName.localeCompare(b.contactName, 'fr'));
 
-    return { toLoad, loaded, all: assigned };
-  }, [packages, selectedDriverId]);
+    return { toLoad, loaded, all: [...toLoad, ...loaded] };
+  }, [packages, selectedDriverId, missions, today]);
 
   // Mission du chauffeur pour afficher le contexte
   const driverMission = useMemo(() => {
     if (!selectedDriverId) return null;
-    return missions.find(m => m.driverId === selectedDriverId && m.status !== MissionStatus.COMPLETED) || null;
+    return missions.find(m => m.driverId === selectedDriverId && [MissionStatus.IN_PROGRESS, MissionStatus.DISPATCHED].includes(m.status)) || null;
   }, [missions, selectedDriverId]);
 
   // Véhicule du chauffeur
@@ -191,15 +196,7 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
   );
 
   // Drivers qui ont des colis à charger (pour le dropdown admin)
-  const driversWithPackages = useMemo(() => {
-    const driverIds = new Set(
-      packages
-        // FIX v3.7.10: Vérifier aussi missionId pour éviter les orphelins
-        .filter(p => p.status === PackageStatus.SORTED && p.currentDriverId && p.missionId)
-        .map(p => p.currentDriverId!)
-    );
-    return drivers.filter(d => driverIds.has(d.id));
-  }, [packages, drivers]);
+  const selectableDrivers = useMemo(() => drivers.filter(d => !d.isDisabled), [drivers]);
 
   // ============================================================================
   // HANDLERS
@@ -265,81 +262,12 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
   };
 
   // --- CHARGEMENT : Scan un colis → vérification chauffeur ---
-  const handleLoadingScan = async (barcode: string) => {
-    const pkg = packages.find(p => packageMatchesCode(p, barcode)) || await findPackageByCode(barcode) || undefined;
-
-    if (!pkg) {
-      showNotif('warning', `Code ${barcode} — colis non trouvé dans le système`);
-      return;
-    }
-
-    // Déjà chargé ?
-    if (pkg.status === PackageStatus.LOADED && pkg.currentDriverId === selectedDriverId) {
-      showNotif('warning', `${barcode} — déjà chargé`);
-      return;
-    }
-
-    // === VÉRIFICATION : est-ce le bon chauffeur ? ===
-    if (pkg.currentDriverId && pkg.currentDriverId !== selectedDriverId) {
-      // MAUVAIS CHAUFFEUR → Alerte
-      const assignedDriver = drivers.find(d => d.id === pkg.currentDriverId);
-      const assignedVehicle = vehicles.find(v => v.id === pkg.currentVehicleId);
-      
-      setShowScanner(false);
-      showNotif('warning', `${barcode} — ce colis est affecté à un autre chauffeur.`);
-      setWrongColisAlert({
-        barcode: pkg.barcode || pkg.orderNumber,
-        packageName: pkg.contactName,
-        assignedDriverName: assignedDriver 
-          ? `${assignedDriver.firstName} ${assignedDriver.lastName}` 
-          : 'Chauffeur inconnu',
-        assignedVehiclePlate: assignedVehicle?.plate || 'Véhicule non assigné',
-        assignedZone: pkg.zone || 'Non définie'
-      });
-      
-      // Vibration erreur longue
-      try { navigator.vibrate?.([500]); } catch {}
-      return;
-    }
-
-    // Vérification statut
-    if (pkg.status !== PackageStatus.SORTED && pkg.status !== PackageStatus.AT_HUB) {
-      showNotif('warning', `${barcode} — statut ${pkg.status}, chargement non applicable`);
-      return;
-    }
-
-    // === BON COLIS → Charger ===
-    const driver = drivers.find(d => d.id === selectedDriverId);
-    const vehicle = driverVehicle || vehicles.find(v => v.id === pkg.currentVehicleId);
-
-    try {
-      await updatePackageStatus(pkg.id, PackageStatus.LOADED, {
-        action: 'LOADED',
-        driverId: selectedDriverId,
-        driverName: driver ? `${driver.firstName} ${driver.lastName}` : '',
-        vehicleId: vehicle?.id || '',
-        vehiclePlate: vehicle?.plate || '',
-        hubId: selectedHubId,
-        hubName: selectedHub?.name || '',
-        notes: `Chargé dans ${vehicle?.plate || 'véhicule'}`
-      }, {
-        currentDriverId: selectedDriverId,
-        currentVehicleId: vehicle?.id
-      });
-
-      setScannedCodes(prev => [...prev, barcode]);
-      
-      // Vérifier si tout est chargé
-      const remainingAfter = driverPackages.toLoad.length - 1;
-      if (remainingAfter <= 0) {
-        setLoadingComplete(true);
-      }
-      
-      showNotif('success', `✅ ${pkg.contactName} — chargé`);
-    } catch (err) {
-      console.error('Loading error:', err);
-      showNotif('error', `❌ Erreur chargement ${barcode}`);
-    }
+  const handleLoadingScan = async (barcode: string, driverId: string) => {
+    if (!driverId) { showNotif('warning', 'Choisissez le chauffeur avant de scanner.'); return; }
+    showNotif('warning', `${barcode} — confirmation en cours…`);
+    const receipt = await scanPackage({ code: barcode, driverId, source: 'hub-loading' });
+    showNotif(receipt.accepted && receipt.outcome !== 'already_scanned' ? 'success' : 'warning', scanReceiptLabel(receipt));
+    if (receipt.accepted) setScannedCodes(prev => [...new Set([...prev, barcode])]);
   };
 
   // Scanner dispatch
@@ -349,8 +277,16 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
   };
 
   const handleScanResult = (barcode: string) => {
-    const task = scanMode === 'reception' ? handleReceptionScan(barcode) : scanMode === 'loading' ? handleLoadingScan(barcode) : undefined;
-    void task?.catch(() => showNotif('error', `${barcode} — vérification interrompue. Vérifiez le réseau puis scannez à nouveau.`));
+    // Capture the selected driver before enqueueing, even if the operator switches views.
+    const driverId = selectedDriverId, mode = scanMode;
+    setScanPending(n => n + 1);
+    loadingQueue.current = loadingQueue.current.then(async () => {
+      try {
+        if (mode === 'reception') await handleReceptionScan(barcode);
+        else if (mode === 'loading') await handleLoadingScan(barcode, driverId);
+      } catch { showNotif('error', `${barcode} — scan non confirmé. Vérifiez la connexion puis scannez à nouveau.`); }
+      finally { setScanPending(n => Math.max(0, n - 1)); }
+    });
   };
 
   // Reset chargement
@@ -514,7 +450,7 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
                           <PackageIcon size={14} className="text-blue-600" />
                         </div>
                         <div>
-                          <p className="text-sm font-medium text-slate-800">{pkg.contactName}</p>
+                          <p className="text-sm font-medium text-slate-800">{pkg.contactName}<PackageScanInfo pkg={pkg} /></p>
                           <p className="text-sm text-slate-500">{pkg.barcode || pkg.orderNumber} • {pkg.clientName}</p>
                         </div>
                       </div>
@@ -556,7 +492,7 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
                 <UserCheck size={14} className="inline mr-1" />
                 Chauffeur
               </label>
-              {driversWithPackages.length > 0 ? (
+              {selectableDrivers.length > 0 ? (
                 <select
                   id="operations-driver"
                   value={selectedDriverId}
@@ -568,8 +504,8 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
                   className="w-full min-h-11 px-3 py-2.5 border border-slate-200 rounded-xl text-base font-medium bg-white"
                 >
                   <option value="">— Sélectionner un chauffeur —</option>
-                  {driversWithPackages.map(d => {
-                    const pkgCount = packages.filter(p => 
+                  {selectableDrivers.map(d => {
+                    const pkgCount = packages.filter(p =>
                       p.currentDriverId === d.id && p.status === PackageStatus.SORTED
                     ).length;
                     return (
@@ -581,7 +517,7 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
                 </select>
               ) : (
                 <p className="text-sm text-slate-600 italic">
-                  Aucun chauffeur avec des colis affectés. Préparez et affectez une tournée depuis l’exploitation.
+                  Aucun chauffeur actif disponible. Vérifiez les comptes chauffeurs.
                 </p>
               )}
             </div>
@@ -621,7 +557,7 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
                 </span>
               </div>
               <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden">
-                <div 
+                <div
                   className="h-full bg-gradient-to-r from-amber-400 to-green-500 rounded-full transition-all duration-500"
                   style={{ width: `${driverPackages.all.length > 0 ? (driverPackages.loaded.length / driverPackages.all.length) * 100 : 0}%` }}
                 />
@@ -630,7 +566,7 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
           )}
 
           {/* Bouton scanner */}
-          {selectedDriverId && driverPackages.toLoad.length > 0 && (
+          {selectedDriverId && (
             <button
               onClick={() => openScanner('loading')}
               className="min-h-11 w-full flex items-center justify-center gap-2 py-4 bg-amber-600 text-white rounded-xl font-bold text-sm shadow-lg shadow-amber-200 active:scale-95 transition-transform"
@@ -687,7 +623,7 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
                   <div key={pkg.id} className="px-4 py-3 flex items-center gap-3 hover:bg-amber-50/30">
                     <div className="w-6 h-6 rounded border-2 border-slate-300 flex-shrink-0" />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-bold text-slate-800">{pkg.contactName}</p>
+                      <p className="text-sm font-bold text-slate-800">{pkg.contactName}<PackageScanInfo pkg={pkg} /></p>
                       <p className="text-sm text-slate-500 truncate">
                         {pkg.barcode || pkg.orderNumber} • {pkg.postalCode} {pkg.city}
                       </p>
@@ -717,7 +653,7 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
                       <CheckCircle size={12} className="text-green-600" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-green-800 line-through opacity-70">{pkg.contactName}</p>
+                      <p className="text-sm font-medium text-green-800">{pkg.contactName}<PackageScanInfo pkg={pkg} /></p>
                       <p className="text-sm text-green-600 truncate">
                         {pkg.barcode || pkg.orderNumber} • {pkg.postalCode} {pkg.city}
                       </p>
@@ -762,14 +698,14 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
               <AlertTriangle size={36} className="mx-auto text-white mb-2" />
               <p className="text-lg font-black text-white">Mauvais colis !</p>
             </div>
-            
+
             {/* Contenu */}
             <div className="p-6 space-y-4">
               <div className="bg-red-50 rounded-xl p-4 text-center">
                 <p className="text-sm font-mono font-bold text-red-800">{wrongColisAlert.barcode}</p>
                 <p className="text-sm text-red-600 mt-1">{wrongColisAlert.packageName}</p>
               </div>
-              
+
               <p className="text-center text-sm text-slate-600 font-medium">
                 Ce colis est assigné à :
               </p>
@@ -798,7 +734,7 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
                 </div>
               </div>
             </div>
-            
+
             {/* Bouton */}
             <div className="px-6 pb-6">
               <button
@@ -831,11 +767,13 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
         }>
           <BarcodeScanner
             onScan={handleScanResult}
+            forwardDuplicates={scanMode === 'loading'}
+            busy={scanPending > 0}
             onClose={() => { setShowScanner(false); setScanMode(null); }}
             expectedBarcodes={scanMode === 'loading' ? expectedBarcodes : []}
             alreadyScanned={scannedCodes}
             flashMessage={notification ? { type: notification.type === 'success' ? 'ok' : 'warn', text: notification.message } : null}
-            isMatch={scanMode === 'loading' ? code => driverPackages.toLoad.some(pkg => packageMatchesCode(pkg, code)) : undefined}
+
             title={
               scanMode === 'reception'
                 ? `Réception — ${selectedHub?.name || 'Hub'}`

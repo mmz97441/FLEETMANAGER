@@ -1,4 +1,5 @@
 import { receivePackagesAtHubHandler } from './hubReception';
+import { scanPackageHandler } from './scanPackage';
 import { finishMissionHandler } from './missionLifecycle';
 import { placeKey } from './deliveryAddress';
 import { dispatchMissionsTransaction } from './dispatchMissions';
@@ -1408,6 +1409,9 @@ export const dispatchMissions = functions
       throw new functions.https.HttpsError('permission-denied', 'Dispatch réservé à l’exploitation.');
     return dispatchMissionsTransaction(db, data, caller);
   });
+
+export const scanPackage = functions.region('europe-west1').https.onCall((data, context) =>
+  scanPackageHandler(data, context, { db, requireActiveCaller, isAdminCaller }));
 
 export const transferPackages = functions
   .region('europe-west1')

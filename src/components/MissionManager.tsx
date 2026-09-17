@@ -1,3 +1,4 @@
+import PackageScanInfo from './PackageScanInfo';
 import { escapeHtml } from '../utils/html';
 import { useUrlParam, updateUrlParams } from '../hooks/useUrlState';
 import { confirmAction } from '../services/confirmationService';
@@ -2054,6 +2055,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                             <p className="text-sm font-bold text-slate-500 uppercase tracking-wide mb-1">
                               Suivi du colis {pkg.externalId || pkg.barcode || pkg.orderNumber}
                             </p>
+                            <PackageScanInfo pkg={pkg} />
                             <PackageTimeline movements={pkg.movements || []} showActors showInternalDetails pod={pkg.pod} />
                           </td>
                         </tr>

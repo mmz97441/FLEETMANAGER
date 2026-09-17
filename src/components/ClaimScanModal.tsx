@@ -6,20 +6,21 @@
  * "scan = prise en charge en livraison".
  */
 import React, { useState, useRef, lazy, Suspense } from 'react';
-import { X, Camera, Loader2, CheckCircle, AlertTriangle, Trash2, PackageCheck, Plus } from 'lucide-react';
-import { Package, User, PackageStatus, ActivityAction } from '../types';
+import { X, Camera, Loader2, CheckCircle, AlertTriangle, PackageCheck, Plus } from 'lucide-react';
+import { User, ActivityAction } from '../types';
 import { todayISO } from '../utils/date';
-import { findPackageByCode, claimPackagesForDelivery, createAndClaimPackage } from '../services/missionService';
+import { createAndClaimPackage } from '../services/missionService';
 import { logActivity } from '../services/activityLogService';
-import { packageDisplayCode, packageScanCodes } from '../utils/barcode';
+import { scanPackage, scanReceiptLabel, type ScanReceipt, type ScanSource } from '../services/scanService';
 import { getCurrentPosition } from '../utils/geo';
 
-const BarcodeScanner = lazy(() => import('./BarcodeScanner'));
+import BarcodeScanner from './Scanner';
 
 interface ClaimScanModalProps {
   currentUser: User;
   onClose: () => void;
-  onDone: (count: number) => void;
+  onDone: (count: number, missionId?: string) => void;
+  source?: ScanSource;
   confirmLabel?: string; // ex. "Commencer ma tournée" (démarrage) vs "Ajouter à ma tournée"
   // Mission active à alimenter (récupération pendant une tournée en cours). Sans
   // elle, les colis rejoignent la tournée de récupération du jour (DLV-…).
@@ -30,12 +31,14 @@ interface ClaimScanModalProps {
 
 const clientLabel = (c: User) => c.companyName || `${c.firstName} ${c.lastName}`.trim() || 'Client';
 
-const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, onDone, confirmLabel = 'Prendre en charge dans ma tournée', targetMissionId, clients = [] }) => {
-  const [scannedPkgs, setScannedPkgs] = useState<Package[]>([]);
+const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, onDone, confirmLabel = 'Ouvrir ma tournée', targetMissionId, clients = [], source = 'driver-claim' }) => {
+  const [scannedPkgs, setScannedPkgs] = useState<ScanReceipt[]>([]);
   const [showScanner, setShowScanner] = useState(false);
   const [manualCode, setManualCode] = useState('');
   const [isSearching, setIsSearching] = useState(false);
-  const [isClaiming, setIsClaiming] = useState(false);
+  const isClaiming = isSearching;
+  const resolvedMission = useRef<string>();
+  const [retryCodes, setRetryCodes] = useState<string[]>([]);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'warn'; message: string } | null>(null);
 
   // Colis HORS-IMPORT : codes scannés introuvables en base. On ne les perd plus
@@ -52,16 +55,16 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
   // perdus (contrairement à un simple "ignore si occupé" qui droppait des colis).
   const queueRef = useRef<string[]>([]);
   const processingRef = useRef(false);
-  const addedIdsRef = useRef<Set<string>>(new Set());
 
   const notify = (type: 'ok' | 'warn', message: string) => {
     setFeedback({ type, message });
-    setTimeout(() => setFeedback(null), 4000);
+
   };
 
   const lookupCode = (code: string) => {
     const cleaned = code.trim();
     if (!cleaned) return;
+    notify('warn', `${cleaned} — confirmation en cours…`);
     queueRef.current.push(cleaned);
     void drainQueue();
   };
@@ -74,35 +77,21 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
       while (queueRef.current.length > 0) {
         const cleaned = queueRef.current.shift()!;
         try {
-          const pkg = await findPackageByCode(cleaned);
-          if (!pkg) {
-            // Colis hors-import : on le mémorise pour création (au lieu de le perdre).
-            if (!unknownSeenRef.current.has(cleaned)) {
-              unknownSeenRef.current.add(cleaned);
-              setUnknownCodes(prev => [...prev, cleaned]);
-            }
-            notify('warn', `${cleaned} — hors import : à créer`);
-          } else if (addedIdsRef.current.has(pkg.id)) {
-            notify('warn', `${packageDisplayCode(pkg)} — déjà scanné`);
-          } else if (pkg.status === PackageStatus.DELIVERED) {
-            notify('warn', `${packageDisplayCode(pkg)} — déjà livré`);
-          } else if (pkg.currentDriverId === currentUser.id && pkg.missionId) {
-            notify('warn', `${packageDisplayCode(pkg)} — déjà dans votre tournée`);
-          } else {
-            // Anti-confusion embarquement : un colis NON affecté = prise en charge
-            // directe normale (ex. récupéré sans passer par le hub). Un colis
-            // affecté à un AUTRE chauffeur = alerte (c'est une passation).
-            const foreign = !!pkg.currentDriverId && pkg.currentDriverId !== currentUser.id && !!pkg.missionId;
-            addedIdsRef.current.add(pkg.id);
-            setScannedPkgs(prev => [...prev, pkg]);
-            if (foreign) {
-              notify('warn', `⚠️ ${packageDisplayCode(pkg)} — ce colis est sur une autre tournée. Le prendre = passation.`);
-            } else {
-              notify('ok', `${packageDisplayCode(pkg)} — ${pkg.contactName} ✓`);
-            }
+          notify('warn', `${cleaned} — confirmation en cours…`);
+          const receipt = await scanPackage({ code: cleaned, driverId: currentUser.id, targetMissionId, source });
+          if (receipt.accepted) {
+            resolvedMission.current = receipt.missionId || undefined;
+            setScannedPkgs(prev => [...prev.filter(p => p.packageId !== receipt.packageId), receipt]);
+            setUnknownCodes(prev => prev.filter(c => c !== cleaned));
+          } else if (receipt.outcome === 'not_found' && !unknownSeenRef.current.has(cleaned)) {
+            unknownSeenRef.current.add(cleaned);
+            setUnknownCodes(prev => [...prev, cleaned]);
           }
+          setRetryCodes(prev => prev.filter(c => c !== cleaned));
+          notify(receipt.accepted && receipt.outcome !== 'already_scanned' ? 'ok' : 'warn', scanReceiptLabel(receipt));
         } catch {
-          notify('warn', `${cleaned} — erreur lors de la recherche`);
+          setRetryCodes(prev => [...new Set([...prev, cleaned])]);
+          notify('warn', `${cleaned} — confirmation non reçue. Vérifiez la connexion puis réessayez ce scan.`);
         }
       }
     } finally {
@@ -111,40 +100,9 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
     }
   };
 
-  const handleConfirm = async () => {
-    // Les colis créés hors-import sont DÉJÀ pris en charge (createdCount) ; on peut
-    // valider même si la liste des scannés « connus » est vide.
-    if ((scannedPkgs.length === 0 && createdCount === 0) || isClaiming) return;
-    setIsClaiming(true);
-    try {
-      let location: { lat: number; lng: number } | undefined;
-      try {
-        location = await getCurrentPosition({ timeout: 5000 });
-      } catch { /* géoloc optionnelle */ }
-
-      const today = todayISO();
-      let count = 0;
-      if (scannedPkgs.length > 0) {
-        count = await claimPackagesForDelivery({
-          packages: scannedPkgs,
-          driver: { id: currentUser.id, name: `${currentUser.firstName} ${currentUser.lastName}` },
-          date: today,
-          location,
-          targetMissionId
-        });
-        // JOURNAL — récupération. Un colis déjà porté par un autre chauffeur = transfert.
-        const transfers = scannedPkgs.filter(p => !!p.currentDriverId && p.currentDriverId !== currentUser.id && !!p.missionId).length;
-        void logActivity(currentUser, transfers > 0 ? ActivityAction.PACKAGE_TRANSFERRED : ActivityAction.PACKAGE_PICKED_UP, {
-          targetType: 'package',
-          description: `${currentUser.firstName} ${currentUser.lastName} a récupéré ${count} colis${transfers > 0 ? ` (dont ${transfers} en transfert d'un collègue)` : ''}`,
-          details: { metadata: { récupérés: count, transferts: transfers } }
-        });
-      }
-      onDone(count + createdCount);
-    } catch (e) {
-      notify('warn', e instanceof Error ? e.message : 'Erreur lors de la prise en charge');
-      setIsClaiming(false);
-    }
+  const handleConfirm = () => {
+    if (processingRef.current || creating) return;
+    onDone(scannedPkgs.length + createdCount, resolvedMission.current);
   };
 
   // Ouvre le formulaire de création pour un code hors-import.
@@ -163,7 +121,7 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
       let location: { lat: number; lng: number } | undefined;
       try { location = await getCurrentPosition({ timeout: 5000 }); } catch { /* optionnel */ }
       const client = clients.find(c => c.id === createForm.clientId);
-      await createAndClaimPackage({
+      const created = await createAndClaimPackage({
         code: createFor,
         clientId: createForm.clientId,
         clientName: client ? clientLabel(client) : 'Client',
@@ -177,6 +135,7 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
         location,
         targetMissionId
       });
+      resolvedMission.current = created.missionId;
       // JOURNAL — création hors import (à réconcilier par le bureau).
       void logActivity(currentUser, ActivityAction.PACKAGE_CREATED_ADHOC, {
         targetType: 'package', targetName: createFor,
@@ -204,11 +163,11 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
                 <PackageCheck size={18} className="text-green-600" />
                 Récupérer des colis
               </h3>
-              <p className="text-xs text-green-700 mt-0.5">
-                Scannez les colis à récupérer (un colis déjà chez un collègue = transfert automatique), puis « {confirmLabel} »
+              <p className="text-sm text-green-700 mt-0.5">
+                Chaque scan confirmé rattache le colis à votre tournée du jour. Un colis provenant d’une autre tournée est transféré avec son historique.
               </p>
             </div>
-            <button onClick={onClose} className="p-2 rounded-full hover:bg-green-100" disabled={isClaiming}>
+            <button onClick={handleConfirm} aria-label="Fermer" className="min-h-11 min-w-11 p-2 rounded-full hover:bg-green-100" disabled={isClaiming || creating}>
               <X size={20} className="text-slate-400" />
             </button>
           </div>
@@ -216,7 +175,7 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
 
         <div className="p-4 space-y-4">
           {feedback && (
-            <div className={`flex items-center gap-2 p-3 rounded-xl text-xs font-bold ${
+            <div className={`flex items-center gap-2 p-3 rounded-xl text-sm font-bold ${
               feedback.type === 'ok' ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-amber-50 border border-amber-200 text-amber-700'
             }`}>
               {feedback.type === 'ok' ? <CheckCircle size={16} /> : <AlertTriangle size={16} />}
@@ -226,7 +185,7 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
 
           <button
             onClick={() => setShowScanner(true)}
-            disabled={isClaiming}
+            disabled={isClaiming || creating}
             className="w-full flex items-center justify-center gap-2 py-3.5 bg-green-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-50"
           >
             <Camera size={18} /> Scanner un colis
@@ -250,25 +209,27 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
             </button>
           </div>
 
+          {retryCodes.length > 0 && <div role="alert" className="rounded-xl border border-amber-300 p-3 text-sm text-amber-900">
+            <p>{retryCodes.length} scan(s) sans confirmation :</p>
+            {retryCodes.map(code => <button key={code} disabled={isSearching} className="ui-button ui-button-secondary m-1" onClick={() => lookupCode(code)}>Réessayer {code}</button>)}
+          </div>}
           {scannedPkgs.length > 0 && (
             <div className="space-y-2">
-              <p className="text-xs font-bold text-slate-700">{scannedPkgs.length} colis à prendre en charge :</p>
+              <p className="text-sm font-bold text-slate-700">{scannedPkgs.length} colis confirmés dans votre tournée :</p>
               {scannedPkgs.map(pkg => (
-                <div key={pkg.id} className="flex items-center justify-between p-2.5 bg-green-50 border border-green-200 rounded-xl">
+                <div key={pkg.packageId!} className="flex flex-col gap-1 p-2.5 bg-green-50 border border-green-200 rounded-xl">
                   <div className="min-w-0">
-                    <p className="font-mono text-xs font-bold text-green-800">{packageDisplayCode(pkg)}</p>
-                    <p className="text-[11px] text-slate-600 truncate">{pkg.contactName} • {pkg.postalCode} {pkg.city}</p>
+                    <p className="font-mono text-sm font-bold text-green-800">{pkg.packageCode}</p>
+                    <p className="text-sm text-slate-600 break-words">{pkg.contactName} • {scanReceiptLabel(pkg)}</p>
                   </div>
-                  <button onClick={() => { addedIdsRef.current.delete(pkg.id); setScannedPkgs(prev => prev.filter(p => p.id !== pkg.id)); }} disabled={isClaiming} className="p-2 text-slate-400 hover:text-red-500">
-                    <Trash2 size={16} />
-                  </button>
+                  <span className="text-sm text-green-800 break-all">Tournée {pkg.missionId}</span>
                 </div>
               ))}
             </div>
           )}
 
           {createdCount > 0 && (
-            <div className="rounded-xl border border-green-300 bg-green-50 p-2.5 text-xs font-bold text-green-800">
+            <div className="rounded-xl border border-green-300 bg-green-50 p-2.5 text-sm font-bold text-green-800">
               ✅ {createdCount} colis hors-import créé{createdCount > 1 ? 's' : ''} et pris en charge
             </div>
           )}
@@ -276,16 +237,16 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
           {/* COLIS HORS-IMPORT : codes scannés introuvables → à créer (rien n'est perdu) */}
           {unknownCodes.length > 0 && (
             <div className="space-y-2">
-              <p className="text-xs font-bold text-amber-700 flex items-center gap-1">
+              <p className="text-sm font-bold text-amber-700 flex items-center gap-1">
                 <AlertTriangle size={14} /> {unknownCodes.length} colis hors import — à créer
               </p>
               {unknownCodes.map(code => (
                 <div key={code} className="flex items-center justify-between gap-2 p-2.5 bg-amber-50 border border-amber-200 rounded-xl">
-                  <p className="font-mono text-xs font-bold text-amber-800 truncate min-w-0">{code}</p>
+                  <p className="font-mono text-sm font-bold text-amber-800 truncate min-w-0">{code}</p>
                   <button
                     onClick={() => startCreate(code)}
-                    disabled={isClaiming}
-                    className="flex-shrink-0 flex items-center gap-1 px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-bold active:scale-95 transition-transform disabled:opacity-40"
+                    disabled={isClaiming || creating}
+                    className="flex-shrink-0 flex items-center gap-1 px-3 py-1.5 bg-amber-600 text-white rounded-lg text-sm font-bold active:scale-95 transition-transform disabled:opacity-40"
                   >
                     <Plus size={14} /> Créer
                   </button>
@@ -296,7 +257,7 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
 
           <button
             onClick={handleConfirm}
-            disabled={(scannedPkgs.length === 0 && createdCount === 0) || isClaiming}
+            disabled={isClaiming || creating}
             className="w-full flex items-center justify-center gap-2 py-3.5 bg-green-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-40"
           >
             {isClaiming ? (<><Loader2 size={18} className="animate-spin" /> Chargement…</>) : (<><PackageCheck size={18} /> {confirmLabel}{(scannedPkgs.length + createdCount) > 0 ? ` (${scannedPkgs.length + createdCount})` : ''}</>)}
@@ -311,7 +272,9 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
             onClose={() => setShowScanner(false)}
             expectedBarcodes={[]}
             // Codes déjà pris → re-scan affiche « ⚠️ déjà scanné » (clair).
-            alreadyScanned={scannedPkgs.flatMap(p => packageScanCodes(p))}
+            alreadyScanned={scannedPkgs.map(p => p.packageCode)}
+            forwardDuplicates
+            busy={isSearching}
             // PAS de isMatch={()=>true} : sinon un colis introuvable flashait VERT à tort.
             // Le vrai résultat (pris / introuvable / passation) est poussé via flashMessage.
             flashMessage={feedback ? { type: feedback.type, text: feedback.message } : null}
@@ -330,7 +293,7 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
               <h3 className="font-bold text-slate-800 flex items-center gap-2">
                 <Plus size={18} className="text-amber-600" /> Créer un colis hors import
               </h3>
-              <button onClick={() => !creating && setCreateFor(null)} className="p-2 rounded-full hover:bg-slate-100" disabled={creating}>
+              <button onClick={() => !creating && setCreateFor(null)} aria-label="Fermer" className="min-h-11 min-w-11 p-2 rounded-full hover:bg-slate-100" disabled={creating}>
                 <X size={20} className="text-slate-400" />
               </button>
             </div>
@@ -338,12 +301,12 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
             <div className="p-4 space-y-3">
               <div className="flex items-start gap-2 p-2.5 bg-amber-50 border border-amber-200 rounded-xl">
                 <span>⚠️</span>
-                <p className="text-[11px] text-amber-800">Colis <b>hors import</b>. Il rejoint ta tournée et sera signalé au bureau pour réconciliation avec le fichier client.</p>
+                <p className="text-sm text-amber-800">Colis <b>hors import</b>. Il rejoint ta tournée et sera signalé au bureau pour réconciliation avec le fichier client.</p>
               </div>
-              <p className="text-xs text-slate-500">N° colis : <b className="font-mono">{createFor}</b></p>
+              <p className="text-sm text-slate-500">N° colis : <b className="font-mono">{createFor}</b></p>
 
               <div>
-                <label className="text-xs font-bold text-slate-500 block mb-1">Client expéditeur *</label>
+                <label className="text-sm font-bold text-slate-500 block mb-1">Client expéditeur *</label>
                 <select
                   value={createForm.clientId}
                   onChange={e => setCreateForm(f => ({ ...f, clientId: e.target.value }))}
