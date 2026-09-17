@@ -9,11 +9,13 @@
  * À monter une seule fois, au sommet de l'app (dans App).
  */
 
-import React, { useEffect, useState, useCallback, useSyncExternalStore } from 'react';
+import React, { useEffect, useState, useCallback, useSyncExternalStore, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { getTopDialogNode, subscribeDialogLayers } from '../hooks/useDialogLayer';
 import { CheckCircle2, AlertTriangle, XCircle, Info, X } from 'lucide-react';
-import { onUserMessage, reportError, UserMessage, LogLevel } from '../services/logService';
+import { onUserMessage, reportError, flushLocalErrorLogs, LogLevel } from '../services/logService';
+import { installRuntimeDiagnostics } from '../utils/runtimeDiagnostics';
+import { appendToast, toastKey, type VisibleToast } from '../utils/toastQueue';
 
 const STYLES: Record<LogLevel, { bg: string; border: string; text: string; icon: React.ReactNode }> = {
   success: { bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-800', icon: <CheckCircle2 size={18} className="text-green-600" /> },
@@ -23,22 +25,24 @@ const STYLES: Record<LogLevel, { bg: string; border: string; text: string; icon:
 };
 
 const ToastHost: React.FC = () => {
-  const [toasts, setToasts] = useState<UserMessage[]>([]);
+  const [toasts, setToasts] = useState<VisibleToast[]>([]);
+  const muted = useRef(new Map<string, number>());
   const activeDialog = useSyncExternalStore(subscribeDialogLayers, getTopDialogNode, () => null);
 
   const dismiss = useCallback((id: string) => {
-    setToasts(prev => prev.filter(t => t.id !== id));
+    setToasts(prev => {
+      const toast = prev.find(t => t.id === id);
+      if (toast?.group === 'runtime') muted.current.set(toastKey(toast), Date.now() + 60000);
+      return prev.filter(t => t.id !== id);
+    });
   }, []);
 
   // Abonnement aux messages émis partout dans l'app
   useEffect(() => {
     const unsub = onUserMessage(msg => {
-      setToasts(prev => {
-        // évite d'empiler 2 fois le même message d'affilée
-        if (prev.some(t => t.message === msg.message && t.level === msg.level)) return prev;
-        // garde au plus 4 toasts visibles
-        return [...prev.slice(-3), msg];
-      });
+      for (const [key, until] of muted.current) if (until <= Date.now()) muted.current.delete(key);
+      if (msg.group === 'runtime' && muted.current.has(toastKey(msg))) return;
+      setToasts(prev => appendToast(prev, msg));
       if (msg.durationMs > 0 && msg.level !== 'error' && msg.level !== 'warning') {
         window.setTimeout(() => dismiss(msg.id), msg.durationMs);
       }
@@ -46,23 +50,7 @@ const ToastHost: React.FC = () => {
     return unsub;
   }, [dismiss]);
 
-  // Gardes globales : erreurs JS et promesses rejetées non catchées
-  useEffect(() => {
-    const onError = (event: ErrorEvent) => {
-      reportError('window.error', event.error || event.message, {
-        extra: { filename: event.filename, lineno: event.lineno, colno: event.colno },
-      });
-    };
-    const onRejection = (event: PromiseRejectionEvent) => {
-      reportError('window.unhandledrejection', event.reason);
-    };
-    window.addEventListener('error', onError);
-    window.addEventListener('unhandledrejection', onRejection);
-    return () => {
-      window.removeEventListener('error', onError);
-      window.removeEventListener('unhandledrejection', onRejection);
-    };
-  }, []);
+  useEffect(() => installRuntimeDiagnostics(reportError, flushLocalErrorLogs), []);
 
   if (toasts.length === 0) return null;
 
@@ -77,7 +65,10 @@ const ToastHost: React.FC = () => {
             className={`pointer-events-auto flex items-start gap-3 rounded-xl border ${s.bg} ${s.border} p-3 shadow-lg animate-[fadeIn_0.15s_ease-out]`}
           >
             <span className="mt-0.5 flex-shrink-0">{s.icon}</span>
-            <p className={`flex-1 text-sm font-medium ${s.text} break-words`}>{t.message}</p>
+            <div className="flex-1 min-w-0">
+              <p className={`text-sm font-medium ${s.text} break-words`}>{t.message}</p>
+              {t.occurrences > 1 && <p className="text-xs mt-1">{t.occurrences} occurrences enregistrées</p>}
+            </div>
             <button
               onClick={() => dismiss(t.id)}
               className={`flex-shrink-0 min-h-11 min-w-11 flex items-center justify-center rounded-lg ${s.text} hover:bg-white transition-colors`}

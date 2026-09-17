@@ -1,0 +1,89 @@
+{
+  "checks": [
+    {
+      "name": "Repeated opaque errors produce one alert and 23 logs 320",
+      "pass": true
+    },
+    {
+      "name": "Current form survives and no horizontal overflow 320",
+      "pass": true
+    },
+    {
+      "name": "Original action retained without draft or URL token 320",
+      "pass": true
+    },
+    {
+      "name": "Dismissed runtime noise stays dismissed and remains logged 320",
+      "pass": true
+    },
+    {
+      "name": "Business errors are still visible during runtime cooldown 320",
+      "pass": true
+    },
+    {
+      "name": "Repeated opaque errors produce one alert and 23 logs 390",
+      "pass": true
+    },
+    {
+      "name": "Current form survives and no horizontal overflow 390",
+      "pass": true
+    },
+    {
+      "name": "Original action retained without draft or URL token 390",
+      "pass": true
+    },
+    {
+      "name": "Dismissed runtime noise stays dismissed and remains logged 390",
+      "pass": true
+    },
+    {
+      "name": "Business errors are still visible during runtime cooldown 390",
+      "pass": true
+    },
+    {
+      "name": "Repeated opaque errors produce one alert and 23 logs 1365",
+      "pass": true
+    },
+    {
+      "name": "Current form survives and no horizontal overflow 1365",
+      "pass": true
+    },
+    {
+      "name": "Original action retained without draft or URL token 1365",
+      "pass": true
+    },
+    {
+      "name": "Dismissed runtime noise stays dismissed and remains logged 1365",
+      "pass": true
+    },
+    {
+      "name": "Business errors are still visible during runtime cooldown 1365",
+      "pass": true
+    },
+    {
+      "name": "Offline directory makes no request and retains self",
+      "pass": true
+    },
+    {
+      "name": "Wake events produce one directory request",
+      "pass": true
+    },
+    {
+      "name": "Opaque error records pending directory and scan without parcel code",
+      "pass": true
+    },
+    {
+      "name": "Confirmed requests clear pending operations",
+      "pass": true
+    },
+    {
+      "name": "Resource failure is logged with a sanitized asset URL",
+      "pass": true
+    },
+    {
+      "name": "No unexpected runtime exception",
+      "pass": true
+    }
+  ],
+  "exceptions": []
+}

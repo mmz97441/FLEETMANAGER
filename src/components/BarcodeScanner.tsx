@@ -13,6 +13,8 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import Modal from './shared/Modal';
+import { recordDiagnosticAction } from '../utils/runtimeDiagnostics';
+import { reportError } from '../services/logService';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import {
   Camera,
@@ -98,6 +100,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
     // Anti-spam: ignorer si même code scanné il y a moins de 3 secondes
     if (now - lastScanTime.current < 3000 && lastScanned === barcode) return;
     lastScanTime.current = now;
+    recordDiagnosticAction('scanner.code.read');
 
     // Vérifier si déjà scanné
     if (alreadyScanned.includes(barcode)) {
@@ -258,6 +261,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
         }
 
         if (mounted) {
+          reportError('scanner.camera.start', err, { silent: true, extra: { attempts: attempt + 1, permissionDenied } });
           setError(
             permissionDenied
               ? 'Accès caméra refusé. Autorisez la caméra ou utilisez la saisie manuelle.'
@@ -291,6 +295,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
 
   // Switch vers mode manuel
   const switchToManual = async () => {
+    recordDiagnosticAction('scanner.manual');
     await stopAndClear();
     setTorchOn(false);
     setTorchAvailable(false);
@@ -301,6 +306,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
 
   // Switch vers mode caméra
   const switchToCamera = () => {
+    recordDiagnosticAction('scanner.camera');
     setManualMode(false);
     setError(null);
   };

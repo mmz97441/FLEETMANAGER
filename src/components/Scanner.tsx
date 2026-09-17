@@ -1,4 +1,5 @@
-import React, { lazy, Suspense, useState } from 'react';
+import React, { lazy, Suspense, useState, useEffect } from 'react';
+import { recordDiagnosticAction } from '../utils/runtimeDiagnostics';
 import Modal from './shared/Modal';
 import type { BarcodeScannerProps } from './BarcodeScanner';
 
@@ -21,5 +22,6 @@ const CameraScanner = lazy(() => import('./BarcodeScanner').catch(error => {
   return { default: ManualScanFallback };
 }));
 export default function Scanner(props: BarcodeScannerProps) {
+  useEffect(() => { recordDiagnosticAction('scanner.open'); return () => recordDiagnosticAction('scanner.close'); }, []);
   return <Suspense fallback={<Modal isOpen onClose={props.onClose} title="Ouverture du scanner"><p role="status">Chargement du lecteur…</p></Modal>}><CameraScanner {...props} /></Suspense>;
 }
