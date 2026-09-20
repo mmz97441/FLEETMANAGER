@@ -40,6 +40,7 @@ import PageHeader from "../shared/PageHeader";
 import Modal from "../shared/Modal";
 import VoteEditor from "./VoteEditor";
 import VoteResultsPanel from "./VoteResultsPanel";
+import VotePrivacyNotice from "./VotePrivacyNotice";
 
 type Confirmation = {
   action:
@@ -476,14 +477,8 @@ export default function VotingModule({ currentUser }: { currentUser: User }) {
                 </dd>
               </div>
             </dl>
-            <p
-              className={`rounded-xl p-3 text-sm ${poll.privacy === "secret" ? "bg-blue-50 text-blue-900" : "bg-amber-50 text-amber-900"}`}
-            >
-              {poll.privacy === "secret"
-                ? "Vote secret : la direction verra les résultats globaux et qui a participé, sans afficher votre choix individuel."
-                : "Vote nominatif : après clôture, votre choix sera visible par la direction."}{" "}
-              Un bulletin confirmé ne peut plus être modifié.
-            </p>
+            <VotePrivacyNotice privacy={poll.privacy} />
+            <p className="text-sm text-slate-600">Un bulletin confirmé ne peut plus être modifié.</p>
             {poll.canManage && (
               <details className="rounded-xl border border-slate-200 p-3">
                 <summary className="font-semibold min-h-11 cursor-pointer">

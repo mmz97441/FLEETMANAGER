@@ -1,4 +1,8 @@
-import type { Firestore, Transaction } from "firebase-admin/firestore";
+import type {
+  Firestore,
+  Transaction,
+  QueryDocumentSnapshot,
+} from "firebase-admin/firestore";
 import * as functions from "firebase-functions/v1";
 import { createHash, randomUUID } from "crypto";
 
@@ -313,6 +317,35 @@ export async function votingHandler(
         .sort((a, b) => a.name.localeCompare(b.name, "fr")),
     };
   }
+  if (data?.action === "pending") {
+    // Only the caller's open electorate, nearest deadline first. Scan successive
+    // pages: dismissed, scheduled or completed ballots must not hide later ones.
+    const instant = now();
+    const query = db
+      .collection(COLLECTION)
+      .where("voterIds", "array-contains", caller.id)
+      .where("status", "==", "published")
+      .where("closesAt", ">", instant)
+      .orderBy("closesAt");
+    let cursor: QueryDocumentSnapshot | undefined;
+    for (;;) {
+      const page = await (cursor ? query.startAfter(cursor) : query)
+        .limit(30)
+        .get();
+      for (const snapshot of page.docs) {
+        const poll = snapshot.data();
+        if (poll.opensAt > instant) continue;
+        const [participation, reminder] = await db.getAll(
+          snapshot.ref.collection("participation").doc(caller.id),
+          snapshot.ref.collection("reminders").doc(caller.id),
+        );
+        if (!participation.exists && !reminder.exists)
+          return { poll: visible(poll, snapshot.id) };
+      }
+      if (page.size < 30) return { poll: null };
+      cursor = page.docs[page.docs.length - 1];
+    }
+  }
   if (data?.action === "list") {
     let query = manager
       ? db.collection(COLLECTION).orderBy("createdAt", "desc")
@@ -359,6 +392,11 @@ export async function votingHandler(
   if (data.action === "save") {
     requireManager();
     const value = draft(data.draft);
+    if (value.privacy !== "secret")
+      fail(
+        "invalid-argument",
+        "Les nouveaux scrutins doivent être à vote secret.",
+      );
     if (!operationId(data.requestId) || !Number.isInteger(data.revision))
       fail("invalid-argument", "Référence d’enregistrement invalide.");
     await db.runTransaction(async (tx) => {
@@ -432,6 +470,11 @@ export async function votingHandler(
           "failed-precondition",
           "Rechargez le brouillon avant publication.",
         );
+      if (p!.privacy !== "secret")
+        fail(
+          "failed-precondition",
+          "Enregistrez ce brouillon en vote secret avant publication.",
+        );
       if (p!.closesAt <= now())
         fail(
           "failed-precondition",
@@ -464,6 +507,44 @@ export async function votingHandler(
         "VOTE_PUBLISHED",
         `Scrutin ouvert aux participants : ${p!.title}`,
       );
+    });
+  } else if (data.action === "dismiss") {
+    return db.runTransaction(async (tx) => {
+      const [snapshot, participation, profile, reminder] = await tx.getAll(
+        ref,
+        ref.collection("participation").doc(caller.id),
+        db.collection("users").doc(caller.id),
+        ref.collection("reminders").doc(caller.id),
+      );
+      const p = snapshot.data(),
+        fresh = profile.data();
+      if (
+        !p ||
+        !p.voterIds.includes(caller.id) ||
+        !eligibleProfile(fresh) ||
+        (fresh?.sessionsRevokedAt &&
+          Number(context.auth?.token.auth_time || 0) <= fresh.sessionsRevokedAt)
+      )
+        fail(
+          "permission-denied",
+          "Votre compte ne peut pas répondre à ce scrutin.",
+        );
+      // A dismissal is NOT a ballot, a blank ballot, or a permanent withdrawal.
+      // Concurrent voting always wins; closing this reminder never removes a vote.
+      if (participation.exists) return { dismissed: false, alreadyVoted: true };
+      if (reminder.exists) return { dismissed: true, alreadyVoted: false };
+      const instant = now();
+      if (
+        p!.status !== "published" ||
+        instant < p!.opensAt ||
+        instant >= p!.closesAt
+      )
+        fail(
+          "failed-precondition",
+          "Ce scrutin n’est plus ouvert. Actualisez la page.",
+        );
+      tx.create(reminder.ref, { dismissedAt: instant });
+      return { dismissed: true, alreadyVoted: false };
     });
   } else if (data.action === "cast") {
     if (

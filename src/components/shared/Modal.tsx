@@ -45,6 +45,8 @@ export interface ModalProps {
   className?: string;
   /** Use the whole mobile viewport for long forms; desktop remains a dialog. */
   mobileFullscreen?: boolean;
+  /** Priority over ordinary dialogs; equal priorities retain nesting order. */
+  priority?: number;
 }
 
 const sizeClasses: Record<ModalSize, string> = {
@@ -78,14 +80,15 @@ const Modal: React.FC<ModalProps> = ({
   ariaLabel,
   role = 'dialog',
   className = '',
-  mobileFullscreen = false
+  mobileFullscreen = false,
+  priority = 0
 }) => {
   const titleId = useId();
   const subtitleId = useId();
   const blocked = preventClose || busy;
   const requestClose = useUnsavedChanges(isOpen && dirty, isOpen && busy);
   const handleClose = useCallback(() => { if (!blocked) void requestClose(onClose); }, [requestClose, onClose, blocked]);
-  const layerRef = useDialogLayer(isOpen, () => { if (closeOnEscape && !blocked) handleClose(); });
+  const layerRef = useDialogLayer(isOpen, () => { if (closeOnEscape && !blocked) handleClose(); }, priority);
 
   if (!isOpen) return null;
 

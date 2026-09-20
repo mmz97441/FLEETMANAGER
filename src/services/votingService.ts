@@ -7,6 +7,7 @@ import type {
   VoteDraft,
   VoteList,
   VotePerson,
+  VotePoll,
 } from "../types/voting";
 
 const endpoint = httpsCallable(
@@ -14,9 +15,31 @@ const endpoint = httpsCallable(
   "employeeVoting",
   { timeout: 120000 },
 );
+const reminderEndpoint = httpsCallable(
+  getFunctions(app, "europe-west1"),
+  "employeeVoting",
+  { timeout: 15000 },
+);
 async function call<T>(data: Record<string, unknown>): Promise<T> {
-  return (await endpoint(data)).data as T;
+  const invoke = ["pending", "dismiss"].includes(String(data.action))
+    ? reminderEndpoint
+    : endpoint;
+  const result = (await invoke(data)).data as T;
+  if (
+    ["cast", "dismiss", "publish", "close", "cancel"].includes(
+      String(data.action),
+    )
+  )
+    window.dispatchEvent(new Event("fleet-votes-changed"));
+  return result;
 }
+export const getPendingVote = () =>
+  call<{ poll: VotePoll | null }>({ action: "pending" });
+export const dismissVoteReminder = (pollId: string) =>
+  call<{ dismissed: boolean; alreadyVoted: boolean }>({
+    action: "dismiss",
+    pollId,
+  });
 export const listVotes = (cursor?: string) =>
   call<VoteList>({ action: "list", ...(cursor ? { cursor } : {}) });
 export const getVote = (pollId: string) =>

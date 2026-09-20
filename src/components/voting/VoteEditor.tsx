@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import Modal from "../shared/Modal";
 import type { VoteDraft, VotePerson, VotePoll } from "../../types/voting";
 import { fromReunionInput, toReunionInput } from "../../utils/voting";
+import VotePrivacyNotice from './VotePrivacyNotice';
 
 const labelClass = "block space-y-1 text-sm font-semibold text-slate-800";
 function PeoplePicker({
@@ -106,7 +107,7 @@ export default function VoteEditor({
           purpose: initial.purpose,
           question: initial.question,
           kind: initial.kind,
-          privacy: initial.privacy,
+          privacy: "secret",
           opensAt: initial.opensAt,
           closesAt: initial.closesAt,
           participantIds: initial.participantIds || [],
@@ -239,27 +240,9 @@ export default function VoteEditor({
                 <option value="election">Élection interne simple</option>
               </select>
             </label>
-            <label className={labelClass}>
-              Confidentialité
-              <select
-                className="ui-input w-full"
-                value={value.privacy}
-                onChange={(e) =>
-                  set({ privacy: e.target.value as VoteDraft["privacy"] })
-                }
-              >
-                <option value="secret">Vote secret</option>
-                <option value="nominal">Vote nominatif</option>
-              </select>
-            </label>
+            <p className="text-sm font-semibold self-center">Confidentialité : vote secret obligatoire</p>
           </div>
-          <p
-            className={`rounded-xl p-3 text-sm ${value.privacy === "nominal" ? "bg-amber-50 text-amber-900" : "bg-blue-50 text-blue-900"}`}
-          >
-            {value.privacy === "secret"
-              ? "La direction verra les totaux et la liste des votants, sans afficher leurs choix individuels."
-              : "Après clôture, la direction pourra voir le choix de chaque électeur. Cette règle sera annoncée avant de voter."}
-          </p>
+          <VotePrivacyNotice privacy="secret" />
         </fieldset>
         <fieldset disabled={busy} className="space-y-4">
           <legend className="text-lg font-bold mb-3">

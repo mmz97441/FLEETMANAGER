@@ -266,7 +266,10 @@ async function fixture(patch = {}, publish = true) {
       const f = await fixture();
       await denied(
         invoke("save", f.pollId, {
-          draft: { ...f.draft, privacy: "nominal" },
+          draft: {
+            ...f.draft,
+            question: "Nouvelle question après publication",
+          },
           revision: 2,
           requestId: randomUUID(),
         }),
@@ -460,7 +463,10 @@ async function fixture(patch = {}, publish = true) {
   await check(
     "nominal choices are visible to direction only after closure",
     async () => {
-      const f = await fixture({ privacy: "nominal" });
+      const f = await fixture();
+      // Existing published nominal votes keep the confidentiality announced
+      // before the secret-only policy. New ones cannot use that mode.
+      await f.ref.update({ privacy: "nominal" });
       await f.cast(["afternoon"]);
       const closed = await f.close();
       assert.deepEqual(
@@ -468,6 +474,184 @@ async function fixture(patch = {}, publish = true) {
         ["afternoon"],
       );
       await denied(invoke("close", f.pollId, { reason: "test" }, "a"));
+    },
+  );
+  await check(
+    "new votes must be secret even with a forged API request",
+    async () => {
+      await denied(fixture({ privacy: "nominal" }, false), "invalid-argument");
+      const f = await fixture({}, false);
+      await f.ref.update({ privacy: "nominal" });
+      await denied(
+        invoke("publish", f.pollId, { revision: f.result.poll.revision }),
+        "failed-precondition",
+      );
+      const saved = await invoke("save", f.pollId, {
+        revision: f.result.poll.revision,
+        draft: f.draft,
+        requestId: randomUUID(),
+      });
+      assert.equal(
+        (await invoke("publish", f.pollId, { revision: saved.poll.revision }))
+          .poll.privacy,
+        "secret",
+      );
+    },
+  );
+  async function reminderFixture(patch = {}, publish = true) {
+    const who = `reminder-${randomUUID()}`;
+    await db
+      .collection("users")
+      .doc(uid(who))
+      .set({ role: "Chauffeur", firstName: "Fictif", lastName: "Rappel" });
+    const f = await fixture(
+      { participantIds: [uid(who)], voterIds: [uid(who)], ...patch },
+      publish,
+    );
+    return {
+      ...f,
+      who,
+      pending: () => invoke("pending", undefined, {}, who),
+      dismiss: () => invoke("dismiss", f.pollId, {}, who),
+    };
+  }
+  await check(
+    "priority reminders only expose the caller's open, uncast votes",
+    async () => {
+      const f = await reminderFixture();
+      const r = await f.pending();
+      assert.equal(r.poll.id, f.pollId);
+      assert.equal(r.poll.canVote, true);
+      assert.equal(r.poll.participantIds, undefined);
+      assert.equal(
+        (await invoke("pending", undefined, {}, "outside")).poll,
+        null,
+      );
+      assert.equal(
+        (await invoke("pending", undefined, {}, "observer")).poll,
+        null,
+      );
+      await f.cast(["morning"], f.who);
+      assert.equal((await f.pending()).poll, null);
+      await denied(invoke("pending", undefined, {}, null), "unauthenticated");
+      await denied(invoke("pending", undefined, {}, "client"));
+      await denied(invoke("pending", undefined, {}, "disabled"));
+    },
+  );
+  await check(
+    "draft, future, expired, cancelled and closed votes never interrupt users",
+    async () => {
+      const f = await reminderFixture({}, false);
+      assert.equal((await f.pending()).poll, null);
+      await invoke("publish", f.pollId, { revision: f.result.poll.revision });
+      await f.ref.update({
+        opensAt: new Date(Date.now() + 60000).toISOString(),
+      });
+      assert.equal((await f.pending()).poll, null);
+      await f.ref.update({
+        opensAt: f.draft.opensAt,
+        closesAt: new Date(Date.now() - 1000).toISOString(),
+      });
+      assert.equal((await f.pending()).poll, null);
+      for (const status of ["cancelled", "closed"]) {
+        await f.ref.update({ closesAt: f.draft.closesAt, status });
+        assert.equal((await f.pending()).poll, null);
+      }
+    },
+  );
+  await check(
+    "closing a reminder is persisted without a ballot and remains reversible",
+    async () => {
+      const f = await reminderFixture();
+      assert.equal((await f.dismiss()).dismissed, true);
+      const marker = f.ref.collection("reminders").doc(uid(f.who));
+      const first = (await marker.get()).data();
+      assert.deepEqual(Object.keys(first), ["dismissedAt"]);
+      assert.equal((await f.pending()).poll, null);
+      assert.equal((await f.ref.collection("participation").get()).size, 0);
+      assert.equal(
+        (await f.ref.collection("private").doc("tally").get()).data().votes,
+        0,
+      );
+      assert.equal(
+        (await invoke("get", f.pollId, {}, f.who)).poll.canVote,
+        true,
+      );
+      await f.dismiss();
+      assert.deepEqual((await marker.get()).data(), first);
+      await f.cast(["afternoon"], f.who);
+      assert.equal((await f.dismiss()).alreadyVoted, true);
+      const closed = await f.close();
+      assert.equal(closed.poll.results.cast, 1);
+      assert.equal(closed.poll.results.abstentions, 0);
+    },
+  );
+  await check(
+    "dismissal counts as non-participation, not a blank vote, at closure",
+    async () => {
+      const f = await reminderFixture();
+      await f.dismiss();
+      const r = await f.close();
+      assert.equal(r.poll.results.cast, 0);
+      assert.equal(r.poll.results.blank, 0);
+      assert.equal(r.poll.results.abstentions, 1);
+      assert.equal(r.participation[0].voted, false);
+      assert.equal((await f.dismiss()).dismissed, true);
+    },
+  );
+  await check(
+    "a concurrent dismissal never removes or duplicates a recorded vote",
+    async () => {
+      const f = await reminderFixture();
+      await Promise.all([f.dismiss(), f.cast(["morning"], f.who), f.dismiss()]);
+      const closed = await f.close();
+      assert.equal(closed.poll.results.cast, 1);
+      assert.equal(closed.poll.results.rows[0].votes, 1);
+      assert.equal(closed.poll.results.abstentions, 0);
+    },
+  );
+  await check(
+    "non-electors and closed votes cannot create dismissal records",
+    async () => {
+      const f = await reminderFixture();
+      await denied(invoke("dismiss", f.pollId, {}, "observer"));
+      await denied(invoke("dismiss", f.pollId, {}, "manager"));
+      await f.close();
+      await denied(f.dismiss(), "failed-precondition");
+      assert.equal((await f.ref.collection("reminders").get()).size, 0);
+    },
+  );
+  await check(
+    "priority lookup scans past thirty dismissed votes and orders by deadline",
+    async () => {
+      const f = await reminderFixture();
+      const base = (await f.ref.get()).data();
+      await f.dismiss();
+      const batch = db.batch();
+      for (let i = 0; i < 31; i++) {
+        const ref = db
+          .collection("voting_polls")
+          .doc(`priority-${randomUUID()}`);
+        batch.set(ref, base);
+        batch.set(ref.collection("reminders").doc(uid(f.who)), {
+          dismissedAt: new Date().toISOString(),
+        });
+      }
+      const later = db
+        .collection("voting_polls")
+        .doc(`priority-${randomUUID()}`);
+      batch.set(later, {
+        ...base,
+        closesAt: new Date(Date.now() + 7200000).toISOString(),
+      });
+      await batch.commit();
+      assert.equal((await f.pending()).poll.id, later.id);
+      const sooner = await fixture({
+        participantIds: [uid(f.who)],
+        voterIds: [uid(f.who)],
+        closesAt: new Date(Date.now() + 1800000).toISOString(),
+      });
+      assert.equal((await f.pending()).poll.id, sooner.pollId);
     },
   );
   await check(

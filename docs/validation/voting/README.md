@@ -42,3 +42,14 @@ node scripts/voting/fixture.mjs
 ```
 
 Les émulateurs nécessitent Java 21. Pour les écrans, démarrer Chrome dans un autre terminal avec `--headless=new --remote-debugging-port=0 --user-data-dir=/tmp/fleet-voting-browser --no-first-run about:blank`, puis lancer `node scripts/voting/probe.mjs`. La sonde écrit `browser.json`, les captures et `PV-FICTIF.pdf`.
+
+## Évolution 4.30.0 — vote prioritaire et confidentialité
+
+- TypeScript, compilation frontend et fonctions : réussis. Les 297 tests unitaires et l’audit UI de 49 fichiers passent.
+- Contrôles ciblés sur émulateurs : **49 serveur vote + 42 règles vote réussis**. Ils couvrent les nouvelles actions `pending` et `dismiss`, les états/dates/éligibilités, le secret obligatoire, les anciens scrutins nominatifs, la pagination des rappels, les fermetures idempotentes, le vote après fermeture du rappel, la concurrence vote/fermeture et le décompte exact des abstentions sans vote blanc.
+- Recette existante : **38 contrôles Chrome réussis**. Nouvelle recette : **35 contrôles prioritaires réussis**, à 320, 390 et 1365 pixels, dans `priority-browser.json`. Lancer `node scripts/voting/priority-probe.mjs` avec la même fixture. La capture `priority-390.png` montre le nouveau rappel avec des données fictives.
+- Les **40 contrôles UI partagés et 10 contrôles de navigation** ont été rejoués avec succès pour vérifier les fenêtres imbriquées, le focus et les brouillons après l’ajout de priorités aux fenêtres.
+
+La nouvelle recette vérifie aussi une alerte métier ouverte après le rappel, la croix et Échap, le double clic et la réponse retardée de fermeture, les erreurs réseau, plusieurs scrutins successifs, le scrutin déjà voté, l’explication exacte du secret et l’avertissement explicite des anciens scrutins nominatifs. Le passage au vote utilise l’historique natif et les protections de navigation réelles. Aucun scrutin ni bulletin de production n’est créé par ces tests.
+
+Déploiement : créer l’index `voterIds CONTAINS / status ASC / closesAt ASC` et attendre son état prêt, puis déployer `employeeVoting` avant la nouvelle interface. Les règles Firestore existantes protègent déjà tous les sous-documents de `voting_polls`, y compris les nouveaux marqueurs `reminders`.

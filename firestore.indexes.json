@@ -68,6 +68,15 @@
       "collectionGroup": "voting_polls",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "voterIds", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "closesAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "voting_polls",
+      "queryScope": "COLLECTION",
+      "fields": [
         { "fieldPath": "participantIds", "arrayConfig": "CONTAINS" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
