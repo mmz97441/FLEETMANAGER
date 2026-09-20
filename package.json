@@ -1,7 +1,7 @@
 {
   "name": "fleetgenius-pro",
   "private": true,
-  "version": "4.28.1",
+  "version": "4.29.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,15 +11,16 @@
     "test": "vitest run src",
     "test:integration": "vitest run tests/integration",
     "test:rules": "node scripts/test-rules.mjs",
-    "test:server": "node scripts/test-server.cjs && node scripts/test-mission-lifecycle.cjs && node scripts/test-scan-package.cjs",
+    "test:server": "node scripts/test-server.cjs && node scripts/test-mission-lifecycle.cjs && node scripts/test-scan-package.cjs && node scripts/test-voting.cjs",
     "test:storage": "node scripts/test-storage.mjs",
-    "test:emulated": "npm run test:rules && npm run test:integration && npm run test:server && npm run test:storage",
+    "test:emulated": "npm run test:rules && npm run test:integration && npm run test:server && npm run test:storage && node scripts/test-voting-rules.mjs",
     "audit:ui": "node scripts/audit-ui.mjs"
   },
   "dependencies": {
     "firebase": "^12.18.0",
     "html5-qrcode": "^2.3.8",
     "jsbarcode": "^3.12.3",
+    "jspdf": "^4.2.1",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.344.0",
     "react": "^18.2.0",

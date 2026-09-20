@@ -1,4 +1,6 @@
 import { receivePackagesAtHubHandler } from './hubReception';
+import { votingHandler } from './voting';
+import { getStorage } from 'firebase-admin/storage';
 import { scanPackageHandler } from './scanPackage';
 import { finishMissionHandler } from './missionLifecycle';
 import { placeKey } from './deliveryAddress';
@@ -22,6 +24,18 @@ admin.initializeApp();
 
 const db = getFirestore();
 const auth = getAuth();
+
+export const employeeVoting = functions.region('europe-west1').runWith({ timeoutSeconds: 120, memory: '256MB' }).https.onCall((data, context) => votingHandler(data, context, {
+  db, requireActiveCaller,
+  fileMetadata: async path => {
+    const [metadata] = await getStorage().bucket().file(path).getMetadata();
+    return { size: Number(metadata.size), contentType: metadata.contentType || '', generation: String(metadata.generation) };
+  },
+  downloadFile: async (path, generation) => {
+    const [buffer] = await getStorage().bucket().file(path, { generation }).download();
+    return buffer;
+  },
+}));
 
 // URL de l'application (configurable via Firebase Functions config ou variable d'environnement)
 const APP_URL = process.env.APP_URL || "https://delivrex.vercel.app";

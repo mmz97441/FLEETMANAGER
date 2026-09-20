@@ -48,6 +48,17 @@ service firebase.storage {
     //         pod/{missionId}/{stopId}/photo-{n}.jpg
     // Lecture : tous les connectés (clients voient les POD de leurs colis)
     // Écriture : admin + chauffeurs (seuls à livrer)
+    // Voting attachments are immutable uploads. Downloads are authorized by
+    // the callable (membership + document visibility), never by public tokens.
+    match /votes/{pollId}/{documentId}/file {
+      allow create: if isActive()
+        && getUserRole().matches('(?i)^(admin|pr[eé]sident[e]?|directeur(?: exploitation)?|directrice(?: exploitation)?|direction)$')
+        && !firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('customPermissions', {}).get('revoked', []).hasAny(['votes.manage', 'votes.view'])
+        && firestore.get(/databases/(default)/documents/voting_polls/$(pollId)).data.status in ['draft', 'closed']
+        && resource == null && request.resource.size > 0 && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType in ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'image/jpeg', 'image/png'];
+      allow read, update, delete: if false;
+    }
     match /pod/{missionId}/{stopId}/{allPaths=**} {
       allow read: if isAdminRole() || (isDriver() && firestore.get(/databases/(default)/documents/missions/$(missionId)).data.driverId == request.auth.uid);
       allow create: if resource == null && (isAdminRole() || (isDriver() && firestore.get(/databases/(default)/documents/missions/$(missionId)).data.driverId == request.auth.uid))

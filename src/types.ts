@@ -593,6 +593,7 @@ export interface DeliveryScheduleConfig {
 }
 
 export type ViewState = 
+  | 'votes'
   | 'dashboard' 
   | 'vehicles' 
   | 'drivers' 

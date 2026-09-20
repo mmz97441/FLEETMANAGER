@@ -83,6 +83,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
       id: 'demarches', label: 'Mes démarches', icon: FileCheck,
       items: [
         { id: 'leaves', label: 'Congés et absences', icon: Palmtree, badgeKey: 'leaves' },
+        { id: 'votes', label: 'Votes des salariés', icon: ClipboardList, permission: Permission.VOTES_VIEW },
         { id: 'documents', label: 'Mes documents', icon: FileCheck, badgeKey: 'docs' },
       ],
     },
@@ -151,6 +152,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, isCollapse
       badgeKey: 'docs',
       items: [
         { id: 'drivers', label: 'Chauffeurs', icon: Users, permission: Permission.DRIVERS_VIEW },
+        { id: 'votes', label: 'Votes des salariés', icon: ClipboardList, permission: Permission.VOTES_VIEW },
         { id: 'leaves', label: 'Congés', icon: Palmtree, permission: Permission.ABSENCES_VIEW_OWN, badgeKey: 'leaves' },
         { id: 'absences', label: 'Absences', icon: CalendarDays, permission: Permission.ABSENCES_VIEW_OWN, badgeKey: 'absences' },
         { id: 'company_docs', label: 'Documents', icon: FileSignature, permission: Permission.DOCS_VIEW_ALL, badgeKey: 'docs' },

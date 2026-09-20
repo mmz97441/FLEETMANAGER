@@ -84,6 +84,12 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Polls, participation and aggregates are server-only. The voting callable
+    // returns only authorized fields and reveals results after closure.
+    match /voting_polls/{pollId}/{path=**} {
+      allow read, write: if false;
+    }
+
     // ============================================================
     // UTILISATEURS
     // ============================================================
@@ -450,7 +456,8 @@ service cloud.firestore {
       allow read: if isPresident();
       allow create: if isAuthenticated()
         && request.resource.data.userId == request.auth.uid
-        && request.resource.data.action != 'PACKAGE_SCANNED'; // Confirmations de scan réservées au serveur.
+        && request.resource.data.action != 'PACKAGE_SCANNED'
+        && !request.resource.data.action.matches('^VOTE_.*'); // Scan et gestion des votes : journal du serveur uniquement.
       allow update, delete: if false;
     }
 

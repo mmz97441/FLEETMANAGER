@@ -48,6 +48,7 @@ const VehicleDetail = lazy(() => import('./components/VehicleDetail'));
 const ActivateAccount = lazy(() => import('./components/ActivateAccount'));
 const HelpCenter = lazy(() => import('./components/HelpCenter'));
 const DriverMissionView = lazy(() => import('./components/DriverMissionView'));
+const VotingModule = lazy(() => import('./components/voting/VotingModule'));
 const PermissionsManager = lazy(() => import('./components/PermissionsManager'));
 const DeliveryScheduleSettings = lazy(() => import('./components/DeliveryScheduleSettings'));
 const ZoneManager = lazy(() => import('./components/ZoneManager'));
@@ -845,6 +846,8 @@ const App: React.FC = () => {
     }
 
     switch (view) {
+      case 'votes':
+        return <VotingModule key={currentUser.id} currentUser={currentUser} />;
       case 'dashboard':
         return <Dashboard
             vehicles={vehicles} 
@@ -1199,8 +1202,8 @@ const App: React.FC = () => {
       <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[12000] bg-white text-brand-700 rounded-lg p-3">Aller au contenu principal</a>
       <div className={`flex h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden`}>
 
-        {/* VERROU GPS — chauffeurs : app inutilisable sans localisation active */}
-        {currentView !== 'help' && <DriverGpsGate currentUser={currentUser} onHelp={() => handleViewChange('help')} />}
+        {/* VERROU GPS — les votes et l’aide restent accessibles sans position */}
+        {!['help', 'votes'].includes(currentView) && <DriverGpsGate currentUser={currentUser} onHelp={() => handleViewChange('help')} onVotes={() => handleViewChange('votes')} />}
 
         {/* Sidebar */}
         <div ref={menuRef} role={isMobileMenuOpen ? 'dialog' : undefined} aria-modal={isMobileMenuOpen || undefined} aria-label="Menu principal" tabIndex={-1} className={`fixed inset-y-0 left-0 z-50 ${isMobileMenuOpen ? 'right-0' : 'invisible lg:visible'} lg:relative lg:shrink-0`}>
@@ -1299,13 +1302,13 @@ const App: React.FC = () => {
 
         {/* Raccourci scan rapide (usage interne dispatch/admin). RETIRÉ pour les CHAUFFEURS
             et sur la vue chauffeur (le scan s'y fait via « Scanner des colis »). */}
-        {currentUser.role !== UserRole.CLIENT && currentUser.role !== UserRole.DRIVER && currentView !== 'driver_tour' && currentView !== 'driver_preview' && <QuickScanButton currentUser={currentUser} clients={users.filter(u => u.role === UserRole.CLIENT || String(u.role).toLowerCase().includes('client'))} />}
+        {currentUser.role !== UserRole.CLIENT && currentUser.role !== UserRole.DRIVER && currentView !== 'driver_tour' && currentView !== 'driver_preview' && currentView !== 'votes' && <QuickScanButton currentUser={currentUser} clients={users.filter(u => u.role === UserRole.CLIENT || String(u.role).toLowerCase().includes('client'))} />}
 
         {/* RACCOURCI SCAN CHAUFFEUR — bouton flottant présent sur TOUS ses écrans
             (Accueil, Véhicule, Démarches…). Un tap → « Ma Tournée » + ouverture du
             choix Récupérer/Livraison. Sur driver_tour le scan est déjà dans la vue,
             on ne double pas. Le scan alimente ainsi toujours la BONNE tournée. */}
-        {currentUser.role === UserRole.DRIVER && currentView !== 'driver_tour' && currentView !== 'driver_preview' && (
+        {currentUser.role === UserRole.DRIVER && currentView !== 'driver_tour' && currentView !== 'driver_preview' && currentView !== 'votes' && (
           <button
             onClick={() => { setDriverScanIntent(true); handleViewChange('driver_tour'); }}
             title="Scanner un colis"
@@ -1322,11 +1325,12 @@ const App: React.FC = () => {
             Documents sans avoir tout traité. Pas de « Plus tard ». */}
         <Suspense fallback={null}>
           <DocumentAlertModal
-            isOpen={pendingDocumentsList.length > 0 && currentView !== 'documents' && currentView !== 'company_docs' && currentView !== 'help'}
+            isOpen={pendingDocumentsList.length > 0 && !['documents', 'company_docs', 'help', 'votes'].includes(currentView)}
             blocking
             onClose={() => handleViewChange('documents')}
             onGoToDocuments={() => handleViewChange('documents')}
             onHelp={() => handleViewChange('help')}
+            onVotes={currentUser.role !== UserRole.CLIENT ? () => handleViewChange('votes') : undefined}
             pendingDocuments={pendingDocumentsList}
             currentUser={currentUser}
           />

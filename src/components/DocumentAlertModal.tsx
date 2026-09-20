@@ -8,6 +8,7 @@ interface DocumentAlertModalProps {
   onClose: () => void;
   onGoToDocuments: () => void;
   onHelp?: () => void;
+  onVotes?: () => void;
   pendingDocuments: CompanyDocument[];
   currentUser: User;
   /** true = obligatoire : pas de « Plus tard », l'utilisateur DOIT lire/signer. */
@@ -19,6 +20,7 @@ const DocumentAlertModal: React.FC<DocumentAlertModalProps> = ({
   onClose,
   onGoToDocuments,
   onHelp,
+  onVotes,
   pendingDocuments,
   currentUser,
   blocking = false
@@ -145,6 +147,7 @@ const DocumentAlertModal: React.FC<DocumentAlertModalProps> = ({
         </div>
 
         {onHelp && <div className="px-4 pb-4"><button type="button" onClick={onHelp} className="min-h-11 w-full rounded-xl border border-slate-300 px-4 py-3 text-sm font-bold text-slate-800">Besoin d’aide pour consulter ou signer ?</button></div>}
+        {onVotes && <div className="px-4 pb-4"><button type="button" onClick={onVotes} className="min-h-11 w-full rounded-xl border border-slate-300 px-4 py-3 text-sm font-bold text-slate-800">Accéder aux votes des salariés</button></div>}
         {/* Actions */}
         <div className="p-4 bg-slate-50 border-t border-slate-200 flex gap-3">
           {!blocking && (

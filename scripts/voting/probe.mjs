@@ -1,0 +1,232 @@
+import { readFile, writeFile, mkdir } from "node:fs/promises";
+const [port] = (
+  await readFile("/tmp/fleet-voting-browser/DevToolsActivePort", "utf8")
+)
+  .trim()
+  .split("\n");
+const tab = await (
+  await fetch(`http://127.0.0.1:${port}/json/new?about:blank`, {
+    method: "PUT",
+  })
+).json();
+const ws = new WebSocket(tab.webSocketDebuggerUrl);
+await new Promise((r) => ws.addEventListener("open", r, { once: true }));
+let id = 0;
+const pending = new Map(),
+  checks = [],
+  exceptions = [];
+ws.addEventListener("message", (e) => {
+  const m = JSON.parse(e.data);
+  if (m.id) {
+    const p = pending.get(m.id);
+    if (p) {
+      pending.delete(m.id);
+      m.error ? p.reject(m.error) : p.resolve(m.result);
+    }
+  }
+  if (m.method === "Runtime.exceptionThrown")
+    exceptions.push(
+      m.params.exceptionDetails.exception?.description ||
+        m.params.exceptionDetails.text,
+    );
+});
+const call = (method, params = {}) =>
+  new Promise((resolve, reject) => {
+    pending.set(++id, { resolve, reject });
+    ws.send(JSON.stringify({ id, method, params }));
+  });
+const ev = async (expression) => {
+  const r = await call("Runtime.evaluate", {
+    expression,
+    returnByValue: true,
+    awaitPromise: true,
+  });
+  if (r.exceptionDetails)
+    throw Error(
+      r.exceptionDetails.exception?.description || r.exceptionDetails.text,
+    );
+  return r.result.value;
+};
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+const wait = async (e) => {
+  for (let n = 0; n < 100; n++) {
+    if (await ev(e)) return;
+    await pause(100);
+  }
+  throw Error("Timeout " + e);
+};
+const check = async (name, e) => checks.push({ name, pass: !!(await ev(e)) });
+const click = async (text) => {
+  await ev(
+    `(()=>{const b=[...document.querySelectorAll('button')].find(b=>b.innerText.trim()===${JSON.stringify(text)});if(!b)throw Error('Button missing');b.click()})()`,
+  );
+  await pause(60);
+};
+const input = async (label, value) => {
+  await ev(
+    `(()=>{const el=[...document.querySelectorAll('label')].find(l=>l.textContent.trim().startsWith(${JSON.stringify(label)}))?.querySelector('input,textarea');if(!el)throw Error('Input missing');el.focus();el.select()})()`,
+  );
+  await call("Input.insertText", { text: value });
+  await pause(30);
+};
+const navigate = async (query, width = 390) => {
+  await call("Emulation.setDeviceMetricsOverride", {
+    width,
+    height: 844,
+    deviceScaleFactor: 1,
+    mobile: width < 640,
+  });
+  await call("Page.navigate", { url: "http://127.0.0.1:5249/?" + query });
+  await wait(
+    `window.poll&&document.body.innerText.includes('Choisir notre réunion')&&!document.body.innerText.includes('Chargement des scrutins')`,
+  );
+};
+await call("Runtime.enable");
+await call("Page.enable");
+await call("Network.enable");
+await call("Network.setBlockedURLs", {
+  urls: [
+    "*://*.googleapis.com/*",
+    "*://*.firebaseio.com/*",
+    "*://*.cloudfunctions.net/*",
+    "*://*.run.app/*",
+  ],
+});
+await mkdir("docs/validation/voting", { recursive: true });
+try {
+  for (const width of [320, 390, 1365]) {
+    await navigate("role=employee&direct=1", width);
+    await check(
+      "Worker sees object and privacy before voting " + width,
+      `document.body.innerText.includes('Pourquoi vote-t-on')&&document.body.innerText.includes('Vote secret')&&!document.body.innerText.includes('Gestion du scrutin')`,
+    );
+    await check(
+      "No page overflow " + width,
+      `document.documentElement.scrollWidth===innerWidth`,
+    );
+    await ev(
+      `document.querySelector('input[name=ballot]').click();window.holdCast=true`,
+    );
+    await click("Vérifier puis confirmer mon vote");
+    await check(
+      "Confirmation repeats selected choice " + width,
+      `document.querySelector('[role=alertdialog]').innerText.includes('Le matin')&&document.querySelector('[role=alertdialog]').innerText.includes('ne pourrez plus')`,
+    );
+    await click("Confirmer mon vote");
+    await click("Enregistrement…");
+    await check(
+      "Double tap produces one request and no premature confirmation " + width,
+      `window.calls.filter(x=>x.action==='cast').length===1&&!document.body.innerText.includes('Votre vote est enregistré')`,
+    );
+    await ev("window.releaseCast()");
+    await wait(`document.body.innerText.includes('Votre vote est enregistré')`);
+    await check(
+      "Receipt shown and second vote removed " + width,
+      `document.body.innerText.includes('confirmation-fictive')&&!document.querySelector('input[name=ballot]')`,
+    );
+    const shot = await call("Page.captureScreenshot", { format: "png" });
+    await writeFile(
+      "docs/validation/voting/employee-" + width + ".png",
+      Buffer.from(shot.data, "base64"),
+    );
+  }
+  await navigate("role=employee&scenario=scheduled&direct=1");
+  await check(
+    "Scheduled elector initially sees opening time",
+    `document.body.innerText.includes('Le vote n’a pas encore commencé')&&!document.querySelector('input[name=ballot]')`,
+  );
+  await wait(`!!document.querySelector('input[name=ballot]')`);
+  await check(
+    "Ballot opens automatically without classifying elector as observer",
+    `document.body.innerText.includes('Votre bulletin')&&!document.body.innerText.includes('Vous participez en consultation')`,
+  );
+  await navigate("role=observer&direct=1");
+  await check(
+    "Observer can read but has no ballot",
+    `document.body.innerText.includes('Vous participez en consultation')&&!document.querySelector('input[name=ballot]')`,
+  );
+  await navigate("role=employee&privacy=nominal&direct=1");
+  await check(
+    "Nominal privacy is explicit before choice",
+    `document.body.innerText.includes('Vote nominatif')&&document.body.innerText.includes('visible par la direction')`,
+  );
+  await navigate("role=manager&scenario=draft&direct=1");
+  await check(
+    "Manager can review eligibility before publishing",
+    `document.body.innerText.includes('Vérifier les participants')&&document.body.innerText.includes('Publier le scrutin')`,
+  );
+  await ev(
+    `const file=new File(['%PDF-fictif'],'note-fictive.pdf',{type:'application/pdf'});const dt=new DataTransfer();dt.items.add(file);const el=document.querySelector('input[type=file]');el.files=dt.files;el.dispatchEvent(new Event('change',{bubbles:true}));`,
+  );
+  await click("Ajouter le document");
+  await wait(`window.calls.some(c=>c.action==='attach')`);
+  await check(
+    "Selected attachment survives rerender and is submitted",
+    `window.calls.find(c=>c.action==='attach').name==='note-fictive.pdf'&&document.body.innerText.includes('note-fictive.pdf')`,
+  );
+  await click("Publier le scrutin");
+  await click("Confirmer");
+  await wait(
+    `document.body.innerText.includes('Clôturer et voir les résultats')`,
+  );
+  await check(
+    "Published rules cannot be edited",
+    `!document.body.innerText.includes('Modifier le brouillon')&&!document.body.innerText.includes('Résultats et procès-verbal')`,
+  );
+  await click("Clôturer et voir les résultats");
+  await input("Motif obligatoire", "Clôture anticipée fictive");
+  await click("Confirmer");
+  await wait(`document.body.innerText.includes('Résultats et procès-verbal')`);
+  await input("Présidence du scrutin", "Alice Fictive");
+  await input("Secrétaire du scrutin", "Bruno Fictif");
+  await input("Lieu", "La Réunion");
+  await input("Observations", "Résultats fictifs constatés pour validation.");
+  await click("Finaliser le procès-verbal");
+  await click("Confirmer");
+  await wait(`document.body.innerText.includes('Télécharger le PV PDF')`);
+  await click("Télécharger le PV PDF");
+  await wait(`window.downloads.some(d=>d.name.endsWith('.pdf'))`);
+  await click("Exporter le tableau CSV");
+  await wait(`window.downloads.some(d=>d.name.endsWith('.csv'))`);
+  await check(
+    "Actual PDF and CSV downloads",
+    `window.downloads.some(d=>d.type==='application/pdf'&&d.size>1000)&&window.downloads.some(d=>d.name.endsWith('.csv'))`,
+  );
+  const pdf = await ev(
+    `window.downloads.find(d=>d.name.endsWith('.pdf')).base64`,
+  );
+  await writeFile(
+    "docs/validation/voting/PV-FICTIF.pdf",
+    Buffer.from(pdf, "base64"),
+  );
+  await ev("window.scrollTo(0,document.body.scrollHeight)");
+  const shot = await call("Page.captureScreenshot", { format: "png" });
+  await writeFile(
+    "docs/validation/voting/direction-390.png",
+    Buffer.from(shot.data, "base64"),
+  );
+  await navigate("role=manager&scenario=draft");
+  await click("Préparer un vote");
+  await input("Titre du vote", "Consultation fictive de validation");
+  await input(
+    "Objet et explications",
+    "Choisir un créneau en conservant la logique métier.",
+  );
+  await input("Question posée", "Quel créneau vous convient ?");
+  await click("Enregistrer le brouillon");
+  await wait(`window.calls.some(c=>c.action==='save')`);
+  await check(
+    "Creation includes selected voters, purpose, rules and dates",
+    `(()=>{const d=window.calls.find(c=>c.action==='save').draft;return d.participantIds.length===3&&d.voterIds.length===3&&d.privacy==='secret'&&d.purpose.includes('créneau')&&d.options.length===2&&Date.parse(d.closesAt)>Date.parse(d.opensAt)})()`,
+  );
+  checks.push({ name: "No runtime exception", pass: exceptions.length === 0 });
+  await writeFile(
+    "docs/validation/voting/browser.json",
+    JSON.stringify({ checks, exceptions }, null, 2),
+  );
+  console.log(JSON.stringify({ checks, exceptions }, null, 2));
+  if (checks.some((c) => !c.pass)) process.exitCode = 1;
+} finally {
+  await call("Page.close");
+  ws.close();
+}

@@ -1,0 +1,105 @@
+{
+  "checks": [
+    {
+      "name": "Worker sees object and privacy before voting 320",
+      "pass": true
+    },
+    {
+      "name": "No page overflow 320",
+      "pass": true
+    },
+    {
+      "name": "Confirmation repeats selected choice 320",
+      "pass": true
+    },
+    {
+      "name": "Double tap produces one request and no premature confirmation 320",
+      "pass": true
+    },
+    {
+      "name": "Receipt shown and second vote removed 320",
+      "pass": true
+    },
+    {
+      "name": "Worker sees object and privacy before voting 390",
+      "pass": true
+    },
+    {
+      "name": "No page overflow 390",
+      "pass": true
+    },
+    {
+      "name": "Confirmation repeats selected choice 390",
+      "pass": true
+    },
+    {
+      "name": "Double tap produces one request and no premature confirmation 390",
+      "pass": true
+    },
+    {
+      "name": "Receipt shown and second vote removed 390",
+      "pass": true
+    },
+    {
+      "name": "Worker sees object and privacy before voting 1365",
+      "pass": true
+    },
+    {
+      "name": "No page overflow 1365",
+      "pass": true
+    },
+    {
+      "name": "Confirmation repeats selected choice 1365",
+      "pass": true
+    },
+    {
+      "name": "Double tap produces one request and no premature confirmation 1365",
+      "pass": true
+    },
+    {
+      "name": "Receipt shown and second vote removed 1365",
+      "pass": true
+    },
+    {
+      "name": "Scheduled elector initially sees opening time",
+      "pass": true
+    },
+    {
+      "name": "Ballot opens automatically without classifying elector as observer",
+      "pass": true
+    },
+    {
+      "name": "Observer can read but has no ballot",
+      "pass": true
+    },
+    {
+      "name": "Nominal privacy is explicit before choice",
+      "pass": true
+    },
+    {
+      "name": "Manager can review eligibility before publishing",
+      "pass": true
+    },
+    {
+      "name": "Selected attachment survives rerender and is submitted",
+      "pass": true
+    },
+    {
+      "name": "Published rules cannot be edited",
+      "pass": true
+    },
+    {
+      "name": "Actual PDF and CSV downloads",
+      "pass": true
+    },
+    {
+      "name": "Creation includes selected voters, purpose, rules and dates",
+      "pass": true
+    },
+    {
+      "name": "No runtime exception",
+      "pass": true
+    }
+  ],
+  "exceptions": []
+}
