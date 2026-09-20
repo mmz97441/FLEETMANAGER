@@ -78,6 +78,7 @@ export interface VotePoll extends Omit<
   voters?: VotePerson[];
   documents: VoteDocument[];
   canManage: boolean;
+  canViewResults: boolean;
   isElector: boolean;
   canVote: boolean;
   hasVoted: boolean;

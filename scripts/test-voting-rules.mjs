@@ -89,6 +89,26 @@ try {
     assertSucceeds,
     () => put("manager", "closed"),
   );
+  await check(
+    "secretariat can upload briefing documents to drafts",
+    assertSucceeds,
+    () => put("secretary"),
+  );
+  await check(
+    "secretariat cannot overwrite a briefing document",
+    assertFails,
+    () => put("secretary"),
+  );
+  await check(
+    "secretariat cannot alter documents after publication",
+    assertFails,
+    () => put("secretary", "published"),
+  );
+  await check(
+    "secretariat cannot upload a signed PV after closure",
+    assertFails,
+    () => put("secretary", "closed"),
+  );
   await check("HTML is refused", assertFails, () =>
     put("manager", "draft", "html", "text/html"),
   );
@@ -98,7 +118,7 @@ try {
   await check("oversized file is refused", assertFails, () =>
     put("manager", "draft", "large", "application/pdf", 5 * 1024 * 1024 + 1),
   );
-  for (const who of ["driver", "client", "secretary", "revoked", null])
+  for (const who of ["driver", "client", "revoked", null])
     await check(
       `${who || "anonymous"} cannot upload voting documents`,
       assertFails,
@@ -115,7 +135,7 @@ try {
         ),
       ),
   );
-  for (const who of ["manager", "driver", "client", null]) {
+  for (const who of ["manager", "secretary", "driver", "client", null]) {
     await check(
       `${who || "anonymous"} cannot read raw voting data`,
       assertFails,

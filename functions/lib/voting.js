@@ -69,6 +69,7 @@ const direction = new Set([
     "directeur exploitation",
     "directrice exploitation",
 ]);
+const organizers = new Set([...direction, "secretariat", "secretaire"]);
 const normalize = (v) => String(v || "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -106,7 +107,7 @@ const eligibleProfile = (profile) => !!profile &&
     !profile.isDisabled &&
     internal.has(normalize(profile.role)) &&
     !(profile.customPermissions?.revoked || []).includes("votes.view");
-const canManageVotes = (caller) => direction.has(normalize(caller.role)) &&
+const canManageVotes = (caller) => organizers.has(normalize(caller.role)) &&
     !(caller.customPermissions?.revoked || []).includes("votes.manage");
 exports.canManageVotes = canManageVotes;
 const types = new Set([
@@ -181,12 +182,19 @@ async function votingHandler(data, context, deps) {
     if (!internal.has(normalize(caller.role)) ||
         (caller.customPermissions?.revoked || []).includes("votes.view"))
         fail("permission-denied", "Les votes sont réservés aux salariés autorisés.");
-    const manager = (0, exports.canManageVotes)(caller), { db } = deps;
+    const manager = (0, exports.canManageVotes)(caller), canViewResults = manager && direction.has(normalize(caller.role)), { db } = deps;
     const now = () => (deps.now || (() => new Date()))().toISOString();
     const requireManager = () => {
         if (!manager)
-            fail("permission-denied", "Gestion des scrutins réservée à la direction.");
+            fail("permission-denied", "Gestion des scrutins réservée à la direction et au secrétariat.");
     };
+    const requireResultsAccess = () => {
+        if (!canViewResults)
+            fail("permission-denied", "Résultats et procès-verbaux réservés à la direction.");
+    };
+    const mayReadDocument = (p, d) => canViewResults ||
+        (d.visibility === "participants" &&
+            (d.kind === "attachment" || p.participantIds.includes(caller.id)));
     const mayRead = (p) => manager || (p.status !== "draft" && p.participantIds.includes(caller.id));
     const visible = (p, uid, participation) => {
         const { participants, voters, participantIds, voterIds, lastMutationId, lastMutationHash, results, minutes, ...rest } = p;
@@ -194,11 +202,12 @@ async function votingHandler(data, context, deps) {
             ...rest,
             id: uid,
             documents: (p.documents || [])
-                .filter((d) => manager || d.visibility === "participants")
+                .filter((d) => mayReadDocument(p, d))
                 .map(({ path, generation, ...d }) => d),
             participantCount: participantIds.length,
             voterCount: voterIds.length,
             canManage: manager,
+            canViewResults,
             isElector: voterIds.includes(caller.id),
             canVote: voterIds.includes(caller.id) &&
                 p.status === "published" &&
@@ -220,9 +229,10 @@ async function votingHandler(data, context, deps) {
                     voterIds,
                     participants,
                     voters,
-                    ...(results ? { results } : {}),
-                    ...(minutes ? { minutes } : {}),
                 }
+                : {}),
+            ...(canViewResults
+                ? { ...(results ? { results } : {}), ...(minutes ? { minutes } : {}) }
                 : {}),
         };
     };
@@ -505,7 +515,7 @@ async function votingHandler(data, context, deps) {
         });
     }
     else if (data.action === "finalize_minutes") {
-        requireManager();
+        requireResultsAccess();
         const value = {
             chair: text(data.minutes?.chair, 160, true),
             secretary: text(data.minutes?.secretary || "", 160),
@@ -560,6 +570,8 @@ async function votingHandler(data, context, deps) {
             !["attachment", "signed_minutes"].includes(d?.kind) ||
             !["participants", "direction"].includes(d?.visibility))
             fail("invalid-argument", "Document invalide.");
+        if (d.kind === "signed_minutes" || d.visibility === "direction")
+            requireResultsAccess();
         const name = text(d.name, 180, true), path = `votes/${ref.id}/${d.id}/file`;
         if (!deps.fileMetadata)
             fail("internal", "Stockage indisponible.");
@@ -613,8 +625,11 @@ async function votingHandler(data, context, deps) {
             const snapshot = await tx.get(ref), p = snapshot.data();
             if (!p || p.status !== "draft")
                 fail("failed-precondition", "Les documents sont figés après publication.");
-            if (!p.documents.some((d) => d.id === data.documentId))
+            const document = p.documents.find((d) => d.id === data.documentId);
+            if (!document)
                 return;
+            if (document.visibility === "direction")
+                requireResultsAccess();
             tx.update(ref, {
                 documents: p.documents.filter((d) => d.id !== data.documentId),
                 revision: p.revision + 1,
@@ -629,8 +644,7 @@ async function votingHandler(data, context, deps) {
     if (!p || !mayRead(p))
         fail("permission-denied", "Ce scrutin ne vous est pas accessible.");
     if (data.action === "download_document") {
-        const document = (p.documents || []).find((d) => d.id === data.documentId &&
-            (manager || d.visibility === "participants"));
+        const document = (p.documents || []).find((d) => d.id === data.documentId && mayReadDocument(p, d));
         if (!document)
             fail("not-found", "Document indisponible.");
         if (!deps.downloadFile)
@@ -647,7 +661,7 @@ async function votingHandler(data, context, deps) {
     const mine = (await ref.collection("participation").doc(caller.id).get()).data();
     const response = { poll: visible(p, ref.id, mine) };
     // No live turnout or individual choices: small groups must not reveal votes incrementally.
-    if (manager && p.status === "closed") {
+    if (canViewResults && p.status === "closed") {
         const participation = await ref.collection("participation").get(), byId = new Map(participation.docs.map((s) => [s.id, s.data()]));
         response.participation = p.voters.map((v) => {
             const entry = byId.get(v.id);

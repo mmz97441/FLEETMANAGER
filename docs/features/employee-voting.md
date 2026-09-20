@@ -4,15 +4,28 @@ Le menu **Votes des salariés** ouvre `/votes`. Il est disponible dans les déma
 
 ## Organiser un scrutin
 
-1. La direction choisit **Préparer un vote** et renseigne un titre, l'objet de la décision et la question posée.
+1. La direction ou le secrétariat choisit **Préparer un vote** et renseigne un titre, l'objet de la décision et la question posée.
 2. Elle sélectionne les **participants** qui pourront consulter le scrutin et les documents, puis les **électeurs**, nécessairement parmi ces participants. Pour une élection, elle choisit les **candidats** parmi les participants. Un candidat unique est accepté. Les comptes désactivés, les clients et les comptes privés du droit de vote ne sont pas proposés.
 3. Elle définit les choix, leur nombre maximum par bulletin, le vote blanc, le quorum, la confidentialité et le calendrier. Les dates sont saisies et affichées à l'heure de La Réunion.
-4. Elle enregistre le brouillon, joint les documents et vérifie le récapitulatif. Les documents peuvent être visibles par les participants ou réservés à la direction.
-5. **Publier le scrutin** fige son objet, ses choix, les personnes sélectionnées, ses règles, ses dates et ses pièces jointes. Un vote programmé s'ouvre à l'heure prévue ; le serveur refuse tout bulletin reçu après l'heure limite. La direction clôture explicitement pour dépouiller. Une clôture anticipée impose un motif.
+4. Elle enregistre le brouillon, joint les documents et vérifie le récapitulatif. Le secrétariat joint les documents destinés aux participants. La direction peut également ajouter des documents qui lui sont réservés.
+5. **Publier le scrutin** fige son objet, ses choix, les personnes sélectionnées, ses règles, ses dates et ses pièces jointes. Un vote programmé s'ouvre à l'heure prévue ; le serveur refuse tout bulletin reçu après l'heure limite. La direction ou le secrétariat clôture explicitement pour dépouiller. Une clôture anticipée impose un motif.
 6. Après clôture, la direction consulte le tableau de résultats et le registre de participation, puis utilise **Exporter le tableau CSV** pour Excel ou LibreOffice.
 7. Elle renseigne la présidence du scrutin, éventuellement le secrétariat, le lieu et les observations/décisions, puis **Finaliser le procès-verbal**. Le bouton **Télécharger le PV PDF** devient disponible. La finalisation fige ces informations ; les signatures sont à apposer sur le PDF. Les exemplaires signés peuvent ensuite être joints au scrutin.
 
 Le CSV contient l'objet, les règles, la participation, les résultats et le registre de participation. Le PDF contient l'objet, la question, les dates, les règles, les responsables, les résultats, le quorum, les observations, les noms des annexes, les espaces de signature et une empreinte du contenu enregistré. Il gère plusieurs pages. Le moteur PDF n'est chargé qu'au téléchargement.
+
+## Droits d’organisation
+
+| Action | Direction, président, administrateur | Secrétariat | Autres salariés |
+| --- | --- | --- | --- |
+| Préparer, modifier un brouillon, choisir électeurs/candidats | Oui | Oui | Non |
+| Publier, clôturer, annuler avec motif | Oui | Oui | Non |
+| Joindre les documents des participants avant publication | Oui | Oui | Non |
+| Consulter les résultats, le registre et exporter | Après clôture | Non | Non |
+| Finaliser/télécharger le PV généré, joindre un PV signé | Oui | Non | Non |
+| Déposer un bulletin | Si sélectionné comme électeur | Si sélectionné comme électeur | Si sélectionné comme électeur |
+
+Les révocations individuelles de `votes.manage` et `votes.view` restent respectées. Un PV signé partagé explicitement par la direction avec les participants reste téléchargeable par les personnes sélectionnées, y compris un membre du secrétariat invité. L’organisation seule ne donne pas accès à ce document partagé ni aux pièces réservées à la direction.
 
 ## Parcours du salarié
 
@@ -24,7 +37,7 @@ Les votes ne sont pas mis en file d'attente hors connexion. En cas de connexion 
 
 - **Périmètre : consultations internes et élections simples.** Ce module n'implémente pas un dispositif d'élection CSE certifié, les collèges électoraux, les listes syndicales, plusieurs tours ou une répartition de sièges. Aucun document modèle n'ayant été joint à la demande, le PV est un modèle interne générique ; un modèle existant peut être importé comme pièce jointe, sans extraction automatique de ses champs.
 - **Secret par défaut.** Aucun choix individuel ni empreinte de choix n'est conservé dans le registre d'un vote secret. L'urne contient seulement les compteurs agrégés. Le registre séparé permet de savoir qui a voté et quand. Le mode nominatif existe, mais sa visibilité pour la direction est annoncée avant de voter.
-- **Résultats après clôture.** La direction n'accède ni aux compteurs ni au registre de participation pendant le vote. Après clôture, les résultats et le registre sont réservés aux rôles direction, président et administrateur. Le secrétariat peut participer, mais n'a pas ces pouvoirs par défaut. Un droit personnalisé ne permet pas de transformer un rôle client ou salarié en organisateur ; la restriction de rôle est également appliquée au serveur.
+- **Résultats après clôture.** La direction n'accède ni aux compteurs ni au registre de participation pendant le vote. Après clôture, les résultats et le registre sont réservés aux rôles direction, président et administrateur. Le secrétariat peut préparer, modifier, publier, clôturer et annuler les scrutins, sans accéder aux résultats, au registre de participation, aux exports ou à la finalisation du PV. Un droit personnalisé ne permet pas de transformer un rôle client, chauffeur, mécanicien ou stagiaire en organisateur ; la restriction de rôle est également appliquée au serveur.
 - **Règles figées à la publication.** Pour corriger un scrutin publié, il faut l'annuler avec un motif et en créer un nouveau, éventuellement en le copiant. Le scrutin annulé et sa trace restent conservés. Un scrutin clôturé ne peut être ni rouvert ni annulé. Les modifications concurrentes de brouillon sont détectées.
 - **Pas de proclamation automatique.** Les votes blancs participent au quorum mais pas aux bulletins exprimés. Le tableau signale un quorum non atteint ou une égalité. Avec plusieurs choix possibles, chaque pourcentage est rapporté aux bulletins exprimés. La décision et un éventuel départage restent à consigner par le bureau dans le PV.
 - **Pièces jointes :** PDF, DOC, DOCX, JPEG ou PNG, 5 Mo par fichier, dix annexes et trois exemplaires signés. Les exemplaires signés disposent d'une capacité distincte pour ne pas être bloqués par les annexes. Les fichiers ne sont pas écrasables. Les téléchargements passent par une vérification serveur des destinataires et utilisent la génération exacte du fichier enregistré.

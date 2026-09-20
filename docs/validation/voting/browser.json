@@ -97,6 +97,26 @@
       "pass": true
     },
     {
+      "name": "Secretariat can create and prepare publication",
+      "pass": true
+    },
+    {
+      "name": "Secretariat uploads briefing documents with participant visibility",
+      "pass": true
+    },
+    {
+      "name": "Secretariat can publish without a results access button",
+      "pass": true
+    },
+    {
+      "name": "Secretariat can close without seeing results or exports",
+      "pass": true
+    },
+    {
+      "name": "Secretariat cannot generate or attach signed minutes",
+      "pass": true
+    },
+    {
       "name": "No runtime exception",
       "pass": true
     }

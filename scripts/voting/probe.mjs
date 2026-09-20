@@ -219,6 +219,50 @@ try {
     "Creation includes selected voters, purpose, rules and dates",
     `(()=>{const d=window.calls.find(c=>c.action==='save').draft;return d.participantIds.length===3&&d.voterIds.length===3&&d.privacy==='secret'&&d.purpose.includes('créneau')&&d.options.length===2&&Date.parse(d.closesAt)>Date.parse(d.opensAt)})()`,
   );
+  await navigate("role=secretary&scenario=draft");
+  await click("Préparer un vote");
+  await input("Titre du vote", "Vote créé par le secrétariat fictif");
+  await input("Objet et explications", "Consultation préparée pour l’équipe.");
+  await input("Question posée", "Êtes-vous d’accord ?");
+  await click("Enregistrer le brouillon");
+  await wait(
+    `window.calls.some(c=>c.action==='save')&&document.body.innerText.includes('Publier le scrutin')`,
+  );
+  await check(
+    "Secretariat can create and prepare publication",
+    `window.poll.canManage&&!window.poll.canViewResults&&document.body.innerText.includes('Modifier le brouillon')`,
+  );
+  await check(
+    "Secretariat uploads briefing documents with participant visibility",
+    `!!document.querySelector('input[type=file]')&&!document.querySelector('option[value=direction]')`,
+  );
+  await click("Publier le scrutin");
+  await click("Confirmer");
+  await wait(`document.body.innerText.includes('Clôturer le scrutin')`);
+  await check(
+    "Secretariat can publish without a results access button",
+    `window.calls.some(c=>c.action==='publish')&&!document.body.innerText.includes('Clôturer et voir les résultats')`,
+  );
+  await click("Clôturer le scrutin");
+  await input("Motif obligatoire", "Fin de la validation fictive");
+  await click("Confirmer");
+  await wait(
+    `window.poll.status==='closed'&&!document.querySelector('[role=alertdialog]')`,
+  );
+  await check(
+    "Secretariat can close without seeing results or exports",
+    `window.calls.some(c=>c.action==='close')&&!document.body.innerText.includes('Résultats et procès-verbal')&&!document.body.innerText.includes('Exporter le tableau CSV')`,
+  );
+  await navigate("role=secretary&scenario=closed&finalized=1&direct=1");
+  await check(
+    "Secretariat cannot generate or attach signed minutes",
+    `!document.body.innerText.includes('Télécharger le PV PDF')&&!document.body.innerText.includes('Finaliser le procès-verbal')&&!document.querySelector('input[type=file]')`,
+  );
+  const secretaryShot = await call("Page.captureScreenshot", { format: "png" });
+  await writeFile(
+    "docs/validation/voting/secretariat-390.png",
+    Buffer.from(secretaryShot.data, "base64"),
+  );
   checks.push({ name: "No runtime exception", pass: exceptions.length === 0 });
   await writeFile(
     "docs/validation/voting/browser.json",

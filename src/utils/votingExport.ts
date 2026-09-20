@@ -11,7 +11,12 @@ export function voteResultsCsv({
   poll,
   participation = [],
 }: VoteDetail): string {
-  if (!poll.canManage || !poll.results || poll.status !== "closed")
+  if (
+    !poll.canManage ||
+    !poll.canViewResults ||
+    !poll.results ||
+    poll.status !== "closed"
+  )
     throw new Error(
       "Les résultats sont disponibles pour la direction après clôture.",
     );
@@ -82,6 +87,7 @@ export function voteResultsCsv({
 export async function voteMinutesPdf({ poll }: VoteDetail): Promise<Blob> {
   if (
     !poll.canManage ||
+    !poll.canViewResults ||
     !poll.results ||
     !poll.minutes ||
     poll.status !== "closed"

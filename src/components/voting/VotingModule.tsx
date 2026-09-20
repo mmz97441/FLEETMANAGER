@@ -557,7 +557,9 @@ export default function VotingModule({ currentUser }: { currentUser: User }) {
                       })
                     }
                   >
-                    Clôturer et voir les résultats
+                    {poll.canViewResults
+                      ? "Clôturer et voir les résultats"
+                      : "Clôturer le scrutin"}
                   </button>
                 )}
                 {["draft", "published"].includes(poll.status) && (
@@ -586,11 +588,19 @@ export default function VotingModule({ currentUser }: { currentUser: User }) {
                   Créer un nouveau vote à partir de celui-ci
                 </button>
               </div>
-              {poll.status === "published" && (
+              {!poll.canViewResults ? (
                 <p className="text-sm text-slate-600">
-                  Les résultats et le registre de participation seront
-                  accessibles après clôture.
+                  Vous pouvez organiser et clôturer le scrutin. Les résultats,
+                  le registre de participation, les exports et la finalisation
+                  du PV sont réservés à la direction.
                 </p>
+              ) : (
+                poll.status === "published" && (
+                  <p className="text-sm text-slate-600">
+                    Les résultats et le registre de participation seront
+                    accessibles après clôture.
+                  </p>
+                )
               )}
             </section>
           )}
@@ -656,7 +666,9 @@ export default function VotingModule({ currentUser }: { currentUser: User }) {
             </ul>
             {manager &&
               (poll.status === "draft" ||
-                (poll.status === "closed" && poll.minutes)) && (
+                (poll.status === "closed" &&
+                  poll.canViewResults &&
+                  poll.minutes)) && (
                 <form
                   className="space-y-3 border-t border-slate-200 pt-3"
                   onSubmit={(e) => {
@@ -711,7 +723,11 @@ export default function VotingModule({ currentUser }: { currentUser: User }) {
                       <option value="participants">
                         Les participants au scrutin
                       </option>
-                      <option value="direction">La direction uniquement</option>
+                      {poll.canViewResults && (
+                        <option value="direction">
+                          La direction uniquement
+                        </option>
+                      )}
                     </select>
                   </label>
                   <button
@@ -859,7 +875,7 @@ export default function VotingModule({ currentUser }: { currentUser: User }) {
               </ul>
             </section>
           )}
-          {detail && poll.status === "closed" && poll.canManage && (
+          {detail && poll.status === "closed" && poll.canViewResults && (
             <VoteResultsPanel
               key={poll.id}
               detail={detail}

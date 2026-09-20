@@ -27,7 +27,7 @@ export default function VoteResultsPanel({
     place: "",
     observations: "",
   });
-  if (!poll.results || !poll.canManage) return null;
+  if (!poll.results || !poll.canViewResults) return null;
   const r = poll.results;
   return (
     <section className="space-y-5" aria-labelledby="vote-results-heading">

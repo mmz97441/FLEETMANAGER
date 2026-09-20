@@ -168,7 +168,7 @@ export interface PermissionCategory {
 export const PERMISSION_CATEGORIES: PermissionCategory[] = [
   { id: 'votes', label: 'Votes des salariés', icon: '🗳️', permissions: [
     { key: Permission.VOTES_VIEW, label: 'Consulter les scrutins et voter', description: 'Uniquement les scrutins auxquels le salarié est invité' },
-    { key: Permission.VOTES_MANAGE, label: 'Organiser les scrutins et consulter les résultats', description: 'Réservé à la direction ; exports et procès-verbaux' },
+    { key: Permission.VOTES_MANAGE, label: 'Organiser les scrutins', description: 'Direction et secrétariat ; résultats, exports et procès-verbaux réservés à la direction' },
   ] },
   {
     id: 'dashboard',
@@ -462,6 +462,7 @@ export const DEFAULT_ROLE_TEMPLATES: Record<UserRole, PermissionKey[]> = {
 
   [UserRole.SECRETARY]: [
     Permission.VOTES_VIEW,
+    Permission.VOTES_MANAGE,
     // Dashboard (sans coûts)
     Permission.DASHBOARD_VIEW,
     Permission.DASHBOARD_KPI_FLEET,

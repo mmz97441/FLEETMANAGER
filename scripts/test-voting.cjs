@@ -101,8 +101,13 @@ async function fixture(patch = {}, publish = true) {
   await check("disabled accounts are excluded", () =>
     denied(invoke("list", undefined, {}, "disabled")),
   );
-  await check("secretariat cannot manage votes or list employees", () =>
-    denied(invoke("employees", undefined, {}, "secretary")),
+  await check(
+    "secretariat can select eligible employees to organize a poll",
+    async () => {
+      const r = await invoke("employees", undefined, {}, "secretary");
+      assert(r.employees.some((p) => p.id === uid("a")));
+      assert(!r.employees.some((p) => p.id === uid("client")));
+    },
   );
   await check("directory excludes disabled and client accounts", async () => {
     const r = await invoke("employees");
@@ -667,6 +672,205 @@ async function fixture(patch = {}, publish = true) {
       await denied(
         add("signed-overflow", "signed_minutes"),
         "resource-exhausted",
+      );
+    },
+  );
+  await check(
+    "secretariat can create, edit, publish and close without seeing results",
+    async () => {
+      const template = await fixture({}, false),
+        pollId = `vote-${randomUUID()}`;
+      const create = await invoke(
+        "save",
+        pollId,
+        { draft: template.draft, revision: 0, requestId: randomUUID() },
+        "secretary",
+      );
+      assert.equal(create.poll.canManage, true);
+      assert.equal(create.poll.canViewResults, false);
+      const edit = await invoke(
+        "save",
+        pollId,
+        {
+          draft: {
+            ...template.draft,
+            title: "Scrutin préparé par le secrétariat",
+          },
+          revision: create.poll.revision,
+          requestId: randomUUID(),
+        },
+        "secretary",
+      );
+      await invoke(
+        "publish",
+        pollId,
+        { revision: edit.poll.revision },
+        "secretary",
+      );
+      await invoke(
+        "cast",
+        pollId,
+        { choices: ["morning"], requestId: randomUUID() },
+        "a",
+      );
+      const closed = await invoke(
+        "close",
+        pollId,
+        { reason: "Fin du scrutin fictif" },
+        "secretary",
+      );
+      assert.equal(closed.poll.status, "closed");
+      assert.equal(closed.poll.results, undefined);
+      assert.equal(closed.participation, undefined);
+      const direction = await invoke("get", pollId);
+      assert.equal(direction.poll.results.cast, 1);
+      await denied(
+        invoke(
+          "finalize_minutes",
+          pollId,
+          { minutes: { chair: "Secrétariat" } },
+          "secretary",
+        ),
+      );
+      await invoke("finalize_minutes", pollId, {
+        minutes: { chair: "Direction fictive" },
+      });
+      const final = await invoke("get", pollId, {}, "secretary");
+      assert.equal(final.poll.minutes, undefined);
+    },
+  );
+  await check(
+    "secretariat list hides results and minutes for every closed poll",
+    async () => {
+      const polls = [];
+      let cursor;
+      do {
+        const r = await invoke(
+          "list",
+          undefined,
+          cursor ? { cursor } : {},
+          "secretary",
+        );
+        assert.equal(r.canManage, true);
+        polls.push(...r.polls);
+        cursor = r.nextCursor;
+      } while (cursor);
+      assert(polls.some((p) => p.status === "closed"));
+      assert(
+        polls.every(
+          (p) =>
+            p.canViewResults === false &&
+            p.results === undefined &&
+            p.minutes === undefined,
+        ),
+      );
+    },
+  );
+  await check(
+    "secretariat may cancel with a reason but cannot vote outside the electorate",
+    async () => {
+      const f = await fixture();
+      await denied(f.cast(["morning"], "secretary"));
+      await invoke(
+        "cancel",
+        f.pollId,
+        { reason: "Calendrier à corriger" },
+        "secretary",
+      );
+      assert.equal((await f.ref.get()).data().status, "cancelled");
+      await denied(invoke("employees", undefined, {}, "a"));
+    },
+  );
+  await check(
+    "disabled or revoked secretariat cannot organize votes",
+    async () => {
+      const user = db.collection("users").doc(uid("secretary"));
+      await user.update({ isDisabled: true });
+      await denied(invoke("employees", undefined, {}, "secretary"));
+      await user.update({
+        isDisabled: false,
+        customPermissions: { revoked: ["votes.manage"] },
+      });
+      await denied(invoke("employees", undefined, {}, "secretary"));
+      await user.update({ customPermissions: { revoked: [] } });
+    },
+  );
+  await check(
+    "secretariat manages briefing files but cannot access private direction files or write signed minutes",
+    async () => {
+      const f = await fixture({}, false);
+      const deps = {
+        db,
+        requireActiveCaller: async (c) => ({
+          ...(await db.collection("users").doc(c.auth.uid).get()).data(),
+          id: c.auth.uid,
+        }),
+        fileMetadata: async () => ({
+          size: 123,
+          contentType: "application/pdf",
+          generation: "42",
+        }),
+        downloadFile: async () => Buffer.from("%PDF-test"),
+      };
+      const run = (action, extra, who = "secretary") =>
+        votingHandler(
+          { action, pollId: f.pollId, ...extra },
+          context(who),
+          deps,
+        );
+      const document = {
+        id: "briefing",
+        name: "Note.pdf",
+        kind: "attachment",
+        visibility: "participants",
+      };
+      await run("attach_document", { document });
+      assert(
+        (await run("download_document", { documentId: "briefing" })).base64,
+      );
+      await run("remove_document", { documentId: "briefing" });
+      await denied(
+        run("attach_document", {
+          document: { ...document, id: "private", visibility: "direction" },
+        }),
+      );
+      await run(
+        "attach_document",
+        { document: { ...document, id: "private", visibility: "direction" } },
+        "manager",
+      );
+      assert.equal(
+        (await invoke("get", f.pollId, {}, "secretary")).poll.documents.length,
+        0,
+      );
+      await denied(
+        run("download_document", { documentId: "private" }),
+        "not-found",
+      );
+      await denied(run("remove_document", { documentId: "private" }));
+      const draft = await invoke("get", f.pollId);
+      await invoke("publish", f.pollId, { revision: draft.poll.revision });
+      await f.close();
+      await invoke("finalize_minutes", f.pollId, {
+        minutes: { chair: "Direction" },
+      });
+      await denied(
+        run("attach_document", {
+          document: { ...document, id: "pv-forged", kind: "signed_minutes" },
+        }),
+      );
+      await run(
+        "attach_document",
+        { document: { ...document, id: "pv-shared", kind: "signed_minutes" } },
+        "manager",
+      );
+      await denied(
+        run("download_document", { documentId: "pv-shared" }),
+        "not-found",
+      );
+      assert(
+        (await run("download_document", { documentId: "pv-shared" }, "a"))
+          .base64,
       );
     },
   );

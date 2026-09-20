@@ -45,6 +45,7 @@ const direction = new Set([
   "directeur exploitation",
   "directrice exploitation",
 ]);
+const organizers = new Set([...direction, "secretariat", "secretaire"]);
 const normalize = (v: unknown) =>
   String(v || "")
     .normalize("NFD")
@@ -101,7 +102,7 @@ const eligibleProfile = (profile: any) =>
   internal.has(normalize(profile.role)) &&
   !(profile.customPermissions?.revoked || []).includes("votes.view");
 export const canManageVotes = (caller: any): boolean =>
-  direction.has(normalize(caller.role)) &&
+  organizers.has(normalize(caller.role)) &&
   !(caller.customPermissions?.revoked || []).includes("votes.manage");
 const types = new Set([
   "application/pdf",
@@ -210,15 +211,27 @@ export async function votingHandler(
       "Les votes sont réservés aux salariés autorisés.",
     );
   const manager = canManageVotes(caller),
+    canViewResults = manager && direction.has(normalize(caller.role)),
     { db } = deps;
   const now = () => (deps.now || (() => new Date()))().toISOString();
   const requireManager = () => {
     if (!manager)
       fail(
         "permission-denied",
-        "Gestion des scrutins réservée à la direction.",
+        "Gestion des scrutins réservée à la direction et au secrétariat.",
       );
   };
+  const requireResultsAccess = () => {
+    if (!canViewResults)
+      fail(
+        "permission-denied",
+        "Résultats et procès-verbaux réservés à la direction.",
+      );
+  };
+  const mayReadDocument = (p: any, d: any) =>
+    canViewResults ||
+    (d.visibility === "participants" &&
+      (d.kind === "attachment" || p.participantIds.includes(caller.id)));
   const mayRead = (p: any) =>
     manager || (p.status !== "draft" && p.participantIds.includes(caller.id));
   const visible = (p: any, uid: string, participation?: any) => {
@@ -237,11 +250,12 @@ export async function votingHandler(
       ...rest,
       id: uid,
       documents: (p.documents || [])
-        .filter((d: any) => manager || d.visibility === "participants")
+        .filter((d: any) => mayReadDocument(p, d))
         .map(({ path, generation, ...d }: any) => d),
       participantCount: participantIds.length,
       voterCount: voterIds.length,
       canManage: manager,
+      canViewResults,
       isElector: voterIds.includes(caller.id),
       canVote:
         voterIds.includes(caller.id) &&
@@ -264,9 +278,10 @@ export async function votingHandler(
             voterIds,
             participants,
             voters,
-            ...(results ? { results } : {}),
-            ...(minutes ? { minutes } : {}),
           }
+        : {}),
+      ...(canViewResults
+        ? { ...(results ? { results } : {}), ...(minutes ? { minutes } : {}) }
         : {}),
     };
   };
@@ -649,7 +664,7 @@ export async function votingHandler(
       );
     });
   } else if (data.action === "finalize_minutes") {
-    requireManager();
+    requireResultsAccess();
     const value = {
       chair: text(data.minutes?.chair, 160, true),
       secretary: text(data.minutes?.secretary || "", 160),
@@ -713,6 +728,8 @@ export async function votingHandler(
       !["participants", "direction"].includes(d?.visibility)
     )
       fail("invalid-argument", "Document invalide.");
+    if (d.kind === "signed_minutes" || d.visibility === "direction")
+      requireResultsAccess();
     const name = text(d.name, 180, true),
       path = `votes/${ref.id}/${d.id}/file`;
     if (!deps.fileMetadata) fail("internal", "Stockage indisponible.");
@@ -790,7 +807,9 @@ export async function votingHandler(
           "failed-precondition",
           "Les documents sont figés après publication.",
         );
-      if (!p!.documents.some((d: any) => d.id === data.documentId)) return;
+      const document = p!.documents.find((d: any) => d.id === data.documentId);
+      if (!document) return;
+      if (document.visibility === "direction") requireResultsAccess();
       tx.update(ref, {
         documents: p!.documents.filter((d: any) => d.id !== data.documentId),
         revision: p!.revision + 1,
@@ -812,9 +831,7 @@ export async function votingHandler(
     fail("permission-denied", "Ce scrutin ne vous est pas accessible.");
   if (data.action === "download_document") {
     const document = (p!.documents || []).find(
-      (d: any) =>
-        d.id === data.documentId &&
-        (manager || d.visibility === "participants"),
+      (d: any) => d.id === data.documentId && mayReadDocument(p, d),
     );
     if (!document) fail("not-found", "Document indisponible.");
     if (!deps.downloadFile) fail("internal", "Stockage indisponible.");
@@ -832,7 +849,7 @@ export async function votingHandler(
   ).data();
   const response: any = { poll: visible(p, ref.id, mine) };
   // No live turnout or individual choices: small groups must not reveal votes incrementally.
-  if (manager && p!.status === "closed") {
+  if (canViewResults && p!.status === "closed") {
     const participation = await ref.collection("participation").get(),
       byId = new Map(participation.docs.map((s) => [s.id, s.data()]));
     response.participation = p!.voters.map((v: any) => {

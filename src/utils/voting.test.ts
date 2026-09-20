@@ -29,6 +29,7 @@ export const example: VoteDetail = {
     quorumPercent: 50,
     documents: [],
     canManage: true,
+    canViewResults: true,
     isElector: false,
     canVote: false,
     hasVoted: false,
@@ -134,6 +135,14 @@ describe("voting presentation and exports", () => {
     const bytes = new Uint8Array(await pdf.arrayBuffer());
     expect(new TextDecoder().decode(bytes.slice(0, 5))).toBe("%PDF-");
     expect(pdf.size).toBeGreaterThan(1000);
+  });
+  it("organizers without results access cannot export CSV or PDF", async () => {
+    const secretaryView = {
+      ...example,
+      poll: { ...example.poll, canManage: true, canViewResults: false },
+    };
+    expect(() => voteResultsCsv(secretaryView)).toThrow();
+    await expect(voteMinutesPdf(secretaryView)).rejects.toThrow();
   });
   it("does not manufacture minutes before their finalization", async () => {
     await expect(
