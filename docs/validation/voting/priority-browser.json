@@ -1,0 +1,145 @@
+{
+  "checks": [
+    {
+      "name": "Priority vote is above blocking documents 320",
+      "pass": true
+    },
+    {
+      "name": "Secret voting explanation separates participation and choice 320",
+      "pass": true
+    },
+    {
+      "name": "Priority prompt fits mobile and desktop 320",
+      "pass": true
+    },
+    {
+      "name": "Closing first opens a warning without recording anything 320",
+      "pass": true
+    },
+    {
+      "name": "Escape cannot bypass the non-participation warning 320",
+      "pass": true
+    },
+    {
+      "name": "One dismissal request and no premature close 320",
+      "pass": true
+    },
+    {
+      "name": "Business work resumes after confirmed non-participation 320",
+      "pass": true
+    },
+    {
+      "name": "Priority vote is above blocking documents 390",
+      "pass": true
+    },
+    {
+      "name": "Secret voting explanation separates participation and choice 390",
+      "pass": true
+    },
+    {
+      "name": "Priority prompt fits mobile and desktop 390",
+      "pass": true
+    },
+    {
+      "name": "Closing first opens a warning without recording anything 390",
+      "pass": true
+    },
+    {
+      "name": "Escape cannot bypass the non-participation warning 390",
+      "pass": true
+    },
+    {
+      "name": "One dismissal request and no premature close 390",
+      "pass": true
+    },
+    {
+      "name": "Business work resumes after confirmed non-participation 390",
+      "pass": true
+    },
+    {
+      "name": "Priority vote is above blocking documents 1365",
+      "pass": true
+    },
+    {
+      "name": "Secret voting explanation separates participation and choice 1365",
+      "pass": true
+    },
+    {
+      "name": "Priority prompt fits mobile and desktop 1365",
+      "pass": true
+    },
+    {
+      "name": "Closing first opens a warning without recording anything 1365",
+      "pass": true
+    },
+    {
+      "name": "Escape cannot bypass the non-participation warning 1365",
+      "pass": true
+    },
+    {
+      "name": "One dismissal request and no premature close 1365",
+      "pass": true
+    },
+    {
+      "name": "Business work resumes after confirmed non-participation 1365",
+      "pass": true
+    },
+    {
+      "name": "A later document modal cannot steal priority or focus",
+      "pass": true
+    },
+    {
+      "name": "Primary action opens the actual ballot at a native deep link",
+      "pass": true
+    },
+    {
+      "name": "A recorded ballot suppresses the priority reminder",
+      "pass": true
+    },
+    {
+      "name": "Unsaved work confirmation remains above the priority invitation",
+      "pass": true
+    },
+    {
+      "name": "Cancelling navigation keeps the draft and invitation",
+      "pass": true
+    },
+    {
+      "name": "Accepting the warning opens the ballot",
+      "pass": true
+    },
+    {
+      "name": "An ongoing business write is protected from navigation",
+      "pass": true
+    },
+    {
+      "name": "Legacy nominal polls never receive the secrecy promise",
+      "pass": true
+    },
+    {
+      "name": "A failed dismissal stays explicit and does not create a ballot",
+      "pass": true
+    },
+    {
+      "name": "A network failure does not trap the user in the reminder",
+      "pass": true
+    },
+    {
+      "name": "The next eligible vote appears after dismissing the first",
+      "pass": true
+    },
+    {
+      "name": "The next invitation is interactive above every backdrop",
+      "pass": true
+    },
+    {
+      "name": "Closed votes do not interrupt work",
+      "pass": true
+    },
+    {
+      "name": "No runtime exception",
+      "pass": true
+    }
+  ],
+  "exceptions": []
+}

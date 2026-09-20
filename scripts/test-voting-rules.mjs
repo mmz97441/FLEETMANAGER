@@ -137,6 +137,35 @@ try {
   );
   for (const who of ["manager", "secretary", "driver", "client", null]) {
     await check(
+      `${who || "anonymous"} cannot forge or read reminder dismissals`,
+      assertFails,
+      () =>
+        setDoc(
+          doc(
+            context(who).firestore(),
+            "voting_polls",
+            `${prefix}-closed`,
+            "reminders",
+            "forged",
+          ),
+          { dismissedAt: new Date().toISOString() },
+        ),
+    );
+    await check(
+      `${who || "anonymous"} cannot read reminder dismissals`,
+      assertFails,
+      () =>
+        getDoc(
+          doc(
+            context(who).firestore(),
+            "voting_polls",
+            `${prefix}-closed`,
+            "reminders",
+            "forged",
+          ),
+        ),
+    );
+    await check(
       `${who || "anonymous"} cannot read raw voting data`,
       assertFails,
       () =>

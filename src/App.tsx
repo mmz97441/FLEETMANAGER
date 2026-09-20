@@ -18,6 +18,7 @@ import QuickScanButton from './components/QuickScanButton';
 import NotificationCenter from './components/NotificationCenter';
 import ViewAsSwitcher from './components/ViewAsSwitcher';
 import DriverGpsGate from './components/DriverGpsGate';
+import VotePriorityGate from './components/voting/VotePriorityGate';
 import Login from './components/Login';
 import { useDriverLocationPublisher } from './hooks/useDriverLocationPublisher';
 import { useAutoUpdate } from './hooks/useAutoUpdate';
@@ -462,7 +463,7 @@ const App: React.FC = () => {
   // --- HANDLERS ---
   
   const handleViewChange = (view: ViewState, params?: Record<string, string>) => {
-    void requestNavigation(() => {
+    return requestNavigation(() => {
     if (view !== 'issues') {
         setTargetIssueVehicleId(null);
     }
@@ -1335,6 +1336,8 @@ const App: React.FC = () => {
             currentUser={currentUser}
           />
         </Suspense>
+
+        <VotePriorityGate key={currentUser.id} currentView={currentView} onVote={id => handleViewChange('votes', { vote: id })} />
 
       </div>
       </PermissionsProvider>

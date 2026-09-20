@@ -12,7 +12,7 @@ export default function ConfirmationHost() {
   }, []);
   const current = queue[0];
   const finish = (confirmed: boolean) => { current?.resolve(confirmed); setQueue(previous => previous.slice(1)); };
-  return <Modal isOpen={!!current} onClose={() => finish(false)} title={current?.title} role="alertdialog" size="sm" showCloseButton={false}>
+  return <Modal isOpen={!!current} onClose={() => finish(false)} title={current?.title} role="alertdialog" size="sm" showCloseButton={false} priority={200}>
     <p className="text-slate-700">{current?.message}</p>
     <div className="mt-5 flex flex-col gap-3">
       <button type="button" data-autofocus onClick={() => finish(false)} className="ui-button ui-button-secondary">{current?.cancelLabel || 'Annuler'}</button>

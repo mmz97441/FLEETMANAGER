@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef } from 'react';
 
-type Layer = { node: HTMLElement; escape: () => void; previous: HTMLElement | null };
+type Layer = { node: HTMLElement; escape: () => void; previous: HTMLElement | null; priority: number };
 const layers: Layer[] = [];
 const subscribers = new Set<() => void>();
 export const getTopDialogNode = () => layers[layers.length - 1]?.node ?? null;
@@ -22,6 +22,7 @@ function focusInside(layer: Layer) {
   (preferred && controls.includes(preferred) ? preferred : controls[0] || layer.node).focus({ preventScroll: true });
 }
 function updateBackground() {
+  layers.forEach((layer, index) => { layer.node.style.zIndex = String(10000 + (index + 1) * 10); });
   for (const [node, value] of originalInert) node.inert = value;
   originalInert.clear();
   const top = layers[layers.length - 1];
@@ -60,7 +61,7 @@ function focusin(event: FocusEvent) {
 }
 
 /** A shared stack keeps nested dialogs from unlocking or focusing their background. */
-export function useDialogLayer(isOpen: boolean, onEscape: () => void) {
+export function useDialogLayer(isOpen: boolean, onEscape: () => void, priority = 0) {
   const ref = useRef<HTMLDivElement>(null);
   const escapeRef = useRef(onEscape);
   escapeRef.current = onEscape;
@@ -68,7 +69,7 @@ export function useDialogLayer(isOpen: boolean, onEscape: () => void) {
     if (!isOpen || !ref.current) return;
     const node = ref.current;
     const initialZIndex = node.style.zIndex;
-    const layer: Layer = { node, escape: () => escapeRef.current(), previous: document.activeElement instanceof HTMLElement ? document.activeElement : null };
+    const layer: Layer = { node, escape: () => escapeRef.current(), previous: document.activeElement instanceof HTMLElement ? document.activeElement : null, priority };
     if (!layers.length) {
       savedBody = { overflow: document.body.style.overflow, paddingRight: document.body.style.paddingRight };
       const gap = window.innerWidth - document.documentElement.clientWidth;
@@ -80,9 +81,9 @@ export function useDialogLayer(isOpen: boolean, onEscape: () => void) {
       observer.observe(document.body, { childList: true });
     }
     layers.push(layer);
-    node.style.zIndex = String(10000 + layers.length * 10);
+    layers.sort((a, b) => a.priority - b.priority);
     updateBackground();
-    focusInside(layer);
+    if (layers[layers.length - 1] === layer) focusInside(layer);
     notifyLayers();
     return () => {
       node.style.zIndex = initialZIndex;
@@ -105,6 +106,6 @@ export function useDialogLayer(isOpen: boolean, onEscape: () => void) {
       }
       notifyLayers();
     };
-  }, [isOpen]);
+  }, [isOpen, priority]);
   return ref;
 }
