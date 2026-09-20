@@ -20,9 +20,10 @@ type GpsState = 'checking' | 'ok' | 'need_permission' | 'denied' | 'unavailable'
 interface DriverGpsGateProps {
   currentUser: User | null;
   onHelp?: () => void;
+  onVotes?: () => void;
 }
 
-const DriverGpsGate: React.FC<DriverGpsGateProps> = ({ currentUser, onHelp }) => {
+const DriverGpsGate: React.FC<DriverGpsGateProps> = ({ currentUser, onHelp, onVotes }) => {
   const [state, setState] = useState<GpsState>('checking');
   const [failCount, setFailCount] = useState(0); // échecs de localisation → porte de sortie après 2
   const passedRef = useRef(false); // une fois débloqué, on ne re-bloque plus la session
@@ -181,6 +182,7 @@ const DriverGpsGate: React.FC<DriverGpsGateProps> = ({ currentUser, onHelp }) =>
           <p className="mt-2">Revenez dans l’application et appuyez sur Réessayer. La livraison et le départ conservent leurs contrôles de position.</p>
         </details>
         {onHelp && <button type="button" onClick={onHelp} className="mt-3 min-h-12 w-full rounded-xl border border-white/50 px-3 py-3 font-bold">Ouvrir l’aide et contacter le bureau</button>}
+        {onVotes && <button type="button" onClick={onVotes} className="mt-3 min-h-12 w-full rounded-xl border border-white/50 px-3 py-3 font-bold">Accéder aux votes des salariés</button>}
         <p className="text-white/80 text-sm mt-6">
           Votre position sert au suivi des tournées et à la preuve de livraison.
         </p>

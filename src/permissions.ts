@@ -18,6 +18,8 @@ import { UserRole } from './types';
  * Organisées par catégorie pour l'UI
  */
 export const Permission = {
+  VOTES_VIEW: 'votes.view',
+  VOTES_MANAGE: 'votes.manage',
   // --- TABLEAU DE BORD ---
   DASHBOARD_VIEW: 'dashboard.view',
   DASHBOARD_KPI_FLEET: 'dashboard.kpi.fleet',
@@ -164,6 +166,10 @@ export interface PermissionCategory {
 }
 
 export const PERMISSION_CATEGORIES: PermissionCategory[] = [
+  { id: 'votes', label: 'Votes des salariés', icon: '🗳️', permissions: [
+    { key: Permission.VOTES_VIEW, label: 'Consulter les scrutins et voter', description: 'Uniquement les scrutins auxquels le salarié est invité' },
+    { key: Permission.VOTES_MANAGE, label: 'Organiser les scrutins', description: 'Direction et secrétariat ; résultats, exports et procès-verbaux réservés à la direction' },
+  ] },
   {
     id: 'dashboard',
     label: 'Tableau de Bord',
@@ -367,6 +373,8 @@ export const DEFAULT_ROLE_TEMPLATES: Record<UserRole, PermissionKey[]> = {
   ],
 
   [UserRole.DIRECTOR]: [
+    Permission.VOTES_VIEW,
+    Permission.VOTES_MANAGE,
     // Dashboard (sans coûts financiers détaillés)
     Permission.DASHBOARD_VIEW,
     Permission.DASHBOARD_KPI_FLEET,
@@ -453,6 +461,8 @@ export const DEFAULT_ROLE_TEMPLATES: Record<UserRole, PermissionKey[]> = {
   ],
 
   [UserRole.SECRETARY]: [
+    Permission.VOTES_VIEW,
+    Permission.VOTES_MANAGE,
     // Dashboard (sans coûts)
     Permission.DASHBOARD_VIEW,
     Permission.DASHBOARD_KPI_FLEET,
@@ -536,6 +546,7 @@ export const DEFAULT_ROLE_TEMPLATES: Record<UserRole, PermissionKey[]> = {
   ],
 
   [UserRole.DRIVER]: [
+    Permission.VOTES_VIEW,
     // Dashboard limité
     Permission.DASHBOARD_VIEW,
     // Véhicules (seulement le sien)
@@ -566,6 +577,7 @@ export const DEFAULT_ROLE_TEMPLATES: Record<UserRole, PermissionKey[]> = {
   ],
 
   [UserRole.MECHANIC]: [
+    Permission.VOTES_VIEW,
     // Dashboard limité
     Permission.DASHBOARD_VIEW,
     // Véhicules
@@ -612,6 +624,7 @@ export const DEFAULT_ROLE_TEMPLATES: Record<UserRole, PermissionKey[]> = {
   ],
 
   [UserRole.INTERN]: [
+    Permission.VOTES_VIEW,
     // Permissions de base pour un stagiaire
     Permission.DASHBOARD_VIEW,
     Permission.DASHBOARD_KPI_FLEET,

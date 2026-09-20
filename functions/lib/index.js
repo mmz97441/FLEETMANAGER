@@ -33,8 +33,10 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.interpretAnalytics = exports.acceptQuote = exports.getTeamDirectory = exports.notifyPackageStatus = exports.returnPackage = exports.deleteAbsence = exports.deleteVehicle = exports.importPackages = exports.assignVehicle = exports.askFleetGenius = exports.sendBusinessNotification = exports.transferPackages = exports.scanPackage = exports.dispatchMissions = exports.finishMission = exports.receivePackagesAtHub = exports.saveAbsence = exports.revokeOwnSessions = exports.linkAuthToProfile = exports.createInvitation = exports.activateAccount = exports.validateInvitationToken = exports.forcePasswordReset = exports.toggleUserStatus = exports.cleanupExpiredInvitations = exports.deleteUserCompletely = exports.optimizeTours = void 0;
+exports.interpretAnalytics = exports.acceptQuote = exports.getTeamDirectory = exports.notifyPackageStatus = exports.returnPackage = exports.deleteAbsence = exports.deleteVehicle = exports.importPackages = exports.assignVehicle = exports.askFleetGenius = exports.sendBusinessNotification = exports.transferPackages = exports.scanPackage = exports.dispatchMissions = exports.finishMission = exports.receivePackagesAtHub = exports.saveAbsence = exports.revokeOwnSessions = exports.linkAuthToProfile = exports.createInvitation = exports.activateAccount = exports.validateInvitationToken = exports.forcePasswordReset = exports.toggleUserStatus = exports.cleanupExpiredInvitations = exports.deleteUserCompletely = exports.optimizeTours = exports.employeeVoting = void 0;
 const hubReception_1 = require("./hubReception");
+const voting_1 = require("./voting");
+const storage_1 = require("firebase-admin/storage");
 const scanPackage_1 = require("./scanPackage");
 const missionLifecycle_1 = require("./missionLifecycle");
 const deliveryAddress_1 = require("./deliveryAddress");
@@ -55,6 +57,17 @@ const google_auth_library_1 = require("google-auth-library");
 admin.initializeApp();
 const db = (0, firestore_1.getFirestore)();
 const auth = (0, auth_1.getAuth)();
+exports.employeeVoting = functions.region('europe-west1').runWith({ timeoutSeconds: 120, memory: '256MB' }).https.onCall((data, context) => (0, voting_1.votingHandler)(data, context, {
+    db, requireActiveCaller,
+    fileMetadata: async (path) => {
+        const [metadata] = await (0, storage_1.getStorage)().bucket().file(path).getMetadata();
+        return { size: Number(metadata.size), contentType: metadata.contentType || '', generation: String(metadata.generation) };
+    },
+    downloadFile: async (path, generation) => {
+        const [buffer] = await (0, storage_1.getStorage)().bucket().file(path, { generation }).download();
+        return buffer;
+    },
+}));
 // URL de l'application (configurable via Firebase Functions config ou variable d'environnement)
 const APP_URL = process.env.APP_URL || "https://delivrex.vercel.app";
 // ============================================================================

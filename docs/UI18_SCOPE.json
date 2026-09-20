@@ -44,7 +44,10 @@
     "src/components/vehicles/VehicleFormModal.tsx",
     "src/components/vehicles/VehicleRow.tsx",
     "src/components/vehicles/VehicleStats.tsx",
-    "src/components/vehicles/VehicleStatusBadge.tsx"
+    "src/components/vehicles/VehicleStatusBadge.tsx",
+    "src/components/voting/VoteResultsPanel.tsx",
+    "src/components/voting/VoteEditor.tsx",
+    "src/components/voting/VotingModule.tsx"
   ],
   "exceptions": [
     {

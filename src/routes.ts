@@ -6,6 +6,7 @@ import { ViewState } from './types';
 
 // ViewState → chemin URL
 export const VIEW_TO_PATH: Record<ViewState, string> = {
+  votes: '/votes',
   dashboard: '/',
   vehicles: '/vehicles',
   drivers: '/drivers',
