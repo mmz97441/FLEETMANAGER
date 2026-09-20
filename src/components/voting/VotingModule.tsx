@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useUrlParam } from "../../hooks/useUrlState";
 import {
   ArrowLeft,
   CheckCircle,
@@ -55,8 +55,7 @@ type Confirmation = {
 };
 export default function VotingModule({ currentUser }: { currentUser: User }) {
   const { hasPermission, isLoading: permissionsLoading } = usePermissions();
-  const [params, setParams] = useSearchParams();
-  const selected = params.get("vote") || "";
+  const [selected, setSelected] = useUrlParam<string>("vote", "");
   const [list, setList] = useState<VoteList>({
     polls: [],
     nextCursor: null,
@@ -156,7 +155,7 @@ export default function VotingModule({ currentUser }: { currentUser: User }) {
   const open = (id?: string) => {
     if (!busy) {
       setConfirmation(null);
-      setParams(id ? { vote: id } : {});
+      setSelected(id || "");
     }
   };
   const edit = (initial?: VotePoll, copy = false) =>
@@ -193,7 +192,7 @@ export default function VotingModule({ currentUser }: { currentUser: User }) {
       setNotice(
         "Brouillon enregistré. Vérifiez le récapitulatif et ajoutez les documents avant publication.",
       );
-      setParams({ vote: result.poll.id });
+      setSelected(result.poll.id);
     });
   const confirm = (value: Confirmation) => {
     setReason("");

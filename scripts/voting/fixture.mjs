@@ -2,7 +2,8 @@ import { createServer } from "vite";
 import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const entry = `
-import React from 'react';import {createRoot} from 'react-dom/client';import {MemoryRouter} from 'react-router-dom';import '/src/index.css';
+import React,{useLayoutEffect} from 'react';import {createRoot} from 'react-dom/client';import '/src/index.css';
+import {installNavigationGuard} from '/src/utils/navigationGuard.ts';
 import VotingModule from '/src/components/voting/VotingModule.tsx';import ConfirmationHost from '/src/components/ConfirmationHost.tsx';
 const config=new URLSearchParams(location.search);window.direction=config.get('role')==='manager';window.manager=['manager','secretary'].includes(config.get('role'));window.calls=[];window.downloads=[];
 window.people=[{id:'employee-a',name:'Alice Fictive',role:'Chauffeur'},{id:'employee-b',name:'Bruno Fictif',role:'Mécanicien'},{id:'observer',name:'Camille Fictive',role:'Stagiaire'}];
@@ -15,7 +16,9 @@ if(window.poll.status==='closed')window.makeClosed();
 if(config.get('finalized'))window.poll.minutes={chair:'Alice Fictive',secretary:'Bruno Fictif',place:'La Réunion',observations:'Dépouillement de démonstration. Tous les noms et chiffres sont fictifs.',finalizedAt:new Date().toISOString(),finalizedBy:'Direction fictive',digest:'a'.repeat(64)};
 window.empty=config.get('scenario')==='empty';window.detail=()=>({poll:structuredClone(window.poll),...(window.manager&&window.poll.status==='closed'?{participation:window.parts}:{} )});
 const click=HTMLAnchorElement.prototype.click;HTMLAnchorElement.prototype.click=function(){if(this.download&&this.href.startsWith('blob:')){const name=this.download;fetch(this.href).then(r=>r.blob()).then(async b=>{const bytes=new Uint8Array(await b.arrayBuffer());window.downloads.push({name,type:b.type,size:b.size,base64:btoa(Array.from(bytes,x=>String.fromCharCode(x)).join(''))});});}else click.call(this);};
-createRoot(document.getElementById('root')).render(<MemoryRouter initialEntries={['/votes'+(config.has('direct')?'?vote=fixture-vote':'')]}><main className="p-4 max-w-6xl mx-auto"><p className="text-sm text-slate-500 mb-4">Validation locale — données fictives</p><VotingModule currentUser={{id:window.manager?'manager':'employee-a',firstName:'Alice',lastName:'Fictive',role:window.direction?'Directeur Exploitation':config.get('role')==='secretary'?'Secrétariat':'Chauffeur',email:'fictif@example.invalid',leaveBalance:0}}/><ConfirmationHost/></main></MemoryRouter>);
+// Match App: real browser URL, native history guard, no React Router provider.
+function Fixture(){useLayoutEffect(()=>installNavigationGuard(),[]);return <main className="p-4 max-w-6xl mx-auto"><p className="text-sm text-slate-500 mb-4">Validation locale — données fictives</p><VotingModule currentUser={{id:window.manager?'manager':'employee-a',firstName:'Alice',lastName:'Fictive',role:window.direction?'Directeur Exploitation':config.get('role')==='secretary'?'Secrétariat':'Chauffeur',email:'fictif@example.invalid',leaveBalance:0}}/><ConfirmationHost/></main>;}
+createRoot(document.getElementById('root')).render(<React.StrictMode><Fixture/></React.StrictMode>);
 `;
 const service = `
 const record=(action,extra={})=>window.calls.push({action,...structuredClone(extra)});
@@ -44,7 +47,7 @@ const mock = {
   },
   configureServer(server) {
     server.middlewares.use(async (req, res, next) => {
-      if (req.url.split("?")[0] !== "/") return next();
+      if (!["/", "/votes"].includes(req.url.split("?")[0])) return next();
       res.setHeader("Content-Type", "text/html");
       res.end(
         await server.transformIndexHtml(
