@@ -76,7 +76,10 @@ const navigate = async (query, width = 390) => {
     deviceScaleFactor: 1,
     mobile: width < 640,
   });
-  await call("Page.navigate", { url: "http://127.0.0.1:5249/?" + query });
+  const params = new URLSearchParams(query);
+  if (params.has("direct")) params.set("vote", "fixture-vote");
+  params.delete("direct");
+  await call("Page.navigate", { url: "http://127.0.0.1:5249/votes?" + params });
   await wait(
     `window.poll&&document.body.innerText.includes('Choisir notre réunion')&&!document.body.innerText.includes('Chargement des scrutins')`,
   );
@@ -94,6 +97,33 @@ await call("Network.setBlockedURLs", {
 });
 await mkdir("docs/validation/voting", { recursive: true });
 try {
+  await navigate("role=employee");
+  await check(
+    "Votes list renders without a Router provider at the real /votes path",
+    `location.pathname==='/votes'&&!location.search.includes('vote=')&&document.body.innerText.includes('Votes des salariés')`,
+  );
+  await click("Comprendre et voter");
+  await wait(`!!document.querySelector('input[name=ballot]')`);
+  await check(
+    "Opening a vote updates the native URL and preserves other parameters",
+    `new URLSearchParams(location.search).get('vote')==='fixture-vote'&&new URLSearchParams(location.search).get('role')==='employee'&&!!history.state.__fleetNavigation`,
+  );
+  await ev("history.back()");
+  await wait(`!document.querySelector('input[name=ballot]')&&document.body.innerText.includes('Votes des salariés')`);
+  await check("Browser Back restores the list", `!new URLSearchParams(location.search).has('vote')`);
+  await ev("history.forward()");
+  await wait(`!!document.querySelector('input[name=ballot]')`);
+  await check("Browser Forward restores the selected vote", `new URLSearchParams(location.search).get('vote')==='fixture-vote'`);
+  await click("Tous les scrutins");
+  await wait(`!document.querySelector('input[name=ballot]')&&document.body.innerText.includes('Votes des salariés')`);
+  await check("Return to all votes clears only the vote parameter", `location.pathname==='/votes'&&location.search==='?role=employee'`);
+  await ev(`history.pushState(history.state,'','/votes?role=employee&vote=fixture-vote');window.dispatchEvent(new Event('fleet-url-change'))`);
+  await wait(`!!document.querySelector('input[name=ballot]')`);
+  await check("Application navigation event opens the selected vote", `window.calls.some(c=>c.action==='get'&&c.id==='fixture-vote')`);
+  await ev("window.beforeReload=true");
+  await call("Page.reload");
+  await wait(`!window.beforeReload&&window.poll&&!!document.querySelector('input[name=ballot]')`);
+  await check("Reload preserves the direct link and ballot", `new URLSearchParams(location.search).get('vote')==='fixture-vote'&&document.body.innerText.includes('Pourquoi vote-t-on')`);
   for (const width of [320, 390, 1365]) {
     await navigate("role=employee&direct=1", width);
     await check(
@@ -215,6 +245,11 @@ try {
   await input("Question posée", "Quel créneau vous convient ?");
   await click("Enregistrer le brouillon");
   await wait(`window.calls.some(c=>c.action==='save')`);
+  await wait(`new URLSearchParams(location.search).get('vote')===window.poll.id&&document.body.innerText.includes('Modifier le brouillon')`);
+  await check(
+    "Creating a vote opens its saved detail at a shareable native URL",
+    `new URLSearchParams(location.search).get('vote')===window.poll.id&&location.pathname==='/votes'&&new URLSearchParams(location.search).get('role')==='manager'`,
+  );
   await check(
     "Creation includes selected voters, purpose, rules and dates",
     `(()=>{const d=window.calls.find(c=>c.action==='save').draft;return d.participantIds.length===3&&d.voterIds.length===3&&d.privacy==='secret'&&d.purpose.includes('créneau')&&d.options.length===2&&Date.parse(d.closesAt)>Date.parse(d.opensAt)})()`,
