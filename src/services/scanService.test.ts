@@ -41,3 +41,20 @@ it('a business refusal is confirmed and clears its pending intent', async () => 
   expect((await service.scanPackage({ code: 'BR4', driverId: 'd', source: 'transfer' })).accepted).toBe(false);
   expect([...storage.keys()].some(k => k.includes('.pending.'))).toBe(false);
 });
+it('bounds a stalled authentication preparation and releases the scan lock without losing idempotency', async () => {
+  const service = await import('./scanService');
+  let lateReply!: (value: unknown) => void;
+  call.mockImplementationOnce(() => new Promise(resolve => { lateReply = resolve; }));
+  const input = { code: 'BR-STALLED', driverId: 'd', source: 'driver-claim' as const };
+  const first = service.scanPackage(input);
+  const failure = expect(first).rejects.toMatchObject({ code: 'functions/deadline-exceeded' });
+  await vi.advanceTimersByTimeAsync(25000); await failure;
+  const request = call.mock.calls[0][0];
+  expect([...storage.keys()].some(k => k.includes('.pending.'))).toBe(true);
+  call.mockResolvedValueOnce({ data: { ...result, requestId: request.requestId, replayed: true } });
+  const retry = await service.scanPackage(input);
+  expect(retry.replayed).toBe(true); expect(call.mock.calls[1][0]).toEqual(request);
+  // A late acknowledgement cannot replace the retry's result or recreate pending work.
+  lateReply({ data: { ...result, missionId: 'late' } }); await Promise.resolve();
+  expect([...storage.keys()].some(k => k.includes('.pending.'))).toBe(false);
+});
