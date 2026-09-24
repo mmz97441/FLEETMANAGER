@@ -9,6 +9,7 @@ import { db } from '../firebaseConfig';
 import { collection, doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { DriverLocation } from '../types';
 import { cleanUndefined } from '../utils/firestore';
+import { reportError } from './logService';
 
 const COLLECTION = 'driverLocations';
 
@@ -27,9 +28,15 @@ export const publishDriverLocation = async (
 
 /** Abonnement temps réel à toutes les positions chauffeurs. */
 export const subscribeToDriverLocations = (
-  callback: (locations: DriverLocation[]) => void
+  callback: (locations: DriverLocation[]) => void,
+  onError?: (error: unknown) => void,
+  onSource?: (source: 'cache' | 'live') => void,
 ): (() => void) => {
-  return onSnapshot(collection(db, COLLECTION), (snap) => {
-    callback(snap.docs.map(d => d.data() as DriverLocation));
+  return onSnapshot(collection(db, COLLECTION), { includeMetadataChanges: true }, (snap) => {
+    onSource?.(snap.metadata.fromCache ? 'cache' : 'live');
+    callback(snap.docs.map(d => ({ ...d.data(), driverId: d.id } as DriverLocation)));
+  }, error => {
+    reportError('drivers.locations.load', error, { silent: true });
+    onError?.(error);
   });
 };

@@ -11,6 +11,7 @@
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import Modal from './shared/Modal';
+import UserConnectionStatus from './UserConnectionStatus';
 import { useUrlParam, updateUrlParams } from '../hooks/useUrlState';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
@@ -37,8 +38,8 @@ interface FleetMapViewProps {
 // - ON_TOUR   : en tournée, position fraîche
 // - AVAILABLE : disponible (sans tournée), position fraîche
 // - STALE     : a une position mais périmée (>= 3 min) — marqueur gris sur la carte
-// - NEVER     : aucune entrée driverLocations — jamais connecté, absent de la carte
-type DriverBucket = 'ON_TOUR' | 'AVAILABLE' | 'STALE' | 'NEVER';
+// - NO_POSITION     : aucune entrée driverLocations — position inconnue, absent de la carte
+type DriverBucket = 'ON_TOUR' | 'AVAILABLE' | 'STALE' | 'NO_POSITION';
 
 interface ParsedDriver {
   user: User;
@@ -162,6 +163,7 @@ const MapController: React.FC<MapControllerProps> = ({ markers, selected }) => {
 // ---------------------------------------------------------------------------
 
 const FleetMapView: React.FC<FleetMapViewProps> = ({ users }) => {
+  const [locationSource, setLocationSource] = useState<'loading' | 'cache' | 'live' | 'error'>('loading');
   const [locations, setLocations] = useState<DriverLocation[]>([]);
   const [missions, setMissions] = useState<Mission[]>([]);
   const [selectedDate, setSelectedDate] = useUrlParam<string>('date', '');
@@ -176,12 +178,12 @@ const FleetMapView: React.FC<FleetMapViewProps> = ({ users }) => {
     ON_TOUR: true,
     AVAILABLE: true,
     STALE: false,
-    NEVER: false,
+    NO_POSITION: true,
   });
 
   // Abonnements temps réel (nettoyés au démontage)
   useEffect(() => {
-    const unsubLoc = subscribeToDriverLocations(setLocations);
+    const unsubLoc = subscribeToDriverLocations(setLocations, () => setLocationSource('error'), setLocationSource);
     const unsubMis = subscribeToMissions(setMissions);
     return () => {
       unsubLoc();
@@ -215,7 +217,7 @@ const FleetMapView: React.FC<FleetMapViewProps> = ({ users }) => {
     const now = Date.now();
 
     return users
-      .filter(isDriver)
+      .filter(u => isDriver(u) && !u.isDisabled)
       .map<ParsedDriver>((u) => {
         const location = locByDriver.get(u.id);
         const activeMission = activeMissionByDriver.get(u.id);
@@ -226,7 +228,7 @@ const FleetMapView: React.FC<FleetMapViewProps> = ({ users }) => {
           : false;
 
         let bucket: DriverBucket;
-        if (!location) bucket = 'NEVER'; // aucune position publiée
+        if (!location) bucket = 'NO_POSITION'; // aucune position publiée
         else if (!isFresh) bucket = 'STALE'; // position présente mais périmée
         else if (isOnTour) bucket = 'ON_TOUR';
         else bucket = 'AVAILABLE';
@@ -259,7 +261,7 @@ const FleetMapView: React.FC<FleetMapViewProps> = ({ users }) => {
       ON_TOUR: parsedDrivers.filter((d) => d.bucket === 'ON_TOUR'),
       AVAILABLE: parsedDrivers.filter((d) => d.bucket === 'AVAILABLE'),
       STALE: parsedDrivers.filter((d) => d.bucket === 'STALE'),
-      NEVER: parsedDrivers.filter((d) => d.bucket === 'NEVER'),
+      NO_POSITION: parsedDrivers.filter((d) => d.bucket === 'NO_POSITION'),
     };
   }, [parsedDrivers]);
 
@@ -295,7 +297,7 @@ const FleetMapView: React.FC<FleetMapViewProps> = ({ users }) => {
           <LegendDot color={COLOR_ON_TOUR} label="En tournée" />
           <LegendDot color={COLOR_AVAILABLE} label="Disponible" />
           <LegendDot color={COLOR_STALE} label="Position ancienne" />
-          <LegendDot color={COLOR_STALE} label="Jamais connecté" hollow />
+          <LegendDot color={COLOR_STALE} label="Position indisponible" hollow />
           <div className="flex flex-wrap items-center gap-2 text-slate-600">
             <span className="font-semibold text-green-600">{groups.ON_TOUR.length}</span> en tournée
             <span className="text-slate-300">·</span>
@@ -303,7 +305,7 @@ const FleetMapView: React.FC<FleetMapViewProps> = ({ users }) => {
             <span className="text-slate-300">·</span>
             <span className="font-semibold text-slate-500">{groups.STALE.length}</span> position ancienne
             <span className="text-slate-300">·</span>
-            <span className="font-semibold text-slate-400">{groups.NEVER.length}</span> jamais connectés
+            <span className="font-semibold text-slate-400">{groups.NO_POSITION.length}</span> sans position
           </div>
         </div>
       </div>
@@ -314,6 +316,8 @@ const FleetMapView: React.FC<FleetMapViewProps> = ({ users }) => {
         <a href="/missions?tab=packages" className="min-h-11 inline-flex items-center px-3 text-sm font-semibold text-blue-800 underline">Retrouver un colis</a>
       </div>
       <p className="text-sm text-slate-600">Tournées : {selectedDate || 'toutes dates'}. Les marqueurs montrent la dernière position publiée, pas un historique à la date choisie. Les heures d’arrivée sont des estimations issues de la planification.</p>
+      {locationSource !== 'live' && <p role={locationSource === 'error' ? 'alert' : 'status'} className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{locationSource === 'loading' ? 'Chargement des positions GPS…' : locationSource === 'cache' ? 'Positions en mémoire : en attente de confirmation du serveur.' : 'Les positions GPS ne peuvent pas être actualisées. Vérifiez la connexion puis rechargez cette page. Cela ne signifie pas que les chauffeurs sont déconnectés.'}</p>}
+      <p className="text-sm text-slate-600">En ligne : application active avec un signal reçu depuis moins de 3 minutes, indépendamment du GPS. Une application fermée ou en arrière-plan passe hors ligne après ce délai. Sans signal enregistré, l’état reste inconnu.</p>
       {/* Deux colonnes (lg) / empilé (mobile) */}
       <div className="flex flex-col gap-4 lg:flex-row">
         {/* PANNEAU LATÉRAL */}
@@ -346,12 +350,12 @@ const FleetMapView: React.FC<FleetMapViewProps> = ({ users }) => {
             onSelect={setSelectedId}
           />
           <SidePanelGroup
-            title="Jamais connecté"
+            title="Position indisponible"
             color={COLOR_STALE}
             hollow
-            drivers={groups.NEVER}
-            open={openGroups.NEVER}
-            onToggle={() => toggleGroup('NEVER')}
+            drivers={groups.NO_POSITION}
+            open={openGroups.NO_POSITION}
+            onToggle={() => toggleGroup('NO_POSITION')}
             selectedId={selectedId}
             onSelect={setSelectedId}
           />
@@ -429,7 +433,7 @@ const bucketLabel = (d: ParsedDriver): string => {
   if (d.bucket === 'ON_TOUR') return '🟢 En tournée';
   if (d.bucket === 'AVAILABLE') return '🟡 Disponible';
   if (d.bucket === 'STALE') return '⚪ Position ancienne';
-  return '⚫ Jamais connecté';
+  return '⚫ Position indisponible';
 };
 
 interface SidePanelGroupProps {
@@ -509,7 +513,7 @@ const DriverRow: React.FC<DriverRowProps> = ({ driver, selected, onSelect }) => 
     <span
       className="mt-1 inline-block h-3 w-3 rounded-full flex-shrink-0"
       style={
-        driver.bucket === 'NEVER'
+        driver.bucket === 'NO_POSITION'
           ? { background: 'transparent', border: `2px solid ${COLOR_STALE}` }
           : { background: bucketColor(driver), border: '1px solid #ffffff', boxShadow: '0 1px 2px rgba(0,0,0,0.3)' }
       }
@@ -523,6 +527,7 @@ const DriverRow: React.FC<DriverRowProps> = ({ driver, selected, onSelect }) => 
           </span>
         )}
       </div>
+      <UserConnectionStatus user={driver.user} />
       <div className="mt-0.5 text-xs text-slate-500">
         {driver.bucket === 'ON_TOUR' && (
           <span className="font-medium text-green-700">
@@ -538,7 +543,7 @@ const DriverRow: React.FC<DriverRowProps> = ({ driver, selected, onSelect }) => 
         {driver.bucket === 'STALE' && driver.location && (
           <span className="text-slate-400">position ancienne · maj {timeAgo(driver.location.updatedAt)}</span>
         )}
-        {driver.bucket === 'NEVER' && <span className="text-slate-400">Jamais connecté</span>}
+        {driver.bucket === 'NO_POSITION' && <span className="text-slate-400">Position indisponible</span>}
       </div>
     </div>
   </button>
@@ -591,6 +596,7 @@ const DriverDetail: React.FC<{ driver: ParsedDriver }> = ({ driver }) => {
       </div>
 
       <div className="px-4 py-3">
+        <UserConnectionStatus user={driver.user} />
         {!activeMission ? (
           <p className="text-sm text-slate-500">Sans tournée attribuée</p>
         ) : (

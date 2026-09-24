@@ -3,7 +3,7 @@
  * "il y a 2 jours"… À partir d'une date ISO, relatif à maintenant.
  */
 export const timeAgo = (iso?: string): string => {
-  if (!iso) return 'Jamais connecté';
+  if (!iso) return 'Non renseignée';
   const then = new Date(iso).getTime();
   if (isNaN(then)) return '—';
   const sec = Math.floor((Date.now() - then) / 1000);

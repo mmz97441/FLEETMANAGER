@@ -92,11 +92,6 @@ export const checkUserEmailAuthorized = async (email: string): Promise<boolean> 
     }
 };
 
-// Lie le compte Auth (nouvellement créé) au profil existant (créé par l'admin)
-export const linkAuthToProfile = async (email: string, authUid: string) => {
-    await httpsCallable(getFunctions(app,'europe-west1'),'linkAuthToProfile')({});
-};
-
 // --- USERS ---
 export const subscribeToUsers = (currentUser: User, callback: (data: User[]) => void) => {
   if (![UserRole.CLIENT, UserRole.ADMIN, UserRole.PRESIDENT, UserRole.DIRECTOR, UserRole.SECRETARY].includes(currentUser.role)) {
@@ -120,40 +115,11 @@ export const subscribeToUsers = (currentUser: User, callback: (data: User[]) => 
   }
 
   return onSnapshot(q, (snapshot: QuerySnapshot<DocumentData>) => {
-    const users = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as User));
+    const users = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as User));
     callback(users);
   }, (error) => {
     console.error("❌ [Firestore Error] Impossible de lire 'users':", error);
   });
-};
-
-// Lecture unique (Legacy, utilisé au chargement initial si besoin)
-export const getUserProfile = async (uid: string): Promise<User | null> => {
-    try {
-        const ref = doc(db, "users", uid);
-        const snap = await getDoc(ref);
-        const data = snap.data();
-        if (snap.exists() && data) return { id: snap.id, ...data } as User;
-        return null;
-    } catch (e) {
-        console.error("Error fetching user profile:", e);
-        return null;
-    }
-};
-
-// Écoute temps réel du profil courant (CRUCIAL pour les changements de rôle)
-export const subscribeToUserProfile = (uid: string, callback: (user: User | null) => void) => {
-    const ref = doc(db, "users", uid);
-    return onSnapshot(ref, (snap) => {
-        const data = snap.data();
-        if (snap.exists() && data) {
-            callback({ id: snap.id, ...data } as User);
-        } else {
-            callback(null);
-        }
-    }, (error) => {
-        console.error("Error subscribing to profile:", error);
-    });
 };
 
 export const createUserProfile = async (user: User): Promise<boolean> => {
@@ -171,7 +137,7 @@ export const createUserProfile = async (user: User): Promise<boolean> => {
 export const updateUserProfile = async (user: User) => {
     try {
         const ref = doc(db, "users", user.id);
-        const { id, ...data } = user; // Ne pas update l'ID dans les champs
+        const { id, lastSeenAt: _presence, lastLoginAt: _login, ...data } = user; // Ne pas réécrire l’identité ni les dates de connexion lors d’une modification du profil
         await updateDoc(ref, cleanFirestoreData(data));
     } catch (e) {
         console.error("Error updating user:", e);
@@ -258,16 +224,6 @@ export const cleanupDuplicateUserProfiles = async (
   }
 
   return result;
-};
-
-/** Enregistre la date de dernière connexion (appelé à chaque ouverture de l'app). */
-export const recordUserLogin = async (uid: string) => {
-    try {
-        await updateDoc(doc(db, "users", uid), { lastLoginAt: new Date().toISOString() });
-    } catch (e) {
-        // Non bloquant : ne pas empêcher la connexion si l'écriture échoue
-        console.error("Error recording last login:", e);
-    }
 };
 
 export const deleteUserProfile = async (uid: string) => {

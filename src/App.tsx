@@ -20,6 +20,11 @@ import ViewAsSwitcher from './components/ViewAsSwitcher';
 import DriverGpsGate from './components/DriverGpsGate';
 import VotePriorityGate from './components/voting/VotePriorityGate';
 import Login from './components/Login';
+import ProfileAccessScreen from './components/ProfileAccessScreen';
+import { getUserProfile, linkAuthToProfile, subscribeToUserProfile } from './services/profileService';
+import { createProfileSession, type ProfileIssue } from './utils/profileSession';
+import { useUserPresence } from './hooks/useUserPresence';
+import { reportError } from './services/logService';
 import { useDriverLocationPublisher } from './hooks/useDriverLocationPublisher';
 import { useAutoUpdate } from './hooks/useAutoUpdate';
 import { Menu, Loader2, WifiOff, LogOut, ScanLine } from 'lucide-react';
@@ -71,9 +76,6 @@ import {
   addIssueToFirestore,
   updateIssueInFirestore,
   subscribeToUsers,
-  getUserProfile,
-  recordUserLogin,
-  subscribeToUserProfile, 
   createUserProfile,
   updateUserProfile,
   deleteUserProfile,
@@ -89,7 +91,6 @@ import {
   subscribeToQuotes,
   addQuoteToFirestore,
   updateQuoteInFirestore,
-  linkAuthToProfile,
   subscribeToCompanyDocuments,
   addCompanyDocumentToFirestore,
   updateCompanyDocumentInFirestore,
@@ -128,6 +129,9 @@ const App: React.FC = () => {
   // --- AUTH STATE ---
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [profileIssue, setProfileIssue] = useState<ProfileIssue | null>(null);
+  const retryProfile = useRef<() => void>(() => {});
+  useUserPresence(currentUser?.id);
 
   // Navigation — vue initiale dérivée de l'URL (deep-link / rafraîchissement)
   const [currentView, setCurrentView] = useState<ViewState>(() => pathToView(window.location.pathname));
@@ -229,107 +233,43 @@ const App: React.FC = () => {
 
   // --- 1. AUTHENTICATION & PROFILE LISTENER ---
   useEffect(() => {
-    let unsubscribeProfile: (() => void) | null = null;
-
-    const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser: any) => {
-      setIsAuthLoading(true);
-      
-      if (firebaseUser) {
+    const session = createProfileSession({
+      read: getUserProfile,
+      recover: linkAuthToProfile,
+      subscribe: subscribeToUserProfile,
+      loading: setIsAuthLoading,
+      issue: setProfileIssue,
+      profile: profile => {
+        setCurrentUser(previous => JSON.stringify(previous) === JSON.stringify(profile) ? previous : profile);
+        if (!profile) return;
+        const role = String(profile.role || '').toLowerCase();
+        setCurrentView(previous => {
+          const allowed = ['client_dashboard', 'client_list', 'client_shipments', 'client_tracking', 'client_team', 'client_analytics', 'client_recipients', 'client_company', 'client_help', 'help', 'settings'];
+          if (role.includes('client') && !allowed.includes(previous)) return 'client_dashboard';
+          if (role.includes('stag') && previous === 'dashboard') return 'vehicles';
+          return previous;
+        });
+      },
+      authorized: profile => {
         try {
-            // ETAPE 1 : VÉRIFICATION D'ACCÈS
-            // On vérifie si le profil existe via son UID.
-            let existingProfile = await getUserProfile(firebaseUser.uid);
-
-            // LOGIQUE DE RÉCUPÉRATION (Recovery)
-            if (!existingProfile && firebaseUser.email) {
-                console.log("Profil introuvable par UID. Tentative de récupération par email...");
-                try {
-                    await linkAuthToProfile(firebaseUser.email, firebaseUser.uid);
-                    existingProfile = await getUserProfile(firebaseUser.uid);
-                } catch (recoveryError) {
-                    console.error("Échec de la récupération automatique du profil :", recoveryError);
-                }
-            }
-
-            if (existingProfile && !existingProfile.isDisabled && (!existingProfile.sessionsRevokedAt || Date.parse(firebaseUser.metadata.lastSignInTime || '') / 1000 > existingProfile.sessionsRevokedAt)) {
-                // ACCÈS AUTORISÉ
-                setCurrentUser(existingProfile);
-
-                // Enregistrer la dernière connexion (non bloquant)
-                recordUserLogin(firebaseUser.uid);
-
-                // JOURNAL — connexion, UNE SEULE FOIS par session navigateur
-                // (onAuthStateChanged refire à chaque rechargement → sinon spam).
-                try {
-                  const sk = `logged_login_${firebaseUser.uid}`;
-                  if (!sessionStorage.getItem(sk)) {
-                    sessionStorage.setItem(sk, '1');
-                    void logActivity(existingProfile, ActivityAction.USER_LOGIN, { targetType: 'user', targetId: existingProfile.id });
-                  }
-                } catch { /* sessionStorage indispo : on ignore */ }
-
-                // REDIRECTION SÉCURITÉ CLIENT
-                // Si l'utilisateur est un client, on le force vers le tableau de bord client
-                const role = String(existingProfile.role || '').toLowerCase();
-                if (role.includes('client')) {
-                    // Honorer l'URL si c'est une vue client autorisée (deep-link/refresh), sinon accueil
-                    const allowed = ['client_dashboard', 'client_list', 'client_shipments', 'client_tracking', 'client_team', 'client_analytics', 'client_recipients', 'client_company', 'client_help', 'help', 'settings'];
-                    setCurrentView(prev => allowed.includes(prev) ? prev : 'client_dashboard');
-                }
-                // Si l'utilisateur est un stagiaire, pas de tableau de bord - redirect vers véhicules
-                if (role.includes('stag')) {
-                    setCurrentView('vehicles');
-                }
-
-                // ETAPE 2 : ABONNEMENT TEMPS RÉEL
-                if (unsubscribeProfile) unsubscribeProfile();
-                
-                unsubscribeProfile = subscribeToUserProfile(firebaseUser.uid, (updatedProfile) => {
-                    if (updatedProfile && !updatedProfile.isDisabled && (!updatedProfile.sessionsRevokedAt || Date.parse(firebaseUser.metadata.lastSignInTime || '') / 1000 > updatedProfile.sessionsRevokedAt)) {
-                        setCurrentUser(prev => {
-                            if (JSON.stringify(prev) === JSON.stringify(updatedProfile)) return prev;
-                            return updatedProfile;
-                        });
-                        // Vérification continue du rôle en temps réel
-                        const updatedRole = String(updatedProfile.role || '').toLowerCase();
-                        if (updatedRole.includes('client') && !['client_dashboard', 'client_list', 'client_shipments', 'client_tracking', 'client_team', 'client_analytics', 'client_recipients', 'client_company', 'client_help', 'help', 'settings'].includes(currentView)) {
-                             setCurrentView('client_dashboard');
-                        }
-                        // Stagiaire ne peut pas accéder au dashboard
-                        if (updatedRole.includes('stag') && currentView === 'dashboard') {
-                             setCurrentView('vehicles');
-                        }
-                    } else {
-                        signOut(auth);
-                        setCurrentUser(null);
-                    }
-                });
-            } else {
-                console.error("Aucun profil trouvé pour cet utilisateur (UID: " + firebaseUser.uid + "). Accès refusé.");
-                await signOut(auth);
-                setCurrentUser(null);
-                alert("Votre compte n'est pas associé à un profil autorisé. Contactez l'administrateur si vous pensez qu'il s'agit d'une erreur.");
-            }
-
-        } catch (error) {
-            console.error("Erreur critique lors du chargement du profil:", error);
-            await signOut(auth);
-        } finally {
-            setIsAuthLoading(false);
-        }
-      } else {
-        setCurrentUser(null);
-        if (unsubscribeProfile) {
-            unsubscribeProfile();
-            unsubscribeProfile = null;
-        }
-        setIsAuthLoading(false);
-      }
+          const key = `logged_login_${profile.id}`;
+          if (!sessionStorage.getItem(key)) {
+            sessionStorage.setItem(key, '1');
+            void logActivity(profile, ActivityAction.USER_LOGIN, { targetType: 'user', targetId: profile.id });
+          }
+        } catch { /* Storage availability must not block access. */ }
+      },
+      report: (stage, error, uid) => reportError(stage, error, { silent: true, extra: { profileUid: uid } }),
     });
-
+    retryProfile.current = () => { void session.retry(); };
+    const unsubscribeAuth = onAuthStateChanged(auth, firebaseUser => { void session.start(firebaseUser); });
+    const online = () => session.retryUnavailable();
+    window.addEventListener('online', online);
     return () => {
-        unsubscribeAuth();
-        if (unsubscribeProfile) unsubscribeProfile();
+      unsubscribeAuth();
+      session.dispose();
+      retryProfile.current = () => {};
+      window.removeEventListener('online', online);
     };
   }, []);
 
@@ -817,6 +757,10 @@ const App: React.FC = () => {
         />
       </Suspense>
     );
+  }
+
+  if (profileIssue) {
+    return <ProfileAccessScreen issue={profileIssue} onRetry={() => retryProfile.current()} onSignOut={() => signOut(auth)} />;
   }
 
   if (!currentUser) {

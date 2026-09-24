@@ -49,7 +49,9 @@
     "src/components/voting/VoteEditor.tsx",
     "src/components/voting/VotingModule.tsx",
     "src/components/voting/VotePriorityGate.tsx",
-    "src/components/voting/VotePrivacyNotice.tsx"
+    "src/components/voting/VotePrivacyNotice.tsx",
+    "src/components/ProfileAccessScreen.tsx",
+    "src/components/UserConnectionStatus.tsx"
   ],
   "exceptions": [
     {
