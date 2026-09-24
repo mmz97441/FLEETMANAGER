@@ -94,6 +94,8 @@ export interface User {
 
   // Dernière connexion (mise à jour à chaque ouverture de l'app)
   lastLoginAt?: string;
+  // Dernier signal reçu par le serveur depuis une application visible, hors GPS.
+  lastSeenAt?: string;
   // Date d'activation du compte (posée par la Cloud Function activateAccount)
   activatedAt?: string;
   // Permissions personnalisées (exceptions au template de rôle)

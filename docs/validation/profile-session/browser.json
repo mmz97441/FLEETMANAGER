@@ -1,0 +1,42 @@
+{
+  "checkedAt": "2026-09-24T00:05:10.982Z",
+  "checks": [
+    {
+      "name": "Read failure offers retry without forced sign-out or misleading missing-profile alert",
+      "pass": true
+    },
+    {
+      "name": "Recovery screen fits mobile and offers 44px actions",
+      "pass": true
+    },
+    {
+      "name": "Retry restores actual application and presence without changing credentials",
+      "pass": true
+    },
+    {
+      "name": "Disabled account cannot access application",
+      "pass": true
+    },
+    {
+      "name": "Account switch explicitly signs out and returns to login",
+      "pass": true
+    },
+    {
+      "name": "Presence distinguishes online, offline and unknown with preserved connection dates",
+      "pass": true
+    },
+    {
+      "name": "Presence display fits narrow screens",
+      "pass": true
+    },
+    {
+      "name": "Driver without GPS still shows online status and last connection on map",
+      "pass": true
+    },
+    {
+      "name": "GPS load error is visible without declaring drivers disconnected",
+      "pass": true
+    }
+  ],
+  "exceptions": []
+}

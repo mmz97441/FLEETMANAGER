@@ -113,6 +113,12 @@ await check('Self-create privileged profile', 'denied', () =>
     role: 'Admin',
   }),
 );
+await check('Driver cannot forge server presence timestamp', 'denied', () =>
+  updateDoc(doc(db('driverA'), 'users', 'driverA'), { lastSeenAt: '2099-01-01T00:00:00.000Z' }),
+);
+await check('Legacy client can still record its own opening date', 'allowed', () =>
+  updateDoc(doc(db('driverA'), 'users', 'driverA'), { lastLoginAt: '2026-09-24T00:00:00.000Z' }),
+);
 await check('Client creates privileged invitation', 'denied', () =>
   setDoc(doc(db('clientA'), 'invitations', 'privileged'), {
     invitedBy: 'clientA',

@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.interpretAnalytics = exports.acceptQuote = exports.getTeamDirectory = exports.notifyPackageStatus = exports.returnPackage = exports.deleteAbsence = exports.deleteVehicle = exports.importPackages = exports.assignVehicle = exports.askFleetGenius = exports.sendBusinessNotification = exports.transferPackages = exports.scanPackage = exports.dispatchMissions = exports.finishMission = exports.receivePackagesAtHub = exports.saveAbsence = exports.revokeOwnSessions = exports.linkAuthToProfile = exports.createInvitation = exports.activateAccount = exports.validateInvitationToken = exports.forcePasswordReset = exports.toggleUserStatus = exports.cleanupExpiredInvitations = exports.deleteUserCompletely = exports.optimizeTours = exports.employeeVoting = void 0;
+exports.interpretAnalytics = exports.acceptQuote = exports.getTeamDirectory = exports.notifyPackageStatus = exports.returnPackage = exports.deleteAbsence = exports.deleteVehicle = exports.importPackages = exports.assignVehicle = exports.askFleetGenius = exports.sendBusinessNotification = exports.transferPackages = exports.scanPackage = exports.dispatchMissions = exports.finishMission = exports.receivePackagesAtHub = exports.saveAbsence = exports.revokeOwnSessions = exports.linkAuthToProfile = exports.recordUserPresence = exports.getOwnProfile = exports.createInvitation = exports.activateAccount = exports.validateInvitationToken = exports.forcePasswordReset = exports.toggleUserStatus = exports.cleanupExpiredInvitations = exports.deleteUserCompletely = exports.optimizeTours = exports.employeeVoting = void 0;
 const hubReception_1 = require("./hubReception");
 const voting_1 = require("./voting");
 const storage_1 = require("firebase-admin/storage");
@@ -883,10 +883,40 @@ exports.createInvitation = functions
     });
     return { token, expiresAt };
 });
+// Read-only bootstrap fallback when the browser Firestore cache/channel fails.
+// It never creates a profile, changes a role, or exposes another account.
+exports.getOwnProfile = functions.region('europe-west1').https.onCall(async (data, context) => {
+    if (!context.auth)
+        throw new functions.https.HttpsError('unauthenticated', 'Connexion requise.');
+    if (data?.uid !== context.auth.uid)
+        throw new functions.https.HttpsError('permission-denied', 'Profil réservé à son titulaire.');
+    const snapshot = await db.collection('users').doc(context.auth.uid).get();
+    return { profile: snapshot.exists ? { ...snapshot.data(), id: snapshot.id } : null };
+});
+// Server clock, one update per visible application/minute. No position or vote data.
+exports.recordUserPresence = functions.region('europe-west1').https.onCall(async (data, context) => {
+    if (!context.auth)
+        throw new functions.https.HttpsError('unauthenticated', 'Connexion requise.');
+    if (data?.uid !== context.auth.uid || typeof data?.login !== 'boolean')
+        throw new functions.https.HttpsError('invalid-argument', 'Session invalide.');
+    const uid = context.auth.uid, authTime = Number(context.auth.token.auth_time || 0);
+    return db.runTransaction(async (tx) => {
+        const ref = db.collection('users').doc(uid), snapshot = await tx.get(ref), user = snapshot.data();
+        if (!user || user.isDisabled || (user.sessionsRevokedAt && authTime <= user.sessionsRevokedAt))
+            throw new functions.https.HttpsError('permission-denied', 'Session inactive.');
+        const now = Date.now(), iso = new Date(now).toISOString();
+        if (data.login || !user.lastSeenAt || now - Date.parse(user.lastSeenAt) >= 45000) {
+            tx.update(ref, { lastSeenAt: iso, ...(data.login ? { lastLoginAt: iso } : {}) });
+        }
+        return { success: true };
+    });
+});
 // Recovery is server-only and proves ownership of the verified Auth email.
 exports.linkAuthToProfile = functions
     .region('europe-west1')
     .https.onCall(async (_data, context) => {
+    if (_data?.uid && _data.uid !== context.auth?.uid)
+        throw new functions.https.HttpsError('permission-denied', 'La session a changé. Réessayez.');
     if (!context.auth || !context.auth.token.email_verified)
         throw new functions.https.HttpsError('permission-denied', 'Vérifiez votre adresse email avant récupération du profil.');
     const uid = context.auth.uid, email = String(context.auth.token.email || '')
@@ -1799,6 +1829,8 @@ exports.getTeamDirectory = functions
                 phone: u.phone || '',
                 companyName: u.companyName || '',
                 assignedVehicleId: u.assignedVehicleId || null,
+                lastLoginAt: u.lastLoginAt || null,
+                lastSeenAt: u.lastSeenAt || null,
             };
         }),
     };
