@@ -18,6 +18,7 @@ describe.each([findPackageByCode, findDispatchedPackageByCode])('parcel lookup %
     getDocs.mockImplementation(async (parts: { field?: string; value?: string }[]) => snapshot(
       parts.some(p => p?.field === 'clientReference' && p.value === '12345678') ? [{ externalId: 'BR9010' }] : []));
     await expect(lookup('0012345678300123450101')).rejects.toThrow('Commande 12345678 retrouvée');
+    await expect(lookup('0012345678300123450101')).rejects.toMatchObject({ name: 'ScanIdentificationError' });
   });
   it('refuses ambiguous shared references rather than selecting the newest or active carton', async () => {
     getDocs.mockResolvedValue(snapshot([{ externalId: 'BR9010', status: 'Livré' }, { externalId: 'BR9011', missionId: 'active' }]));

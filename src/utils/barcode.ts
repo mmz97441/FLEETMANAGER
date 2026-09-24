@@ -13,6 +13,11 @@
 import { containsIndividualCode, extractScanTokens } from '../../functions/src/scanCode';
 export { extractScanTokens, orderReferenceHint, orderReferenceMessage } from '../../functions/src/scanCode';
 
+/** A decoded label needs an individual carton code; this is not a network error. */
+export class ScanIdentificationError extends Error {
+  name = 'ScanIdentificationError';
+}
+
 export interface ScannableCodes {
   barcode?: string;
   externalId?: string;

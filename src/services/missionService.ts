@@ -35,7 +35,7 @@ import {
   PackageTransfer, TransferStatus, TransferReason, ProofOfDelivery,
   PostalCodeMapping, User, UserRole
 } from '../types';
-import { extractScanTokens, orderReferenceHint, orderReferenceMessage } from '../utils/barcode';
+import { extractScanTokens, orderReferenceHint, orderReferenceMessage, ScanIdentificationError } from '../utils/barcode';
 import { placeKey } from '../utils/address';
 import { localDatePart } from '../utils/date';
 import { cleanUndefined } from '../utils/firestore';
@@ -1200,14 +1200,14 @@ const queryPackagesByCandidates = async (uniq: string[]): Promise<Package[]> => 
         where(field, '==', value),
         limit(2)
       ));
-      if (snap.size > 1) throw new Error('Ce code correspond à plusieurs colis. Scannez le code individuel DELIVREX ou saisissez le numéro imprimé sur ce carton.');
+      if (snap.size > 1) throw new ScanIdentificationError('Ce code correspond à plusieurs colis. Scannez le code individuel DELIVREX ou saisissez le numéro imprimé sur ce carton.');
       if (!snap.empty) return snap.docs.map(d => ({ id: d.id, ...d.data() } as Package));
     }
   }
   const hint = orderReferenceHint(uniq[0] || '');
   if (hint) {
     const orders = await getDocs(query(collection(db, PACKAGES_COLLECTION), where('clientReference', '==', hint), limit(1)));
-    if (!orders.empty) throw new Error(orderReferenceMessage(hint));
+    if (!orders.empty) throw new ScanIdentificationError(orderReferenceMessage(hint));
   }
   return [];
 };
