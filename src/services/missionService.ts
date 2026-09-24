@@ -35,7 +35,7 @@ import {
   PackageTransfer, TransferStatus, TransferReason, ProofOfDelivery,
   PostalCodeMapping, User, UserRole
 } from '../types';
-import { extractScanTokens } from '../utils/barcode';
+import { extractScanTokens, orderReferenceHint, orderReferenceMessage, ScanIdentificationError } from '../utils/barcode';
 import { placeKey } from '../utils/address';
 import { localDatePart } from '../utils/date';
 import { cleanUndefined } from '../utils/firestore';
@@ -1180,7 +1180,7 @@ export const confirmTransfer = async (transferId: string, toSignatureUrl?: strin
 // seul findPackageByCode appliquait extractScanTokens (isole le BR… d'un
 // DataMatrix, retire le rang -002). Résultat : la passation entre chauffeurs
 // échouait sur des étiquettes qui marchaient partout ailleurs. On centralise :
-// mêmes candidats, même requête ; seul le départage (tie-break) diffère.
+// mêmes candidats, même requête ; une référence partagée demande un code individuel.
 
 /** Candidats de recherche extraits d'un code scanné : chaîne brute + tokens
  *  (N° colis BR…, N° commande, version sans rang). Couvre les DataMatrix clients. */
@@ -1198,10 +1198,16 @@ const queryPackagesByCandidates = async (uniq: string[]): Promise<Package[]> => 
       const snap = await getDocs(query(
         collection(db, PACKAGES_COLLECTION),
         where(field, '==', value),
-        limit(5)
+        limit(2)
       ));
+      if (snap.size > 1) throw new ScanIdentificationError('Ce code correspond à plusieurs colis. Scannez le code individuel DELIVREX ou saisissez le numéro imprimé sur ce carton.');
       if (!snap.empty) return snap.docs.map(d => ({ id: d.id, ...d.data() } as Package));
     }
+  }
+  const hint = orderReferenceHint(uniq[0] || '');
+  if (hint) {
+    const orders = await getDocs(query(collection(db, PACKAGES_COLLECTION), where('clientReference', '==', hint), limit(1)));
+    if (!orders.empty) throw new ScanIdentificationError(orderReferenceMessage(hint));
   }
   return [];
 };
@@ -1210,19 +1216,14 @@ const queryPackagesByCandidates = async (uniq: string[]): Promise<Package[]> => 
  * Retrouve un colis dispatché à partir d'un code scanné (tracking GFL,
  * N° colis client type BR0513, ou N° de commande). Utilisé pour les
  * transferts en route : le colis peut appartenir à n'importe quelle tournée.
- * Départage : préférer un colis ACTIF (rattaché à une mission, non livré).
+ * Un code partagé est refusé : le statut actif ne prouve pas l'identité du carton.
  */
 export const findDispatchedPackageByCode = async (code: string): Promise<Package | null> => {
   const uniq = scanSearchCandidates(code);
   if (uniq.length === 0) return null;
   const pkgs = await queryPackagesByCandidates(uniq);
   if (pkgs.length === 0) return null;
-  const active = pkgs.find(p =>
-    p.missionId &&
-    p.status !== PackageStatus.DELIVERED &&
-    p.status !== PackageStatus.RETURNED
-  );
-  return active || pkgs[0];
+  return pkgs[0];
 };
 
 /**
@@ -1231,16 +1232,14 @@ export const findDispatchedPackageByCode = async (code: string): Promise<Package
  * Repli : si le code scanné se termine par un suffixe d'index (ex "13926865-002"
  * ou "13926865002" pour "colis 02"), on réessaie sur le N° de commande nu —
  * les étiquettes clients encodent souvent commande + rang du colis.
- * Départage : le colis le plus RÉCENT en cas d'homonymes.
+ * Un code partagé demande le numéro individuel, sans choisir le plus récent.
  */
 export const findPackageByCode = async (code: string): Promise<Package | null> => {
   const uniq = scanSearchCandidates(code);
   if (uniq.length === 0) return null;
   const pkgs = await queryPackagesByCandidates(uniq);
   if (pkgs.length === 0) return null;
-  return pkgs.sort((a, b) =>
-    new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
-  )[0];
+  return pkgs[0];
 };
 
 export interface RoadTransferInput {

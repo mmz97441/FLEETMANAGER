@@ -3362,7 +3362,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
               expectedBarcodes={[]}
               alreadyScanned={scannedBarcodes}
               title={`${isPickupStop ? 'Scan enlèvement' : 'Scan livraison'} — ${currentStop?.contactName || ''}`}
-              hint={isPickupStop ? undefined : 'Scannez le code DELIVREX — le petit carré (DataMatrix) en bas à gauche'}
+              hint="Scannez le code individuel DELIVREX du carton, ou saisissez son numéro complet (ex : BR0513)."
               progress={stopPackages.length > 0 ? { done: deliveryScannedCount, total: stopPackages.length } : undefined}
 
               checklist={stopPackages.map(p => ({ code: packageDisplayCode(p) || 'sans code', done: scannedStopIds.has(p.id) }))}

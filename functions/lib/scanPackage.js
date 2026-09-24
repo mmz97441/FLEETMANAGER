@@ -38,6 +38,7 @@ exports.scanPackageHandler = scanPackageHandler;
 const functions = __importStar(require("firebase-functions/v1"));
 const crypto_1 = require("crypto");
 const deliveryAddress_1 = require("./deliveryAddress");
+const scanCode_1 = require("./scanCode");
 const validId = (v) => typeof v === 'string' && v.length > 0 && v.length <= 200 && !v.includes('/');
 const sources = new Set(['driver-claim', 'driver-delivery', 'driver-pickup', 'hub-loading', 'quick-scan', 'transfer', 'manual-create']);
 const openStatuses = new Set(['En cours', 'Dispatché']);
@@ -81,21 +82,20 @@ async function scanPackageHandler(data, context, deps) {
         const driverName = `${driver.firstName || ''} ${driver.lastName || ''}`.trim();
         let packageSnap;
         let ambiguous = false;
+        let matchedOrderReference = null;
         if (data.packageId) {
             packageSnap = await tx.get(db.collection('packages').doc(data.packageId));
             if (code && packageSnap.exists) {
                 const fields = packageSnap.data();
-                const upper = code.toUpperCase();
-                const matches = [fields.barcode, fields.externalId, fields.orderNumber].some(v => typeof v === 'string' && (v.trim().toUpperCase() === upper || (v.trim().length >= 4 && upper.includes(v.trim().toUpperCase()))));
+                const tokens = (0, scanCode_1.extractScanTokens)(code);
+                const matches = [fields.barcode, fields.externalId, fields.orderNumber].some(v => typeof v === 'string' && tokens.includes(v.trim().toUpperCase())) ||
+                    [fields.barcode, fields.externalId].some(v => (0, scanCode_1.containsIndividualCode)(code, v));
                 if (!matches)
                     throw new functions.https.HttpsError('invalid-argument', 'Le code lu ne correspond pas au colis sélectionné.');
             }
         }
         else {
-            const upper = code.toUpperCase();
-            const numbers = upper.match(/\d{6,}/g) || [];
-            const candidates = [...new Set([code, upper, ...(upper.match(/GFL-[A-Z0-9]+-[A-Z0-9]+/g) || []), ...(upper.match(/[A-Z]{2,5}\d{2,}/g) || []), ...numbers,
-                    ...numbers.filter(n => n.length > 8).map(n => n.slice(0, -3))])].slice(0, 12);
+            const candidates = [...new Set([code, ...(0, scanCode_1.extractScanTokens)(code)])].slice(0, 12);
             // Shared order references are search hints, never sufficient to move an arbitrary parcel.
             search: for (const field of ['barcode', 'externalId', 'orderNumber', 'clientReference']) {
                 for (const candidate of candidates) {
@@ -106,6 +106,14 @@ async function scanPackageHandler(data, context, deps) {
                         break search;
                     }
                 }
+            }
+            // The carrier's order label is not an individual carton identifier.
+            // Recognize the order without proposing a duplicate out-of-import parcel.
+            const hint = (0, scanCode_1.orderReferenceHint)(code);
+            if (!packageSnap && hint) {
+                const orders = await tx.get(db.collection('packages').where('clientReference', '==', hint).limit(1));
+                if (!orders.empty)
+                    matchedOrderReference = hint;
             }
         }
         const pkg = packageSnap?.exists ? { ...packageSnap.data(), id: packageSnap.id } : null;
@@ -126,8 +134,10 @@ async function scanPackageHandler(data, context, deps) {
             return result;
         };
         const refused = (outcome, message, extra = {}) => finish({ ...base, ...extra, accepted: false, outcome, message });
+        if (matchedOrderReference)
+            return refused('ambiguous', (0, scanCode_1.orderReferenceMessage)(matchedOrderReference), { matchedOrderReference });
         if (ambiguous)
-            return refused('ambiguous', 'Ce code correspond à plusieurs colis. Scannez le code individuel du carton.');
+            return refused('ambiguous', 'Ce code correspond à plusieurs colis. Scannez le code individuel DELIVREX ou saisissez le numéro imprimé sur ce carton.', { packageId: null, packageCode: code, contactName: '' });
         if (!pkg)
             return refused('not_found', 'Colis introuvable. Vérifiez le code ou créez le colis hors import.');
         if (['Livré', 'Retourné', 'À retourner'].includes(pkg.status))

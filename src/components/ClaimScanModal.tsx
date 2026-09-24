@@ -39,6 +39,7 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
   const isClaiming = isSearching;
   const resolvedMission = useRef<string>();
   const [retryCodes, setRetryCodes] = useState<string[]>([]);
+  const [identificationWarnings, setIdentificationWarnings] = useState<Record<string, string>>({});
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'warn'; message: string } | null>(null);
 
   // Colis HORS-IMPORT : codes scannés introuvables en base. On ne les perd plus
@@ -83,6 +84,10 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
             resolvedMission.current = receipt.missionId || undefined;
             setScannedPkgs(prev => [...prev.filter(p => p.packageId !== receipt.packageId), receipt]);
             setUnknownCodes(prev => prev.filter(c => c !== cleaned));
+          } else if (receipt.outcome === 'ambiguous') {
+            setIdentificationWarnings(prev => ({ ...prev, [cleaned]: receipt.message }));
+            setUnknownCodes(prev => prev.filter(c => c !== cleaned));
+            unknownSeenRef.current.delete(cleaned);
           } else if (receipt.outcome === 'not_found' && !unknownSeenRef.current.has(cleaned)) {
             unknownSeenRef.current.add(cleaned);
             setUnknownCodes(prev => [...prev, cleaned]);
@@ -197,7 +202,7 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
               value={manualCode}
               onChange={e => setManualCode(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') { lookupCode(manualCode); setManualCode(''); } }}
-              placeholder="Ou saisir le N° colis (ex: BR0513)"
+              placeholder="N° individuel du carton (ex : BR0513)"
               className="flex-1 px-3 py-2.5 border border-slate-300 rounded-xl text-sm font-mono focus:ring-2 focus:ring-green-500 outline-none"
             />
             <button
@@ -209,6 +214,15 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
             </button>
           </div>
 
+          {Object.entries(identificationWarnings).map(([code, message]) => (
+            <div key={code} role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+              <p className="font-bold">Numéro individuel nécessaire</p>
+              <p className="mt-1">{message}</p>
+              <button type="button" className="ui-button ui-button-secondary mt-2" onClick={() => setIdentificationWarnings(prev => {
+                const next = { ...prev }; delete next[code]; return next;
+              })}>J’ai compris</button>
+            </div>
+          ))}
           {retryCodes.length > 0 && <div role="alert" className="rounded-xl border border-amber-300 p-3 text-sm text-amber-900">
             <p>{retryCodes.length} scan(s) sans confirmation :</p>
             {retryCodes.map(code => <button key={code} disabled={isSearching} className="ui-button ui-button-secondary m-1" onClick={() => lookupCode(code)}>Réessayer {code}</button>)}

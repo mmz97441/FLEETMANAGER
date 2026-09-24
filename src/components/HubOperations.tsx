@@ -17,7 +17,7 @@ import PackageScanInfo from './PackageScanInfo';
  */
 
 import React, { useState, useEffect, useMemo, useRef, lazy, Suspense } from 'react';
-import { packageMatchesCode, packageScanCodes } from '../utils/barcode';
+import { packageScanCodes } from '../utils/barcode';
 import { todayISO } from '../utils/date';
 import {
   Package as PackageIcon, Truck, ArrowDownToLine, ArrowUpFromLine,
@@ -216,7 +216,7 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
     receptionLock.current = true;
     setProcessing(true);
     try {
-      const pkg = packages.find(p => packageMatchesCode(p, barcode)) || await findPackageByCode(barcode);
+      const pkg = await findPackageByCode(barcode);
       if (!pkg) { showNotif('warning', `Code ${barcode} — colis non trouvé`); return; }
       if (![PackageStatus.COLLECTED, PackageStatus.PENDING, PackageStatus.AT_HUB].includes(pkg.status)) {
         showNotif('warning', `${barcode} — statut ${pkg.status}, réception non applicable`); return;

@@ -1,5 +1,6 @@
 import {readFile,writeFile,mkdir}from'node:fs/promises';
-const [port]=(await readFile('/tmp/fleet-scan-browser/DevToolsActivePort','utf8')).trim().split('\n');
+const output=process.env.SCAN_PROBE_OUTPUT || 'docs/validation/scans';
+const [port]=(await readFile((process.env.SCAN_BROWSER_DIR || '/tmp/fleet-scan-browser')+'/DevToolsActivePort','utf8')).trim().split('\n');
 const tab=await(await fetch(`http://127.0.0.1:${port}/json/new?about:blank`,{method:'PUT'})).json();
 const ws=new WebSocket(tab.webSocketDebuggerUrl);await new Promise(r=>ws.addEventListener('open',r,{once:true}));let id=0;const pending=new Map(),checks=[],errors=[];
 ws.addEventListener('message',e=>{const m=JSON.parse(e.data);if(m.id){const p=pending.get(m.id);if(p){pending.delete(m.id);m.error?p.reject(m.error):p.resolve(m.result)}}if(m.method==='Runtime.exceptionThrown')errors.push(m.params.exceptionDetails.exception?.description||m.params.exceptionDetails.text)});
@@ -22,11 +23,16 @@ await check('Duplicate confirmed without duplicate parcel '+width,`window.calls.
 await ev('window.rejectNext=true');await type('BR-RETRY');await click('OK');await wait(`document.body.innerText.includes('sans confirmation')`);
 await check('Network failure never offered as unknown creation '+width,`document.body.innerText.includes('Réessayer BR-RETRY')&&!document.body.innerText.includes('hors import — à créer')`);
 await click('Réessayer BR-RETRY');await wait(`document.body.innerText.includes('2 colis confirmés')`);
+await type('0012345678300123450101');await click('OK');await wait(`document.body.innerText.includes('Numéro individuel nécessaire')`);
+await check('Recognized order stays unconfirmed and cannot create a duplicate '+width,`document.body.innerText.includes('Commande 12345678 retrouvée')&&document.body.innerText.includes('2 colis confirmés')&&!document.body.innerText.includes('hors import — à créer')`);
+await type('BR-CARTON');await click('OK');await wait(`document.body.innerText.includes('3 colis confirmés')`);
+await check('Individual carton still confirms after order warning '+width,`document.body.innerText.includes('BR-CARTON')&&document.body.innerText.includes('Numéro individuel nécessaire')`);
+await click('J’ai compris');await check('Order guidance is dismissible '+width,`!document.body.innerText.includes('Numéro individuel nécessaire')`);
 await check('No horizontal overflow '+width,`document.documentElement.scrollWidth===innerWidth && [...document.querySelectorAll('input')].every(e=>e.getBoundingClientRect().right<=innerWidth)`);
-await mkdir('docs/validation/scans',{recursive:true});const shot=await call('Page.captureScreenshot',{format:'png'});await writeFile(`docs/validation/scans/scan-${width}.png`,Buffer.from(shot.data,'base64'));
-await click('Ouvrir ma tournée (2)');await check('Done opens actual returned tour '+width,`window.done?.count===2&&window.done?.id==='tour-demo-17-septembre'`);
+await mkdir(output,{recursive:true});const shot=await call('Page.captureScreenshot',{format:'png'});await writeFile(`${output}/scan-${width}.png`,Buffer.from(shot.data,'base64'));
+await click('Ouvrir ma tournée (3)');await check('Done opens actual returned tour '+width,`window.done?.count===3&&window.done?.id==='tour-demo-17-septembre'`);
 }
 await call('Page.navigate',{url:'http://127.0.0.1:5245/?fallback'});await wait(`!!document.querySelector('#fallback-scan-code')`);await type('BR-MANUAL','#fallback-scan-code');await click('Vérifier ce colis');await check('Fallback preserves business scan and displays confirmation',`window.fallbackCode==='BR-MANUAL'&&document.body.innerText.includes('Scan confirmé')`);
 await call('Page.navigate',{url:'http://127.0.0.1:5245/?timeline'});await wait(`document.body.innerText.includes('Colis')||document.body.innerText.includes('nouvelle tournée')`);await check('Timeline displays original and current tours with full timestamp',`['17/09/2026','16/09/2026','09:12:30','tour-demo-17','tour-demo-16','Chauffeur fictif'].every(t=>document.body.innerText.includes(t))`);
-checks.push({name:'No runtime exception',pass:errors.length===0});await writeFile('docs/validation/scans/browser.json',JSON.stringify({checks,errors},null,2));console.log(JSON.stringify({checks,errors},null,2));if(checks.some(c=>!c.pass))process.exitCode=1;
+checks.push({name:'No runtime exception',pass:errors.length===0});await writeFile(`${output}/browser.json`,JSON.stringify({checks,errors},null,2));console.log(JSON.stringify({checks,errors},null,2));if(checks.some(c=>!c.pass))process.exitCode=1;
 }finally{await call('Page.close');ws.close()}

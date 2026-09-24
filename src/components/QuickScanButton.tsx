@@ -30,7 +30,7 @@ import { normalizeRole } from '../utils/role';
 import { todayISO } from '../utils/date';
 import { findPackageByCode, claimPackagesForDelivery, createAndClaimPackage, getPendingPackagesForClient } from '../services/missionService';
 import { reportError } from '../services/logService';
-import { packageDisplayCode, packageScanCodes, packageMatchesCode } from '../utils/barcode';
+import { packageDisplayCode, packageScanCodes, packageMatchesCode, ScanIdentificationError } from '../utils/barcode';
 import { getCurrentPosition } from '../utils/geo';
 import Modal from './shared/Modal';
 import { FormInput, FormSelect } from './shared/FormInput';
@@ -226,11 +226,15 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
       // NE PAS faire croire à un "introuvable" alors que c'est une erreur réseau
       // ou de droits : on trace, on affiche l'erreur, et on n'invite pas à
       // créer un doublon.
-      reportError('quickscan.search', e, {
+      if (e instanceof ScanIdentificationError) {
+        setClaimError(e.message);
+      } else {
+        reportError('quickscan.search', e, {
         userMessage: 'Recherche impossible (réseau ou droits). Vérifiez votre connexion et rescannez.',
         extra: { code }
       });
-      setClaimError('Recherche impossible — vérifiez votre connexion et rescannez.');
+        setClaimError('Recherche impossible — vérifiez votre connexion et rescannez.');
+      }
     }
     setIsSearching(false);
   };

@@ -93,6 +93,49 @@ async function check(name, test) {
     await db.collection('packages').doc(`${t.parcelId}-duplicate`).set({ clientReference: `${t.id}-shared`, status: 'En attente' });
     assert.equal((await t.scan({ code: `${t.id}-shared` })).outcome, 'ambiguous'); assert.equal((await t.state()).missionId, t.oldId);
   });
+  await check('numeric order label is recognized without choosing a carton or changing its tour', async t => {
+    const reference = '12345678', code = `00${reference}300123450101`;
+    await t.pkgRef.update({ clientReference: reference });
+    const other = db.collection('packages').doc(`${t.parcelId}-other`);
+    await other.set({ clientReference: reference, status: 'Livré' });
+    for (const source of ['driver-claim', 'driver-delivery', 'driver-pickup', 'hub-loading', 'quick-scan', 'transfer']) {
+      const r = await t.scan({ code, source });
+      assert.equal(r.outcome, 'ambiguous'); assert.equal(r.accepted, false);
+      assert.equal(r.matchedOrderReference, reference); assert.equal(r.packageId, null);
+      assert.match(r.message, /numéro BR/); assert.equal((await t.state()).missionId, t.oldId);
+    }
+    assert.equal((await t.state()).movements.length, 0);
+    assert.equal((await other.get()).data().status, 'Livré');
+  });
+  await check('a single imported carton does not turn an order hint into a physical identification', async t => {
+    await t.pkgRef.update({ clientReference: '12345679' });
+    const r = await t.scan({ code: ']d20012345679300123450101' });
+    assert.equal(r.outcome, 'ambiguous'); assert.equal(r.matchedOrderReference, '12345679');
+    assert.equal((await t.state()).missionId, t.oldId);
+    await assert.rejects(t.scan({ packageId: t.parcelId, code: '0012345679300123450101' }), e => e.code === 'invalid-argument');
+  });
+  await check('exact numeric barcode wins over a coincidental embedded order reference', async t => {
+    const code = '0012345680300123450101';
+    await t.pkgRef.update({ barcode: code });
+    await db.collection('packages').doc(`${t.parcelId}-unrelated`).set({ clientReference: '12345680', status: 'En attente' });
+    const r = await t.scan({ code }); assert.equal(r.accepted, true); assert.equal(r.packageId, t.parcelId);
+  });
+  await check('unknown numeric label stays unknown without inventing a parcel', async t => {
+    const r = await t.scan({ code: '0087654321300123450101' });
+    assert.equal(r.outcome, 'not_found'); assert.equal(r.packageId, null);
+    assert.equal((await t.state()).missionId, t.oldId);
+  });
+  await check('full individual code remains usable after an order-label refusal and detects duplicates', async t => {
+    await t.pkgRef.update({ clientReference: '12345681', barcode: 'BR9010', externalId: 'BR9010' });
+    assert.equal((await t.scan({ code: '0012345681300123450101' })).accepted, false);
+    assert.equal((await t.scan({ code: ']d2BR9010' })).accepted, true);
+    assert.equal((await t.scan({ code: 'BR9010' })).outcome, 'already_scanned');
+  });
+  await check('explicit package id cannot validate a longer carton number sharing its prefix', async t => {
+    await t.pkgRef.update({ externalId: 'BR905', barcode: 'BR905' });
+    await assert.rejects(t.scan({ packageId: t.parcelId, code: 'BR9051' }), e => e.code === 'invalid-argument');
+    assert.equal((await t.state()).missionId, t.oldId);
+  });
   await check('explicit active tour wins when driver has several tours', async t => {
     for (const suffix of ['a', 'b']) await db.collection('missions').doc(`${t.id}-${suffix}`).set({ driverId: t.driverId, date: '2026-09-17', type: 'Livraison', status: 'En cours', stops: [] });
     assert.equal((await t.scan({ targetMissionId: `${t.id}-b` })).missionId, `${t.id}-b`);
