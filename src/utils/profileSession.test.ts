@@ -34,10 +34,26 @@ it('uses the session auth_time cutoff, including its exact second and missing cl
   expect(profileIssueKind(revoked, 200)).toBe('revoked'); expect(profileIssueKind(revoked, NaN)).toBe('revoked');
   expect(profileIssueKind(revoked, 201)).toBeNull(); expect(profileIssueKind({ ...revoked, isDisabled: true }, 201)).toBe('disabled');
 });
+it('can reopen cached work offline without refreshing an expired persisted token', async () => {
+  const { deps, session } = setup();
+  const refresh = vi.fn(async () => { throw { code: 'auth/network-request-failed' }; });
+  const stored = { ...identity(), getIdTokenResult: refresh, toJSON: () => ({ stsTokenManager: { accessToken: `header.${btoa(JSON.stringify({ sub: 'driver', auth_time: 200, exp: 201 }))}.signature` } }) };
+  await session.start(stored); expect(deps.authorized).toHaveBeenCalledWith(profile); expect(refresh).not.toHaveBeenCalled();
+  deps.read.mockResolvedValue({ ...profile, sessionsRevokedAt: 201 });
+  await session.start(stored); expect(deps.issue.mock.lastCall?.[0].kind).toBe('revoked');
+});
+it('does not trust an unreadable token or one belonging to another identity', async () => {
+  for (const token of ['invalid', `header.${btoa(JSON.stringify({ sub: 'someone-else', auth_time: 999 }))}.signature`]) {
+    const { deps, session } = setup(); deps.read.mockResolvedValue({ ...profile, sessionsRevokedAt: 201 });
+    const refresh = vi.fn(async () => ({ claims: { auth_time: 200 } }));
+    await session.start({ ...identity(), getIdTokenResult: refresh, toJSON: () => ({ stsTokenManager: { accessToken: token } }) });
+    expect(refresh).toHaveBeenCalledOnce(); expect(deps.authorized).not.toHaveBeenCalled(); expect(deps.issue.mock.lastCall?.[0].kind).toBe('revoked');
+  }
+});
 it('ignores late reads after logout, account change or disposal', async () => {
   for (const action of ['logout', 'switch', 'dispose']) {
     const { deps, session } = setup(), pending = deferred<User | null>(); deps.read.mockReturnValueOnce(pending.promise);
-    const first = session.start(identity()); await Promise.resolve();
+    const first = session.start(identity()); await vi.waitFor(() => expect(deps.read).toHaveBeenCalledTimes(1));
     if (action === 'logout') await session.start(null);
     if (action === 'switch') await session.start(identity('second'));
     if (action === 'dispose') session.dispose();
@@ -48,7 +64,7 @@ it('ignores late reads after logout, account change or disposal', async () => {
 });
 it('ignores late recovery and old listeners after account change', async () => {
   const { deps, session } = setup(), pending = deferred<void>(); deps.read.mockResolvedValueOnce(null); deps.recover.mockReturnValueOnce(pending.promise);
-  const first = session.start(identity()); await Promise.resolve(); await Promise.resolve();
+  const first = session.start(identity()); await vi.waitFor(() => expect(deps.recover).toHaveBeenCalledTimes(1));
   await session.start(identity('second')); const next = deps.subscribe.mock.calls[0][1];
   pending.resolve(); await first; expect(deps.read).toHaveBeenCalledTimes(2);
   await session.start(null); next({ ...profile, isDisabled: true }); expect(deps.issue).toHaveBeenLastCalledWith(null);

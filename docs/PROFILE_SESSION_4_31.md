@@ -8,6 +8,8 @@ L’activité est indépendante du GPS. L’application visible transmet un sign
 
 La carte distingue positions en mémoire, chargement serveur, positions confirmées et erreur. Les pages Utilisateurs et Carte présentent l’état d’activité et la date/heure de dernière connexion. L’annuaire interne conserve ces champs opérationnels sans exposer les données RH.
 
-Validation locale : typecheck, 313 tests unitaires, 254 contrôles sur émulateurs (règles, intégration, serveur et stockage), builds application/fonctions, audit UI sans écart. Neuf contrôles navigateur spécifiques et dix contrôles de navigation/brouillons réussissent avec des données fictives, sans exception JavaScript. Simulation mobile Chrome ; aucune exécution sur les iPhone physiques des chauffeurs.
+L’heure d’authentification peut être lue dans le jeton de session conservé par Firebase, après vérification de son identifiant utilisateur, sans forcer une actualisation réseau. Cela préserve la réouverture des données locales hors ligne, y compris après expiration du jeton. Les opérations serveur continuent à exiger un jeton valide et à contrôler la révocation ; aucune connexion initiale hors ligne ni aucun nouveau droit ne sont accordés.
+
+Validation locale : typecheck, 315 tests unitaires, 254 contrôles sur émulateurs (règles, intégration, serveur et stockage), builds application/fonctions, audit UI sans écart. Neuf contrôles navigateur spécifiques et dix contrôles de navigation/brouillons réussissent avec des données fictives, sans exception JavaScript. Simulation mobile Chrome ; aucune exécution sur les iPhone physiques des chauffeurs.
 
 Déploiement : publier les fonctions `getOwnProfile`, `recordUserPresence`, `linkAuthToProfile`, `getTeamDirectory` et les règles Firestore avant le frontend. Les fonctions modifiées restent compatibles avec les anciennes versions. Aucun compte historique orphelin n’est réactivé et aucun droit n’est élargi.
