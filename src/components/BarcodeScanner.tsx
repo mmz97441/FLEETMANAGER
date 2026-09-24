@@ -62,7 +62,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   alreadyScanned = [],
   title = 'Scanner un code-barres',
   progress,
-  hint,
+  hint = 'Scannez le code individuel du carton. Pour Boiron : le code DELIVREX ou le numéro BR… en saisie manuelle.',
   isMatch,
   checklist,
   countLabel,
@@ -368,7 +368,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
         </div>
 
         {/* Footer — Switch mode */}
-        {!manualMode && hint && !checklist && (
+        {!manualMode && hint && (
           <div className="px-4 py-2 bg-amber-100 text-amber-950 text-sm font-semibold text-center">
             {hint}
           </div>
@@ -383,7 +383,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
         )}
 
         {/* Footer — Switch mode */}
-        {!manualMode && flashMessage && (
+        {flashMessage && (
           <div
             className={`px-4 py-3 text-white text-center text-sm font-black ${flashMessage.type === 'ok' ? 'bg-green-700' : "bg-amber-800"}`}
           >
@@ -557,7 +557,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
                       value={manualInput}
                       onChange={(e) => setManualInput(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && handleManualSubmit()}
-                      placeholder="N° commande / code-barres"
+                      placeholder="N° du carton (ex : BR0513)"
                       autoFocus
                       className="min-w-0 flex-1 px-4 py-3 bg-white rounded-xl text-base font-mono font-bold text-slate-800 focus:ring-2 focus:ring-brand-400 outline-none"
                     />

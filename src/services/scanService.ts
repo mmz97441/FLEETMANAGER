@@ -12,6 +12,7 @@ export interface ScanReceipt {
   packageId: string | null; packageCode: string; contactName: string;
   missionId: string | null; missionDate: string | null; stopId: string | null; status?: string;
   previousMissionId?: string | null; previousMissionDate?: string | null;
+  matchedOrderReference?: string;
 }
 interface ScanInput { driverId: string; code?: string; packageId?: string; targetMissionId?: string; stopId?: string; source: ScanSource }
 type Request = ScanInput & { requestId: string };

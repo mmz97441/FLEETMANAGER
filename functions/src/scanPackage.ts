@@ -2,6 +2,7 @@ import type { Firestore } from 'firebase-admin/firestore';
 import * as functions from 'firebase-functions/v1';
 import { createHash } from 'crypto';
 import { placeKey } from './deliveryAddress';
+import { containsIndividualCode, extractScanTokens, orderReferenceHint, orderReferenceMessage } from './scanCode';
 
 interface Dependencies {
   db: Firestore;
@@ -52,26 +53,33 @@ export async function scanPackageHandler(data: any, context: functions.https.Cal
     const driverName = `${driver.firstName || ''} ${driver.lastName || ''}`.trim();
     let packageSnap;
     let ambiguous = false;
+    let matchedOrderReference: string | null = null;
     if (data.packageId) {
       packageSnap = await tx.get(db.collection('packages').doc(data.packageId));
       if (code && packageSnap.exists) {
         const fields = packageSnap.data()!;
-        const upper = code.toUpperCase();
-        const matches = [fields.barcode, fields.externalId, fields.orderNumber].some(v => typeof v === 'string' && (v.trim().toUpperCase() === upper || (v.trim().length >= 4 && upper.includes(v.trim().toUpperCase()))));
+        const tokens = extractScanTokens(code);
+        const matches = [fields.barcode, fields.externalId, fields.orderNumber].some(v =>
+          typeof v === 'string' && tokens.includes(v.trim().toUpperCase())) ||
+          [fields.barcode, fields.externalId].some(v => containsIndividualCode(code, v));
         if (!matches) throw new functions.https.HttpsError('invalid-argument', 'Le code lu ne correspond pas au colis sélectionné.');
       }
     }
     else {
-      const upper = code.toUpperCase();
-      const numbers = upper.match(/\d{6,}/g) || [];
-      const candidates = [...new Set([code, upper, ...(upper.match(/GFL-[A-Z0-9]+-[A-Z0-9]+/g) || []), ...(upper.match(/[A-Z]{2,5}\d{2,}/g) || []), ...numbers,
-        ...numbers.filter(n => n.length > 8).map(n => n.slice(0, -3))])].slice(0, 12);
+      const candidates = [...new Set([code, ...extractScanTokens(code)])].slice(0, 12);
       // Shared order references are search hints, never sufficient to move an arbitrary parcel.
       search: for (const field of ['barcode', 'externalId', 'orderNumber', 'clientReference']) {
         for (const candidate of candidates) {
           const found = await tx.get(db.collection('packages').where(field, '==', candidate).limit(2));
           if (!found.empty) { ambiguous = found.size > 1; packageSnap = found.docs[0]; break search; }
         }
+      }
+      // The carrier's order label is not an individual carton identifier.
+      // Recognize the order without proposing a duplicate out-of-import parcel.
+      const hint = orderReferenceHint(code);
+      if (!packageSnap && hint) {
+        const orders = await tx.get(db.collection('packages').where('clientReference', '==', hint).limit(1));
+        if (!orders.empty) matchedOrderReference = hint;
       }
     }
     const pkg: any = packageSnap?.exists ? { ...packageSnap.data(), id: packageSnap.id } : null;
@@ -92,7 +100,8 @@ export async function scanPackageHandler(data: any, context: functions.https.Cal
       return result;
     };
     const refused = (outcome: string, message: string, extra = {}) => finish({ ...base, ...extra, accepted: false, outcome, message });
-    if (ambiguous) return refused('ambiguous', 'Ce code correspond à plusieurs colis. Scannez le code individuel du carton.');
+    if (matchedOrderReference) return refused('ambiguous', orderReferenceMessage(matchedOrderReference), { matchedOrderReference });
+    if (ambiguous) return refused('ambiguous', 'Ce code correspond à plusieurs colis. Scannez le code individuel DELIVREX ou saisissez le numéro imprimé sur ce carton.', { packageId: null, packageCode: code, contactName: '' });
     if (!pkg) return refused('not_found', 'Colis introuvable. Vérifiez le code ou créez le colis hors import.');
     if (['Livré', 'Retourné', 'À retourner'].includes(pkg.status))
       return refused('terminal', `Colis ${pkg.status.toLowerCase()} : aucune nouvelle prise en charge.`, { missionId: pkg.missionId || null, missionDate: pkg.missionDate || null });

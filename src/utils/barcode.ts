@@ -10,6 +10,9 @@
  * sont obligés de ré-étiqueter chaque carton au dépôt.
  */
 
+import { containsIndividualCode, extractScanTokens } from '../../functions/src/scanCode';
+export { extractScanTokens, orderReferenceHint, orderReferenceMessage } from '../../functions/src/scanCode';
+
 export interface ScannableCodes {
   barcode?: string;
   externalId?: string;
@@ -37,25 +40,6 @@ export const packageScanCodes = (pkg: ScannableCodes): string[] =>
     .map(c => c.trim().toUpperCase());
 
 /**
- * Extrait les identifiants candidats d'un code scanné. Le DataMatrix DELIVREX
- * peut encoder une chaîne enrichie : on en isole le code colis à préfixe client
- * (BR1018, AUT0451, AUR…) — préfixe GÉNÉRIQUE, non codé en dur — et les suites
- * de chiffres (fallback), en retirant un éventuel rang final (…003).
- */
-export const extractScanTokens = (raw: string): string[] => {
-  const s = raw.trim().toUpperCase();
-  const tokens = new Set<string>();
-  if (s) tokens.add(s);
-  // Code colis DELIVREX : 2 à 5 lettres (préfixe client) suivies de chiffres.
-  for (const m of s.match(/[A-Z]{2,5}\d{2,}/g) || []) tokens.add(m);
-  for (const d of s.match(/\d{6,}/g) || []) {   // suites de ≥6 chiffres (fallback)
-    tokens.add(d);
-    if (d.length > 8) tokens.add(d.slice(0, d.length - 3)); // retire le rang (…003)
-  }
-  return [...tokens];
-};
-
-/**
  * Le code scanné correspond-il à ce colis ? Vrai si :
  * - correspondance exacte (tracking GFL, N° colis BR…, N° commande), ou
  * - le payload 2D scanné contient l'identifiant unique du colis (BR… ou GFL…).
@@ -71,8 +55,7 @@ export const packageMatchesCode = (pkg: ScannableCodes, scannedCode: string): bo
   if (extractScanTokens(scanned).some(t => codes.includes(t))) return true;
   // Payload 2D enrichi contenant un identifiant UNIQUE du colis (BR… / GFL…)
   for (const unique of [pkg.externalId, pkg.barcode]) {
-    const c = unique?.trim().toUpperCase();
-    if (c && c.length >= 4 && scanned.includes(c)) return true;
+    if (containsIndividualCode(scanned, unique)) return true;
   }
   return false;
 };
