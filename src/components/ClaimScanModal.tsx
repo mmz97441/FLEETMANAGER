@@ -55,6 +55,7 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
   // File d'attente : en scan rafale, les codes sont traités en série SANS être
   // perdus (contrairement à un simple "ignore si occupé" qui droppait des colis).
   const queueRef = useRef<string[]>([]);
+  const queuedCodes = useRef(new Set<string>());
   const processingRef = useRef(false);
 
   const notify = (type: 'ok' | 'warn', message: string) => {
@@ -65,6 +66,8 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
   const lookupCode = (code: string) => {
     const cleaned = code.trim();
     if (!cleaned) return;
+    if (queuedCodes.current.has(cleaned.toUpperCase())) return;
+    queuedCodes.current.add(cleaned.toUpperCase());
     notify('warn', `${cleaned} — confirmation en cours…`);
     queueRef.current.push(cleaned);
     void drainQueue();
@@ -95,9 +98,12 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
           setRetryCodes(prev => prev.filter(c => c !== cleaned));
           notify(receipt.accepted && receipt.outcome !== 'already_scanned' ? 'ok' : 'warn', scanReceiptLabel(receipt));
         } catch {
-          setRetryCodes(prev => [...new Set([...prev, cleaned])]);
-          notify('warn', `${cleaned} — confirmation non reçue. Vérifiez la connexion puis réessayez ce scan.`);
-        }
+          const unconfirmed = [cleaned, ...queueRef.current.splice(0)];
+          setRetryCodes(prev => [...new Set([...prev, ...unconfirmed])]);
+          queuedCodes.current.clear();
+          notify('warn', `${unconfirmed.length} scan(s) sans confirmation. Vérifiez la connexion puis réessayez, sans vous déconnecter.`);
+          break;
+        } finally { queuedCodes.current.delete(cleaned.toUpperCase()); }
       }
     } finally {
       processingRef.current = false;

@@ -11,10 +11,11 @@
  * - Anti-doublon (ne scanne pas 2x le même en 3s)
  */
 
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useId } from 'react';
 import Modal from './shared/Modal';
 import { recordDiagnosticAction } from '../utils/runtimeDiagnostics';
 import { reportError } from '../services/logService';
+import { createScannerCameraSession, waitForCameraImage, waitForCameraRelease } from '../utils/scannerCameraSession';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import {
   Camera,
@@ -25,6 +26,7 @@ import {
   AlertTriangle,
   Flashlight,
   FlashlightOff,
+  RefreshCw,
 } from 'lucide-react';
 
 export interface BarcodeScannerProps {
@@ -83,8 +85,12 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   const [torchAvailable, setTorchAvailable] = useState(false);
 
   const scannerRef = useRef<Html5Qrcode | null>(null);
-  const lastScanTime = useRef(0);
-  const scannerContainerId = 'barcode-scanner-container';
+  const lastRead = useRef({ code: '', at: 0 });
+  const scannerContainerId = `barcode-scanner-${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
+  const cameraCleanup = useRef<() => Promise<void>>(async () => {});
+  const [cameraAttempt, setCameraAttempt] = useState(0);
+  const [pageActive, setPageActive] = useState(document.visibilityState !== 'hidden');
+  const cameraNumber = useRef(0);
 
   const recordScan = useCallback((text: string, warning: boolean) => {
     setScanHistory(previous => [{ text, warning, time: new Date().toLocaleTimeString('fr-FR') }, ...previous].slice(0, 6));
@@ -98,8 +104,9 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   const feedbackScan = useCallback((barcode: string) => {
     const now = Date.now();
     // Anti-spam: ignorer si même code scanné il y a moins de 3 secondes
-    if (now - lastScanTime.current < 3000 && lastScanned === barcode) return;
-    lastScanTime.current = now;
+    const codeKey = barcode.trim().toUpperCase();
+    if (now - lastRead.current.at < 3000 && lastRead.current.code === codeKey) return;
+    lastRead.current = { code: codeKey, at: now };
     recordDiagnosticAction('scanner.code.read');
 
     // Vérifier si déjà scanné
@@ -166,39 +173,54 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
     }
   }, [checklist, busy]);
 
-  // Arrêt propre : clear() UNIQUEMENT après que stop() soit terminé, sinon
-  // html5-qrcode lève "Cannot clear while scan is ongoing, close it first".
-  const stopAndClear = useCallback(async () => {
-    const s = scannerRef.current;
-    scannerRef.current = null;
-    if (!s) return;
-    try { await s.stop(); } catch {}
-    try { s.clear(); } catch {}
+  const stopAndClear = useCallback(() => cameraCleanup.current(), []);
+
+  // A suspended iPhone camera does not always emit a decoder error. Release it
+  // when leaving the page and acquire a fresh stream on return, keeping the scans.
+  useEffect(() => {
+    const visibility = () => setPageActive(document.visibilityState !== 'hidden');
+    const hide = () => setPageActive(false);
+    window.addEventListener('pagehide', hide);
+    window.addEventListener('pageshow', visibility);
+    document.addEventListener('visibilitychange', visibility);
+    return () => {
+      window.removeEventListener('pagehide', hide);
+      window.removeEventListener('pageshow', visibility);
+      document.removeEventListener('visibilitychange', visibility);
+    };
   }, []);
 
-  // Démarrer le scanner caméra
   useEffect(() => {
-    if (manualMode) return;
-
+    setIsScanning(false);
+    setTorchOn(false);
+    setTorchAvailable(false);
+    if (manualMode || !pageActive) return;
     let mounted = true;
-    // Démarrage de la caméra avec RETRY. Au 2ᵉ/3ᵉ scan d'affilée, le flux vidéo
-    // de l'ouverture précédente n'est parfois pas encore libéré par l'OS →
-    // start() échoue ("NotReadableError / Could not start video source"). Avant,
-    // on basculait aussitôt en saisie manuelle (caméra « qui ne s'ouvre pas »).
-    // Désormais on retente 2 fois à 700 ms d'intervalle, ce qui laisse le temps
-    // au téléphone de rendre la caméra. Seul un refus de permission bascule
-    // directement en manuel (inutile de réessayer).
+    let session: ReturnType<typeof createScannerCameraSession> | undefined;
+    let ownedScanner: Html5Qrcode | undefined;
+    let removeListeners = () => {};
+    const closeOwned = async () => {
+      mounted = false;
+      removeListeners();
+      if (scannerRef.current === ownedScanner) scannerRef.current = null;
+      await session?.close();
+    };
+    cameraCleanup.current = closeOwned;
+
     const attemptStart = async (attempt: number): Promise<void> => {
+      await waitForCameraRelease();
       if (!mounted) return;
+      const container = document.getElementById(scannerContainerId);
+      if (!container) return;
+      // Every attempt has its own DOM node. A late cleanup must not erase a
+      // camera that has already reopened in this component or another screen.
+      const surface = document.createElement('div');
+      surface.id = `${scannerContainerId}-${++cameraNumber.current}`;
+      surface.style.cssText = 'width:100%;height:100%';
+      container.append(surface);
+      let scanner: Html5Qrcode | undefined;
       try {
-        // Formats à décoder. Les étiquettes rencontrées sont variées :
-        // - clients (BOIRON) : codes 2D DataMatrix + QR imprimés sur le carton
-        // - étiquettes FleetGenius (GFL…) : Code128 via jsbarcode
-        // On active donc 1D ET 2D. useBarCodeDetectorIfSupported utilise le
-        // détecteur natif du navigateur quand il existe (Android/Chrome, fiable
-        // sur 1D) ; sur iPhone/Safari il n'existe pas → repli sur ZXing, qui est
-        // performant sur les codes 2D.
-        const scanner = new Html5Qrcode(scannerContainerId, {
+        scanner = new Html5Qrcode(surface.id, {
           formatsToSupport: [
             Html5QrcodeSupportedFormats.DATA_MATRIX,
             Html5QrcodeSupportedFormats.QR_CODE,
@@ -208,79 +230,76 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
             Html5QrcodeSupportedFormats.PDF_417,
             Html5QrcodeSupportedFormats.AZTEC,
           ],
-          experimentalFeatures: { useBarCodeDetectorIfSupported: true },
-          verbose: false,
+          experimentalFeatures: { useBarCodeDetectorIfSupported: true }, verbose: false,
         });
-        scannerRef.current = scanner;
-
-        await scanner.start(
-          { facingMode: 'environment' },  // Caméra arrière
-          {
-            fps: 15, // acquisition plus rapide pour le scan en rafale
-            // PAS de qrbox : on décode TOUTE l'image de la caméra. Ainsi la
-            // position du code n'a plus d'importance (le trait/viseur n'a plus
-            // besoin d'être « en face »), ce qui fiabilise le scan pour tous.
-            // (Avant : zone restreinte 72% désalignée du viseur affiché.)
-            aspectRatio: undefined,
+        const camera = scanner;
+        ownedScanner = camera;
+        scannerRef.current = camera;
+        const currentSession = createScannerCameraSession({
+          start: async () => {
+            await camera.start({ facingMode: 'environment' }, { fps: 15 },
+              code => { if (mounted && !currentSession.closed && document.visibilityState !== 'hidden') feedbackScanRef.current(code); }, () => {});
+            const video = surface.querySelector('video');
+            if (!video) throw new Error('La caméra ne fournit aucune image.');
+            await waitForCameraImage(video);
           },
-          (decodedText) => {
-            if (mounted) feedbackScanRef.current(decodedText);
+          stop: () => camera.stop(),
+          clear: () => camera.clear(),
+          release: () => {
+            surface.querySelectorAll('video').forEach(video => {
+              const stream = video.srcObject as MediaStream | null;
+              stream?.getTracks?.().forEach(track => track.stop());
+            });
+            surface.remove();
           },
-          () => {} // Ignore erreurs de scan continu
-        );
-
-        if (!mounted) {
-          // Composant démonté pendant le start : on relâche la caméra proprement.
-          try { await scanner.stop(); } catch {}
-          try { scanner.clear(); } catch {}
-          scannerRef.current = null;
-          return;
-        }
-
+        });
+        session = currentSession;
+        await currentSession.ready;
+        if (!mounted || currentSession.closed) { await currentSession.close(); return; }
         setError(null);
         setIsScanning(true);
-        // Détecter la disponibilité de la torche (Android surtout ; iOS ne la
-        // supporte pas via le web, le bouton reste alors masqué)
-        try {
-          const torch = scanner.getRunningTrackCameraCapabilities().torchFeature();
-          if (torch.isSupported()) setTorchAvailable(true);
-        } catch {}
+        recordDiagnosticAction('scanner.camera.ready');
+        const video = surface.querySelector('video')!;
+        const tracks = (video.srcObject as MediaStream | null)?.getVideoTracks?.() || [];
+        let recovering = false;
+        const recover = () => {
+          if (!mounted || currentSession.closed || recovering || document.visibilityState === 'hidden') return;
+          recovering = true;
+          reportError('scanner.camera.interrupted', new Error('Flux caméra interrompu : reprise du lecteur.'), { silent: true, level: 'warning' });
+          setCameraAttempt(value => value + 1);
+        };
+        tracks.forEach(track => track.addEventListener('ended', recover));
+        video.addEventListener('pause', recover);
+        removeListeners = () => {
+          tracks.forEach(track => track.removeEventListener('ended', recover));
+          video.removeEventListener('pause', recover);
+        };
+        try { if (camera.getRunningTrackCameraCapabilities().torchFeature().isSupported()) setTorchAvailable(true); } catch {}
       } catch (err: any) {
-        console.error(`Scanner error (essai ${attempt + 1}):`, err);
-        // Libérer l'instance ratée avant tout nouvel essai.
-        try { await scannerRef.current?.stop(); } catch {}
-        try { scannerRef.current?.clear(); } catch {}
-        scannerRef.current = null;
-
-        const msg = String(err?.message || err || '');
-        const permissionDenied = msg.includes('NotAllowed') || msg.includes('Permission');
-
-        if (!permissionDenied && attempt < 2 && mounted) {
-          await new Promise((r) => setTimeout(r, 700));
-          return attemptStart(attempt + 1);
+        await session?.close();
+        surface.remove();
+        if (scannerRef.current === scanner) scannerRef.current = null;
+        if (!mounted) return;
+        const message = String(err?.message || err || '');
+        const permissionDenied = /NotAllowed|Permission|permission denied/i.test(message);
+        if (!permissionDenied && !['scanner/start-timeout', 'scanner/no-image'].includes(err?.code) && attempt < 2) {
+          await new Promise(resolve => setTimeout(resolve, 700));
+          if (mounted) return attemptStart(attempt + 1);
+          return;
         }
-
-        if (mounted) {
-          reportError('scanner.camera.start', err, { silent: true, extra: { attempts: attempt + 1, permissionDenied } });
-          setError(
-            permissionDenied
-              ? 'Accès caméra refusé. Autorisez la caméra ou utilisez la saisie manuelle.'
-              : 'Impossible de démarrer la caméra. Réessayez ou utilisez la saisie manuelle.'
-          );
-          setManualMode(true);
-        }
+        reportError('scanner.camera.start', err, { silent: true, extra: { attempts: attempt + 1, permissionDenied } });
+        setError(permissionDenied ? 'Accès caméra refusé. Autorisez la caméra ou utilisez la saisie manuelle.' : 'La caméra ne répond pas. Relancez-la avec « Retour caméra » ou saisissez le numéro du colis, sans vous déconnecter.');
+        setManualMode(true);
       }
     };
+    const timer = setTimeout(() => { void attemptStart(0); }, 100);
+    return () => { clearTimeout(timer); void closeOwned(); };
+  }, [manualMode, pageActive, cameraAttempt, scannerContainerId]);
 
-    // Petit délai pour laisser le DOM se monter
-    const timer = setTimeout(() => { void attemptStart(0); }, 300);
-
-    return () => {
-      mounted = false;
-      clearTimeout(timer);
-      void stopAndClear();
-    };
-  }, [manualMode, stopAndClear]);
+  const restartCamera = () => {
+    recordDiagnosticAction('scanner.camera.restart');
+    setCameraAttempt(value => value + 1);
+  };
 
   // Allumer / éteindre la torche
   const toggleTorch = async () => {
@@ -603,7 +622,10 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
           </p>
         ) : null}
         {/* Footer — Switch mode */}
-        <div className="px-4 py-3 bg-black/80 flex gap-2">
+        <div className="px-4 py-3 bg-black/80 flex flex-wrap gap-2">
+          {!manualMode && <button type="button" onClick={restartCamera} className="min-h-11 flex-1 flex items-center justify-center gap-2 px-3 py-3 bg-white/10 text-white rounded-xl text-sm font-medium">
+            <RefreshCw size={16} /> Relancer la caméra
+          </button>}
           {!manualMode ? (
             <button
             onClick={switchToManual}

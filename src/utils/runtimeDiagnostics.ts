@@ -4,6 +4,7 @@ const actions = new Set([
   'session.start', 'network.online', 'network.offline', 'page.visible', 'page.hidden',
   'ui.button', 'ui.link', 'ui.field', 'ui.submit', 'navigation',
   'scanner.open', 'scanner.close', 'scanner.manual', 'scanner.camera', 'scanner.code.read',
+  'scanner.camera.ready', 'scanner.camera.restart',
   'document.open', 'document.read', 'document.sign',
   'directory.load', 'scan.confirm',
 ]);

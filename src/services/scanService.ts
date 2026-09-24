@@ -3,6 +3,7 @@ import app from '../firebaseConfig';
 import { reportError } from './logService';
 import { operationalDay } from '../utils/operationalDay';
 import { beginDiagnosticOperation } from '../utils/runtimeDiagnostics';
+import { withDeadline } from '../utils/asyncDeadline';
 
 export type ScanSource = 'driver-claim' | 'driver-delivery' | 'driver-pickup' | 'hub-loading' | 'quick-scan' | 'transfer' | 'manual-create';
 export interface ScanReceipt {
@@ -48,7 +49,10 @@ export function scanPackage(input: ScanInput): Promise<ScanReceipt> {
     try {
       const call = httpsCallable<Request, ScanReceipt>(getFunctions(app, 'europe-west1'), 'scanPackage', { timeout: 20000 });
       // Firebase rejects undefined values in callable payloads.
-      const { data } = await call(JSON.parse(JSON.stringify(request)));
+      // Firebase starts its timeout AFTER preparing authentication headers.
+      // A stalled token lookup must not leave the scan queue locked indefinitely.
+      const { data } = await withDeadline(call(JSON.parse(JSON.stringify(request))), 25000,
+        Object.assign(new Error('Confirmation du scan trop longue. Réessayez sans vous déconnecter.'), { code: 'functions/deadline-exceeded' }));
       operation.finish(data.accepted ? 'success' : 'refused');
       pending.delete(key);
       try { localStorage.removeItem(key); } catch { /* memory fallback */ }
