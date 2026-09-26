@@ -3,9 +3,11 @@ import * as functions from 'firebase-functions/v1';
 import { createHash } from 'crypto';
 
 /** Idempotent diagnostic ingestion independent of the browser Firestore cache. */
-export async function recordClientErrorsHandler(data: any, context: functions.https.CallableContext, db: Firestore) {
-  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Connexion requise.');
-  const uid = context.auth.uid;
+export async function recordClientErrorsHandler(data: any, context: functions.https.CallableContext, deps: {
+  db: Firestore; requireActiveCaller: (context: functions.https.CallableContext) => Promise<{ id: string }>;
+}) {
+  const { id: uid } = await deps.requireActiveCaller(context);
+  const { db } = deps;
   if (!Array.isArray(data?.entries) || !data.entries.length || data.entries.length > 20)
     throw new functions.https.HttpsError('invalid-argument', 'Lot de diagnostics invalide.');
   const entries = data.entries.map((entry: any) => {

@@ -60,7 +60,7 @@ admin.initializeApp();
 const db = (0, firestore_1.getFirestore)();
 const auth = (0, auth_1.getAuth)();
 exports.associateCarrierBarcode = functions.region('europe-west1').https.onCall((data, context) => (0, carrierBarcode_1.associateCarrierBarcodeHandler)(data, context, { db, requireActiveCaller, isAdminCaller }));
-exports.recordClientErrors = functions.region('europe-west1').https.onCall((data, context) => (0, clientErrors_1.recordClientErrorsHandler)(data, context, db));
+exports.recordClientErrors = functions.region('europe-west1').https.onCall((data, context) => (0, clientErrors_1.recordClientErrorsHandler)(data, context, { db, requireActiveCaller }));
 exports.employeeVoting = functions.region('europe-west1').runWith({ timeoutSeconds: 120, memory: '256MB' }).https.onCall((data, context) => (0, voting_1.votingHandler)(data, context, {
     db, requireActiveCaller,
     fileMetadata: async (path) => {

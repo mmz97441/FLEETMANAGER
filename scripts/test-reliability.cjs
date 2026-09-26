@@ -71,6 +71,19 @@ const associate = (packageId, value = code, who = manager) => service.associateC
     const user = (await db.collection('users').doc(driver).get()).data();
     assert.equal(user.appVersion, '4.32.0'); assert.equal(user.appBuildId, '123456'); assert.equal(user.role, 'Chauffeur'); assert.notEqual(user.lastSeenAt, '2099-01-01');
   });
+  await check('diagnostics reject disabled, missing and revoked accounts before writing', async () => {
+    for (const state of ['disabled', 'missing', 'revoked']) {
+      const uid = prefix + '-' + state, referenceId = uid + '-error';
+      if (state !== 'missing') await db.collection('users').doc(uid).set({ role: 'Chauffeur', ...(state === 'disabled' ? { isDisabled: true } : { sessionsRevokedAt: 200 }) });
+      await denied(service.recordClientErrors.run({ entries: [{ referenceId, message: 'Rejected diagnostic' }] }, ctx(uid)), 'permission-denied');
+      assert.equal((await db.collection('error_logs').where('referenceId', '==', referenceId).get()).size, 0);
+    }
+    const uid = prefix + '-revoked';
+    const freshContext = { auth: { uid, token: { auth_time: 201 } } };
+    const referenceId = uid + '-new-session';
+    await service.recordClientErrors.run({ entries: [{ referenceId, message: 'Fresh active session' }] }, freshContext);
+    assert.equal((await db.collection('error_logs').where('referenceId', '==', referenceId).get()).size, 1);
+  });
   console.log(`${passed} production reliability server tests passed`);
   await req('firebase-admin/app').deleteApp(req('firebase-admin/app').getApp());
 })().catch(error => { console.error(error); process.exit(1); });

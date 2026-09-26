@@ -28,7 +28,7 @@ const db = getFirestore();
 const auth = getAuth();
 
 export const associateCarrierBarcode = functions.region('europe-west1').https.onCall((data, context) => associateCarrierBarcodeHandler(data, context, { db, requireActiveCaller, isAdminCaller }));
-export const recordClientErrors = functions.region('europe-west1').https.onCall((data, context) => recordClientErrorsHandler(data, context, db));
+export const recordClientErrors = functions.region('europe-west1').https.onCall((data, context) => recordClientErrorsHandler(data, context, { db, requireActiveCaller }));
 
 export const employeeVoting = functions.region('europe-west1').runWith({ timeoutSeconds: 120, memory: '256MB' }).https.onCall((data, context) => votingHandler(data, context, {
   db, requireActiveCaller,

@@ -37,10 +37,9 @@ exports.recordClientErrorsHandler = recordClientErrorsHandler;
 const functions = __importStar(require("firebase-functions/v1"));
 const crypto_1 = require("crypto");
 /** Idempotent diagnostic ingestion independent of the browser Firestore cache. */
-async function recordClientErrorsHandler(data, context, db) {
-    if (!context.auth)
-        throw new functions.https.HttpsError('unauthenticated', 'Connexion requise.');
-    const uid = context.auth.uid;
+async function recordClientErrorsHandler(data, context, deps) {
+    const { id: uid } = await deps.requireActiveCaller(context);
+    const { db } = deps;
     if (!Array.isArray(data?.entries) || !data.entries.length || data.entries.length > 20)
         throw new functions.https.HttpsError('invalid-argument', 'Lot de diagnostics invalide.');
     const entries = data.entries.map((entry) => {
