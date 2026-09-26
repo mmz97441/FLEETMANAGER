@@ -42,6 +42,7 @@ interface ImportShipmentsModalProps {
 interface ParsedRow {
   line: number;               // numéro de ligne dans le fichier (1 = entêtes)
   colisNumber: string;
+  carrierBarcode: string;
   contactName: string;
   address: string;
   postalCode: string;
@@ -64,6 +65,7 @@ const normalize = (s: string): string =>
 // exports courants (ex. fichier tournée : « Numéro colis », « Contact », « Adress »,
 // « Order Number », « Comment », « Weight »…).
 const HEADER_ALIASES: Record<keyof Omit<ParsedRow, 'line' | 'errors'>, string[]> = {
+  carrierBarcode: ['code boiron', 'code transporteur', 'carrierbarcode', 'carrier barcode', 'barcode boiron'],
   colisNumber: ['numero de colis', 'numero colis', 'n° colis', 'n colis', 'colis', 'code colis', 'br', 'barcode', 'code barre'],
   contactName: ['nom du destinataire', 'destinataire', 'nom', 'pharmacie', 'contact', 'client', 'raison sociale'],
   address: ['adresse', 'adress', 'address'],
@@ -147,6 +149,7 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
         : XLSX.read(buf, { type: 'array', sheetRows: 10002 });
       const ws = wb.Sheets[wb.SheetNames[0]];
       const raw = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: '', raw: false });
+      const originalCells = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: '', raw: true });
 
       if (raw.length > 10000) { setError('Limite de 10 000 lignes par fichier.'); setRows(null); return; }
       if (raw.length === 0) { setError('Aucune ligne trouvée dans le fichier.'); setRows(null); return; }
@@ -169,6 +172,7 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
         return {
           line: Number.isInteger(r.__rowNum__) ? r.__rowNum__ + 1 : i + 2,               // ligne 1 = entêtes
           colisNumber: getField(r, 'colisNumber'),
+          carrierBarcode: getField(r, 'carrierBarcode'),
           contactName: getField(r, 'contactName'),
           address: street,
           postalCode,
@@ -178,19 +182,24 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
           weight: getField(r, 'weight'),
           clientReference: getField(r, 'clientReference'),
           comment: getField(r, 'comment'),
-          errors: [],
+          errors: Object.entries(originalCells[i] || {}).some(([key, value]) => HEADER_ALIASES.carrierBarcode.includes(normalize(key)) && typeof value === 'number')
+            ? ['Code Boiron numérique : reformatez la cellule en texte et recopiez les 22 chiffres depuis l’étiquette.'] : [],
         };
       });
 
       // Comptage des numéros de colis (pour repérer les doublons dans le fichier)
       const counts = new Map<string, number>();
+      const carrierCounts = new Map<string, number>();
       for (const p of parsed) {
         const key = p.colisNumber.trim().toUpperCase();
         if (key) counts.set(key, (counts.get(key) || 0) + 1);
+        if (p.carrierBarcode) carrierCounts.set(p.carrierBarcode, (carrierCounts.get(p.carrierBarcode) || 0) + 1);
       }
 
       // 2e passage : contrôle qualité, une liste d'erreurs par ligne
       for (const p of parsed) {
+        if (p.carrierBarcode && (!/^00\d{20}$/.test(p.carrierBarcode) || p.carrierBarcode.slice(2, 10) !== p.clientReference.trim())) p.errors.push('Code Boiron invalide ou différent de la référence de commande');
+        if (p.carrierBarcode && (carrierCounts.get(p.carrierBarcode) || 0) > 1) p.errors.push('Code Boiron attribué à plusieurs lignes');
         const num = p.colisNumber.trim();
         if (!num) {
           p.errors.push('Numéro de colis manquant');
@@ -228,6 +237,7 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
         'Adresse': '19 RUE ADRIEN LAGOURGUE 97424 PITON SAINT LEU',
         'Téléphone': '0262343377',
         'Référence': '13953047',
+        'Code Boiron': '',
         'Remarque': '',
       },
       {
@@ -263,7 +273,7 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
     const worksheet = XLSX.utils.json_to_sheet(rejected.map(row => ({
       'Numéro de colis': row.colisNumber, Destinataire: row.contactName, Adresse: row.address,
       'Code postal': row.postalCode, Ville: row.city, Téléphone: row.contactPhone, Email: row.contactEmail,
-      'Poids (kg)': row.weight, Référence: row.clientReference, Remarque: row.comment,
+      'Poids (kg)': row.weight, Référence: row.clientReference, 'Code Boiron': row.carrierBarcode, Remarque: row.comment,
       'Ligne source': row.line, Motif: row.errors.join(' ; ') || 'Import non confirmé : reprendre la même référence pour vérifier sans doublon',
     })));
     const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, worksheet, 'Lignes à vérifier');
@@ -378,6 +388,7 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
             </button>
             <p className="text-sm text-slate-600 text-center mt-1">
               Remplissez le modèle avec vos expéditions, puis importez-le. Chaque numéro de colis doit commencer par BR.
+              Pour Boiron, ajoutez le code de chaque carton dans la colonne « Code Boiron », au format texte pour conserver les 22 chiffres.
             </p>
           </>
         )}
@@ -430,6 +441,7 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
             <div className="sm:max-h-72 sm:overflow-y-auto border-t border-slate-200 divide-y mb-3">
               {visibleRows.map(row => <div key={row.line} className={`p-3 text-sm ${row.errors.length ? 'bg-red-50 text-red-900' : 'text-slate-700'}`}>
                 <p className="font-semibold break-words">Ligne {row.line} · {row.colisNumber || '(sans numéro)'} · {row.contactName || '(sans destinataire)'}</p>
+                {row.carrierBarcode && <p className="break-all">Code Boiron : {row.carrierBarcode} · Commande : {row.clientReference}</p>}
                 {row.errors.length ? <ul className="mt-1 list-disc pl-5">{row.errors.map(message => <li key={message}>{message}</li>)}</ul> : <p>{confirmed.has(row.line) ? 'Confirmé : enregistré' : attempted ? 'Non confirmé' : 'Prêt à importer'} · {row.city}</p>}
               </div>)}
               {visibleRows.length === 0 && <p className="p-3 text-sm text-slate-600">Aucune ligne en erreur.</p>}

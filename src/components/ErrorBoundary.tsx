@@ -1,6 +1,7 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { RefreshCw, ShieldAlert } from 'lucide-react';
 import { reportError } from '../services/logService';
+import { reloadApplication } from '../utils/reloadApplication';
 
 interface ErrorBoundaryProps {
   children?: ReactNode;
@@ -31,7 +32,7 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   }
 
   handleReload = () => {
-    window.location.reload();
+    void reloadApplication();
   };
 
   render() {

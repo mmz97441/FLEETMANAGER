@@ -1,6 +1,8 @@
 import { scanPackage, scanReceiptLabel } from '../services/scanService';
 import { useOperationalDay } from '../hooks/useOperationalDay';
 import PackageScanInfo from './PackageScanInfo';
+import CarrierBarcodeModal from './CarrierBarcodeModal';
+import { normalizeRole } from '../utils/role';
 /**
  * HUB OPERATIONS — v3.2.1
  *
@@ -81,6 +83,7 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
   const [activeTab, setActiveTab] = useState<HubOpsTab>('reception');
   const [selectedHubId, setSelectedHubId] = useState<string>('');
   const [showScanner, setShowScanner] = useState(false);
+  const [showCarrierAssociation, setShowCarrierAssociation] = useState(false);
   const [scanMode, setScanMode] = useState<'reception' | 'loading' | null>(null);
   const [processing, setProcessing] = useState(false);
   const receptionLock = useRef(false);
@@ -99,6 +102,7 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
   const loadingQueue = useRef(Promise.resolve());
   const [scanPending, setScanPending] = useState(0);
   const isDriver = currentUser.role === UserRole.DRIVER;
+  const canAssociateCarrier = [UserRole.ADMIN, UserRole.PRESIDENT, UserRole.DIRECTOR, UserRole.SECRETARY].includes(normalizeRole(currentUser.role));
 
   // ============================================================================
   // SUBSCRIPTIONS
@@ -323,6 +327,8 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
 
   return (
     <div className="space-y-4">
+      {showCarrierAssociation && <CarrierBarcodeModal onClose={() => setShowCarrierAssociation(false)} />}
+      {canAssociateCarrier && <button type="button" onClick={() => setShowCarrierAssociation(true)} className="min-h-11 px-3 border rounded-lg font-semibold">Associer une étiquette Boiron</button>}
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>

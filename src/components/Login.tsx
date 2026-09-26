@@ -9,7 +9,7 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(() => new URLSearchParams(window.location.search).get('recover') === '1' ? 'Saisissez votre email puis choisissez « Mot de passe oublié ? ».' : '');
   const [success, setSuccess] = useState('');
   const [busy, setBusy] = useState<'login' | 'reset' | null>(null);
   const handleSubmit = async (event: React.FormEvent) => {

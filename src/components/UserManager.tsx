@@ -447,7 +447,9 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
       }
     } catch (error) {
       console.error('Erreur renvoi invitation:', error);
-      alert('❌ Erreur lors du renvoi de l\'invitation');
+      alert((error as { code?: string })?.code === 'functions/already-exists'
+        ? 'Ce compte est déjà activé. Le salarié peut se connecter ou utiliser « Mot de passe oublié ? » sur l’écran de connexion.'
+        : 'L’invitation n’a pas pu être renvoyée. Vérifiez la connexion et réessayez.');
     } finally {
       setActionLoading(null);
     }

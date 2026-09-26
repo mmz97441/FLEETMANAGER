@@ -5,7 +5,9 @@ import { useDialogLayer } from './hooks/useDialogLayer';
 import { addMaintenanceToFirestore } from './services/firestore';
 import PendingSyncBanner from './components/PendingSyncBanner';
 
-import React, { useState, useMemo, useEffect, useLayoutEffect, useRef, Suspense, lazy } from 'react';
+import React, { useState, useMemo, useEffect, useLayoutEffect, useRef, Suspense } from 'react';
+import { resilientLazy as lazy } from './components/ResilientPage';
+import { reloadApplication } from './utils/reloadApplication';
 // @ts-ignore
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { auth } from "./firebaseConfig";
@@ -1212,7 +1214,7 @@ const App: React.FC = () => {
               <div className="max-w-7xl mx-auto min-h-full">
                 <div className="lg:hidden mb-3"><WorkspaceSearch onNavigate={handleViewChange} /></div>
                 {isOffline && <div role="status" className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 flex items-start gap-2"><WifiOff size={18} className="shrink-0 mt-0.5"/><span>Hors connexion : les validations de livraison sont conservées sur ce téléphone. Les autres opérations nécessitent le réseau.</span></div>}
-                {updateAvailable && <div role="status" className="mb-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950 flex flex-wrap items-center gap-3"><span className="flex-1">Une nouvelle version est disponible. Terminez vos saisies et vos envois avant de recharger.</span><button type="button" onClick={async () => { if (await confirmAction({ title: 'Charger la nouvelle version ?', message: 'Vérifiez que vos saisies sont enregistrées. Les preuves en attente restent conservées sur ce téléphone.', confirmLabel: 'Recharger', cancelLabel: 'Continuer mon travail' })) window.location.reload(); }} className="min-h-11 px-3 rounded-lg border border-blue-400 font-semibold">Recharger</button></div>}
+                {updateAvailable && <div role="status" className="mb-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950 flex flex-wrap items-center gap-3"><span className="flex-1">Une nouvelle version est disponible. Terminez vos saisies et vos envois avant de recharger.</span><button type="button" onClick={() => void reloadApplication()} className="min-h-11 px-3 rounded-lg border border-blue-400 font-semibold">Recharger</button></div>}
                 <PendingSyncBanner userId={currentUser.id} />
                 <Suspense fallback={<PageLoader />}>
                   {renderContent()}

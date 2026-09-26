@@ -104,12 +104,15 @@ const ActivateAccount: React.FC<ActivateAccountProps> = ({ token, onSuccess }) =
         setTimeout(() => {
           window.location.href = '/';
         }, 3000);
+      } else if (result.errorCode === 'functions/already-exists') {
+        setPageState('used'); setPassword(''); setConfirmPassword('');
       } else {
         setError(result.message || 'Erreur lors de l\'activation');
       }
 
     } catch (err: any) {
       console.error('Erreur création compte:', err);
+      if (err?.code === 'functions/already-exists') { setPageState('used'); setPassword(''); setConfirmPassword(''); return; }
       setError(err.message || 'Une erreur est survenue. Veuillez réessayer.');
     } finally {
       setLoading(false);
@@ -235,7 +238,7 @@ const ActivateAccount: React.FC<ActivateAccountProps> = ({ token, onSuccess }) =
           </div>
           <h1 className="text-2xl font-bold text-slate-800 mb-2">Compte déjà activé</h1>
           <p className="text-slate-500 mb-4">
-            Ce lien d'invitation a déjà été utilisé.
+            Ce compte existe déjà. Vous pouvez reprendre votre accès sans créer un autre compte.
           </p>
           {invitation?.email && (
             <p className="text-sm text-slate-400 mb-6">
@@ -253,6 +256,7 @@ const ActivateAccount: React.FC<ActivateAccountProps> = ({ token, onSuccess }) =
           >
             Se connecter
           </a>
+          <a href="/?recover=1" className="block mt-3 min-h-11 p-3 rounded-xl border border-slate-300 font-semibold">Mot de passe oublié</a>
         </div>
       </div>
     );

@@ -15,10 +15,13 @@
  * ou le hook useToast().
  */
 
-import { db } from '../firebaseConfig';
+import app, { db } from '../firebaseConfig';
+import { getFunctions, httpsCallable } from 'firebase/functions';
+import { withDeadline } from '../utils/asyncDeadline';
+import { noteStorageFailure } from '../utils/storageRecovery';
 import { recordSupportErrorReference } from '../utils/supportContext';
 import { captureRuntimeDiagnostics, resetRuntimeDiagnostics } from '../utils/runtimeDiagnostics';
-import { collection, addDoc, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
 
 export type LogLevel = 'error' | 'warning' | 'info' | 'success';
 
@@ -110,44 +113,59 @@ export const notifyInfo = (message: string, durationMs?: number): void => emit('
 
 const LS_KEY = 'fleet_error_logs';
 const LS_MAX = 50;
+const memoryBuffer = new Map<string, Record<string, unknown>>();
 
 const readLocal = (): Record<string, unknown>[] => {
+  let entries: Record<string, unknown>[] = [];
   try {
     const raw = localStorage.getItem(LS_KEY);
-    const entries = raw ? JSON.parse(raw) : [];
-    return Array.isArray(entries) ? entries.filter(entry => entry && typeof entry === 'object').slice(-LS_MAX) : [];
-  } catch { return []; }
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (Array.isArray(parsed)) entries = parsed.filter(entry => entry && typeof entry === 'object');
+  } catch { /* Memory still allows an online report when storage is unavailable. */ }
+  return [...new Map([...entries, ...memoryBuffer.values()].map(e => [String(e.referenceId || JSON.stringify(e)), e])).values()].slice(-LS_MAX);
 };
 
 const bufferLocal = (entry: Record<string, unknown>): void => {
+  memoryBuffer.set(String(entry.referenceId), entry);
+  if (memoryBuffer.size > LS_MAX) memoryBuffer.delete(memoryBuffer.keys().next().value!);
   try {
     const arr = readLocal();
-    arr.push(entry);
-    while (arr.length > LS_MAX) arr.shift();
     localStorage.setItem(LS_KEY, JSON.stringify(arr));
-  } catch { /* localStorage plein ou indisponible : on abandonne silencieusement */ }
+  } catch { /* Keep the in-memory copy until an acknowledged upload. */ }
 };
 
 /** Erreurs bufferisées localement (consultable même hors-ligne). */
 export const getLocalErrorLogs = (): Record<string, unknown>[] => readLocal();
 
+const sendDiagnostics = (data: { entries: Record<string, unknown>[] }) => httpsCallable<{ entries: Record<string, unknown>[] }, { acknowledged: string[] }>(getFunctions(app, 'europe-west1'), 'recordClientErrors', { timeout: 15000 })(data);
 let flushing: Promise<void> | null = null;
-/** One flush per tab. Remove only confirmed entries, never overwrite errors buffered during a request. */
+/** The local copy precedes the network call. Stable references make uncertain retries safe. */
 export const flushLocalErrorLogs = (): Promise<void> => {
   if (flushing) return flushing;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return Promise.resolve();
+  if (!currentContext.userId) return Promise.resolve();
+  const uid = currentContext.userId;
+  if (!readLocal().some(e => !e.userId || e.userId === uid)) return Promise.resolve();
   const task = (async () => {
-    for (const entry of readLocal()) {
-      try { await addDoc(collection(db, 'error_logs'), entry); }
-      catch { break; }
+    while (currentContext.userId === uid) {
+      const pending = readLocal().filter(e => !e.userId || e.userId === uid).slice(0, 20);
+      if (!pending.length) break;
+      // Older buffered entries did not always have a reference. Persist one before sending.
+      for (const entry of pending) if (!entry.referenceId) {
+        const all = readLocal(), index = all.findIndex(e => JSON.stringify(e) === JSON.stringify(entry));
+        entry.referenceId = `legacy-${genId()}`;
+        if (index >= 0) { all[index] = entry; try { localStorage.setItem(LS_KEY, JSON.stringify(all)); } catch {} }
+      }
       try {
-        const remaining = readLocal();
-        const index = remaining.findIndex(candidate => entry.referenceId
-          ? candidate.referenceId === entry.referenceId
-          : JSON.stringify(candidate) === JSON.stringify(entry));
-        if (index >= 0) remaining.splice(index, 1);
+        const result = await withDeadline(sendDiagnostics({ entries: pending }), 18000, new Error('Diagnostic en attente du réseau.'));
+        const acknowledged = new Set(result.data.acknowledged);
+        const sent = new Set(pending.map(e => e.referenceId).filter(id => acknowledged.has(String(id))));
+        if (!sent.size) break;
+        const remaining = readLocal().filter(e => !sent.has(e.referenceId));
+        for (const id of sent) memoryBuffer.delete(String(id));
         if (remaining.length) localStorage.setItem(LS_KEY, JSON.stringify(remaining));
         else localStorage.removeItem(LS_KEY);
-      } catch { /* Storage is best-effort; never touch business outboxes. */ }
+      } catch { break; } // Keep the entire uncertain batch; never recurse through reportError.
     }
   })();
   flushing = task;
@@ -182,13 +200,8 @@ interface ReportOptions {
 }
 
 const persist = async (entry: Record<string, unknown>): Promise<void> => {
-  try {
-    await addDoc(collection(db, 'error_logs'), entry);
-  } catch (e) {
-    // Firestore indisponible (hors-ligne, non authentifié, règle) -> tampon local
-    bufferLocal(entry);
-    console.warn('[logService] error_logs indisponible, bufferisé en local', e);
-  }
+  bufferLocal(entry);
+  await flushLocalErrorLogs();
 };
 
 /**
@@ -196,6 +209,7 @@ const persist = async (entry: Record<string, unknown>): Promise<void> => {
  * @param context où l'erreur s'est produite (ex: "pickup.claim", "import.parse")
  */
 export const reportError = (context: string, error: unknown, opts: ReportOptions = {}): void => {
+  noteStorageFailure(error);
   const { message, stack } = serializeError(error);
   const level = opts.level ?? 'error';
   const referenceId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `error-${Date.now()}-${Math.random().toString(36).slice(2)}`;
