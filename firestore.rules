@@ -66,7 +66,7 @@ service cloud.firestore {
     // Champs sensibles d'un profil utilisateur qu'un user ne doit JAMAIS modifier sur lui-même
     // (escalade de privilèges sinon : un chauffeur ferait updateDoc({ role: 'Admin' }))
     function userImmutableFields() {
-      return ['role', 'customPermissions', 'id', 'createdAt', 'originalUserId', 'email', 'companyName', 'companyId', 'leaveBalance', 'isDisabled', 'disabledAt', 'disabledBy', 'status', 'activatedAt', 'assignedVehicleId', 'codePrefix', 'sessionsRevokedAt', 'lastSeenAt'];
+      return ['role', 'customPermissions', 'id', 'createdAt', 'originalUserId', 'email', 'companyName', 'companyId', 'leaveBalance', 'isDisabled', 'disabledAt', 'disabledBy', 'status', 'activatedAt', 'assignedVehicleId', 'codePrefix', 'sessionsRevokedAt', 'lastSeenAt', 'appVersion', 'appBuildId'];
     }
 
     // Vérifie que l'utilisateur est authentifié
@@ -341,16 +341,16 @@ service cloud.firestore {
         || resource.data.clientId == request.auth.uid
         || (getUserData().get('companyName','') != '' && resource.data.clientName == getUserData().companyName)
       );
-      allow create: if isAdminRole()
+      allow create: if !request.resource.data.keys().hasAny(['carrierBarcode']) && (isAdminRole()
         || (isDriver() && request.resource.data.currentDriverId == request.auth.uid
-          && !request.resource.data.keys().hasAny(['lastScannedAt','lastScannedMissionId','lastScannedBy','lastScanSource','firstScannedForMissionAt']))
+          && !request.resource.data.keys().hasAny(['lastScannedAt','lastScannedMissionId','lastScannedBy','lastScanSource','firstScannedForMissionAt'])))
 ;
-      allow update: if isAdminRole() || (isDriver()
+      allow update: if !request.resource.data.diff(resource.data).affectedKeys().hasAny(['carrierBarcode']) && (isAdminRole() || (isDriver()
         && (resource.data.get('currentDriverId','') == request.auth.uid || (resource.data.get('currentDriverId',null) == null && resource.data.get('missionId','') != '' && get(/databases/$(database)/documents/missions/$(resource.data.missionId)).data.driverId == request.auth.uid))
         && request.resource.data.currentDriverId == request.auth.uid
         && (!(resource.data.status in ['Livré','Retourné']) || request.resource.data.status == resource.data.status)
         && (!resource.data.keys().hasAny(['pod']) || request.resource.data.pod == resource.data.pod)
-        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['clientId','clientName','companyId','externalId','orderNumber','barcode','lastScannedAt','lastScannedMissionId','lastScannedBy','lastScanSource','firstScannedForMissionAt']));
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['clientId','clientName','companyId','externalId','orderNumber','barcode','lastScannedAt','lastScannedMissionId','lastScannedBy','lastScanSource','firstScannedForMissionAt'])));
       allow delete: if isAdminRole();
     }
 

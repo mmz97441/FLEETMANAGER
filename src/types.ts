@@ -96,6 +96,8 @@ export interface User {
   lastLoginAt?: string;
   // Dernier signal reçu par le serveur depuis une application visible, hors GPS.
   lastSeenAt?: string;
+  appVersion?: string;
+  appBuildId?: string;
   // Date d'activation du compte (posée par la Cloud Function activateAccount)
   activatedAt?: string;
   // Permissions personnalisées (exceptions au template de rôle)
@@ -886,6 +888,7 @@ export interface Package {
   externalId: string;              // "C0004911-15087911"
   orderNumber: string;             // "15087911" → code barre
   barcode?: string;                // Code barre si différent de orderNumber
+  carrierBarcode?: string;         // Étiquette Boiron associée au carton, vérifiée côté serveur
   
   // Destination
   address: string;

@@ -315,6 +315,7 @@ export const validateInvitationTokenCF = async (
 // ============================================================================
 
 export interface ActivateAccountResult {
+  errorCode?: string;
   success: boolean;
   message: string;
   email?: string;
@@ -350,7 +351,7 @@ export const activateAccountCF = async (
     if (error.code === "functions/already-exists") {
       errorMessage = "Ce compte existe déjà. Utilisez 'Mot de passe oublié' pour vous connecter.";
     } else if (error.code === "functions/deadline-exceeded") {
-      errorMessage = "Ce lien a expiré. Demandez une nouvelle invitation.";
+      errorMessage = "La confirmation prend trop de temps. Vérifiez votre connexion et réessayez ; votre lien n’est pas forcément expiré.";
     } else if (error.code === "functions/not-found") {
       errorMessage = "Lien d'invitation invalide.";
     } else if (error.message) {
@@ -360,6 +361,7 @@ export const activateAccountCF = async (
     return {
       success: false,
       message: errorMessage,
+      errorCode: error.code,
     };
   }
 };

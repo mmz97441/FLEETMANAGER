@@ -13,17 +13,22 @@ export function createPresencePublisher(deps: {
   report: (error: unknown) => void;
 }) {
   let stopped = false, sending = false, login = true, lastSuccess = 0, reported = false;
+  let generation = 0, startedAt = 0;
   return {
     async tick(now = Date.now()) {
+      if (!deps.visible()) { generation++; sending = false; return; }
+      if (sending && now - startedAt >= 20000) { generation++; sending = false; }
       if (stopped || sending || !deps.visible() || now - lastSuccess < 45000) return;
       sending = true;
+      startedAt = now;
+      const attempt = ++generation;
       try {
         await deps.send(login);
-        if (!stopped) { login = false; lastSuccess = now; reported = false; }
+        if (!stopped && attempt === generation) { login = false; lastSuccess = now; reported = false; }
       } catch (error) {
-        if (!stopped && !reported) { reported = true; deps.report(error); }
-      } finally { sending = false; }
+        if (!stopped && attempt === generation && !reported) { reported = true; deps.report(error); }
+      } finally { if (attempt === generation) sending = false; }
     },
-    stop() { stopped = true; },
+    stop() { stopped = true; generation++; },
   };
 }

@@ -19,6 +19,7 @@ export class ScanIdentificationError extends Error {
 }
 
 export interface ScannableCodes {
+  carrierBarcode?: string;
   barcode?: string;
   externalId?: string;
   orderNumber?: string;
@@ -40,7 +41,7 @@ export interface ScannableCodes {
  * l'est pas. Ces deux couches ne doivent donc PAS être « unifiées » sur ce point.
  */
 export const packageScanCodes = (pkg: ScannableCodes): string[] =>
-  [pkg.barcode, pkg.externalId, pkg.orderNumber]
+  [pkg.carrierBarcode, pkg.barcode, pkg.externalId, pkg.orderNumber]
     .filter((c): c is string => !!c && c.trim() !== '')
     .map(c => c.trim().toUpperCase());
 

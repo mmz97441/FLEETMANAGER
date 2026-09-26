@@ -1,0 +1,54 @@
+import {readFile,writeFile,mkdir} from 'node:fs/promises';
+const output='/private/tmp/fleet-reliability-browser-results';
+const [port]=(await readFile('/private/tmp/fleet-reliability-browser/DevToolsActivePort','utf8')).trim().split('\n');
+const tab=await(await fetch(`http://127.0.0.1:${port}/json/new?about:blank`,{method:'PUT'})).json();
+const ws=new WebSocket(tab.webSocketDebuggerUrl);await new Promise(r=>ws.addEventListener('open',r,{once:true}));let id=0;const pending=new Map(),checks=[],errors=[];
+ws.addEventListener('message',e=>{const m=JSON.parse(e.data);if(m.id){const p=pending.get(m.id);if(p){pending.delete(m.id);m.error?p.reject(m.error):p.resolve(m.result)}}if(m.method==='Runtime.exceptionThrown')errors.push(m.params.exceptionDetails.exception?.description||m.params.exceptionDetails.text)});
+const call=(method,params={})=>new Promise((resolve,reject)=>{pending.set(++id,{resolve,reject});ws.send(JSON.stringify({id,method,params}))});
+const ev=async expression=>{const r=await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.exception?.description);return r.result.value};
+const pause=ms=>new Promise(r=>setTimeout(r,ms));const wait=async expr=>{for(let i=0;i<160;i++){if(await ev(expr))return;await pause(100)}throw Error('Timeout '+expr)};
+const check=async(name,expr)=>checks.push({name,pass:!!(await ev(expr))});
+const click=async text=>{await ev(`[...document.querySelectorAll('button')].find(b=>b.innerText.trim()===${JSON.stringify(text)})?.click()`);await pause(100)};
+const type=async(text,selector)=>{await ev(`document.querySelector(${JSON.stringify(selector)}).focus()`);await call('Input.insertText',{text});await pause(30)};
+await call('Runtime.enable');await call('Page.enable');await call('Network.enable');await call('Network.setBlockedURLs',{urls:['*://*.googleapis.com/*','*://*.firebaseio.com/*','*://*.cloudfunctions.net/*','*://*.run.app/*']});
+try {
+await call('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+await call('Page.navigate',{url:'http://127.0.0.1:5250/'});await wait(`document.body?.innerText.includes('Réessayer cet écran')`);
+await check('Page failure preserves navigation and a surrounding draft',`document.querySelector('nav')&&document.querySelector('input').value==='Saisie en cours'`);
+await ev(`window.loadMode='ok'`);await click('Réessayer cet écran');await wait(`document.body?.innerText.includes('Mission fictive chargée')`);
+await check('Page retry succeeds in same session',`document.querySelector('input').value==='Saisie en cours'&&window.logged.some(e=>e.context==='page.module.load')`);
+await ev(`localStorage.setItem('pending-proof','photo-synthetic');window.failStorage();window.failStorage()`);
+await wait(`document.body?.innerText.includes('Relancer sans se déconnecter')`);await click('Relancer sans se déconnecter');await wait(`document.body?.innerText.includes('Recharger l’application ?')`);await click('Rester ici');
+await check('Storage recovery is explicit and does not clear pending evidence',`localStorage.getItem('pending-proof')==='photo-synthetic'&&document.querySelector('input').value==='Saisie en cours'`);
+await call('Page.navigate',{url:'http://127.0.0.1:5250/?case=carrier'});await wait(`document.body?.innerText.includes('Retrouver le colis')`);
+await type('BR1234','[role=dialog] input');await click('Retrouver le colis');await wait(`document.body?.innerText.includes('Pharmacie fictive')`);
+await type('0012345678300123450101','[role=dialog] input[inputmode=numeric]');
+await check('No association without physical verification',`[...document.querySelectorAll('button')].find(b=>b.innerText==='Confirmer la correspondance').disabled`);
+await ev(`document.querySelector('input[type=checkbox]').click();window.rejectAssociation=true`);await click('Confirmer la correspondance');await wait(`document.body?.innerText.includes('Confirmation trop longue')`);
+await check('An uncertain association preserves both labels for an idempotent retry',`document.querySelector('input[inputmode=numeric]').value==='0012345678300123450101'&&document.body?.innerText.includes('BR1234')`);
+await click('Confirmer la correspondance');await wait(`document.body?.innerText.includes('Le chauffeur peut maintenant le scanner')`);
+await check('Office association retries the exact verified carton without taking ownership',`window.calls.length===2&&JSON.stringify(window.calls[0])===JSON.stringify(window.calls[1])&&window.calls[1].data.packageId==='parcel-test'&&window.calls[1].data.verified===true`);
+await mkdir(output,{recursive:true});const shot=await call('Page.captureScreenshot',{format:'png'});await writeFile(output+'/carrier-390.png',Buffer.from(shot.data,'base64'));
+await call('Page.navigate',{url:'http://127.0.0.1:5250/?case=activate'});await wait(`document.querySelectorAll('input[type=password]').length===2`);
+await type('Synthetic-only-123','input[type=password]');await type('Synthetic-only-123','input[placeholder="Retapez votre mot de passe"]');
+await ev(`document.querySelector('form').requestSubmit()`);await wait(`document.body?.innerText.includes('Compte déjà activé')`);
+await check('Existing account has direct login and password recovery instead of an activation loop',`!!document.querySelector('a[href="/?recover=1"]')&&document.body?.innerText.includes('Se connecter')`);
+const xlsx = await import('xlsx');
+const baseRow = {'Numéro de colis':'BR1234','Destinataire':'Pharmacie fictive','Adresse':'1 RUE FICTIVE 97400 SAINT DENIS','Téléphone':'0262000000','Référence':'12345678','Code Boiron':'0012345678300123450101'};
+const file='/private/tmp/fleet-reliability-import.xlsx';
+async function importRows(rows) {
+  const workbook=xlsx.utils.book_new(), sheet=xlsx.utils.json_to_sheet(rows); xlsx.utils.book_append_sheet(workbook,sheet,'Fictif');
+  await writeFile(file,xlsx.write(workbook,{type:'buffer',bookType:'xlsx'}));
+  await call('Page.navigate',{url:'http://127.0.0.1:5250/?case=import'});await wait(`!!document.querySelector('input[type=file]')`);
+  const {root}=await call('DOM.getDocument');const {nodeId}=await call('DOM.querySelector',{nodeId:root.nodeId,selector:'input[type=file]'});
+  await call('DOM.setFileInputFiles',{nodeId,files:[file]});await wait(`document.body?.innerText.includes('Ligne 2')`);
+}
+await importRows([baseRow]);
+await check('Import preserves a native label as text including leading zeroes',`document.body?.innerText.includes('0012345678300123450101')&&document.body?.innerText.includes('Prêt à importer')`);
+await importRows([{...baseRow,'Code Boiron':Number(baseRow['Code Boiron'])}]);
+await check('Import refuses numeric cells that may have rounded the barcode',`document.body?.innerText.includes('Code Boiron numérique')&&!document.body?.innerText.includes('Prêt à importer')`);
+await importRows([baseRow,{...baseRow,'Numéro de colis':'BR1235'}]);
+await check('Import rejects a native code reused for two cartons',`document.body?.innerText.includes('Code Boiron attribué à plusieurs lignes')&&!document.body?.innerText.includes('Prêt à importer')`);
+checks.push({name:'No unhandled JavaScript error',pass:errors.length===0});
+await writeFile(output+'/checks.json',JSON.stringify({checks,errors},null,2));console.log(JSON.stringify({checks,errors},null,2));if(checks.some(c=>!c.pass))process.exitCode=1;
+} finally {await call('Page.close');ws.close()}

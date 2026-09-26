@@ -1,4 +1,6 @@
 import { receivePackagesAtHubHandler } from './hubReception';
+import { associateCarrierBarcodeHandler, validatedCarrierBarcode, checkCarrierBarcode } from './carrierBarcode';
+import { recordClientErrorsHandler } from './clientErrors';
 import { votingHandler } from './voting';
 import { getStorage } from 'firebase-admin/storage';
 import { scanPackageHandler } from './scanPackage';
@@ -24,6 +26,9 @@ admin.initializeApp();
 
 const db = getFirestore();
 const auth = getAuth();
+
+export const associateCarrierBarcode = functions.region('europe-west1').https.onCall((data, context) => associateCarrierBarcodeHandler(data, context, { db, requireActiveCaller, isAdminCaller }));
+export const recordClientErrors = functions.region('europe-west1').https.onCall((data, context) => recordClientErrorsHandler(data, context, db));
 
 export const employeeVoting = functions.region('europe-west1').runWith({ timeoutSeconds: 120, memory: '256MB' }).https.onCall((data, context) => votingHandler(data, context, {
   db, requireActiveCaller,
@@ -1073,7 +1078,9 @@ export const recordUserPresence = functions.region('europe-west1').https.onCall(
       throw new functions.https.HttpsError('permission-denied', 'Session inactive.');
     const now = Date.now(), iso = new Date(now).toISOString();
     if (data.login || !user.lastSeenAt || now - Date.parse(user.lastSeenAt) >= 45000) {
-      tx.update(ref, { lastSeenAt: iso, ...(data.login ? { lastLoginAt: iso } : {}) });
+      const appVersion = typeof data.appVersion === 'string' && /^\d+\.\d+\.\d+$/.test(data.appVersion) ? data.appVersion : null;
+      const buildId = typeof data.buildId === 'string' && /^\d{1,20}$/.test(data.buildId) ? data.buildId : null;
+      tx.update(ref, { lastSeenAt: iso, ...(data.login ? { lastLoginAt: iso } : {}), ...(appVersion && buildId ? { appVersion, appBuildId: buildId } : {}) });
     }
     return { success: true };
   });
@@ -1914,6 +1921,7 @@ export const importPackages = functions
         'externalId',
         'orderNumber',
         'barcode',
+        'carrierBarcode',
         'address',
         'city',
         'postalCode',
@@ -1940,6 +1948,7 @@ export const importPackages = functions
       ];
       const p: any = {};
       for (const key of allowed) if (raw[key] !== undefined) p[key] = raw[key];
+      if (p.carrierBarcode) p.carrierBarcode = validatedCarrierBarcode(p.carrierBarcode, p.clientReference);
       p.movements = [
         {
           action: 'IMPORTED',
@@ -2010,6 +2019,31 @@ export const importPackages = functions
           'Des doublons existent déjà pour cette référence. Faites-les contrôler avant de reprendre l’import.',
         );
       const ids: string[] = [];
+      const carrierReservations: Awaited<ReturnType<typeof checkCarrierBarcode>>[] = [];
+      const codes = new Map<string, string>();
+      const codesByPackage = new Map<string, string>();
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i], code = row.p.carrierBarcode;
+        if (!code) continue;
+        const target = legacy[i]?.docs[0] || snapshots[i], id = target.exists ? target.id : row.id;
+        if (codes.has(code) && codes.get(code) !== id) throw new functions.https.HttpsError('already-exists', 'Deux colis du fichier portent le même code Boiron.');
+        if (codesByPackage.has(id) && codesByPackage.get(id) !== code) throw new functions.https.HttpsError('already-exists', 'Un colis ne peut pas recevoir deux codes Boiron dans le même import.');
+        for (let j = 0; j < rows.length; j++) {
+          const other = legacy[j]?.docs[0] || snapshots[j], otherId = other.exists ? other.id : rows[j].id;
+          if (otherId !== id && ['barcode', 'externalId', 'orderNumber'].some(field => rows[j].p[field] === code))
+            throw new functions.https.HttpsError('already-exists', 'Un code Boiron correspond aussi à un autre colis du fichier.');
+        }
+        if (codes.has(code)) continue;
+        codesByPackage.set(id, code);
+        codes.set(code, id);
+        if (target.exists && target.data()?.carrierBarcode !== code)
+          throw new functions.https.HttpsError('failed-precondition', 'Ce colis existe déjà. Vérifiez et associez son code depuis les opérations du hub.');
+        carrierReservations.push(await checkCarrierBarcode(tx, db, code, id));
+      }
+      for (const [code, id] of codes) {
+        const reservation = carrierReservations.shift()!;
+        if (!reservation.exists) tx.create(reservation.ref, { code, packageId: id, createdAt: new Date().toISOString(), createdBy: caller.id });
+      }
       const written = new Set<string>();
       const now = new Date().toISOString();
       rows.forEach((row: any, i: number) => {
@@ -2321,6 +2355,8 @@ export const getTeamDirectory = functions
             assignedVehicleId: u.assignedVehicleId || null,
             lastLoginAt: u.lastLoginAt || null,
             lastSeenAt: u.lastSeenAt || null,
+            appVersion: u.appVersion || null,
+            appBuildId: u.appBuildId || null,
           };
         }),
     };

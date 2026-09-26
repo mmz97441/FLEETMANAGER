@@ -116,6 +116,15 @@ await check('Self-create privileged profile', 'denied', () =>
 await check('Driver cannot forge server presence timestamp', 'denied', () =>
   updateDoc(doc(db('driverA'), 'users', 'driverA'), { lastSeenAt: '2099-01-01T00:00:00.000Z' }),
 );
+await check('Driver cannot forge a reported application version', 'denied', () =>
+  updateDoc(doc(db('driverA'), 'users', 'driverA'), { appVersion: '99.0.0' }),
+);
+await check('Driver cannot forge a carrier barcode on its parcel', 'denied', () =>
+  updateDoc(doc(db('driverB'), 'packages', 'pB'), { carrierBarcode: '0012345678300123450101' }),
+);
+await check('Driver cannot reserve a carrier barcode directly', 'denied', () =>
+  setDoc(doc(db('driverA'), 'carrier_barcodes', 'forged'), { packageId: 'pB' }),
+);
 await check('Legacy client can still record its own opening date', 'allowed', () =>
   updateDoc(doc(db('driverA'), 'users', 'driverA'), { lastLoginAt: '2026-09-24T00:00:00.000Z' }),
 );

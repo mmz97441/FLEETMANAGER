@@ -655,6 +655,7 @@ export const createClientShipmentsBatch = async (params: {
   deliveryDate?: string;   // Jour de livraison souhaité (YYYY-MM-DD) — daté sur chaque colis
   rows: Array<{
     colisNumber: string;   // ex. BR-000123
+    carrierBarcode?: string;
     contactName: string;
     address: string;
     postalCode: string;
@@ -683,6 +684,7 @@ export const createClientShipmentsBatch = async (params: {
       externalId: code,
       orderNumber: code,
       barcode: code,
+      ...(r.carrierBarcode ? { carrierBarcode: r.carrierBarcode } : {}),
       address: r.address,
       city: r.city,
       postalCode: cp,
@@ -1193,7 +1195,7 @@ const scanSearchCandidates = (code: string): string[] => {
  *  Champs testés dans l'ordre : identifiants uniques d'abord, clientReference
  *  (N° de commande potentiellement partagé) en DERNIER. */
 const queryPackagesByCandidates = async (uniq: string[]): Promise<Package[]> => {
-  for (const field of ['barcode', 'externalId', 'orderNumber', 'clientReference'] as const) {
+  for (const field of ['carrierBarcode', 'barcode', 'externalId', 'orderNumber', 'clientReference'] as const) {
     for (const value of uniq) {
       const snap = await getDocs(query(
         collection(db, PACKAGES_COLLECTION),

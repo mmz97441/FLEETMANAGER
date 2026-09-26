@@ -3,6 +3,7 @@ import { getFunctions, httpsCallable } from 'firebase/functions';
 import app, { db } from '../firebaseConfig';
 import type { User } from '../types';
 import { reportError } from './logService';
+import { withDeadline } from '../utils/asyncDeadline';
 
 const serverProfile = httpsCallable<{ uid: string }, { profile: User | null }>(
   getFunctions(app, 'europe-west1'), 'getOwnProfile', { timeout: 15000 },
@@ -23,7 +24,8 @@ export async function getUserProfile(uid: string): Promise<User | null> {
     // A network/cache failure is never proof of an absent account. This callable
     // reads only the authenticated caller's profile without the browser Firestore cache.
     reportError('auth.profile.fallback', error, { silent: true, level: 'warning', extra: { profileUid: uid } });
-    const result = await serverProfile({ uid });
+    const result = await withDeadline(serverProfile({ uid }), 20000,
+      Object.assign(new Error('Le profil ne répond pas. Réessayez sans vous déconnecter.'), { code: 'functions/deadline-exceeded' }));
     return result.data.profile ? { ...result.data.profile, id: uid } : null;
   } finally {
     if (timer) clearTimeout(timer);

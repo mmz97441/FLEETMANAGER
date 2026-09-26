@@ -20,6 +20,17 @@ it('retries the opening timestamp after failure, throttles heartbeats and pauses
 it('never overlaps or writes an offline state that could overwrite another tab', async () => {
   let done!: () => void;
   const send = vi.fn(() => new Promise<void>(r => { done = r; })); const p = createPresencePublisher({ send, visible: () => true, report: vi.fn() });
-  const first = p.tick(now); await p.tick(now + 120000); expect(send).toHaveBeenCalledTimes(1);
+  const first = p.tick(now); await p.tick(now + 1000); expect(send).toHaveBeenCalledTimes(1);
   p.stop(); done(); await first; await p.tick(now + 180000); expect(send).toHaveBeenCalledTimes(1);
+});
+
+it('recovers a suspended presence request and ignores its late failure', async () => {
+  let reject!: (error: unknown) => void;
+  const deps = { send: vi.fn().mockReturnValueOnce(new Promise((_, r) => { reject = r; })).mockResolvedValue(undefined), visible: vi.fn(() => true), report: vi.fn() };
+  const p = createPresencePublisher(deps), first = p.tick(now);
+  deps.visible.mockReturnValue(false); await p.tick(now + 1000);
+  deps.visible.mockReturnValue(true); await p.tick(now + 2000);
+  reject(new Error('old network')); await first;
+  expect(deps.send.mock.calls).toEqual([[true], [true]]); expect(deps.report).not.toHaveBeenCalled();
+  await p.tick(now + 65000); expect(deps.send).toHaveBeenLastCalledWith(false);
 });

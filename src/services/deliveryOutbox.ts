@@ -18,18 +18,32 @@ export type PendingDelivery = {
 );
 const CHANGE = 'fleet-outbox-change';
 let dbPromise: Promise<IDBDatabase> | undefined;
+let databaseGeneration = 0;
 function openDB(): Promise<IDBDatabase> {
-  if (!dbPromise)
-    dbPromise = new Promise((resolve, reject) => {
-      const req = indexedDB.open('fleet-delivery-outbox', 1);
-      req.onupgradeneeded = () =>
-        req.result.createObjectStore('deliveries', { keyPath: 'id' });
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => {
-        dbPromise = undefined;
-        reject(req.error);
-      };
-    });
+  if (dbPromise) return dbPromise;
+  const generation = ++databaseGeneration;
+  const opening = new Promise<IDBDatabase>((resolve, reject) => {
+    let settled = false;
+    const fail = (error: unknown) => {
+      if (settled) return;
+      settled = true; clearTimeout(timer); reject(error);
+    };
+    const timer = setTimeout(() => fail(new Error('Le stockage des preuves ne répond pas. Relancez l’application sans effacer ses données.')), 8000);
+    let req: IDBOpenDBRequest;
+    try { req = indexedDB.open('fleet-delivery-outbox', 1); }
+    catch (error) { fail(error); return; }
+    req.onupgradeneeded = () => { req.result.createObjectStore('deliveries', { keyPath: 'id' }); };
+    req.onsuccess = () => {
+      if (settled) { req.result.close(); return; }
+      settled = true; clearTimeout(timer);
+      const reset = () => { if (databaseGeneration === generation) dbPromise = undefined; };
+      req.result.onclose = reset;
+      req.result.onversionchange = () => { req.result.close(); reset(); };
+      resolve(req.result);
+    };
+    req.onerror = () => fail(req.error);
+  });
+  dbPromise = opening.catch(error => { if (databaseGeneration === generation) dbPromise = undefined; throw error; });
   return dbPromise;
 }
 async function write(entry: PendingDelivery | string): Promise<void> {

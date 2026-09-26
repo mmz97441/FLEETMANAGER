@@ -25,7 +25,7 @@ it('waits offline, resumes online and never overlaps requests on repeated wake e
   network.onLine = false; const received = vi.fn(); stop = subscribeToTeamDirectory(self, received);
   await vi.advanceTimersByTimeAsync(120000); expect(call).not.toHaveBeenCalled(); expect(received).toHaveBeenLastCalledWith([self]);
   network.onLine = true; win.dispatchEvent(new Event('online')); win.dispatchEvent(new Event('online')); doc.dispatchEvent(new Event('visibilitychange'));
-  await vi.advanceTimersByTimeAsync(120000); expect(call).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1000); expect(call).toHaveBeenCalledTimes(1);
   pending.resolve({ data: { users: [{ ...self, firstName: 'Stale' }, colleague] } }); await tick();
   expect(received).toHaveBeenLastCalledWith([self, colleague]);
   await vi.advanceTimersByTimeAsync(59999); expect(call).toHaveBeenCalledTimes(1);
@@ -75,4 +75,23 @@ it('does not erase the previous directory for a malformed successful response', 
   call.mockResolvedValueOnce({ data: { users: [colleague] } }).mockResolvedValueOnce({ data: {} }); const received = vi.fn();
   stop = subscribeToTeamDirectory(self, received); await tick(); await vi.advanceTimersByTimeAsync(60000);
   expect(received).toHaveBeenLastCalledWith([self, colleague]); expect(report).toHaveBeenCalledTimes(1);
+});
+
+it('retires a background read and ignores its late reply after a fresh visible read', async () => {
+  const old = deferred<{ data: { users: User[] } }>();
+  call.mockReturnValueOnce(old.promise).mockResolvedValue({ data: { users: [colleague] } });
+  const received = vi.fn(); stop = subscribeToTeamDirectory(self, received);
+  doc.visibilityState = 'hidden'; doc.dispatchEvent(new Event('visibilitychange'));
+  doc.visibilityState = 'visible'; doc.dispatchEvent(new Event('visibilitychange')); await tick();
+  expect(call).toHaveBeenCalledTimes(2); expect(received).toHaveBeenLastCalledWith([self, colleague]);
+  old.resolve({ data: { users: [] } }); await tick();
+  expect(received).toHaveBeenLastCalledWith([self, colleague]); expect(report).not.toHaveBeenCalled();
+});
+
+it('bounds a stalled auth preparation and retries without logging out', async () => {
+  call.mockReturnValueOnce(new Promise(() => {})).mockResolvedValue({ data: { users: [colleague] } });
+  const received = vi.fn(); stop = subscribeToTeamDirectory(self, received);
+  await vi.advanceTimersByTimeAsync(25000);
+  expect(call).toHaveBeenCalledTimes(2); expect(received).toHaveBeenLastCalledWith([self, colleague]);
+  expect(report.mock.calls[0][1].code).toBe('functions/deadline-exceeded');
 });

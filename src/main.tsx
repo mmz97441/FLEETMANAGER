@@ -3,6 +3,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import ToastHost from './components/ToastHost';
+import StorageRecoveryNotice from './components/StorageRecoveryNotice';
 import './index.css';
 
 const rootElement = document.getElementById('root');
@@ -17,6 +18,7 @@ root.render(
     {/* Affichage global des messages + gardes window.onerror / unhandledrejection.
         Monté hors de <App/> pour rester actif même si l'ErrorBoundary bascule. */}
     <ToastHost />
+    <StorageRecoveryNotice />
       <ConfirmationHost />
   </React.StrictMode>
 );

@@ -1,7 +1,7 @@
 {
   "name": "fleetgenius-pro",
   "private": true,
-  "version": "4.31.2",
+  "version": "4.32.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,7 +11,7 @@
     "test": "vitest run src",
     "test:integration": "vitest run tests/integration",
     "test:rules": "node scripts/test-rules.mjs",
-    "test:server": "node scripts/test-server.cjs && node scripts/test-mission-lifecycle.cjs && node scripts/test-scan-package.cjs && node scripts/test-voting.cjs && node scripts/test-profile-session.cjs",
+    "test:server": "node scripts/test-server.cjs && node scripts/test-mission-lifecycle.cjs && node scripts/test-scan-package.cjs && node scripts/test-voting.cjs && node scripts/test-profile-session.cjs && node scripts/test-reliability.cjs",
     "test:storage": "node scripts/test-storage.mjs",
     "test:emulated": "npm run test:rules && npm run test:integration && npm run test:server && npm run test:storage && node scripts/test-voting-rules.mjs",
     "audit:ui": "node scripts/audit-ui.mjs"

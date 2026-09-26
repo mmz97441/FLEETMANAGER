@@ -51,7 +51,10 @@
     "src/components/voting/VotePriorityGate.tsx",
     "src/components/voting/VotePrivacyNotice.tsx",
     "src/components/ProfileAccessScreen.tsx",
-    "src/components/UserConnectionStatus.tsx"
+    "src/components/UserConnectionStatus.tsx",
+    "src/components/CarrierBarcodeModal.tsx",
+    "src/components/ResilientPage.tsx",
+    "src/components/StorageRecoveryNotice.tsx"
   ],
   "exceptions": [
     {

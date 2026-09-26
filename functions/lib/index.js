@@ -33,8 +33,10 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.interpretAnalytics = exports.acceptQuote = exports.getTeamDirectory = exports.notifyPackageStatus = exports.returnPackage = exports.deleteAbsence = exports.deleteVehicle = exports.importPackages = exports.assignVehicle = exports.askFleetGenius = exports.sendBusinessNotification = exports.transferPackages = exports.scanPackage = exports.dispatchMissions = exports.finishMission = exports.receivePackagesAtHub = exports.saveAbsence = exports.revokeOwnSessions = exports.linkAuthToProfile = exports.recordUserPresence = exports.getOwnProfile = exports.createInvitation = exports.activateAccount = exports.validateInvitationToken = exports.forcePasswordReset = exports.toggleUserStatus = exports.cleanupExpiredInvitations = exports.deleteUserCompletely = exports.optimizeTours = exports.employeeVoting = void 0;
+exports.interpretAnalytics = exports.acceptQuote = exports.getTeamDirectory = exports.notifyPackageStatus = exports.returnPackage = exports.deleteAbsence = exports.deleteVehicle = exports.importPackages = exports.assignVehicle = exports.askFleetGenius = exports.sendBusinessNotification = exports.transferPackages = exports.scanPackage = exports.dispatchMissions = exports.finishMission = exports.receivePackagesAtHub = exports.saveAbsence = exports.revokeOwnSessions = exports.linkAuthToProfile = exports.recordUserPresence = exports.getOwnProfile = exports.createInvitation = exports.activateAccount = exports.validateInvitationToken = exports.forcePasswordReset = exports.toggleUserStatus = exports.cleanupExpiredInvitations = exports.deleteUserCompletely = exports.optimizeTours = exports.employeeVoting = exports.recordClientErrors = exports.associateCarrierBarcode = void 0;
 const hubReception_1 = require("./hubReception");
+const carrierBarcode_1 = require("./carrierBarcode");
+const clientErrors_1 = require("./clientErrors");
 const voting_1 = require("./voting");
 const storage_1 = require("firebase-admin/storage");
 const scanPackage_1 = require("./scanPackage");
@@ -57,6 +59,8 @@ const google_auth_library_1 = require("google-auth-library");
 admin.initializeApp();
 const db = (0, firestore_1.getFirestore)();
 const auth = (0, auth_1.getAuth)();
+exports.associateCarrierBarcode = functions.region('europe-west1').https.onCall((data, context) => (0, carrierBarcode_1.associateCarrierBarcodeHandler)(data, context, { db, requireActiveCaller, isAdminCaller }));
+exports.recordClientErrors = functions.region('europe-west1').https.onCall((data, context) => (0, clientErrors_1.recordClientErrorsHandler)(data, context, db));
 exports.employeeVoting = functions.region('europe-west1').runWith({ timeoutSeconds: 120, memory: '256MB' }).https.onCall((data, context) => (0, voting_1.votingHandler)(data, context, {
     db, requireActiveCaller,
     fileMetadata: async (path) => {
@@ -906,7 +910,9 @@ exports.recordUserPresence = functions.region('europe-west1').https.onCall(async
             throw new functions.https.HttpsError('permission-denied', 'Session inactive.');
         const now = Date.now(), iso = new Date(now).toISOString();
         if (data.login || !user.lastSeenAt || now - Date.parse(user.lastSeenAt) >= 45000) {
-            tx.update(ref, { lastSeenAt: iso, ...(data.login ? { lastLoginAt: iso } : {}) });
+            const appVersion = typeof data.appVersion === 'string' && /^\d+\.\d+\.\d+$/.test(data.appVersion) ? data.appVersion : null;
+            const buildId = typeof data.buildId === 'string' && /^\d{1,20}$/.test(data.buildId) ? data.buildId : null;
+            tx.update(ref, { lastSeenAt: iso, ...(data.login ? { lastLoginAt: iso } : {}), ...(appVersion && buildId ? { appVersion, appBuildId: buildId } : {}) });
         }
         return { success: true };
     });
@@ -1513,6 +1519,7 @@ exports.importPackages = functions
             'externalId',
             'orderNumber',
             'barcode',
+            'carrierBarcode',
             'address',
             'city',
             'postalCode',
@@ -1541,6 +1548,8 @@ exports.importPackages = functions
         for (const key of allowed)
             if (raw[key] !== undefined)
                 p[key] = raw[key];
+        if (p.carrierBarcode)
+            p.carrierBarcode = (0, carrierBarcode_1.validatedCarrierBarcode)(p.carrierBarcode, p.clientReference);
         p.movements = [
             {
                 action: 'IMPORTED',
@@ -1585,6 +1594,36 @@ exports.importPackages = functions
         if (legacy.some((result) => result && result.size > 1))
             throw new functions.https.HttpsError('failed-precondition', 'Des doublons existent déjà pour cette référence. Faites-les contrôler avant de reprendre l’import.');
         const ids = [];
+        const carrierReservations = [];
+        const codes = new Map();
+        const codesByPackage = new Map();
+        for (let i = 0; i < rows.length; i++) {
+            const row = rows[i], code = row.p.carrierBarcode;
+            if (!code)
+                continue;
+            const target = legacy[i]?.docs[0] || snapshots[i], id = target.exists ? target.id : row.id;
+            if (codes.has(code) && codes.get(code) !== id)
+                throw new functions.https.HttpsError('already-exists', 'Deux colis du fichier portent le même code Boiron.');
+            if (codesByPackage.has(id) && codesByPackage.get(id) !== code)
+                throw new functions.https.HttpsError('already-exists', 'Un colis ne peut pas recevoir deux codes Boiron dans le même import.');
+            for (let j = 0; j < rows.length; j++) {
+                const other = legacy[j]?.docs[0] || snapshots[j], otherId = other.exists ? other.id : rows[j].id;
+                if (otherId !== id && ['barcode', 'externalId', 'orderNumber'].some(field => rows[j].p[field] === code))
+                    throw new functions.https.HttpsError('already-exists', 'Un code Boiron correspond aussi à un autre colis du fichier.');
+            }
+            if (codes.has(code))
+                continue;
+            codesByPackage.set(id, code);
+            codes.set(code, id);
+            if (target.exists && target.data()?.carrierBarcode !== code)
+                throw new functions.https.HttpsError('failed-precondition', 'Ce colis existe déjà. Vérifiez et associez son code depuis les opérations du hub.');
+            carrierReservations.push(await (0, carrierBarcode_1.checkCarrierBarcode)(tx, db, code, id));
+        }
+        for (const [code, id] of codes) {
+            const reservation = carrierReservations.shift();
+            if (!reservation.exists)
+                tx.create(reservation.ref, { code, packageId: id, createdAt: new Date().toISOString(), createdBy: caller.id });
+        }
         const written = new Set();
         const now = new Date().toISOString();
         rows.forEach((row, i) => {
@@ -1831,6 +1870,8 @@ exports.getTeamDirectory = functions
                 assignedVehicleId: u.assignedVehicleId || null,
                 lastLoginAt: u.lastLoginAt || null,
                 lastSeenAt: u.lastSeenAt || null,
+                appVersion: u.appVersion || null,
+                appBuildId: u.appBuildId || null,
             };
         }),
     };

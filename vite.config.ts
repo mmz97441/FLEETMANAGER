@@ -13,7 +13,7 @@ const emitVersionPlugin = () => ({
   name: 'emit-version-json',
   generateBundle() {
     // @ts-ignore - API rollup disponible dans ce hook
-    this.emitFile({ type: 'asset', fileName: 'version.json', source: JSON.stringify({ buildId: BUILD_ID }) });
+    this.emitFile({ type: 'asset', fileName: 'version.json', source: JSON.stringify({ buildId: BUILD_ID, version }) });
   },
 });
 

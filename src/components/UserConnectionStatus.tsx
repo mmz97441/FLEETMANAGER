@@ -18,5 +18,6 @@ export default function UserConnectionStatus({ user }: { user: User }) {
     <div className="text-slate-600">Dernière connexion : <span title={formatDateTimeFr(user.lastLoginAt)}>{timeAgo(user.lastLoginAt)}</span></div>
     {user.lastLoginAt && <div className="text-slate-500">{formatDateTimeFr(user.lastLoginAt)}</div>}
     {status === 'offline' && user.lastSeenAt && <div className="text-slate-500" title={formatDateTimeFr(user.lastSeenAt)}>Dernière activité : {timeAgo(user.lastSeenAt)}</div>}
+    {user.appVersion && <div className="text-slate-500">Dernière version signalée : {user.appVersion}{user.appVersion !== __APP_VERSION__ ? ' — mise à jour à vérifier' : ''}</div>}
   </div>;
 }

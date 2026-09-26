@@ -1,5 +1,5 @@
 import { beforeEach, it, expect, vi } from 'vitest';
-import { IDBFactory } from 'fake-indexeddb';
+import { IDBFactory, forceCloseDatabase } from 'fake-indexeddb';
 import { StopStatus } from '../types';
 const calls = vi.hoisted(() => ({
   auth: { currentUser: { uid: 'driver' } },
@@ -63,6 +63,21 @@ it('persists the full action without starting network writes offline', async () 
   await expect(outbox.submitDelivery(entry())).rejects.toThrow();
   expect(calls.commit).not.toHaveBeenCalled();
   expect(await outbox.pendingDeliveries('driver')).toHaveLength(1);
+});
+it('reopens a browser-closed IndexedDB connection and retains photos and signatures', async () => {
+  const factory = indexedDB;
+  let connection!: IDBDatabase;
+  const open = factory.open.bind(factory);
+  vi.spyOn(factory, 'open').mockImplementation((...args) => {
+    const request = open(...args); request.addEventListener('success', () => { connection = request.result; }); return request;
+  });
+  const outbox = await import('./deliveryOutbox'); calls.proof.mockResolvedValueOnce(null);
+  await expect(outbox.submitDelivery(entry())).rejects.toThrow();
+  forceCloseDatabase(connection as unknown as Parameters<typeof forceCloseDatabase>[0]); await new Promise(resolve => setTimeout(resolve, 10));
+  const pending = await outbox.pendingDeliveries('driver');
+  expect(pending[0].proof.photosBase64).toEqual(['photo-data']); expect(pending[0].kind).toBe('success');
+  if (pending[0].kind === 'success') expect(pending[0].proof.signatureBase64).toBe('signature-data');
+  await outbox.syncDeliveries('driver'); expect(await outbox.pendingDeliveries('driver')).toEqual([]);
 });
 it('does not drop a delivery when the atomic commit fails', async () => {
   calls.commit.mockRejectedValue(new Error('Conflict'));

@@ -59,7 +59,7 @@ export async function scanPackageHandler(data: any, context: functions.https.Cal
       if (code && packageSnap.exists) {
         const fields = packageSnap.data()!;
         const tokens = extractScanTokens(code);
-        const matches = [fields.barcode, fields.externalId, fields.orderNumber].some(v =>
+        const matches = [fields.carrierBarcode, fields.barcode, fields.externalId, fields.orderNumber].some(v =>
           typeof v === 'string' && tokens.includes(v.trim().toUpperCase())) ||
           [fields.barcode, fields.externalId].some(v => containsIndividualCode(code, v));
         if (!matches) throw new functions.https.HttpsError('invalid-argument', 'Le code lu ne correspond pas au colis sélectionné.');
@@ -68,7 +68,7 @@ export async function scanPackageHandler(data: any, context: functions.https.Cal
     else {
       const candidates = [...new Set([code, ...extractScanTokens(code)])].slice(0, 12);
       // Shared order references are search hints, never sufficient to move an arbitrary parcel.
-      search: for (const field of ['barcode', 'externalId', 'orderNumber', 'clientReference']) {
+      search: for (const field of ['carrierBarcode', 'barcode', 'externalId', 'orderNumber', 'clientReference']) {
         for (const candidate of candidates) {
           const found = await tx.get(db.collection('packages').where(field, '==', candidate).limit(2));
           if (!found.empty) { ambiguous = found.size > 1; packageSnap = found.docs[0]; break search; }
