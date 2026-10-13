@@ -21,6 +21,12 @@ Les refus d’identification de cartons, les imports incomplets et les contrôle
 - Nouveaux cas : mauvais arrêt, tournée obsolète, contrôle répété, preuve existante, import interrompu et rejoué, lignes rejetées, création simultanée, import concurrent avec création exceptionnelle, droits d’accès aux confirmations.
 - Navigateur isolé : 14 contrôles caméra et reprise ; 17 contrôles imports, association, journal et création exceptionnelle, en 320, 390 et 1365 pixels. Services distants bloqués et données fictives.
 
+## Dépendances
+
+Mises à jour ciblées de gRPC, DOMPurify, source-map-js, postcss-selector-parser, brace-expansion et proxy-addr. Les dépendances serveur ne présentent plus de signalement npm après mise à jour. Les versions gRPC et postcss-selector-parser corrigées sont imposées aux dépendances transitives.
+
+L’alerte [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm) de `braces@3.0.3` n’a pas de correctif amont au 13 octobre 2026. Son usage est limité à Tailwind pour les motifs de fichiers locaux définis dans le dépôt ; elle n’est pas embarquée dans l’application ni les fonctions. Une exception explicite, limitée à cette version et aux dépendances de développement, expire le 13 novembre 2026. L’audit échoue pour toute autre alerte modérée ou supérieure, toute dépendance de production, ou après expiration. Cinq tests vérifient ces limites. Remplacer cette exception dès qu’un correctif est disponible ou lors d’une migration contrôlée de Tailwind.
+
 ## Publication et vérification terrain
 
 Publier les fonctions `scanPackage`, `importPackages`, `createAdHocPackage`, puis le frontend et les règles Firestore validées. La nouvelle création terrain exige le frontend 4.33.0 ; actualiser après sauvegarde des opérations en cours, sans effacer le stockage des preuves.
