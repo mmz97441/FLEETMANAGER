@@ -1,3 +1,5 @@
+import { importReference } from '../utils/importManifest';
+import { carrierBarcodeError } from '../utils/carrierBarcodeValidation';
 import { indexImportedPackageIds } from '../utils/importedPackageIds';
 /**
  * SERVICE D'IMPORT EXCEL
@@ -16,7 +18,7 @@ import {
   addPackagesBatch,
   addImportBatch,
   getHubByZone,
-  getExistingClientPackageCodes
+  getPackagesByIds
 } from './missionService';
 // Source de vérité UNIQUE du regroupement par point de livraison (cf. address.ts).
 import { placeKey, phoneSignal, sameDeliveryPoint } from '../utils/address';
@@ -44,6 +46,8 @@ function generateBarcodeSuffix(length = 10): string {
 
 // Structure attendue du fichier client
 interface ClientFileRow {
+  Carrier_Barcode?: string | number;
+  Client_Reference?: string;
   Id: string;                    // "C0004911-15087911"
   Address: string;               // "6 RUE DE L ETANG ZI BEL AIR,97450,SAINT LOUIS"
   Floor: string | number;        // "0"
@@ -71,9 +75,31 @@ export interface ImportResult {
   zoneBreakdown: ImportBatchZoneBreakdown[];
 }
 
+async function reconcileImportedPackages(result: ImportResult, packageIds: string[]): Promise<void> {
+  const confirmed = await getPackagesByIds(packageIds);
+  const byId = new Map(confirmed.map(parcel => [parcel.id, parcel]));
+  if (packageIds.some(id => !byId.has(id))) throw new Error('Des colis n’ont pas pu être relus. Reprenez le même fichier pour vérifier les confirmations.');
+  result.packages = packageIds.map(id => byId.get(id)!);
+  const available = confirmed.filter(parcel => !parcel.missionId && !parcel.currentDriverId &&
+    [PackageStatus.PENDING, PackageStatus.AT_HUB, PackageStatus.SORTED].includes(parcel.status));
+  const byZone = indexImportedPackageIds(available, available.map(parcel => parcel.id));
+  result.zoneBreakdown = [];
+  for (const [zone, ids] of byZone) {
+    const hub = await getHubByZone(zone as Zone);
+    result.zoneBreakdown.push({ zone: zone as Zone, count: ids.length, packageIds: ids,
+      hubId: hub?.id, hubName: hub?.name, dispatched: false });
+  }
+}
+
 // Variantes d'en-têtes rencontrées dans les fichiers clients (fautes de frappe,
 // espaces au lieu d'underscores, libellés français). Clé = en-tête en minuscules.
 const HEADER_ALIASES: Record<string, keyof ClientFileRow> = {
+  'code boiron': 'Carrier_Barcode',
+  'code transporteur': 'Carrier_Barcode',
+  'carrierbarcode': 'Carrier_Barcode',
+  'référence': 'Client_Reference',
+  'reference': 'Client_Reference',
+  'clientreference': 'Client_Reference',
   'id': 'Id',
   'numéro colis': 'Id',
   'numero colis': 'Id',
@@ -158,7 +184,12 @@ export const parseExcelFile = async (file: File): Promise<ClientFileRow[]> => {
           defval: ''
         });
 
-        resolve(jsonData.map(canonicalizeRow));
+        const originals = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { raw: true, defval: '' });
+        resolve(jsonData.map((data, i) => {
+          const row = canonicalizeRow(data), original = canonicalizeRow(originals[i] || {});
+          if (typeof original.Carrier_Barcode === 'number') row.Carrier_Barcode = original.Carrier_Barcode;
+          return row;
+        }));
       } catch (error) {
         reject(new Error('Erreur lors de la lecture du fichier Excel'));
       }
@@ -227,6 +258,8 @@ const rowToPackage = async (
   importBatchId: string
 ): Promise<{ package: Omit<Package, 'id' | 'createdAt' | 'updatedAt'> | null; error: ImportBatchError | null }> => {
   
+  const carrierError = carrierBarcodeError(row.Carrier_Barcode, row.Client_Reference || row.Order_Number);
+  if (carrierError) return { package: null, error: { row: rowIndex, field: 'Code Boiron', message: carrierError } };
   // Validation des champs obligatoires
   if (!row.Address) {
     return { package: null, error: { row: rowIndex, field: 'Address', message: 'Adresse manquante' } };
@@ -277,6 +310,8 @@ const rowToPackage = async (
     importBatchId,
     externalId: row.Id || '',
     orderNumber,
+    clientReference: row.Client_Reference || String(row.Order_Number || ''),
+    ...(row.Carrier_Barcode ? { carrierBarcode: String(row.Carrier_Barcode).trim() } : {}),
     barcode: trackingNumber, // Tracking FleetGenius unique (GFL-YYMMDD-XXXXX)
     address,
     city,
@@ -377,13 +412,9 @@ export const importExcelFile = async (
     
     // Sauvegarder les colis si au moins un est valide
     if (result.packages.length > 0) {
-      const packageIds = await addPackagesBatch(result.packages);
+      const packageIds = await addPackagesBatch(result.packages, { clientId: client.id, references: result.packages.map(importReference), fileName: file.name, rejectedRows: result.errorCount });
       
-      // Mettre à jour les packageIds dans zoneBreakdown
-      const idsByZone = indexImportedPackageIds(result.packages, packageIds);
-      for (const breakdown of result.zoneBreakdown) {
-        breakdown.packageIds = idsByZone.get(breakdown.zone) || [];
-      }
+      await reconcileImportedPackages(result, packageIds);
       
       // Créer le batch d'import
       const importBatch: Omit<ImportBatch, 'id'> = {
@@ -399,7 +430,7 @@ export const importExcelFile = async (
         importedBy: importedBy.id,
         importedByName: `${importedBy.firstName} ${importedBy.lastName}`,
         importedAt: new Date().toISOString(),
-        status: result.errorCount > 0 ? ImportBatchStatus.COMPLETED : ImportBatchStatus.COMPLETED
+        status: result.errorCount > 0 ? ImportBatchStatus.INCOMPLETE : ImportBatchStatus.COMPLETED
       };
       
       result.batchId = await addImportBatch(importBatch);
@@ -409,6 +440,7 @@ export const importExcelFile = async (
     return result;
     
   } catch (error) {
+    result.successCount = Number((error as { confirmedCount?: number })?.confirmedCount) || 0;
     console.error('Erreur import Excel:', error);
     result.errors.push({ row: 0, message: error instanceof Error ? error.message : 'Erreur inconnue' });
     return result;
@@ -499,6 +531,9 @@ export interface ReviewRow {
   _multiColis?: { index: number; total: number }; // Colis i/N d'un même point de livraison
 
   // Champs éditables
+  carrierBarcode?: string;
+  clientReference?: string;
+  _carrierNumeric?: boolean;
   externalId: string;
   orderNumber: string;
   address: string;
@@ -549,6 +584,8 @@ export const parseExcelForReview = async (file: File): Promise<ReviewResult> => 
     if (!raw.Address) errors.push('Adresse manquante');
     if (!raw.Order_Number) errors.push('N° commande manquant');
     if (!raw.Contact) errors.push('Contact manquant');
+    const carrierError = carrierBarcodeError(raw.Carrier_Barcode, raw.Client_Reference || raw.Order_Number);
+    if (carrierError) errors.push(carrierError);
 
     if (!postalCode && raw.Address) errors.push('Code postal non détecté');
 
@@ -576,6 +613,9 @@ export const parseExcelForReview = async (file: File): Promise<ReviewResult> => 
       _status: status,
       _errors: errors,
       _warnings: warnings,
+      carrierBarcode: String(raw.Carrier_Barcode || '').trim(),
+      clientReference: raw.Client_Reference || String(raw.Order_Number || ''),
+      _carrierNumeric: typeof raw.Carrier_Barcode === 'number',
       externalId: raw.Id || '',
       orderNumber: String(raw.Order_Number || ''),
       address,
@@ -681,6 +721,8 @@ const annotateMultiColisAndDuplicates = (reviewRows: ReviewRow[]): void => {
  */
 export const revalidateRow = async (row: ReviewRow, allRows: ReviewRow[]): Promise<ReviewRow> => {
   const errors: string[] = [];
+  const carrierError = carrierBarcodeError(row._carrierNumeric ? 1 : row.carrierBarcode, row.clientReference || row.orderNumber);
+  if (carrierError) errors.push(carrierError);
   const warnings: string[] = [];
 
   if (!row.address) errors.push('Adresse manquante');
@@ -758,7 +800,7 @@ export const confirmReviewedImport = async (
   const clientName = client.companyName || `${client.firstName} ${client.lastName}`;
   // Dédup INTER-IMPORTS : codes colis déjà en base pour ce client (+ ceux du fichier
   // courant au fil de l'eau) → ré-importer un fichier ne crée plus de colis en double.
-  const existingCodes = await getExistingClientPackageCodes(client.id);
+  const existingCodes = new Set<string>(); // File duplicates only; the server confirms existing records on every retry.
   let skippedDuplicates = 0;
   const zonePackages: Record<Zone, Omit<Package, 'id' | 'createdAt' | 'updatedAt'>[]> = {
     [Zone.NORD]: [],
@@ -804,6 +846,8 @@ export const confirmReviewedImport = async (
       importBatchId: batchId,
       externalId: row.externalId,
       orderNumber: row.orderNumber,
+      clientReference: row.clientReference || row.orderNumber,
+      ...(row.carrierBarcode ? { carrierBarcode: row.carrierBarcode } : {}),
       barcode: `GFL-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${generateBarcodeSuffix()}`,
       address: row.address,
       city: row.city,
@@ -829,7 +873,7 @@ export const confirmReviewedImport = async (
   }
 
   if (skippedDuplicates > 0) {
-    result.errors.push({ row: 0, message: `${skippedDuplicates} colis déjà en base — ignorés (aucun doublon créé).` });
+    result.errors.push({ row: 0, message: `${skippedDuplicates} références répétées dans le fichier — ignorées (aucun doublon créé).` });
   }
 
   // Zone breakdown
@@ -849,11 +893,8 @@ export const confirmReviewedImport = async (
 
   // Sauvegarder les colis
   if (result.packages.length > 0) {
-    const packageIds = await addPackagesBatch(result.packages);
-    const idsByZone = indexImportedPackageIds(result.packages, packageIds);
-    for (const breakdown of result.zoneBreakdown) {
-      breakdown.packageIds = idsByZone.get(breakdown.zone) || [];
-    }
+    const packageIds = await addPackagesBatch(result.packages, { clientId: client.id, references: result.packages.map(importReference), fileName, rejectedRows: result.errorCount });
+    await reconcileImportedPackages(result, packageIds);
 
     const importBatch: Omit<ImportBatch, 'id'> = {
       clientId: client.id,
@@ -867,7 +908,7 @@ export const confirmReviewedImport = async (
       importedBy: importedBy.id,
       importedByName: `${importedBy.firstName} ${importedBy.lastName}`,
       importedAt: new Date().toISOString(),
-      status: result.errorCount > 0 ? ImportBatchStatus.COMPLETED : ImportBatchStatus.COMPLETED
+      status: result.errorCount > 0 ? ImportBatchStatus.INCOMPLETE : ImportBatchStatus.COMPLETED
     };
 
     result.batchId = await addImportBatch(importBatch);

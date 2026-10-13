@@ -127,9 +127,10 @@ async function scanPackageHandler(data, context, deps) {
                 action: 'PACKAGE_SCANNED', category: 'Livraison', targetType: 'package', targetId: result.packageId || '', targetName: result.packageCode,
                 description: `${driverName} — ${result.packageCode} : ${result.message}`,
                 outcome: result.accepted ? (result.outcome === 'already_scanned' ? 'neutral' : 'success') : 'failure',
-                details: { metadata: { scan: result.outcome, scannedAt: timestamp, driverId, driverName, source: data.source,
+                details: { metadata: { scan: result.outcome, scannedCode: code, accepted: result.accepted, scannedAt: timestamp, driverId, driverName, source: data.source,
                         missionId: result.missionId, missionDate: result.missionDate, previousMissionId: result.previousMissionId || null,
-                        previousMissionDate: result.previousMissionDate || null, requestId: data.requestId } }, createdAt: timestamp,
+                        previousMissionDate: result.previousMissionDate || null, requestedMissionId: data.targetMissionId || null,
+                        requestedStopId: data.stopId || null, packageCode: result.packageCode, requestId: data.requestId } }, createdAt: timestamp,
             });
             return result;
         };
@@ -139,9 +140,9 @@ async function scanPackageHandler(data, context, deps) {
         if (ambiguous)
             return refused('ambiguous', 'Ce code correspond à plusieurs colis. Scannez le code individuel DELIVREX ou saisissez le numéro imprimé sur ce carton.', { packageId: null, packageCode: code, contactName: '' });
         if (!pkg)
-            return refused('not_found', 'Colis introuvable. Vérifiez le code ou créez le colis hors import.');
+            return refused('not_found', 'Code non retrouvé. Scannez le BR du carton ou faites vérifier son import par le bureau. Le refus est enregistré dans le suivi des scans.');
         if (['Livré', 'Retourné', 'À retourner'].includes(pkg.status))
-            return refused('terminal', `Colis ${pkg.status.toLowerCase()} : aucune nouvelle prise en charge.`, { missionId: pkg.missionId || null, missionDate: pkg.missionDate || null });
+            return refused('terminal', terminalScanMessage(pkg), { missionId: pkg.missionId || null, missionDate: pkg.missionDate || null });
         if (pkg.missionId && !validId(pkg.missionId))
             return refused('blocked', 'Affectation invalide : faites vérifier ce colis par le bureau.');
         const driverMissions = await tx.get(db.collection('missions').where('driverId', '==', driverId).where('date', '==', day));
@@ -160,6 +161,27 @@ async function scanPackageHandler(data, context, deps) {
         const proofSnaps = await Promise.all(sourceStops.map(s => tx.get(db.collection('proofs_of_delivery').doc(`${previous.id}_${s.id}`))));
         if (proofSnaps.some(s => s.exists && s.data().type === 'SUCCESS' && Array.isArray(s.data().packageIds) && s.data().packageIds.includes(pkg.id)))
             return refused('terminal', 'Une preuve confirme déjà la livraison de ce colis. Faites vérifier son statut par le bureau.');
+        // A control at a stop must never claim, transfer or resurrect a parcel.
+        // Resolve the explicit context, not a cached/default tour. Transaction reads
+        // also protect against a concurrent transfer or delivery after the scan starts.
+        if (['driver-delivery', 'driver-pickup'].includes(data.source)) {
+            const target = hinted?.exists ? { ...hinted.data(), id: hinted.id } : null;
+            const stop = target?.stops?.find((s) => s.id === data.stopId);
+            const pickup = data.source === 'driver-pickup';
+            if (!target || target.date !== day || !openStatuses.has(target.status) || !stop)
+                return refused('blocked', 'La tournée ou l’arrêt a changé. Rouvrez l’arrêt du jour avant de scanner.');
+            if (finalStops.has(stop.status))
+                return refused('blocked', 'Cet arrêt est déjà terminé. Consultez la livraison ou contactez le bureau.');
+            if (stop.type !== (pickup ? 'PICKUP' : 'DELIVERY') || pkg.missionId !== target.id || pkg.stopId !== stop.id ||
+                !stop.packageIds?.includes(pkg.id) || (pkg.currentDriverId && pkg.currentDriverId !== driverId))
+                return refused('wrong_stop', 'Ce colis ne correspond pas à cet arrêt. Ouvrez le bon arrêt ou utilisez la prise en charge pour un transfert.', { missionId: pkg.missionId || null, missionDate: pkg.missionDate || null, stopId: pkg.stopId || null });
+            tx.update(packageSnap.ref, {
+                lastVerifiedAt: timestamp, lastVerifiedMissionId: target.id, lastVerifiedStopId: stop.id,
+                lastVerifiedBy: driverId, updatedAt: timestamp,
+            });
+            return finish({ ...base, accepted: true, outcome: 'verified', missionId: target.id, missionDate: target.date,
+                stopId: stop.id, status: pkg.status, message: pickup ? 'Colis vérifié pour cet enlèvement.' : 'Colis vérifié pour cette livraison.' });
+        }
         let creating = false;
         if (!mission) {
             let id = `DLV-${driverId}-${day}`, suffix = 1;
@@ -269,5 +291,15 @@ async function scanPackageHandler(data, context, deps) {
             await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)));
         }
     }
+}
+function terminalScanMessage(pkg) {
+    const movement = Array.isArray(pkg.movements) ? [...pkg.movements].reverse().find((m) => m.action === 'DELIVERED') : null;
+    if (pkg.status === 'Livré' && movement) {
+        const date = new Date(movement.timestamp);
+        const when = Number.isFinite(date.getTime()) ? ` le ${date.toLocaleString('fr-FR', { timeZone: 'Indian/Reunion', dateStyle: 'short', timeStyle: 'short' })}` : '';
+        const by = movement.driverName ? ` par ${String(movement.driverName).slice(0, 120)}` : '';
+        return `Livraison déjà enregistrée${when}${by}. Faites vérifier ce colis par le bureau si vous l’avez encore.`;
+    }
+    return `Colis ${pkg.status.toLowerCase()} : faites vérifier son historique par le bureau.`;
 }
 //# sourceMappingURL=scanPackage.js.map

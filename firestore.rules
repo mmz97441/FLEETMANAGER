@@ -341,16 +341,13 @@ service cloud.firestore {
         || resource.data.clientId == request.auth.uid
         || (getUserData().get('companyName','') != '' && resource.data.clientName == getUserData().companyName)
       );
-      allow create: if !request.resource.data.keys().hasAny(['carrierBarcode']) && (isAdminRole()
-        || (isDriver() && request.resource.data.currentDriverId == request.auth.uid
-          && !request.resource.data.keys().hasAny(['lastScannedAt','lastScannedMissionId','lastScannedBy','lastScanSource','firstScannedForMissionAt'])))
-;
+      allow create: if isAdminRole() && !request.resource.data.keys().hasAny(['carrierBarcode']); // Créations terrain : createAdHocPackage contrôle les doublons côté serveur.
       allow update: if !request.resource.data.diff(resource.data).affectedKeys().hasAny(['carrierBarcode']) && (isAdminRole() || (isDriver()
         && (resource.data.get('currentDriverId','') == request.auth.uid || (resource.data.get('currentDriverId',null) == null && resource.data.get('missionId','') != '' && get(/databases/$(database)/documents/missions/$(resource.data.missionId)).data.driverId == request.auth.uid))
         && request.resource.data.currentDriverId == request.auth.uid
         && (!(resource.data.status in ['Livré','Retourné']) || request.resource.data.status == resource.data.status)
         && (!resource.data.keys().hasAny(['pod']) || request.resource.data.pod == resource.data.pod)
-        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['clientId','clientName','companyId','externalId','orderNumber','barcode','lastScannedAt','lastScannedMissionId','lastScannedBy','lastScanSource','firstScannedForMissionAt'])));
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['clientId','clientName','companyId','externalId','orderNumber','barcode','lastScannedAt','lastScannedMissionId','lastScannedBy','lastScanSource','firstScannedForMissionAt','lastVerifiedAt','lastVerifiedMissionId','lastVerifiedStopId','lastVerifiedBy','reconciliationRequired'])));
       allow delete: if isAdminRole();
     }
 
@@ -386,6 +383,11 @@ service cloud.firestore {
 
     // --- Import batches (historique des imports) ---
     // Admin uniquement
+    match /import_runs/{runId} {
+      allow read: if isAdminRole() || (isAuthenticated() && resource.data.clientId == request.auth.uid);
+      allow write: if false; // Le serveur confirme les références effectivement enregistrées.
+    }
+
     match /import_batches/{batchId} {
       allow read: if isAdminRole();
       allow create, update: if isAdminRole();
@@ -457,6 +459,7 @@ service cloud.firestore {
       allow create: if isAuthenticated()
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.action != 'PACKAGE_SCANNED'
+        && request.resource.data.action != 'PACKAGE_CREATED_ADHOC'
         && !request.resource.data.action.matches('^VOTE_.*'); // Scan et gestion des votes : journal du serveur uniquement.
       allow update, delete: if false;
     }

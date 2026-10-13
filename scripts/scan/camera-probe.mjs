@@ -22,10 +22,10 @@ await check('Same-frame duplicate callbacks enqueue one physical scan',`window.c
 await ev(`window.dispatchEvent(new Event('pagehide'))`);await wait(`window.cameras.every(c=>!c.active)`);
 await ev(`window.dispatchEvent(new Event('pageshow'))`);await ready();
 await check('Returning to page restarts camera and preserves scans',`window.cameras.length>=2&&window.codes.length===1&&document.body.innerText.includes('1 colis conservés')`);
-await ev(`window.previousCamera=(${active});window.previousCamera.track.dispatchEvent(new Event('ended'))`);await ready();
-await wait(`(${active}).index>window.previousCamera.index`);
+await ev(`window.previousCamera=(${active});window.previousCamera.track.readyState='ended';window.previousCamera.track.dispatchEvent(new Event('ended'))`);await ready();
+await wait(`(${active})?.index>window.previousCamera.index`);
 await check('Interrupted video track recovers without login',`window.previousCamera.stops===1&&!!(${active})`);
-await ev(`window.previousCamera=(${active})`);await click('Relancer la caméra');await ready();
+await ev(`window.previousCamera=(${active})`);await click('Relancer la caméra');await wait(`window.previousCamera.stops===1&&(${active})?.index>window.previousCamera.index`);await ready();
 await check('Manual camera restart preserves scans',`window.previousCamera.stops===1&&window.codes.length===1`);
 await ev('window.holdNextCamera=true;window.heldIndex=window.cameras.length');await click('Relancer la caméra');
 await wait(`!!window.cameras[window.heldIndex]?.release`);await click('Saisie manuelle');await wait(`!!document.querySelector('#manual-barcode')`);

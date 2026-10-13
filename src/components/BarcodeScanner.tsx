@@ -15,7 +15,7 @@ import React, { useEffect, useRef, useState, useCallback, useId } from 'react';
 import Modal from './shared/Modal';
 import { recordDiagnosticAction } from '../utils/runtimeDiagnostics';
 import { reportError } from '../services/logService';
-import { createScannerCameraSession, waitForCameraImage, waitForCameraRelease } from '../utils/scannerCameraSession';
+import { createScannerCameraSession, waitForCameraImage, waitForCameraRelease, monitorCamera, allowCameraRecovery } from '../utils/scannerCameraSession';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import {
   Camera,
@@ -91,10 +91,12 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   const [cameraAttempt, setCameraAttempt] = useState(0);
   const [pageActive, setPageActive] = useState(document.visibilityState !== 'hidden');
   const cameraNumber = useRef(0);
+  const recoveryAttempts = useRef<number[]>([]);
 
   const recordScan = useCallback((text: string, warning: boolean) => {
     setScanHistory(previous => [{ text, warning, time: new Date().toLocaleTimeString('fr-FR') }, ...previous].slice(0, 6));
-    if (warning) setPersistentWarning(text);
+    if (!warning) setPersistentWarning('');
+    else if (!/confirmation en cours|vérification en cours/i.test(text)) setPersistentWarning(text);
   }, []);
   useEffect(() => {
     if (flashMessage) recordScan(flashMessage.text, flashMessage.type === 'warn');
@@ -113,7 +115,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
     if (alreadyScanned.includes(barcode)) {
       setLastScanned(barcode);
       setLastScanResult('duplicate');
-      recordScan(`${barcode} · déjà scanné`, true);
+      recordScan(`${barcode} · déjà vérifié`, false);
       // Vibration courte = doublon
       try { navigator.vibrate?.(100); } catch {}
       setTimeout(() => setLastScanResult(null), 2000);
@@ -262,18 +264,15 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
         const video = surface.querySelector('video')!;
         const tracks = (video.srcObject as MediaStream | null)?.getVideoTracks?.() || [];
         let recovering = false;
-        const recover = () => {
+        const recover = (cause: string) => {
           if (!mounted || currentSession.closed || recovering || document.visibilityState === 'hidden') return;
           recovering = true;
-          reportError('scanner.camera.interrupted', new Error('Flux caméra interrompu : reprise du lecteur.'), { silent: true, level: 'warning' });
-          setCameraAttempt(value => value + 1);
+          const retry = allowCameraRecovery(recoveryAttempts.current, Date.now());
+          reportError('scanner.camera.interrupted', new Error(retry ? 'Flux caméra interrompu : reprise du lecteur.' : 'Interruptions caméra répétées : saisie manuelle disponible.'), { silent: true, level: 'warning', extra: { cause, automaticRetry: retry, attempts: recoveryAttempts.current.length } });
+          if (retry) setCameraAttempt(value => value + 1);
+          else { setError('La caméra s’interrompt plusieurs fois. Vos scans sont conservés. Saisissez le BR ou appuyez sur Retour caméra.'); setManualMode(true); }
         };
-        tracks.forEach(track => track.addEventListener('ended', recover));
-        video.addEventListener('pause', recover);
-        removeListeners = () => {
-          tracks.forEach(track => track.removeEventListener('ended', recover));
-          video.removeEventListener('pause', recover);
-        };
+        removeListeners = monitorCamera(video, tracks, recover);
         try { if (camera.getRunningTrackCameraCapabilities().torchFeature().isSupported()) setTorchAvailable(true); } catch {}
       } catch (err: any) {
         await session?.close();
@@ -298,6 +297,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
 
   const restartCamera = () => {
     recordDiagnosticAction('scanner.camera.restart');
+    recoveryAttempts.current = [];
     setCameraAttempt(value => value + 1);
   };
 
@@ -326,6 +326,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   // Switch vers mode caméra
   const switchToCamera = () => {
     recordDiagnosticAction('scanner.camera');
+    recoveryAttempts.current = [];
     setManualMode(false);
     setError(null);
   };
@@ -459,7 +460,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
               lastScanResult === 'success'
                 ? "bg-green-700 text-white"
                 : lastScanResult === 'duplicate'
-                  ? 'bg-amber-700 text-white'
+                  ? 'bg-slate-700 text-white'
                   : lastScanResult === 'read'
                     ? 'bg-slate-700 text-white'
                     : "bg-brand-700 text-white"
@@ -473,8 +474,8 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
             )}
             {lastScanResult === 'duplicate' && (
               <>
-                <AlertTriangle size={18} className="inline mr-1" />
-                Déjà scanné : {lastScanned}
+                <CheckCircle size={18} className="inline mr-1" />
+                Code déjà vérifié : {lastScanned}
               </>
             )}
             {lastScanResult === 'unknown' && <>{lastScanned} (non prévu)</>}

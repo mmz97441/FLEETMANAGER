@@ -50,6 +50,7 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
   const [createFor, setCreateFor] = useState<string | null>(null); // code en cours de création
   const [creating, setCreating] = useState(false);
   const [createdCount, setCreatedCount] = useState(0);
+  const [verifiedMissing, setVerifiedMissing] = useState(false);
   const [createForm, setCreateForm] = useState({ clientId: '', contactName: '', address: '', postalCode: '', city: '', contactPhone: '' });
 
   // File d'attente : en scan rafale, les codes sont traités en série SANS être
@@ -96,7 +97,7 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
             setUnknownCodes(prev => [...prev, cleaned]);
           }
           setRetryCodes(prev => prev.filter(c => c !== cleaned));
-          notify(receipt.accepted && receipt.outcome !== 'already_scanned' ? 'ok' : 'warn', scanReceiptLabel(receipt));
+          notify(receipt.accepted ? 'ok' : 'warn', scanReceiptLabel(receipt));
         } catch {
           const unconfirmed = [cleaned, ...queueRef.current.splice(0)];
           setRetryCodes(prev => [...new Set([...prev, ...unconfirmed])]);
@@ -118,13 +119,14 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
 
   // Ouvre le formulaire de création pour un code hors-import.
   const startCreate = (code: string) => {
+    setVerifiedMissing(false);
     setCreateFor(code);
     setCreateForm({ clientId: '', contactName: '', address: '', postalCode: '', city: '', contactPhone: '' });
   };
 
   // Crée le colis hors-import et le prend en charge dans la tournée (active si fournie).
   const handleCreate = async () => {
-    if (!createFor || creating) return;
+    if (!createFor || creating || !verifiedMissing) return;
     if (!createForm.clientId) { notify('warn', 'Choisis le client expéditeur'); return; }
     if (!createForm.address.trim() || !createForm.city.trim()) { notify('warn', 'Adresse et ville obligatoires'); return; }
     setCreating(true);
@@ -133,6 +135,7 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
       try { location = await getCurrentPosition({ timeout: 5000 }); } catch { /* optionnel */ }
       const client = clients.find(c => c.id === createForm.clientId);
       const created = await createAndClaimPackage({
+        verifiedMissing,
         code: createFor,
         clientId: createForm.clientId,
         clientName: client ? clientLabel(client) : 'Client',
@@ -147,12 +150,6 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
         targetMissionId
       });
       resolvedMission.current = created.missionId;
-      // JOURNAL — création hors import (à réconcilier par le bureau).
-      void logActivity(currentUser, ActivityAction.PACKAGE_CREATED_ADHOC, {
-        targetType: 'package', targetName: createFor,
-        description: `${currentUser.firstName} ${currentUser.lastName} a créé le colis hors import ${createFor} (${client ? clientLabel(client) : 'client'})`,
-        details: { metadata: { code: createFor, client: client ? clientLabel(client) : undefined, ville: createForm.city } }
-      });
       // Retirer le code de la liste « à créer » + compter.
       setUnknownCodes(prev => prev.filter(c => c !== createFor));
       setCreatedCount(n => n + 1);
@@ -258,7 +255,7 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
           {unknownCodes.length > 0 && (
             <div className="space-y-2">
               <p className="text-sm font-bold text-amber-700 flex items-center gap-1">
-                <AlertTriangle size={14} /> {unknownCodes.length} colis hors import — à créer
+                <AlertTriangle size={14} /> {unknownCodes.length} codes introuvables — à vérifier avec le bureau
               </p>
               {unknownCodes.map(code => (
                 <div key={code} className="flex items-center justify-between gap-2 p-2.5 bg-amber-50 border border-amber-200 rounded-xl">
@@ -268,7 +265,7 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
                     disabled={isClaiming || creating}
                     className="flex-shrink-0 flex items-center gap-1 px-3 py-1.5 bg-amber-600 text-white rounded-lg text-sm font-bold active:scale-95 transition-transform disabled:opacity-40"
                   >
-                    <Plus size={14} /> Créer
+                    <Plus size={14} /> Création exceptionnelle
                   </button>
                 </div>
               ))}
@@ -321,7 +318,7 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
             <div className="p-4 space-y-3">
               <div className="flex items-start gap-2 p-2.5 bg-amber-50 border border-amber-200 rounded-xl">
                 <span>⚠️</span>
-                <p className="text-sm text-amber-800">Colis <b>hors import</b>. Il rejoint ta tournée et sera signalé au bureau pour réconciliation avec le fichier client.</p>
+                <p className="text-sm text-amber-800">Le code n’a pas été retrouvé. Vérifiez d’abord le BR et l’import avec le bureau. Une création exceptionnelle devra être réconciliée avec le fichier client.</p>
               </div>
               <p className="text-sm text-slate-500">N° colis : <b className="font-mono">{createFor}</b></p>
 
@@ -355,9 +352,10 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
                 onChange={e => setCreateForm(f => ({ ...f, contactPhone: e.target.value }))}
                 className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-green-500 outline-none" />
 
+              <label className="flex items-start gap-2 text-sm min-h-11"><input type="checkbox" checked={verifiedMissing} onChange={e => setVerifiedMissing(e.target.checked)} disabled={creating} />J’ai vérifié avec le bureau que ce carton est absent de l’import et doit être créé.</label>
               <button
                 onClick={handleCreate}
-                disabled={creating}
+                disabled={creating || !verifiedMissing}
                 className="w-full flex items-center justify-center gap-2 py-3.5 bg-green-600 text-white rounded-xl font-bold text-sm active:scale-95 transition-transform disabled:opacity-50"
               >
                 {creating ? <><Loader2 size={18} className="animate-spin" /> Création…</> : <><Plus size={18} /> Créer et prendre en charge</>}

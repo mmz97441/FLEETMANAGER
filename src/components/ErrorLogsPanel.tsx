@@ -1,3 +1,6 @@
+import { collection, onSnapshot, orderBy, query, limit } from 'firebase/firestore';
+import { db } from '../firebaseConfig';
+import { scanSupportIncidents } from '../utils/scanSupport';
 /**
  * PANNEAU JOURNAL D'ERREURS (admin)
  *
@@ -23,7 +26,15 @@ const timeAgo = (iso: string): string => {
 };
 
 const ErrorLogsPanel: React.FC = () => {
-  const [logs, setLogs] = useState<ErrorLogRecord[]>([]);
+  const [technicalLogs, setLogs] = useState<ErrorLogRecord[]>([]);
+  const [scanLogs, setScanLogs] = useState<ErrorLogRecord[]>([]);
+  const [scanError, setScanError] = useState('');
+  const [scanLoading, setScanLoading] = useState(true);
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'scan' | 'technical'>('all');
+  const logs = useMemo(() => [...technicalLogs, ...scanLogs].sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [technicalLogs, scanLogs]);
+  useEffect(() => onSnapshot(query(collection(db, 'activity_logs'), orderBy('createdAt', 'desc'), limit(1000)), snapshot => {
+    setScanLogs(scanSupportIncidents(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id, createdAt: doc.data().createdAt })))); setScanLoading(false); setScanError('');
+  }, () => { setScanLoading(false); setScanError('Le suivi des scans n’a pas pu être chargé. Actualisez la page pour réessayer.'); }), []);
   const [isLoading, setIsLoading] = useState(true);
   const [readError, setReadError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -53,6 +64,8 @@ const ErrorLogsPanel: React.FC = () => {
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     return logs.filter(l => {
+      if (sourceFilter === 'scan' && !l.id.startsWith('scan-')) return false;
+      if (sourceFilter === 'technical' && l.id.startsWith('scan-')) return false;
       if (levelFilter !== 'all' && l.level !== levelFilter) return false;
       if (!term) return true;
       return (
@@ -63,7 +76,7 @@ const ErrorLogsPanel: React.FC = () => {
         (l.userRole || '').toLowerCase().includes(term)
       );
     });
-  }, [logs, search, levelFilter]);
+  }, [logs, search, levelFilter, sourceFilter]);
 
   const stats = useMemo(() => ({
     total: logs.length,
@@ -92,12 +105,15 @@ const ErrorLogsPanel: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-slate-600">Journal des 200 derniers événements. La référence d’erreur fournie dans l’aide permet de retrouver un événement chargé ici.</p>
+      <p className="text-sm text-slate-600">Erreurs techniques récentes et refus de scan parmi les 1 000 dernières activités. Recherchez un chauffeur, un code colis ou une référence. Un refus peut être suivi d’une reprise acceptée.</p>
+      {scanLoading && <p role="status">Chargement des refus de scan…</p>}
+      {scanError && <p role="alert" className="text-red-800">{scanError}</p>}
+      <label className="block text-sm font-semibold">Événements à afficher<select className="block min-h-11 border rounded-lg px-3" value={sourceFilter} onChange={e => setSourceFilter(e.target.value as typeof sourceFilter)}><option value="all">Erreurs et refus de scan</option><option value="scan">Refus de scan</option><option value="technical">Erreurs techniques</option></select></label>
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="bg-white rounded-xl border border-slate-200 p-4">
           <p className="text-2xl font-black text-slate-800">{stats.total}</p>
-          <p className="text-xs text-slate-500">erreurs enregistrées</p>
+          <p className="text-xs text-slate-500">incidents chargés</p>
         </div>
         <div className="bg-white rounded-xl border border-slate-200 p-4">
           <p className="text-2xl font-black text-red-600">{stats.errors}</p>
@@ -147,7 +163,7 @@ const ErrorLogsPanel: React.FC = () => {
       {/* Liste */}
       {filtered.length === 0 ? (
         <div className="text-center py-12 text-slate-400 text-sm">
-          Aucune erreur {search || levelFilter !== 'all' ? 'pour ce filtre' : "— tout va bien 🎉"}
+          Aucun incident {search || levelFilter !== 'all' ? 'pour ce filtre' : "dans les événements chargés"}
         </div>
       ) : (
         <div className="space-y-2">

@@ -1,3 +1,4 @@
+import { importReference, type ImportManifest } from '../utils/importManifest';
 import { scanPackage } from './scanService';
 import { listenClientPackages } from './clientPackageSubscription';
 import { getFunctions, httpsCallable } from "firebase/functions";
@@ -565,12 +566,20 @@ export const resyncPackageStatusesFromStops = async (): Promise<StatusResyncResu
 /**
  * Imports par lots de 150, identifiés côté serveur pour permettre une reprise sans doublon.
  */
-export const addPackagesBatch = async (packages: Omit<Package, 'id' | 'createdAt' | 'updatedAt'>[]): Promise<string[]> => {
+export const addPackagesBatch = async (packages: Omit<Package, 'id' | 'createdAt' | 'updatedAt'>[], manifest?: ImportManifest): Promise<string[]> => {
+  if (!packages.length) return [];
+  const expected = manifest || { clientId: packages[0].clientId, references: packages.map(importReference) };
   const call=httpsCallable<any,{ids:string[]}>(getFunctions(app,'europe-west1'),'importPackages');
   const ids:string[]=[];
   for(let offset=0;offset<packages.length;offset+=150){
-    try{ids.push(...(await call({packages:cleanUndefined(packages.slice(offset,offset+150))})).data.ids);}
-    catch(error){throw new Error(`${ids.length} ligne(s) déjà enregistrée(s). Relancez l’import : les colis existants ne seront pas recréés. ${error instanceof Error?error.message:''}`);}
+    try {
+      const batch = packages.slice(offset, offset + 150);
+      const result = await call({ packages: cleanUndefined(batch), manifest: expected });
+      if (!Array.isArray(result.data.ids) || result.data.ids.length !== batch.length || result.data.ids.some(id => typeof id !== 'string' || !id))
+        throw new Error('La confirmation du serveur est incomplète.');
+      ids.push(...result.data.ids);
+    }
+    catch(error){throw Object.assign(new Error(`${ids.length} ligne(s) déjà confirmée(s). Relancez l’import : les colis existants ne seront pas recréés. ${error instanceof Error?error.message:''}`), { confirmedCount: ids.length });}
   }
   return ids;
 };
@@ -652,6 +661,7 @@ export const createClientShipment = async (params: {
  */
 export const createClientShipmentsBatch = async (params: {
   client: { id: string; companyName: string };
+  manifest?: ImportManifest;
   deliveryDate?: string;   // Jour de livraison souhaité (YYYY-MM-DD) — daté sur chaque colis
   rows: Array<{
     colisNumber: string;   // ex. BR-000123
@@ -709,7 +719,7 @@ export const createClientShipmentsBatch = async (params: {
     } as Omit<Package, 'id' | 'createdAt' | 'updatedAt'>);
   }
 
-  const ids = await addPackagesBatch(toCreate);
+  const ids = await addPackagesBatch(toCreate, params.manifest);
   return toCreate.map((p, idx) => ({ ...(p as Package), id: ids[idx], createdAt: now, updatedAt: now }));
 };
 
@@ -1392,6 +1402,7 @@ export const claimPackagesForDelivery = async (params: {
  */
 export const createAndClaimPackage = async (params: {
   code: string;
+  verifiedMissing: boolean;
   clientId: string;
   clientName: string;
   contactName: string;
@@ -1406,47 +1417,12 @@ export const createAndClaimPackage = async (params: {
   // la tournée de récupération du jour.
   targetMissionId?: string;
 }): Promise<Package> => {
-  const now = new Date().toISOString();
-  const code = params.code.trim();
   const zone = (await getZoneFromPostalCode(params.postalCode.trim())) || Zone.NORD;
-
-  const pkgData = cleanUndefined({
-    clientId: params.clientId,
-    clientName: params.clientName,
-    importBatchId: `MANUEL-${params.date}`,
-    externalId: code,
-    orderNumber: code,
-    address: params.address.trim(),
-    city: params.city.trim(),
-    postalCode: params.postalCode.trim(),
-    zone,
-    contactName: params.contactName.trim() || 'Destinataire',
-    contactPhone: params.contactPhone?.trim() || undefined,
-    serviceTime: 5,
-    status: PackageStatus.PENDING,
-    currentDriverId: params.driver.id, // requis par les règles pour la création chauffeur
-    comment: '⚠️ Créé à la volée (hors import) — à réconcilier',
-    movements: [{
-      timestamp: now,
-      action: 'IMPORTED' as const,
-      driverId: params.driver.id,
-      driverName: params.driver.name,
-      notes: `Colis créé à la volée par ${params.driver.name} (carton hors import)`
-    }],
-    createdAt: now,
-    updatedAt: now
-  });
-
-  // A failed confirmation must not create a second physical parcel on retry.
-  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`adhoc/${params.clientId}/${code.toUpperCase()}`));
-  const id = `adhoc-${Array.from(new Uint8Array(hash), b => b.toString(16).padStart(2, '0')).join('')}`;
-  const ref = doc(db, PACKAGES_COLLECTION, id);
-  const created = await runTransaction(db, async tx => {
-    const existing = await tx.get(ref);
-    if (existing.exists()) return { id, ...existing.data() } as Package;
-    tx.set(ref, pkgData);
-    return { id, ...pkgData } as Package;
-  });
+  const call = httpsCallable<Record<string, unknown>, { package: Package }>(getFunctions(app, 'europe-west1'), 'createAdHocPackage');
+  const response = await call({ code: params.code, clientId: params.clientId, contactName: params.contactName,
+    address: params.address, postalCode: params.postalCode, city: params.city, contactPhone: params.contactPhone || '',
+    zone, verifiedMissing: params.verifiedMissing });
+  const created = response.data.package;
   const receipt = await scanPackage({ packageId: created.id, driverId: params.driver.id, targetMissionId: params.targetMissionId, source: 'manual-create' });
   if (!receipt.accepted) throw new Error(receipt.message);
   return { ...created, missionId: receipt.missionId!, missionDate: receipt.missionDate!, stopId: receipt.stopId!, status: receipt.status as PackageStatus,

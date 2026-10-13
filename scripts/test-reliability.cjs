@@ -33,10 +33,13 @@ const associate = (packageId, value = code, who = manager) => service.associateC
     await denied(associate(p2), 'already-exists'); await denied(associate(p1, otherCode), 'already-exists');
   });
   await check('native code is recognized across every scan entry point without duplicate parcel assignment', async () => {
-    for (const source of ['driver-claim', 'driver-delivery', 'driver-pickup', 'hub-loading', 'quick-scan', 'transfer']) {
+    for (const source of ['driver-claim', 'hub-loading', 'quick-scan', 'transfer']) {
       const result = await service.scanPackage.run({ requestId: randomUUID(), driverId: driver, source, code }, ctx(driver));
       assert.equal(result.accepted, true); assert.equal(result.packageId, p1);
     }
+    const assigned = (await db.collection('packages').doc(p1).get()).data();
+    const verified = await service.scanPackage.run({ requestId: randomUUID(), driverId: driver, source: 'driver-delivery', code, targetMissionId: assigned.missionId, stopId: assigned.stopId }, ctx(driver));
+    assert.equal(verified.outcome, 'verified');
     assert.equal((await db.collection('packages').doc(p2).get()).data().missionId, undefined);
   });
   await check('concurrent associations cannot attach a second native code to two cartons', async () => {

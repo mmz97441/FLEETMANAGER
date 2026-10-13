@@ -1,3 +1,4 @@
+import { importReference } from '../utils/importManifest';
 import { useClientAccess } from './client/ClientAccessContext';
 /**
  * IMPORT EN MASSE D'EXPÉDITIONS (client expéditeur)
@@ -310,6 +311,7 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
         const packages = await access.runMutation('Importer des expéditions', () => createClientShipmentsBatch({
           client: { id: currentUser.id, companyName: currentUser.companyName || `${currentUser.firstName} ${currentUser.lastName}` },
           deliveryDate, rows: rowsWithZone,
+          manifest: { clientId: currentUser.id, references: validRows.map(row => importReference({ externalId: row.colisNumber, packageIndex: 1 })), rejectedRows: invalidRows.length },
         }));
         const stored = new Map((await getPackagesByIds(packages.map(parcel => parcel.id))).map(parcel => [parcel.id, parcel]));
         if (stored.size !== new Set(packages.map(parcel => parcel.id)).size) throw new Error('Certains colis enregistrés n’ont pas pu être relus.');
@@ -344,7 +346,7 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
               </button>
             </div>) : undefined}>
         {attempted && <div ref={resultRef} tabIndex={-1} role="status" className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 mb-4 text-sm text-brand-900">
-          <p className="font-bold">{complete ? 'Import terminé' : busy ? 'Import en cours…' : 'Import interrompu'}</p>
+          <p className="font-bold">{complete ? (outcomes.invalid || outcomes.duplicates ? 'Import partiel — lignes à vérifier' : 'Import terminé et confirmé') : busy ? 'Import en cours…' : 'Import interrompu'}</p>
           <p className="mt-1">{outcomes.total} ligne{outcomes.total > 1 ? 's' : ''} : {outcomes.confirmed} confirmée{outcomes.confirmed > 1 ? 's' : ''} · {outcomes.invalid} rejetée{outcomes.invalid > 1 ? 's' : ''} · {outcomes.duplicates} doublon{outcomes.duplicates > 1 ? 's' : ''} dans le fichier · {outcomes.pending} non confirmée{outcomes.pending > 1 ? 's' : ''}.</p>
           <p className="mt-1">Une référence confirmée est enregistrée, créée maintenant ou déjà présente. Les références existantes ne sont pas recréées.</p>
         </div>}

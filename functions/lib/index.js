@@ -33,7 +33,9 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.interpretAnalytics = exports.acceptQuote = exports.getTeamDirectory = exports.notifyPackageStatus = exports.returnPackage = exports.deleteAbsence = exports.deleteVehicle = exports.importPackages = exports.assignVehicle = exports.askFleetGenius = exports.sendBusinessNotification = exports.transferPackages = exports.scanPackage = exports.dispatchMissions = exports.finishMission = exports.receivePackagesAtHub = exports.saveAbsence = exports.revokeOwnSessions = exports.linkAuthToProfile = exports.recordUserPresence = exports.getOwnProfile = exports.createInvitation = exports.activateAccount = exports.validateInvitationToken = exports.forcePasswordReset = exports.toggleUserStatus = exports.cleanupExpiredInvitations = exports.deleteUserCompletely = exports.optimizeTours = exports.employeeVoting = exports.recordClientErrors = exports.associateCarrierBarcode = void 0;
+exports.createAdHocPackage = exports.interpretAnalytics = exports.acceptQuote = exports.getTeamDirectory = exports.notifyPackageStatus = exports.returnPackage = exports.deleteAbsence = exports.deleteVehicle = exports.importPackages = exports.assignVehicle = exports.askFleetGenius = exports.sendBusinessNotification = exports.transferPackages = exports.scanPackage = exports.dispatchMissions = exports.finishMission = exports.receivePackagesAtHub = exports.saveAbsence = exports.revokeOwnSessions = exports.linkAuthToProfile = exports.recordUserPresence = exports.getOwnProfile = exports.createInvitation = exports.activateAccount = exports.validateInvitationToken = exports.forcePasswordReset = exports.toggleUserStatus = exports.cleanupExpiredInvitations = exports.deleteUserCompletely = exports.optimizeTours = exports.employeeVoting = exports.recordClientErrors = exports.associateCarrierBarcode = void 0;
+const adhocPackage_1 = require("./adhocPackage");
+const importManifest_1 = require("./importManifest");
 const hubReception_1 = require("./hubReception");
 const carrierBarcode_1 = require("./carrierBarcode");
 const clientErrors_1 = require("./clientErrors");
@@ -1581,7 +1583,17 @@ exports.importPackages = functions
                 .digest('hex');
         return { id, code, p };
     });
+    let manifest;
+    try {
+        manifest = (0, importManifest_1.validateImportManifest)(data.manifest || { clientId: rows[0].p.clientId, references: rows.map((r) => (0, importManifest_1.importReference)(r.p)) }, rows.map((r) => r.p));
+    }
+    catch (error) {
+        throw new functions.https.HttpsError('invalid-argument', error.message);
+    }
+    const manifestId = (0, crypto_1.createHash)('sha256').update(JSON.stringify([manifest.clientId, manifest.references, manifest.fileName])).digest('hex');
+    const runRef = db.collection('import_runs').doc(manifestId);
     return db.runTransaction(async (tx) => {
+        const run = await tx.get(runRef);
         const snapshots = await Promise.all(rows.map((r) => tx.get(db.collection('packages').doc(r.id))));
         // Recognize historical documents whose IDs predate deterministic imports.
         const legacy = await Promise.all(rows.map((r, i) => snapshots[i].exists
@@ -1642,7 +1654,15 @@ exports.importPackages = functions
                 });
             }
         });
-        return { ids };
+        const confirmed = [...new Set([...(run.data()?.confirmedReferences || []), ...rows.map((r) => (0, importManifest_1.importReference)(r.p))])];
+        const pending = manifest.references.filter(reference => !confirmed.includes(reference));
+        tx.set(runRef, { ...manifest, confirmedReferences: confirmed, confirmedCount: confirmed.length,
+            expectedCount: manifest.references.length, pendingReferences: pending,
+            status: pending.length || manifest.rejectedRows ? 'Incomplet' : 'Terminé',
+            createdAt: run.data()?.createdAt || now, updatedAt: now, importedBy: caller.id,
+            clientName: rows[0].p.clientName || '',
+        });
+        return { ids, importRunId: manifestId };
     });
 });
 exports.deleteVehicle = functions
@@ -2089,4 +2109,5 @@ Exemple : {"metric":"deliveryRate","dimension":"zone","period":"month","chart":"
             .join('') || '',
     };
 });
+exports.createAdHocPackage = functions.region('europe-west1').https.onCall((data, context) => (0, adhocPackage_1.createAdHocPackageHandler)(data, context, { db, requireActiveCaller, isAdminCaller }));
 //# sourceMappingURL=index.js.map

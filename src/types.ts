@@ -1267,6 +1267,7 @@ export interface PackageTransfer {
 // ============================================================================
 
 export enum ImportBatchStatus {
+  INCOMPLETE = 'Incomplet',
   PROCESSING = 'En traitement',
   COMPLETED = 'Terminé',
   PARTIALLY_DISPATCHED = 'Partiellement dispatché',

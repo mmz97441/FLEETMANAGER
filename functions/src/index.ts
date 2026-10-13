@@ -1,3 +1,5 @@
+import { createAdHocPackageHandler } from './adhocPackage';
+import { importReference, validateImportManifest } from './importManifest';
 import { receivePackagesAtHubHandler } from './hubReception';
 import { associateCarrierBarcodeHandler, validatedCarrierBarcode, checkCarrierBarcode } from './carrierBarcode';
 import { recordClientErrorsHandler } from './clientErrors';
@@ -1991,7 +1993,14 @@ export const importPackages = functions
           .digest('hex');
       return { id, code, p };
     });
+    let manifest;
+    try {
+      manifest = validateImportManifest(data.manifest || { clientId: rows[0].p.clientId, references: rows.map((r: any) => importReference(r.p)) }, rows.map((r: any) => r.p));
+    } catch (error) { throw new functions.https.HttpsError('invalid-argument', (error as Error).message); }
+    const manifestId = createHash('sha256').update(JSON.stringify([manifest.clientId, manifest.references, manifest.fileName])).digest('hex');
+    const runRef = db.collection('import_runs').doc(manifestId);
     return db.runTransaction(async (tx) => {
+      const run = await tx.get(runRef);
       const snapshots = await Promise.all(
         rows.map((r: any) => tx.get(db.collection('packages').doc(r.id))),
       );
@@ -2062,7 +2071,15 @@ export const importPackages = functions
           });
         }
       });
-      return { ids };
+      const confirmed = [...new Set([...(run.data()?.confirmedReferences || []), ...rows.map((r: any) => importReference(r.p))])];
+      const pending = manifest.references.filter(reference => !confirmed.includes(reference));
+      tx.set(runRef, { ...manifest, confirmedReferences: confirmed, confirmedCount: confirmed.length,
+        expectedCount: manifest.references.length, pendingReferences: pending,
+        status: pending.length || manifest.rejectedRows ? 'Incomplet' : 'Terminé',
+        createdAt: run.data()?.createdAt || now, updatedAt: now, importedBy: caller.id,
+        clientName: rows[0].p.clientName || '',
+      });
+      return { ids, importRunId: manifestId };
     });
   });
 
@@ -2632,3 +2649,5 @@ Exemple : {"metric":"deliveryRate","dimension":"zone","period":"month","chart":"
           .join('') || '',
     };
   });
+
+export const createAdHocPackage = functions.region('europe-west1').https.onCall((data, context) => createAdHocPackageHandler(data, context, { db, requireActiveCaller, isAdminCaller }));

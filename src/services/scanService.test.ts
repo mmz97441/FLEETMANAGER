@@ -41,6 +41,16 @@ it('a business refusal is confirmed and clears its pending intent', async () => 
   expect((await service.scanPackage({ code: 'BR4', driverId: 'd', source: 'transfer' })).accepted).toBe(false);
   expect([...storage.keys()].some(k => k.includes('.pending.'))).toBe(false);
 });
+it('an uncertain verification at one stop cannot be replayed as the control of another stop', async () => {
+  const service = await import('./scanService');
+  const input = { code: 'BR-CONTROL', driverId: 'd', source: 'driver-delivery' as const, targetMissionId: 'tour', stopId: 'a' };
+  call.mockRejectedValueOnce({ code: 'functions/deadline-exceeded' });
+  await expect(service.scanPackage(input)).rejects.toBeDefined();
+  call.mockResolvedValueOnce({ data: result });
+  await service.scanPackage({ ...input, stopId: 'b' });
+  expect(call.mock.calls[1][0].stopId).toBe('b');
+  expect(call.mock.calls[1][0].requestId).not.toBe(call.mock.calls[0][0].requestId);
+});
 it('bounds a stalled authentication preparation and releases the scan lock without losing idempotency', async () => {
   const service = await import('./scanService');
   let lateReply!: (value: unknown) => void;

@@ -142,22 +142,22 @@ async function check(name, test) {
   });
   await check('all operational entry points apply the same attachment and audit policy', async t => {
     let missionId;
-    for (const source of ['driver-claim', 'driver-delivery', 'hub-loading', 'quick-scan', 'transfer', 'manual-create']) {
+    for (const source of ['driver-claim', 'hub-loading', 'quick-scan', 'transfer', 'manual-create']) {
       const r = await t.scan({ source }); missionId ||= r.missionId; assert.equal(r.missionId, missionId); assert.equal(r.accepted, true);
     }
-    assert.equal((await t.state()).movements.length, 6);
+    assert.equal((await t.state()).movements.length, 5);
   });
   await check('pickup verification is audited without falsely marking parcel collected', async t => {
     await t.oldRef.update({ date: '2026-09-17', type: 'Collecte', stops: [{ id: 'old-stop', type: 'PICKUP', status: 'En attente', packageIds: [t.parcelId] }] });
-    await t.pkgRef.update({ status: 'En attente' }); const r = await t.scan({ source: 'driver-pickup', targetMissionId: t.oldId });
+    await t.pkgRef.update({ status: 'En attente' }); const r = await t.scan({ source: 'driver-pickup', stopId: 'old-stop', targetMissionId: t.oldId });
     assert.equal(r.accepted, true); assert.equal((await t.state()).status, 'En attente'); assert.equal(r.stopId, 'old-stop');
   });
-  await check('pickup with legacy missing driver assignment stays on its pickup stop', async t => {
+  await check('pickup with legacy missing driver assignment verifies its stop without reassigning', async t => {
     await t.oldRef.update({ date: '2026-09-17', type: 'Collecte', stops: [{ id: 'old-stop', type: 'PICKUP', status: 'En attente', packageIds: [t.parcelId] }] });
     await t.pkgRef.update({ status: 'En attente', currentDriverId: null });
     const r = await t.scan({ source: 'driver-pickup', stopId: 'old-stop', targetMissionId: t.oldId });
     assert.equal(r.stopId, 'old-stop'); assert.equal((await t.state()).status, 'En attente');
-    assert.equal((await t.oldRef.get()).data().stops.length, 1); assert.equal((await t.state()).currentDriverId, t.driverId);
+    assert.equal((await t.oldRef.get()).data().stops.length, 1); assert.equal((await t.state()).currentDriverId, null);
   });
   await check('first verified scan of a preloaded parcel is confirmed, not falsely called a duplicate', async t => {
     await t.oldRef.update({ date: '2026-09-17' });
