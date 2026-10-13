@@ -72,6 +72,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
   // Création à la volée (carton hors import)
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [verifiedMissing, setVerifiedMissing] = useState(false);
   const [createForm, setCreateForm] = useState({ clientId: '', contactName: '', address: '', postalCode: '', city: '', contactPhone: '' });
 
   // === MODE MANIFESTE D'ENLÈVEMENT — scan = PRISE EN CHARGE IMMÉDIATE ===
@@ -132,6 +133,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
 
   const handleCreate = async () => {
     if (!result || creating) return;
+    if (!verifiedMissing) { setClaimError("Vérifiez d’abord ce colis avec le bureau."); return; }
     if (!createForm.clientId) { setClaimError('Choisissez le client expéditeur'); return; }
     if (!createForm.address.trim() || !createForm.city.trim()) { setClaimError('Adresse et ville obligatoires'); return; }
     setCreating(true); setClaimError(null);
@@ -142,6 +144,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
       } catch { /* géoloc optionnelle */ }
       const client = clients.find(c => c.id === createForm.clientId);
       await createAndClaimPackage({
+        verifiedMissing,
         code: result.scannedCode,
         clientId: createForm.clientId,
         clientName: client?.companyName || (client ? `${client.firstName} ${client.lastName}` : 'Client'),
@@ -488,7 +491,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
               {showCreate && !claimed && normalizeRole(currentUser.role) === UserRole.DRIVER && (
                 <button
                   onClick={handleCreate}
-                  disabled={creating}
+                  disabled={creating || !verifiedMissing}
                   className="ui-button ui-button-primary w-full"
                 >
                   {creating ? (
@@ -612,7 +615,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
                 Vérifiez le code individuel du colis ou son import. Pour charger des colis, utilisez l’écran Chargement et choisissez le chauffeur.
               </p>
               {normalizeRole(currentUser.role) === UserRole.DRIVER && <button
-                onClick={() => setShowCreate(true)}
+                onClick={() => { setVerifiedMissing(false); setShowCreate(true); }}
                 className="ui-button ui-button-primary mt-4 w-full gap-2"
               >
                 <Plus size={18} /> Créer et prendre en charge
@@ -638,6 +641,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
                 <b className="font-mono break-all">{result.scannedCode}</b>
               </p>
               <fieldset disabled={busy} className="space-y-3">
+                <label className="flex items-start gap-2 text-sm min-h-11"><input type="checkbox" checked={verifiedMissing} onChange={e => setVerifiedMissing(e.target.checked)} disabled={creating} />J’ai vérifié avec le bureau que ce carton est absent de l’import et doit être créé.</label>
                 <FormSelect label="Client expéditeur" required value={createForm.clientId} onChange={e => setCreateForm(f => ({ ...f, clientId: e.target.value }))} options={[{ value: '', label: 'Choisir un client' }, ...clients.map(client => ({ value: client.id, label: client.companyName || `${client.firstName} ${client.lastName}` }))]} />
                 <FormInput label="Destinataire" value={createForm.contactName} onChange={e => setCreateForm(f => ({ ...f, contactName: e.target.value }))} />
                 <FormInput label="Adresse" required autoComplete="street-address" value={createForm.address} onChange={e => setCreateForm(f => ({ ...f, address: e.target.value }))} />

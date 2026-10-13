@@ -8,7 +8,7 @@ import { withDeadline } from '../utils/asyncDeadline';
 export type ScanSource = 'driver-claim' | 'driver-delivery' | 'driver-pickup' | 'hub-loading' | 'quick-scan' | 'transfer' | 'manual-create';
 export interface ScanReceipt {
   requestId: string; accepted: boolean; replayed?: boolean;
-  outcome: 'confirmed' | 'already_scanned' | 'reassigned' | 'not_found' | 'ambiguous' | 'terminal' | 'blocked';
+  outcome: 'verified' | 'wrong_stop' | 'confirmed' | 'already_scanned' | 'reassigned' | 'not_found' | 'ambiguous' | 'terminal' | 'blocked';
   message: string; scannedAt: string; driverId: string; driverName: string;
   packageId: string | null; packageCode: string; contactName: string;
   missionId: string | null; missionDate: string | null; stopId: string | null; status?: string;
@@ -32,7 +32,8 @@ function currentMission(driverId: string) {
 
 /** Retain the same request after an uncertain response. No green confirmation before the server commits. */
 export function scanPackage(input: ScanInput): Promise<ScanReceipt> {
-  const key = `fleet.scan.pending.${input.driverId}.${operationalDay()}.${input.source}.${encodeURIComponent(input.packageId || input.code?.trim() || '')}`;
+  const context = ['driver-delivery', 'driver-pickup'].includes(input.source) ? `.${input.targetMissionId || ''}.${input.stopId || ''}` : '';
+  const key = `fleet.scan.pending.${input.driverId}.${operationalDay()}.${input.source}.${encodeURIComponent(input.packageId || input.code?.trim() || '')}${context}`;
   const active = running.get(key);
   if (active) return active;
   const task = (async () => {

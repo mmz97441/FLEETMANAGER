@@ -62,3 +62,37 @@ export function waitForCameraImage(video: HTMLVideoElement): Promise<void> {
     ready();
   });
 }
+
+/** Ignore transient pause/mute events. Catch play() rejections and detach every
+ * listener/timer before stop() can generate another interruption event. */
+export function monitorCamera(video: HTMLVideoElement, tracks: MediaStreamTrack[], recover: (cause: string) => void) {
+  let closed = false, checking = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const hidden = () => document.visibilityState === 'hidden';
+  const healthy = () => !video.paused && tracks.every(track => track.readyState !== 'ended' && !track.muted);
+  const inspect = async (cause: string) => {
+    if (closed || checking || hidden() || healthy()) return;
+    checking = true;
+    if (video.paused && tracks.every(track => track.readyState !== 'ended')) {
+      try { await withDeadline(Promise.resolve(video.play()), 1200, new Error('Reprise vidéo trop longue.')); } catch { /* Recover below, without an unhandled rejection. */ }
+    }
+    checking = false;
+    if (!closed && !hidden() && !healthy()) recover(cause);
+  };
+  const schedule = (event: Event) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => { void inspect(event.type); }, event.type === 'ended' ? 100 : 1200);
+  };
+  video.addEventListener('pause', schedule);
+  tracks.forEach(track => { track.addEventListener('ended', schedule); track.addEventListener('mute', schedule); });
+  return () => {
+    closed = true; clearTimeout(timer); video.removeEventListener('pause', schedule);
+    tracks.forEach(track => { track.removeEventListener('ended', schedule); track.removeEventListener('mute', schedule); });
+  };
+}
+
+export function allowCameraRecovery(attempts: number[], now: number): boolean {
+  while (attempts.length && now - attempts[0] >= 60000) attempts.shift();
+  if (attempts.length >= 2) return false;
+  attempts.push(now); return true;
+}

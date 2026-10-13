@@ -309,6 +309,18 @@ await check('Client cannot forge scan receipt for replay', 'denied', () =>
   setDoc(doc(db('driverA'), 'scan_requests', 'fake-receipt'), { result: { accepted: true } }));
 await check('Driver can still record ordinary field activity', 'allowed', () =>
   setDoc(doc(db('driverA'), 'activity_logs', 'ordinary-field-event'), { userId: 'driverA', action: 'PACKAGE_PICKED_UP' }));
+await check('Driver cannot bypass exceptional parcel creation checks', 'denied', () =>
+  setDoc(doc(db('driverA'), 'packages', 'forged-adhoc'), { currentDriverId: 'driverA', status: 'En attente', externalId: 'BR-FAKE' }));
+await check('Driver cannot forge delivery verification timestamp', 'denied', () =>
+  updateDoc(doc(db('driverB'), 'packages', 'pB'), { lastVerifiedAt: '2026-10-13T10:00:00Z' }));
+await check('Client cannot forge import confirmation', 'denied', () =>
+  setDoc(doc(db('clientA'), 'import_runs', 'forged'), { clientId: 'clientA', status: 'Terminé' }));
+await env.withSecurityRulesDisabled(async ctx => {
+  await setDoc(doc(ctx.firestore(), 'import_runs', 'run-a'), { clientId: 'clientA', status: 'Incomplet' });
+});
+await check('Client can read its own import confirmations', 'allowed', () => getDoc(doc(db('clientA'), 'import_runs', 'run-a')));
+await check('Client cannot read another sender import', 'denied', () => getDoc(doc(db('clientB'), 'import_runs', 'run-a')));
+await check('Driver cannot read private import manifests', 'denied', () => getDoc(doc(db('driverA'), 'import_runs', 'run-a')));
 if (process.env.TEST_RESULTS_PATH)
   await writeFile(
     process.env.TEST_RESULTS_PATH,

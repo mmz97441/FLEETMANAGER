@@ -1,7 +1,7 @@
 {
   "name": "fleetgenius-pro",
   "private": true,
-  "version": "4.32.0",
+  "version": "4.33.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,10 +11,11 @@
     "test": "vitest run src",
     "test:integration": "vitest run tests/integration",
     "test:rules": "node scripts/test-rules.mjs",
-    "test:server": "node scripts/test-server.cjs && node scripts/test-mission-lifecycle.cjs && node scripts/test-scan-package.cjs && node scripts/test-voting.cjs && node scripts/test-profile-session.cjs && node scripts/test-reliability.cjs",
+    "test:server": "node scripts/test-server.cjs && node scripts/test-mission-lifecycle.cjs && node scripts/test-scan-package.cjs && node scripts/test-voting.cjs && node scripts/test-profile-session.cjs && node scripts/test-reliability.cjs && node scripts/test-scan-import-reliability.cjs",
     "test:storage": "node scripts/test-storage.mjs",
     "test:emulated": "npm run test:rules && npm run test:integration && npm run test:server && npm run test:storage && node scripts/test-voting-rules.mjs",
-    "audit:ui": "node scripts/audit-ui.mjs"
+    "audit:ui": "node scripts/audit-ui.mjs",
+    "audit:dependencies": "node --test scripts/audit-dependencies.test.mjs && node scripts/audit-dependencies.mjs"
   },
   "dependencies": {
     "firebase": "^12.18.0",
@@ -46,6 +47,10 @@
     "typescript": "^5.2.2",
     "vite": "^8.2.2",
     "vitest": "^4.1.11"
+  },
+  "overrides": {
+    "@grpc/grpc-js": "^1.14.5",
+    "postcss-selector-parser": "^7.1.6"
   },
   "engines": {
     "node": "22.x"

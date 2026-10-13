@@ -7,8 +7,8 @@ import type { Package } from '../types';
 import Modal from './shared/Modal';
 import Scanner from './Scanner';
 
-export default function CarrierBarcodeModal({ onClose }: { onClose: () => void }) {
-  const [br, setBr] = useState(''), [code, setCode] = useState('');
+export default function CarrierBarcodeModal({ onClose, initialBr = '' }: { onClose: () => void; initialBr?: string }) {
+  const [br, setBr] = useState(initialBr), [code, setCode] = useState('');
   const [parcel, setParcel] = useState<Package | null>(null);
   const [verified, setVerified] = useState(false), [busy, setBusy] = useState(false);
   const [message, setMessage] = useState(''), [saved, setSaved] = useState(false);

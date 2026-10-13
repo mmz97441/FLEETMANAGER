@@ -129,6 +129,9 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
 
     // Mettre à jour le champ
     switch (field) {
+      case 'carrierBarcode':
+        row._carrierNumeric = false; row.carrierBarcode = editValue; break;
+      case 'clientReference':
       case 'contactName':
       case 'contactPhone':
       case 'address':
@@ -294,6 +297,7 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
     const worksheet = XLSX.utils.json_to_sheet(rejected.map(row => ({
       Id: row.externalId, Order_Number: row.orderNumber, Contact: row.contactName, Address: `${row.address} ${row.postalCode} ${row.city}`.trim(), Telephone: row.contactPhone,
       Floor: row.floor, Elevator: row.hasElevator ? 1 : 0, Start: row.timeWindowStart, End: row.timeWindowEnd, Service_Time: row.serviceTime, Volume: row.volume, Weight: row.weight, Comment: row.comment,
+      'Code Boiron': row.carrierBarcode || '', Référence: row.clientReference || '',
       'Ligne source': row._rowIndex, Motif: importResult ? importResult.errors.filter(error => error.row === row._rowIndex).map(error => error.message).join(' ; ') : row._errors.join(' ; '),
     })));
     const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, worksheet, 'Lignes à corriger'); XLSX.writeFile(workbook, 'import-lignes-a-corriger.xlsx');
@@ -302,8 +306,8 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
   if (importResult) {
     const duplicateLines = new Set(importResult.errors.filter(error => error.row > 0 && /doublon/i.test(error.message)).map(error => error.row));
     return <div className="rounded-xl border bg-white p-5 space-y-4">
-      <h3 ref={resultRef} tabIndex={-1} className="text-xl font-bold">Bilan de l’import</h3>
-      <p role="status" className="text-sm text-slate-700">{importResult.totalRows} lignes : {importResult.successCount} enregistrées, {importResult.errorCount} rejetées, {duplicateLines.size} doublons ignorés et {stats.deleted} retirées avant import.</p>
+      <h3 ref={resultRef} tabIndex={-1} className="text-xl font-bold">{importResult.errorCount ? 'Import partiel — lignes à corriger' : 'Import confirmé'}</h3>
+      <p role="status" className="text-sm text-slate-700">{importResult.totalRows} lignes : {importResult.successCount} confirmées (créées ou déjà présentes), {importResult.errorCount} rejetées, {duplicateLines.size} doublons ignorés et {stats.deleted} retirées avant import.</p>
       {importResult.errors.length > 0 && <><ul className="max-h-64 overflow-auto list-disc pl-5 text-sm text-slate-700 space-y-1">{importResult.errors.map((error, index) => <li key={index}>{error.row > 0 ? `Ligne ${error.row} : ` : ''}{error.message}</li>)}</ul><button type="button" onClick={exportRejected} className="min-h-11 rounded-xl border px-4 text-sm font-semibold">Exporter les lignes à corriger ou vérifier</button></>}
       <button type="button" onClick={() => onConfirm(importResult)} className="min-h-11 px-4 bg-indigo-700 text-white rounded-xl font-semibold">Terminer et consulter les colis</button>
     </div>;
@@ -551,6 +555,8 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
                     {/* N° commande */}
                     <td className="px-2 py-2 font-mono">
                       {renderEditableCell({ rowIdx: realIdx, field: "orderNumber", value: row.orderNumber })}
+                      <div className="text-sm mt-2">Référence Boiron : {renderEditableCell({ rowIdx: realIdx, field: 'clientReference', value: row.clientReference || '' })}</div>
+                      <div className="text-sm mt-2">Code Boiron : {renderEditableCell({ rowIdx: realIdx, field: 'carrierBarcode', value: row.carrierBarcode || '' })}</div>
                     </td>
 
                     {/* Contact */}

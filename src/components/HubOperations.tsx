@@ -1,3 +1,4 @@
+import ImportReadiness from './ImportReadiness';
 import { scanPackage, scanReceiptLabel } from '../services/scanService';
 import { useOperationalDay } from '../hooks/useOperationalDay';
 import PackageScanInfo from './PackageScanInfo';
@@ -84,6 +85,7 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
   const [selectedHubId, setSelectedHubId] = useState<string>('');
   const [showScanner, setShowScanner] = useState(false);
   const [showCarrierAssociation, setShowCarrierAssociation] = useState(false);
+  const [associationCode, setAssociationCode] = useState('');
   const [scanMode, setScanMode] = useState<'reception' | 'loading' | null>(null);
   const [processing, setProcessing] = useState(false);
   const receptionLock = useRef(false);
@@ -270,7 +272,7 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
     if (!driverId) { showNotif('warning', 'Choisissez le chauffeur avant de scanner.'); return; }
     showNotif('warning', `${barcode} — confirmation en cours…`);
     const receipt = await scanPackage({ code: barcode, driverId, source: 'hub-loading' });
-    showNotif(receipt.accepted && receipt.outcome !== 'already_scanned' ? 'success' : 'warning', scanReceiptLabel(receipt));
+    showNotif(receipt.accepted ? 'success' : 'warning', scanReceiptLabel(receipt));
     if (receipt.accepted) setScannedCodes(prev => [...new Set([...prev, barcode])]);
   };
 
@@ -327,8 +329,9 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
 
   return (
     <div className="space-y-4">
-      {showCarrierAssociation && <CarrierBarcodeModal onClose={() => setShowCarrierAssociation(false)} />}
-      {canAssociateCarrier && <button type="button" onClick={() => setShowCarrierAssociation(true)} className="min-h-11 px-3 border rounded-lg font-semibold">Associer une étiquette Boiron</button>}
+      {showCarrierAssociation && <CarrierBarcodeModal initialBr={associationCode} onClose={() => setShowCarrierAssociation(false)} />}
+      {canAssociateCarrier && <ImportReadiness packages={packages} onAssociate={code => { setAssociationCode(code); setShowCarrierAssociation(true); }} />}
+      {canAssociateCarrier && <button type="button" onClick={() => { setAssociationCode(''); setShowCarrierAssociation(true); }} className="min-h-11 px-3 border rounded-lg font-semibold">Associer une étiquette Boiron</button>}
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>

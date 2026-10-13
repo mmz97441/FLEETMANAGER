@@ -1337,15 +1337,16 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
           driverId: currentUser.id, targetMissionId: missionId, stopId, source });
         const here = receipt.missionId === missionId && receipt.stopId === stopId;
         const text = `${scanReceiptLabel(receipt)}${receipt.accepted && !here ? ' — visible dans sa tournée, à un autre arrêt.' : ''}`;
-        setScanFeedback({ type: receipt.accepted && receipt.outcome !== 'already_scanned' ? 'ok' : 'warn', text });
+        setScanFeedback({ type: receipt.accepted && here ? 'ok' : 'warn', text });
         showNotif(text);
         if (receipt.accepted && here && scanContextRef.current === context) {
           setScannedBarcodes(prev => prev.includes(barcode) ? prev : [...prev, barcode]);
           setStopPackages(prev => prev.map(p => p.id === receipt.packageId ? { ...p, lastScannedAt: receipt.scannedAt,
             lastScannedMissionId: receipt.missionId!, missionDate: receipt.missionDate! } : p));
         }
-      } catch {
-        const text = `${barcode} — scan non confirmé. Vérifiez la connexion puis scannez à nouveau.`;
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : 'Vérifiez la connexion puis scannez à nouveau.';
+        const text = `${barcode} — scan non confirmé. ${reason}`;
         setScanFeedback({ type: 'warn', text }); showNotif(text);
       } finally { setScanPending(n => Math.max(0, n - 1)); }
     });
