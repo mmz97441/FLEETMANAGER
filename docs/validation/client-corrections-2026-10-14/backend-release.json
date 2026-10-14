@@ -1,0 +1,175 @@
+{
+  "checkedAt": "2026-10-14T09:25:20.434Z",
+  "project": "fleet-genius-app",
+  "functions": [
+    {
+      "name": "importPackages",
+      "status": "ACTIVE",
+      "updateTime": "2026-10-14T09:24:32.127Z",
+      "versionId": "6",
+      "sourceHash": "80c678085fdb1c014ac2bf3c276b8621a342e36b"
+    },
+    {
+      "name": "inviteClientTeamMember",
+      "status": "ACTIVE",
+      "updateTime": "2026-10-14T09:24:27.888266839Z",
+      "versionId": "1",
+      "sourceHash": "80c678085fdb1c014ac2bf3c276b8621a342e36b"
+    },
+    {
+      "name": "reconcileDeliveryProofs",
+      "status": "ACTIVE",
+      "updateTime": "2026-10-14T09:24:29.145Z",
+      "versionId": "2",
+      "sourceHash": "80c678085fdb1c014ac2bf3c276b8621a342e36b"
+    },
+    {
+      "name": "createClientRequest",
+      "status": "ACTIVE",
+      "updateTime": "2026-10-14T09:24:23.480876093Z",
+      "versionId": "1",
+      "sourceHash": "80c678085fdb1c014ac2bf3c276b8621a342e36b"
+    },
+    {
+      "name": "updateClientAddress",
+      "status": "ACTIVE",
+      "updateTime": "2026-10-14T09:24:25.158722250Z",
+      "versionId": "1",
+      "sourceHash": "80c678085fdb1c014ac2bf3c276b8621a342e36b"
+    },
+    {
+      "name": "saveClientAddress",
+      "status": "ACTIVE",
+      "updateTime": "2026-10-14T09:24:12.636277967Z",
+      "versionId": "1",
+      "sourceHash": "80c678085fdb1c014ac2bf3c276b8621a342e36b"
+    },
+    {
+      "name": "createInvitation",
+      "status": "ACTIVE",
+      "updateTime": "2026-10-14T09:24:26.374Z",
+      "versionId": "2",
+      "sourceHash": "80c678085fdb1c014ac2bf3c276b8621a342e36b"
+    },
+    {
+      "name": "acceptQuote",
+      "status": "ACTIVE",
+      "updateTime": "2026-10-14T09:24:28.297Z",
+      "versionId": "3",
+      "sourceHash": "80c678085fdb1c014ac2bf3c276b8621a342e36b"
+    },
+    {
+      "name": "updateClientRequest",
+      "status": "ACTIVE",
+      "updateTime": "2026-10-14T09:24:27.426961353Z",
+      "versionId": "1",
+      "sourceHash": "80c678085fdb1c014ac2bf3c276b8621a342e36b"
+    },
+    {
+      "name": "commitDeliveryOutcome",
+      "status": "ACTIVE",
+      "updateTime": "2026-10-14T09:24:28.060Z",
+      "versionId": "2",
+      "sourceHash": "80c678085fdb1c014ac2bf3c276b8621a342e36b"
+    },
+    {
+      "name": "returnPackage",
+      "status": "ACTIVE",
+      "updateTime": "2026-10-14T09:24:27.433Z",
+      "versionId": "4",
+      "sourceHash": "80c678085fdb1c014ac2bf3c276b8621a342e36b"
+    },
+    {
+      "name": "publishDeliveryProof",
+      "status": "ACTIVE",
+      "updateTime": "2026-10-14T09:24:34.586Z",
+      "versionId": "2",
+      "sourceHash": "80c678085fdb1c014ac2bf3c276b8621a342e36b"
+    }
+  ],
+  "checks": [
+    {
+      "name": "All 12 target functions ACTIVE with current update times",
+      "pass": true
+    },
+    {
+      "name": "All callable endpoints enforce authentication and allow application origin",
+      "pass": true
+    }
+  ],
+  "authProbes": [
+    {
+      "name": "saveClientAddress",
+      "status": 401,
+      "error": "UNAUTHENTICATED",
+      "cors": "https://delivrex.vercel.app"
+    },
+    {
+      "name": "updateClientAddress",
+      "status": 401,
+      "error": "UNAUTHENTICATED",
+      "cors": "https://delivrex.vercel.app"
+    },
+    {
+      "name": "inviteClientTeamMember",
+      "status": 401,
+      "error": "UNAUTHENTICATED",
+      "cors": "https://delivrex.vercel.app"
+    },
+    {
+      "name": "createClientRequest",
+      "status": 401,
+      "error": "UNAUTHENTICATED",
+      "cors": "https://delivrex.vercel.app"
+    },
+    {
+      "name": "updateClientRequest",
+      "status": 401,
+      "error": "UNAUTHENTICATED",
+      "cors": "https://delivrex.vercel.app"
+    },
+    {
+      "name": "createInvitation",
+      "status": 401,
+      "error": "UNAUTHENTICATED",
+      "cors": "https://delivrex.vercel.app"
+    },
+    {
+      "name": "importPackages",
+      "status": 401,
+      "error": "UNAUTHENTICATED",
+      "cors": "https://delivrex.vercel.app"
+    },
+    {
+      "name": "acceptQuote",
+      "status": 401,
+      "error": "UNAUTHENTICATED",
+      "cors": "https://delivrex.vercel.app"
+    },
+    {
+      "name": "commitDeliveryOutcome",
+      "status": 401,
+      "error": "UNAUTHENTICATED",
+      "cors": "https://delivrex.vercel.app"
+    },
+    {
+      "name": "publishDeliveryProof",
+      "status": 401,
+      "error": "UNAUTHENTICATED",
+      "cors": "https://delivrex.vercel.app"
+    },
+    {
+      "name": "reconcileDeliveryProofs",
+      "status": 401,
+      "error": "UNAUTHENTICATED",
+      "cors": "https://delivrex.vercel.app"
+    },
+    {
+      "name": "returnPackage",
+      "status": 401,
+      "error": "UNAUTHENTICATED",
+      "cors": "https://delivrex.vercel.app"
+    }
+  ],
+  "success": true
+}
