@@ -1,3 +1,4 @@
+import { writeImportBatches, type ImportBatchConfirmation } from './importBatchWriter';
 import { importReference, type ImportManifest } from '../utils/importManifest';
 import { scanPackage } from './scanService';
 import { listenClientPackages } from './clientPackageSubscription';
@@ -439,22 +440,11 @@ export const resyncPackageStatusesFromStops = async (): Promise<StatusResyncResu
 /**
  * Imports par lots de 75, identifiés côté serveur pour permettre une reprise sans doublon.
  */
-export const addPackagesBatch = async (packages: Omit<Package, 'id' | 'createdAt' | 'updatedAt'>[], manifest?: ImportManifest): Promise<string[]> => {
+export const addPackagesBatch = async (packages: Omit<Package, 'id' | 'createdAt' | 'updatedAt'>[], manifest?: ImportManifest, onConfirmed?: (confirmation: ImportBatchConfirmation) => void | Promise<void>): Promise<string[]> => {
   if (!packages.length) return [];
   const expected = manifest || { clientId: packages[0].clientId, references: packages.map(importReference) };
-  const call=httpsCallable<any,{ids:string[]}>(getFunctions(app,'europe-west1'),'importPackages');
-  const ids:string[]=[];
-  for(let offset=0;offset<packages.length;offset+=75){
-    try {
-      const batch = packages.slice(offset, offset + 75);
-      const result = await call({ packages: cleanUndefined(batch), manifest: expected });
-      if (!Array.isArray(result.data.ids) || result.data.ids.length !== batch.length || result.data.ids.some(id => typeof id !== 'string' || !id))
-        throw new Error('La confirmation du serveur est incomplète.');
-      ids.push(...result.data.ids);
-    }
-    catch(error){throw Object.assign(new Error(`${ids.length} ligne(s) déjà confirmée(s). Relancez l’import : les colis existants ne seront pas recréés. ${error instanceof Error?error.message:''}`), { confirmedCount: ids.length });}
-  }
-  return ids;
+  const call = httpsCallable<any, { ids: string[] }>(getFunctions(app, 'europe-west1'), 'importPackages');
+  return writeImportBatches(packages, async batch => (await call({ packages: cleanUndefined(batch), manifest: expected })).data, onConfirmed);
 };
 
 // Code de suivi généré système pour un colis créé par le client (préfixe CL).
@@ -541,6 +531,7 @@ export const createClientShipment = async (params: {
 export const createClientShipmentsBatch = async (params: {
   client: { id: string; companyName: string };
   manifest?: ImportManifest;
+  onConfirmed?: (packages: Package[], offset: number) => void | Promise<void>;
   deliveryDate?: string;   // Jour de livraison souhaité (YYYY-MM-DD) — daté sur chaque colis
   rows: Array<{
     colisNumber: string;   // ex. BR-000123
@@ -555,6 +546,11 @@ export const createClientShipmentsBatch = async (params: {
     weight?: number;
     clientReference?: string;
     comment?: string;
+    requestedDeliveryDate?: string;
+    timeWindowStart?: string;
+    timeWindowEnd?: string;
+    serviceTime?: number;
+    floor?: number;
     zone?: Zone;           // estimée en amont (défaut Nord, ajustée par le transporteur)
   }>;
 }): Promise<Package[]> => {
@@ -567,6 +563,7 @@ export const createClientShipmentsBatch = async (params: {
     const zone: Zone = r.zone || Zone.NORD;
     const cp = r.postalCode;
     const code = r.colisNumber.trim();
+    const requestedDeliveryDate = r.requestedDeliveryDate || deliveryDate || undefined;
     toCreate.push({
       clientId: client.id,
       clientName: client.companyName,
@@ -582,24 +579,29 @@ export const createClientShipmentsBatch = async (params: {
       contactName: r.contactName,
       contactPhone: r.contactPhone,
       contactEmail: r.contactEmail,
-      serviceTime: 5,
+      serviceTime: r.serviceTime ?? 5,
+      timeWindowStart: r.timeWindowStart || undefined,
+      timeWindowEnd: r.timeWindowEnd || undefined,
+      floor: r.floor,
       comment: r.comment,
       weight: r.weight,
       clientReference: r.clientReference,
       createdByClient: true,
-      requestedDeliveryDate: deliveryDate || undefined,
+      requestedDeliveryDate,
       packageIndex: 1,
       packageTotal: 1,
       status: PackageStatus.PENDING,
       movements: [{
         timestamp: now,
         action: 'IMPORTED' as const,
-        notes: `Importé par l'expéditeur ${client.companyName} — colis ${code}${deliveryDate ? ` — à livrer le ${deliveryDate}` : ''}`
+        notes: `Importé par l'expéditeur ${client.companyName} — colis ${code}${requestedDeliveryDate ? ` — à livrer le ${requestedDeliveryDate}` : ''}`
       }]
     } as Omit<Package, 'id' | 'createdAt' | 'updatedAt'>);
   }
 
-  const ids = await addPackagesBatch(toCreate, params.manifest);
+  const ids = await addPackagesBatch(toCreate, params.manifest, async ({ ids: confirmedIds, offset }) => {
+    await params.onConfirmed?.(confirmedIds.map((id, index) => ({ ...(toCreate[offset + index] as Package), id, createdAt: now, updatedAt: now })), offset);
+  });
   return toCreate.map((p, idx) => ({ ...(p as Package), id: ids[idx], createdAt: now, updatedAt: now }));
 };
 

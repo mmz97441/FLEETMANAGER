@@ -8,6 +8,7 @@ import {
   DonutStatuses,
   TopList,
 } from './AnalyticsWidgets';
+import { currentDimensions, deliveryEvents, eventDimensions } from '../../services/logisticsMetrics';
 import type { Package } from '../../types';
 
 interface AskDataProps {
@@ -26,21 +27,8 @@ const AskData: React.FC<AskDataProps> = ({ packages }) => {
 
   // Contexte dérivé des colis : pharmacies (destinataires) et zones distinctes
   const context = useMemo(() => {
-    const pharmacies = Array.from(
-      new Set(
-        packages
-          .map((p) => p.contactName)
-          .filter((n): n is string => !!n && n.trim().length > 0),
-      ),
-    );
-    const zones = Array.from(
-      new Set(
-        packages
-          .map((p) => (p.zone != null ? String(p.zone) : ''))
-          .filter((z) => z.length > 0),
-      ),
-    );
-    return { pharmacies, zones };
+    const dimensions = packages.flatMap(pkg => [currentDimensions(pkg), ...deliveryEvents(pkg).map(eventDimensions)]);
+    return { pharmacies: [...new Set(dimensions.map(value => value.pharmacy))], zones: [...new Set(dimensions.map(value => value.zone))] };
   }, [packages]);
 
   const submit = async (q: string) => {

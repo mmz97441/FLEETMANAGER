@@ -11,7 +11,7 @@ const db = req('firebase-admin/firestore').getFirestore();
 const prefix = 'evidence-' + randomUUID(), driver = prefix + '-driver';
 const paths = [], created = path => { paths.push(path); return db.doc(path); };
 const now = '2026-10-15T08:00:00Z', recordedAt = '2026-10-13T20:01:00Z';
-const point = { address: '1 rue Fictive', postalCode: '97400', city: 'Saint-Denis', contactName: 'Pharmacie A' };
+const point = { address: '1 rue Fictive', postalCode: '97400', city: 'Saint-Denis', contactName: 'Pharmacie A', zone: 'NORD' };
 const deps = { db, now: () => new Date(now), requireActiveCaller: async ctx => ({ id: ctx.auth.uid, role: 'Chauffeur', firstName: 'Test' }) };
 const ctx = id => ({ auth: { uid: id || driver } });
 let sequence = 0, checks = 0;
@@ -40,6 +40,15 @@ async function check(name, fn) { await fn(); console.log('PASS', name); checks++
     assert.equal(pkg.movements[0].timestamp, recordedAt); assert.equal(pkg.movements[0].receivedAt, new Date(now).toISOString());
     assert.equal(pkg.deliveryAttempts[0].recordedAt, recordedAt); assert.equal(pkg.deliveryAttempts[0].receivedAt, new Date(now).toISOString());
     assert.deepEqual(pkg.deliveryAttempts[0].destination, point);
+  });
+  await check('publication preserves the per-parcel destination zone recorded before a later correction', async () => {
+    const f = await fixture();
+    await db.doc(`packages/${f.ids[1]}`).update({ zone: 'OUEST' });
+    await f.commit();
+    await db.doc(`packages/${f.ids[0]}`).update({ zone: 'SUD' });
+    await f.publish();
+    assert.equal((await f.read(f.ids[0])).pod.destination.zone, 'NORD');
+    assert.equal((await f.read(f.ids[1])).failurePod.destination.zone, 'OUEST');
   });
   await check('parallel replays record each parcel and mission counter once', async () => {
     const f = await fixture(); await Promise.all([f.commit(), f.commit()]);

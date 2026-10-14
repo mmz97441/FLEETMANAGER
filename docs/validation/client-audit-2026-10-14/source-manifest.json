@@ -1,0 +1,21 @@
+{
+  "commit": "1e4267950f3fb353dfae5950a2037e259540d071",
+  "version": "4.37.0",
+  "sourceSHA256": {
+    "src/components/ClientPortal.tsx": "17afdf877c452222c07ecb24d5ea403ec3e4167f18c5b76ca3421a9ab190d473",
+    "src/components/ClientLiveTracking.tsx": "014380b296a3228ec4225ce86b4ca307af43ea519cd3492374d1b29d9429d766",
+    "src/components/PODViewer.tsx": "efc2dabeeb4523153afbd248b6214ccbfeff9f53bf9c964c11db85efe07e9c8f",
+    "src/components/RecipientsManager.tsx": "f48eda0b86e2f416b322ed49160348944b3beb6d2c4736964b311998590ec02f",
+    "src/components/ImportShipmentsModal.tsx": "ac282d2d59237858270427c7ce1e6c00edf2af90de53a6eb3871748ea0b034ff",
+    "src/utils/clientShipmentForm.ts": "1836fdd3cbb0c298a23fa5f7fbfc1aa031c96b102a072a459ad948c9508e3121",
+    "src/services/firestore.ts": "542a9ba5b50f3c468450a0f5fa2c15949366d9d51e695cdfdb1af76039d5c172",
+    "src/services/parcelFeed.ts": "a461062f63b5629325fb6a940040bcab121368f88a68d5ff61a31f0de2601ba9",
+    "src/services/clientMetrics.ts": "efd56fb85083f390760b98a0ca594b6517ee643d729c7252b0d1f7fde14dac5f",
+    "src/services/clientInsights.ts": "32154ed1d163b3a2a0ee951b6af4726512ee36046a0213fbb1bee9a26f813488",
+    "src/services/missionService.ts": "2ad289349942fcb47491b4a4530c4b0765a30a039616da323098bdf9ec8741ed",
+    "functions/src/index.ts": "cf70722744339abef390c87ef31e9a377e7ae68dca6594f926c899405e6420c8",
+    "functions/src/dispatchMissions.ts": "050bd8d6df4df63a1b507df7283f35c3ab0e24feb488c935b99065007415ef5b"
+  },
+  "productionWrites": 0,
+  "productFilesModified": false
+}

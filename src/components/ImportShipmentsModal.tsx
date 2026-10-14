@@ -1,4 +1,5 @@
-import { carrierBarcodeError, individualReferenceError, type CarrierBarcodeFormat } from '../utils/carrierBarcodeValidation';
+import { ImportBatchFailure } from '../services/importBatchWriter';
+import { parseClientShipmentWorkbook, type ParsedClientShipmentRow as ParsedRow } from '../utils/clientShipmentImport';
 import { importReference } from '../utils/importManifest';
 import { useClientAccess } from './client/ClientAccessContext';
 /**
@@ -14,7 +15,6 @@ import React, { useState, useRef, useMemo, useEffect } from 'react';
 import Modal from './shared/Modal';
 import { shipmentImportCounts } from '../utils/clientShipmentForm';
 import * as XLSX from 'xlsx';
-import { decodeClientCsv } from '../utils/clientImportFile';
 import { createClientShipmentsBatch, getPackagesByIds } from '../services/missionService';
 import { estimateZoneFromAddress } from '../services/deliveryService';
 import { generateBatchLabelsHTML, LabelFormat } from '../services/pickupService';
@@ -41,82 +41,20 @@ interface ImportShipmentsModalProps {
   onViewPackages?: () => void;
 }
 
-interface ParsedRow {
-  line: number;               // numéro de ligne dans le fichier (1 = entêtes)
-  colisNumber: string;
-  carrierBarcode: string;
-  carrierBarcodeFormat: CarrierBarcodeFormat;
-  contactName: string;
-  address: string;
-  postalCode: string;
-  city: string;
-  contactPhone: string;
-  contactEmail: string;
-  weight: string;
-  clientReference: string;
-  comment: string;
-  errors: string[];
-}
-
-// Normalisation d'entête : minuscule + suppression des accents.
-// IMPORTANT : plage unicode de combinaison (accents) via échappement, jamais de
-// caractère combinant collé littéralement.
-const normalize = (s: string): string =>
-  String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
-
-// Alias d'entêtes acceptés (déjà normalisés). Couvre le modèle DELIVREX ET les
-// exports courants (ex. fichier tournée : « Numéro colis », « Contact », « Adress »,
-// « Order Number », « Comment », « Weight »…).
-const HEADER_ALIASES: Record<keyof Omit<ParsedRow, 'line' | 'errors'>, string[]> = {
-  carrierBarcodeFormat: ['format transporteur'],
-  carrierBarcode: ['code boiron', 'code transporteur', 'carrierbarcode', 'carrier_barcode', 'carrier barcode', 'barcode boiron'],
-  colisNumber: ['id', 'numero de colis', 'numero colis', 'n° colis', 'n colis', 'colis', 'code colis', 'br', 'barcode', 'code barre'],
-  contactName: ['nom du destinataire', 'destinataire', 'nom', 'pharmacie', 'contact', 'client', 'raison sociale'],
-  address: ['adresse', 'adress', 'address'],
-  postalCode: ['code postal', 'cp', 'postal code', 'zip'],
-  city: ['ville', 'city', 'commune'],
-  contactPhone: ['telephone', 'tel', 'phone', 'gsm', 'mobile', 'portable'],
-  contactEmail: ['email', 'e-mail', 'mail', 'courriel'],
-  weight: ['poids (kg)', 'poids', 'weight'],
-  clientReference: ['reference', 'ref', 'order number', 'order_number', 'numero de commande', 'n° commande', 'commande', 'order'],
-  comment: ['remarque', 'consignes', 'note', 'comment', 'commentaire', 'instructions'],
-};
-
-// Éclate une adresse « tout-en-un » (rue + CP + ville) en trois morceaux.
-// Ex. « 19 RUE ADRIEN LAGOURGUE  97424 PITON SAINT LEU »
-//   → { street: '19 RUE ADRIEN LAGOURGUE', postalCode: '97424', city: 'PITON SAINT LEU' }
-const splitAddress = (full: string): { street: string; postalCode: string; city: string } => {
-  const s = String(full || '').replace(/\s+/g, ' ').trim();
-  const m = s.match(/(97\d{3}|98\d{3}|\d{5})/); // Réunion/Outre-mer 97xxx/98xxx, sinon 5 chiffres
-  if (!m) return { street: s, postalCode: '', city: '' };
-  const cp = m[1];
-  const idx = s.indexOf(cp);
-  const street = s.slice(0, idx).trim().replace(/[,;]+$/, '').trim();
-  const city = s.slice(idx + cp.length).trim().replace(/^[,;]+/, '').trim();
-  return { street: street || s, postalCode: cp, city };
-};
-
-// Récupère la valeur d'une colonne en cherchant l'entête par égalité normalisée.
-const getField = (row: Record<string, any>, field: keyof typeof HEADER_ALIASES): string => {
-  const aliases = HEADER_ALIASES[field];
-  for (const key of Object.keys(row)) {
-    if (aliases.includes(normalize(key))) {
-      const v = row[key];
-      if (v != null && String(v).trim() !== '') return String(v).trim();
-    }
-  }
-  return '';
-};
-
 const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser, onClose, onImported, onViewPackages }) => {
   const access = useClientAccess();
   const [rows, setRows] = useState<ParsedRow[] | null>(null);
+  const [ignoredColumns, setIgnoredColumns] = useState<string[]>([]);
   const [fileName, setFileName] = useState('');
   const [format, setFormat] = useState<LabelFormat>('A6');
   const [onlyErrors, setOnlyErrors] = useState(false);
   const [displayLimit, setDisplayLimit] = useState(100);
   const [confirmed, setConfirmed] = useState<Map<number, Package>>(new Map());
   const confirmedRef = useRef<Map<number, Package>>(new Map());
+  const registeredRef = useRef<Map<number, string>>(new Map());
+  const [registered, setRegistered] = useState<Map<number, string>>(new Map());
+  const [uncertain, setUncertain] = useState<Set<number>>(new Set());
+  const [serverRejected, setServerRejected] = useState<Map<number, string>>(new Map());
   const importingRef = useRef(false);
   const [attempted, setAttempted] = useState(false);
   const [complete, setComplete] = useState(false);
@@ -134,7 +72,7 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
     setRows(null);
     setOnlyErrors(false);
     setDisplayLimit(100);
-    setFileName('');
+    setFileName(''); setIgnoredColumns([]);
     setError('');
     if (inputRef.current) inputRef.current.value = '';
   };
@@ -145,89 +83,12 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
     setDisplayLimit(100);
     setError('');
     if (file.size > 5 * 1024 * 1024) { setError('Fichier trop volumineux (5 Mo maximum).'); return; }
-    setFileName(file.name);
+    setFileName(file.name); setIgnoredColumns([]);
     try {
-      const buf = await file.arrayBuffer();
-      const wb = /\.csv$/i.test(file.name)
-        ? XLSX.read(decodeClientCsv(buf), { type: 'string', raw: true, sheetRows: 10002 })
-        : XLSX.read(buf, { type: 'array', sheetRows: 10002 });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const raw = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: '', raw: false });
-      const originalCells = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: '', raw: true });
-
-      if (raw.length > 10000) { setError('Limite de 10 000 lignes par fichier.'); setRows(null); return; }
-      if (raw.length === 0) { setError('Aucune ligne trouvée dans le fichier.'); setRows(null); return; }
-
-      // 1er passage : lecture + mapping des colonnes
-      const parsed: ParsedRow[] = raw.map((r, i) => {
-        const addressRaw = getField(r, 'address');
-        let street = addressRaw;
-        let postalCode = getField(r, 'postalCode');
-        let city = getField(r, 'city');
-        // Adresse « tout-en-un » : si CP/ville absents, on les extrait de l'adresse.
-        if (!postalCode || !city) {
-          const sp = splitAddress(addressRaw);
-          if (sp.postalCode) {
-            if (!postalCode) postalCode = sp.postalCode;
-            if (!city) city = sp.city;
-            street = sp.street; // on ne garde que la rue dans l'adresse
-          }
-        }
-        return {
-          line: Number.isInteger(r.__rowNum__) ? r.__rowNum__ + 1 : i + 2,               // ligne 1 = entêtes
-          colisNumber: getField(r, 'colisNumber'),
-          carrierBarcode: getField(r, 'carrierBarcode'),
-          carrierBarcodeFormat: getField(r, 'carrierBarcodeFormat').toLowerCase() === 'boiron' || Object.keys(r).some(key => ['code boiron', 'barcode boiron'].includes(normalize(key)) && String(r[key] || '').trim()) ? 'boiron' : 'generic',
-          contactName: getField(r, 'contactName'),
-          address: street,
-          postalCode,
-          city,
-          contactPhone: getField(r, 'contactPhone'),
-          contactEmail: getField(r, 'contactEmail'),
-          weight: getField(r, 'weight'),
-          clientReference: getField(r, 'clientReference'),
-          comment: getField(r, 'comment'),
-          errors: Object.entries(originalCells[i] || {}).some(([key, value]) => HEADER_ALIASES.carrierBarcode.includes(normalize(key)) && typeof value === 'number')
-            ? ['Code transporteur numérique : utilisez une cellule texte et recopiez le code complet depuis l’étiquette.'] : Object.entries(originalCells[i] || {}).some(([key, value]) => HEADER_ALIASES.colisNumber.includes(normalize(key)) && typeof value === 'number') ? ['Numéro de colis numérique : utilisez une cellule texte pour préserver les zéros initiaux.'] : [],
-        };
-      });
-
-      // Comptage des numéros de colis (pour repérer les doublons dans le fichier)
-      const counts = new Map<string, number>();
-      const carrierCounts = new Map<string, number>();
-      for (const p of parsed) {
-        const key = p.colisNumber.trim().toUpperCase();
-        if (key) counts.set(key, (counts.get(key) || 0) + 1);
-        if (p.carrierBarcode) carrierCounts.set(p.carrierBarcode.toUpperCase(), (carrierCounts.get(p.carrierBarcode.toUpperCase()) || 0) + 1);
-      }
-
-      // 2e passage : contrôle qualité, une liste d'erreurs par ligne
-      for (const p of parsed) {
-        const carrierError = carrierBarcodeError(p.carrierBarcode, p.clientReference, p.carrierBarcodeFormat);
-        if (carrierError) p.errors.push(carrierError);
-        if (p.carrierBarcode && (carrierCounts.get(p.carrierBarcode.toUpperCase()) || 0) > 1) p.errors.push('Code transporteur attribué à plusieurs lignes');
-        const num = p.colisNumber.trim();
-        if (!num) {
-          p.errors.push('Numéro de colis manquant');
-        } else {
-          const referenceError = individualReferenceError(num);
-          if (referenceError) p.errors.push(referenceError);
-          if ((counts.get(num.toUpperCase()) || 0) > 1) {
-            p.errors.push('Numéro de colis en double dans le fichier');
-          }
-        }
-        if (!p.contactName.trim()) p.errors.push('Nom du destinataire manquant');
-        if (!p.address.trim()) p.errors.push('Adresse manquante');
-        if (!p.city.trim() && !p.postalCode.trim()) p.errors.push('Ville et code postal manquants');
-        if (!p.contactPhone.trim()) p.errors.push('Téléphone manquant');
-        if (p.postalCode && !/^\d{5}$/.test(p.postalCode)) p.errors.push('Code postal invalide (5 chiffres attendus)');
-        if (p.contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.contactEmail)) p.errors.push('Email invalide');
-        if (p.weight && (!Number.isFinite(Number(p.weight.replace(',', '.'))) || Number(p.weight.replace(',', '.')) < 0)) p.errors.push('Poids invalide (kilogrammes positifs ou nuls)');
-      }
-
-      setRows(parsed);
+      const result = parseClientShipmentWorkbook(await file.arrayBuffer(), file.name);
+      setRows(result.rows); setIgnoredColumns(result.ignoredColumns);
     } catch (e) {
-      setError("Impossible de lire le fichier. Vérifiez que c'est bien un .xlsx, .xls ou .csv.");
+      setError(e instanceof Error ? e.message : "Impossible de lire le fichier. Vérifiez son format.");
       setRows(null);
     }
   };
@@ -242,7 +103,8 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
         'Adresse': '19 RUE ADRIEN LAGOURGUE 97424 PITON SAINT LEU',
         'Téléphone': '0262343377',
         'Référence': '13953047',
-        'Code Boiron': '',
+        'Code transporteur': '',
+        'Date de livraison': '', Start: '08:00', End: '12:00', Service_Time: 5, Étage: '',
         'Remarque': '',
       },
       {
@@ -269,7 +131,7 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
   const validCount = validRows.length;
   const errorCount = invalidRows.length;
 
-  const outcomes = shipmentImportCounts(rows || [], new Set(confirmed.keys()));
+  const outcomes = shipmentImportCounts(rows || [], new Set(registered.keys()));
   const orderedRows = onlyErrors ? invalidRows : [...invalidRows, ...validRows];
   const visibleRows = orderedRows.slice(0, displayLimit);
 
@@ -278,8 +140,8 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
     const worksheet = XLSX.utils.json_to_sheet(rejected.map(row => ({
       'Numéro de colis': row.colisNumber, Destinataire: row.contactName, Adresse: row.address,
       'Code postal': row.postalCode, Ville: row.city, Téléphone: row.contactPhone, Email: row.contactEmail,
-      'Poids (kg)': row.weight, Référence: row.clientReference, 'Code transporteur': row.carrierBarcode, 'Format transporteur': row.carrierBarcodeFormat, Remarque: row.comment,
-      'Ligne source': row.line, Motif: row.errors.join(' ; ') || 'Import non confirmé : reprendre la même référence pour vérifier sans doublon',
+      'Poids (kg)': row.weight, Référence: row.clientReference, 'Code transporteur': row.carrierBarcode, 'Format transporteur': row.carrierBarcodeFormat, Remarque: row.comment, 'Date de livraison': row.requestedDeliveryDate, Start: row.timeWindowStart, End: row.timeWindowEnd, Service_Time: row.serviceTime, Étage: row.floor,
+      'Ligne source': row.line, Motif: row.errors.join(' ; ') || serverRejected.get(row.line) || (registered.has(row.line) ? 'Enregistré : étiquette à relire' : 'Import non confirmé : reprendre la même référence pour vérifier sans doublon'),
     })));
     const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, worksheet, 'Lignes à vérifier');
     XLSX.writeFile(workbook, 'expeditions-a-corriger.xlsx');
@@ -298,34 +160,59 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
 
   const handleImport = async () => {
     if (access.readOnly || validCount === 0 || importingRef.current || complete) return;
-    if (!deliveryDate) { setError('Choisissez la date de livraison souhaitée.'); return; }
-    if (!attempted && deliveryDate < todayISOLocal) { setError('La date de livraison ne peut pas être dans le passé.'); return; }
+    if (!deliveryDate && validRows.some(row => !row.requestedDeliveryDate)) { setError('Choisissez une date pour les lignes qui n’en ont pas.'); return; }
+    if (!attempted && deliveryDate < todayISOLocal && validRows.some(row => !row.requestedDeliveryDate)) {
+      setError('La date par défaut ne peut pas être dans le passé. Les dates propres au fichier restent conservées.'); return;
+    }
     importingRef.current = true; setBusy(true); setAttempted(true); setError('');
+    let remaining: ParsedRow[] = [];
+    const confirmStored = async (pairs: Array<[number, string]>) => {
+      if (!pairs.length) return;
+      const stored = new Map((await getPackagesByIds(pairs.map(([, id]) => id))).map(parcel => [parcel.id, parcel]));
+      for (const [line, id] of pairs) if (stored.has(id)) confirmedRef.current.set(line, stored.get(id)!);
+      setConfirmed(new Map(confirmedRef.current));
+      if (pairs.some(([line]) => !confirmedRef.current.has(line))) throw new Error('Enregistrement confirmé, mais certaines étiquettes ne sont pas encore disponibles. Reprenez pour relire ces colis.');
+    };
     try {
-      const remaining = validRows.filter(row => !confirmedRef.current.has(row.line));
-      for (let offset = 0; offset < remaining.length; offset += 150) {
-        const batch = remaining.slice(offset, offset + 150);
-        const rowsWithZone: Array<Omit<ParsedRow, 'weight'> & { weight?: number; zone?: Zone }> = [];
-        // Address estimation is local and may fall back to the transporter's zone review.
-        for (const row of batch) {
-          let zone: Zone | undefined;
-          try { zone = (await estimateZoneFromAddress(`${row.address}, ${row.postalCode} ${row.city}`))?.zone; } catch { /* transporteur ajuste */ }
-          rowsWithZone.push({ ...row, weight: row.weight ? Number(row.weight.replace(',', '.')) : undefined, zone });
-        }
-        const packages = await access.runMutation('Importer des expéditions', () => createClientShipmentsBatch({
-          client: { id: currentUser.id, companyName: currentUser.companyName || `${currentUser.firstName} ${currentUser.lastName}` },
-          deliveryDate, rows: rowsWithZone,
-          manifest: { clientId: currentUser.id, references: validRows.map(row => importReference({ externalId: row.colisNumber, packageIndex: 1 })), rejectedRows: invalidRows.length },
-        }));
-        const stored = new Map((await getPackagesByIds(packages.map(parcel => parcel.id))).map(parcel => [parcel.id, parcel]));
-        if (stored.size !== new Set(packages.map(parcel => parcel.id)).size) throw new Error('Certains colis enregistrés n’ont pas pu être relus.');
-        packages.forEach((parcel, index) => confirmedRef.current.set(batch[index].line, stored.get(parcel.id)!));
-        setConfirmed(new Map(confirmedRef.current));
+      // A failed reread must not erase a receipt already returned by the server.
+      await confirmStored([...registeredRef.current].filter(([line]) => !confirmedRef.current.has(line)));
+      remaining = validRows.filter(row => !registeredRef.current.has(row.line));
+      const prepared: Array<Omit<ParsedRow, 'weight' | 'serviceTime' | 'floor'> & { weight?: number; serviceTime?: number; floor?: number; zone?: Zone }> = [];
+      for (const row of remaining) {
+        let zone: Zone | undefined;
+        try { zone = (await estimateZoneFromAddress(`${row.address}, ${row.postalCode} ${row.city}`))?.zone; } catch { /* transporteur ajuste */ }
+        prepared.push({ ...row, zone, weight: row.weight ? Number(row.weight.replace(',', '.')) : undefined,
+          serviceTime: row.serviceTime ? Number(row.serviceTime.replace(',', '.')) : undefined,
+          floor: row.floor === '' ? undefined : Number(row.floor) });
       }
-      setComplete(true);
-      onImported(confirmedRef.current.size);
+      await access.runMutation('Importer des expéditions', () => createClientShipmentsBatch({
+        client: { id: currentUser.id, companyName: currentUser.companyName || `${currentUser.firstName} ${currentUser.lastName}` },
+        deliveryDate, rows: prepared,
+        manifest: { clientId: currentUser.id, references: validRows.map(row => importReference({ externalId: row.colisNumber, packageIndex: 1 })), rejectedRows: invalidRows.length },
+        onConfirmed: async (packages, offset) => {
+          const pairs: Array<[number, string]> = packages.map((parcel, index) => [remaining[offset + index].line, parcel.id]);
+          for (const [line, id] of pairs) registeredRef.current.set(line, id);
+          setRegistered(new Map(registeredRef.current));
+          setUncertain(previous => new Set([...previous].filter(line => !registeredRef.current.has(line))));
+          setServerRejected(previous => new Map([...previous].filter(([line]) => !registeredRef.current.has(line))));
+          await confirmStored(pairs);
+        },
+      }));
+      setComplete(true); onImported(registeredRef.current.size);
     } catch (cause) {
-      setError(`${confirmedRef.current.size} ligne${confirmedRef.current.size > 1 ? 's' : ''} confirmée${confirmedRef.current.size > 1 ? 's' : ''}. Les autres restent à vérifier. ${cause instanceof Error ? cause.message : 'La connexion a été interrompue.'} Reprendre vérifie les mêmes références sans recréer les colis existants.`);
+      if (cause instanceof ImportBatchFailure && cause.outcome !== 'confirmed') {
+        const affected = remaining.slice(cause.offset, cause.offset + cause.count);
+        if (cause.outcome === 'unknown') {
+          setUncertain(previous => new Set([...previous, ...affected.map(row => row.line)]));
+          setServerRejected(previous => new Map([...previous].filter(([line]) => !affected.some(row => row.line === line))));
+        }
+        else {
+          setUncertain(previous => new Set([...previous].filter(line => !affected.some(row => row.line === line))));
+          setServerRejected(previous => new Map([...previous, ...affected.map(row => [row.line, cause.cause instanceof Error ? cause.cause.message : 'Lot refusé par le serveur.'] as [number, string])]));
+        }
+      }
+      const detail = cause instanceof ImportBatchFailure ? cause.cause : cause;
+      setError(`${registeredRef.current.size} ligne(s) enregistrée(s). ${detail instanceof Error ? detail.message : 'La connexion a été interrompue.'} Reprenez les mêmes références pour vérifier les autres lignes sans doublon.`);
     } finally { importingRef.current = false; setBusy(false); }
   };
 
@@ -346,7 +233,7 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
                 <CheckCircle size={16} />
                 {busy
                   ? 'Import en cours…'
-                  : attempted ? `Reprendre ${outcomes.pending} ligne${outcomes.pending > 1 ? 's' : ''} non confirmée${outcomes.pending > 1 ? 's' : ''}` : `Importer ${validCount} expédition${validCount > 1 ? 's' : ''} valide${validCount > 1 ? 's' : ''}`}
+                  : attempted && outcomes.pending === 0 ? 'Relire les étiquettes enregistrées' : attempted ? `Reprendre ${outcomes.pending} ligne${outcomes.pending > 1 ? 's' : ''} non confirmée${outcomes.pending > 1 ? 's' : ''}` : `Importer ${validCount} expédition${validCount > 1 ? 's' : ''} valide${validCount > 1 ? 's' : ''}`}
               </button>
             </div>) : undefined}>
         {attempted && <div ref={resultRef} tabIndex={-1} role="status" className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 mb-4 text-sm text-brand-900">
@@ -399,6 +286,7 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
           </>
         )}
 
+        {ignoredColumns.length > 0 && <p role="alert" className="ui-notice ui-notice-warning mt-3">Colonnes non importées : {ignoredColumns.join(', ')}. Vérifiez que ces informations ne sont pas nécessaires à la livraison avant de continuer.</p>}
         {error && (
           <div role="alert" className="mt-3 text-sm bg-red-50 border border-red-200 text-red-700 rounded-lg px-3 py-2 flex items-center gap-2">
             <AlertTriangle size={14} className="shrink-0" /> {error}
@@ -422,11 +310,14 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
               <span>{totalCount} ligne{totalCount > 1 ? 's' : ''} lue{totalCount > 1 ? 's' : ''} · {validCount} valide{validCount > 1 ? 's' : ''} · {errorCount} avec erreur</span>
             </div>
 
+            {attempted && <div role="status" className="ui-notice ui-notice-info mb-3">
+              <p>{registered.size} enregistré(s) · {uncertain.size} résultat(s) inconnu(s) · {serverRejected.size + errorCount} rejeté(s)</p>
+            </div>}
             {/* DATE DE LIVRAISON SOUHAITÉE — chaque colis est daté pour CE jour
                 (et non le jour du dépôt) → la tournée sera planifiée le bon jour. */}
             <div className="rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 mb-3">
               <label htmlFor="import-delivery-date" className="flex items-center gap-2 text-sm font-bold text-brand-800 mb-1">
-                <CalendarDays size={16} /> Date de livraison souhaitée
+                <CalendarDays size={16} /> Date de livraison par défaut
               </label>
               <input
                 id="import-delivery-date"
@@ -437,7 +328,8 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
                 onChange={(e) => setDeliveryDate(e.target.value)}
                 className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-base focus:ring-2 focus:ring-brand-500 outline-none min-h-11"
               />
-              <p className="text-sm text-slate-600 mt-1">Date demandée pour préparer la tournée ; elle sera confirmée par le transporteur.</p>
+              <p className="text-sm text-slate-600 mt-1">Utilisée uniquement pour les lignes sans date propre. Les dates et créneaux du fichier sont conservés, puis confirmés par le transporteur.</p>
+              {validRows.some(row => row.requestedDeliveryDate && row.requestedDeliveryDate < todayISOLocal) && <p role="status" className="text-sm text-amber-800 mt-1">Le fichier contient des dates antérieures. Elles sont conservées pour les reprises ou envois en retard ; le transporteur confirmera leur planification.</p>}
             </div>
 
             <div className="flex flex-wrap gap-3 mb-3 items-center">
@@ -448,7 +340,7 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
               {visibleRows.map(row => <div key={row.line} className={`p-3 text-sm ${row.errors.length ? 'bg-red-50 text-red-900' : 'text-slate-700'}`}>
                 <p className="font-semibold break-words">Ligne {row.line} · {row.colisNumber || '(sans numéro)'} · {row.contactName || '(sans destinataire)'}</p>
                 {row.carrierBarcode && <p className="break-all">Code transporteur : {row.carrierBarcode} · Commande : {row.clientReference}</p>}
-                {row.errors.length ? <ul className="mt-1 list-disc pl-5">{row.errors.map(message => <li key={message}>{message}</li>)}</ul> : <p>{confirmed.has(row.line) ? 'Confirmé : enregistré' : attempted ? 'Non confirmé' : 'Prêt à importer'} · {row.city}</p>}
+                {row.errors.length ? <ul className="mt-1 list-disc pl-5">{row.errors.map(message => <li key={message}>{message}</li>)}</ul> : <><p>{registered.has(row.line) ? confirmed.has(row.line) ? 'Enregistré · étiquette disponible' : 'Enregistré · étiquette à relire' : uncertain.has(row.line) ? 'Résultat inconnu · reprendre la même référence' : serverRejected.has(row.line) ? `Refusé : ${serverRejected.get(row.line)}` : attempted ? 'Pas encore envoyé' : 'Prêt à importer'} · {row.city}</p><p>Livraison : {row.requestedDeliveryDate || deliveryDate || 'date à préciser'} · {row.timeWindowStart || 'début libre'} – {row.timeWindowEnd || 'fin libre'} · {row.serviceTime || '5'} min{row.floor ? ` · étage ${row.floor}` : ''}</p></>}
               </div>)}
               {visibleRows.length === 0 && <p className="p-3 text-sm text-slate-600">Aucune ligne en erreur.</p>}
               {orderedRows.length > displayLimit && <button type="button" onClick={() => setDisplayLimit(limit => limit + 100)} className="ui-button ui-button-ghost w-full min-h-11 text-sm">Afficher 100 lignes supplémentaires ({visibleRows.length}/{orderedRows.length})</button>}

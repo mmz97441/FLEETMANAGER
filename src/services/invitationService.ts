@@ -1,5 +1,6 @@
 import { getFunctions, httpsCallable } from "firebase/functions";
-import app from "../firebaseConfig";
+import app, { auth } from "../firebaseConfig";
+import type { User } from '../types';
 /**
  * Service de gestion des invitations avec tokens
  * 
@@ -105,6 +106,16 @@ export const createInvitation = async (
   return (await call({email,userId})).data;
 };
 
+export interface ClientTeamInviteReceipt { userId: string; outcome: 'INVITED' | 'EXISTING' }
+export const inviteClientTeamMember = async (user: User): Promise<ClientTeamInviteReceipt> => {
+  const uid = auth.currentUser?.uid;
+  if (!uid) throw new Error('Reconnectez-vous avant d’inviter un collaborateur.');
+  const call = httpsCallable<unknown, ClientTeamInviteReceipt>(getFunctions(app, 'europe-west1'), 'inviteClientTeamMember');
+  const result = (await call({ requestId: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName })).data;
+  if (auth.currentUser?.uid !== uid) throw new Error('La session a changé. Consultez votre équipe pour vérifier le résultat de l’invitation.');
+  return result;
+};
+
 /**
  * Valide un token d'invitation
  */
@@ -169,10 +180,23 @@ export const markInvitationAsUsed = async (token: string): Promise<boolean> => {
  */
 export const resendInvitation = async (
   email: string,
-  invitedBy: { id: string; name: string }
+  invitedBy: { id: string; name: string },
+  userId?: string
 ): Promise<{ token: string; expiresAt: string } | null> => {
+  const uid = auth.currentUser?.uid;
+  if (!uid || uid !== invitedBy.id) throw new Error('La session a changé. Reconnectez-vous avant de renvoyer cette invitation.');
+  const key = `fleet-invitation-retry:${uid}:${encodeURIComponent(userId || email.toLowerCase().trim())}`;
+  let requestId: string;
+  try {
+    requestId = localStorage.getItem(key) || crypto.randomUUID();
+    localStorage.setItem(key, requestId);
+  } catch { throw new Error('Le stockage local est indisponible. Autorisez-le avant de renvoyer une invitation sans risquer de doublon.'); }
   const call=httpsCallable<any,{token:string;expiresAt:string}>(getFunctions(app,'europe-west1'),'createInvitation');
-  return (await call({email})).data;
+  const result = (await call({email, ...(userId ? {userId} : {}), requestId})).data;
+  if (auth.currentUser?.uid !== uid) throw new Error('La session a changé. Consultez la fiche du collaborateur pour vérifier le renvoi.');
+  // A cleanup failure must not turn a confirmed invitation into a fresh retry.
+  try { localStorage.removeItem(key); } catch { /* The same receipt remains safe to replay. */ }
+  return result;
 };
 
 /**

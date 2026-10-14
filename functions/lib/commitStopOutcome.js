@@ -130,7 +130,7 @@ async function commitDeliveryOutcomeHandler(data, context, deps) {
             const attempt = clean({ id: proofId, proofId, missionId: data.missionId, stopId: data.stopId,
                 driverId: caller.id, outcome: success ? 'SUCCESS' : 'FAILURE', recordedAt, receivedAt,
                 destination: { contactName: stop.contactName || '', address: stop.address || '', city: stop.city || '', postalCode: stop.postalCode || '',
-                    floor: stop.floor, timeWindowStart: stop.timeWindowStart, timeWindowEnd: stop.timeWindowEnd },
+                    zone: pkg.zone || undefined, floor: stop.floor, timeWindowStart: stop.timeWindowStart, timeWindowEnd: stop.timeWindowEnd },
                 promisedDeliveryAt: promise && Number.isFinite(Date.parse(promise)) ? promise : null,
                 estimatedDeliveryAt: Number.isFinite(Date.parse(pkg.estimatedDeliveryAt || '')) ? pkg.estimatedDeliveryAt : null,
                 failureReason: reason, failureNotes: notes });

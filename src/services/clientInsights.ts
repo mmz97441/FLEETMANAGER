@@ -8,10 +8,10 @@
 import { Package, PackageStatus } from '../types';
 import {
   computeClientMetrics,
-  filterPackages,
+  MetricsFilters,
   ClientMetricsWithTrend, metricsRange,
 } from './clientMetrics';
-import { outcomeEventsInRange } from './logisticsMetrics';
+import { outcomeEventsInRange, eventDimensions, currentDimensions, matchesLogisticsDimensions } from './logisticsMetrics';
 
 // ----------------------------------------------------------------------------
 // Types exportés
@@ -106,29 +106,26 @@ const MIN_DIMENSION_VOLUME = 5;
  * Renvoie au plus 5 insights, triés par sévérité (critical, warning,
  * positive, info).
  */
-export function getClientInsights(packages: Package[]): Insight[] {
+export function getClientInsights(packages: Package[], filters: MetricsFilters = { period: '30d' }): Insight[] {
   const list = Array.isArray(packages) ? packages : [];
 
-  const metrics: ClientMetricsWithTrend = computeClientMetrics(list, { period: '30d' });
+  const metrics: ClientMetricsWithTrend = computeClientMetrics(list, filters);
   const { previous } = metrics;
 
-  // Cas: aucune donnée exploitable sur la période.
-  if (metrics.total === 0 && metrics.resolved === 0) {
-    return [
-      {
-        id: 'no-data',
-        kind: 'info',
-        title: 'Pas encore de données',
-        detail: 'Créez des expéditions pour voir vos indicateurs.',
-      },
-    ];
+  const active = list.filter(pkg => ![PackageStatus.DELIVERED, PackageStatus.RETURNED].includes(pkg.status) && matchesLogisticsDimensions(currentDimensions(pkg), filters));
+  const blocked = active.filter(pkg => pkg.pickupMissing || pkg.returnDisposition === 'AWAITING_DECISION' || [PackageStatus.FAILED, PackageStatus.RETURN_REQUESTED].includes(pkg.status));
+  const insights: Insight[] = blocked.length ? [{ id: 'work-blocked', kind: 'warning', title: `${blocked.length} colis à examiner`,
+    detail: 'Absence à l’enlèvement, tentative non aboutie ou retour en attente de décision. Consultez le suivi de ces colis.' }] : [];
+  if (metrics.resolved === 0) {
+    insights.push({ id: metrics.total || metrics.workInProgress ? 'no-decisions' : 'no-data', kind: 'info',
+      title: metrics.workInProgress ? `${metrics.workInProgress} colis à traiter` : metrics.total ? 'Aucune tentative décidée' : 'Aucune donnée sur ce périmètre',
+      detail: 'Aucun taux de réussite ni délai ne peut être calculé sans tentative datée sur la période. Les colis à traiter incluent les jours précédents.' });
+    return insights;
   }
-
-  // Liste filtrée (même fenêtre que les métriques) pour les analyses
-  // par dimension que le moteur de métriques n'expose pas.
-  const filtered = outcomeEventsInRange(list, metricsRange('30d')).map(event => ({ ...event.package, status: event.outcome === 'SUCCESS' ? PackageStatus.DELIVERED : PackageStatus.FAILED }));
-
-  const insights: Insight[] = [];
+  const filtered = outcomeEventsInRange(list, metricsRange(filters.period), filters).map(event => {
+    const dimensions = eventDimensions(event);
+    return { ...event.package, contactName: dimensions.pharmacy, zone: dimensions.zone as Package['zone'], status: event.outcome === 'SUCCESS' ? PackageStatus.DELIVERED : PackageStatus.FAILED };
+  });
 
   // --- Règle 1 : Ponctualité (baisse / hausse) ---
   if (metrics.punctualityRate !== null && previous.punctualityRate !== null) {
@@ -153,7 +150,7 @@ export function getClientInsights(packages: Package[]): Insight[] {
   }
 
   // --- Règle 2 : Taux de livraison sous l'objectif ---
-  if (metrics.resolved > 0 && metrics.deliveryRate < 90) {
+  if (metrics.resolved > 0 && metrics.deliveryRate < 95) {
     insights.push({
       id: 'delivery-rate-low',
       kind: 'warning',
@@ -252,7 +249,7 @@ export function getClientInsights(packages: Package[]): Insight[] {
     insights.push({
       id: 'all-good',
       kind: 'positive',
-      title: 'Tout roule',
+      title: 'Tentatives sans alerte sur ce périmètre',
       detail: `Taux ${formatRate(metrics.deliveryRate)} · ponctualité ${formatRate(metrics.punctualityRate)} · délai moyen ${formatDelay(metrics.avgDelayHours)}`,
     });
   }

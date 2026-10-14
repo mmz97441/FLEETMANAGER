@@ -85,7 +85,8 @@ const CreateShipmentModal: React.FC<CreateShipmentModalProps> = ({ currentUser, 
     const split = splitCity(a.city);
     setContactName(a.contactName || a.label || ''); setAddress(a.address || '');
     setPostalCode(split.postalCode); setCity(split.cityName); setContactPhone(a.contactPhone || ''); setContactEmail(a.contactEmail || '');
-    setLinkedId(a.id); setShowBook(false); setFieldErrors({}); if (a.contactEmail) setOptionsOpen(true);
+    setComment(a.notes || '');
+    setLinkedId(a.id); setShowBook(false); setFieldErrors({}); if (a.contactEmail || a.notes) setOptionsOpen(true);
   };
 
   const print = () => {
@@ -103,7 +104,7 @@ const CreateShipmentModal: React.FC<CreateShipmentModalProps> = ({ currentUser, 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (submitting.current || created || access.readOnly) return;
-    const errors = validateClientShipment({ contactName, address, postalCode, city, contactPhone, contactEmail, packageCount, weight, requestedDeliveryDate, timeWindowStart, timeWindowEnd }, requestLocked ? undefined : new Intl.DateTimeFormat('en-CA', { timeZone: 'Indian/Reunion', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()));
+    const errors = requestLocked ? {} : validateClientShipment({ contactName, address, postalCode, city, contactPhone, contactEmail, packageCount, weight, requestedDeliveryDate, timeWindowStart, timeWindowEnd }, new Intl.DateTimeFormat('en-CA', { timeZone: 'Indian/Reunion', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()));
     setFieldErrors(errors); setError('');
     const first = Object.keys(errors)[0];
     if (first) {
@@ -234,8 +235,8 @@ const CreateShipmentModal: React.FC<CreateShipmentModalProps> = ({ currentUser, 
             <FormInput id="shipment-contactName" label="Nom du destinataire" required autoComplete="shipping name" value={contactName} onChange={e => { setContactName(e.target.value); setLinkedId(null); }} error={fieldErrors.contactName} />
             <FormInput id="shipment-address" label="Adresse : rue et numéro" required autoComplete="shipping address-line1" value={address} onChange={e => setAddress(e.target.value)} error={fieldErrors.address} />
             <div className="grid sm:grid-cols-2 gap-3">
-              <FormInput id="shipment-postalCode" label="Code postal" autoComplete="shipping postal-code" inputMode="numeric" maxLength={5} value={postalCode} onChange={e => setPostalCode(e.target.value)} error={fieldErrors.postalCode} />
-              <FormInput id="shipment-city" label="Ville" autoComplete="shipping address-level2" value={city} onChange={e => setCity(e.target.value)} error={fieldErrors.city} />
+              <FormInput id="shipment-postalCode" label="Code postal" required autoComplete="shipping postal-code" inputMode="numeric" maxLength={5} value={postalCode} onChange={e => setPostalCode(e.target.value)} error={fieldErrors.postalCode} />
+              <FormInput id="shipment-city" label="Ville" required autoComplete="shipping address-level2" value={city} onChange={e => setCity(e.target.value)} error={fieldErrors.city} />
             </div>
             <FormInput id="shipment-contactPhone" label="Téléphone du destinataire" required type="tel" autoComplete="shipping tel" value={contactPhone} onChange={e => setContactPhone(e.target.value)} error={fieldErrors.contactPhone} />
             {!linkedId && onSaveRecipient && <label className="flex items-start gap-3 text-sm text-slate-700 py-2"><input type="checkbox" checked={saveToBook} onChange={e => setSaveToBook(e.target.checked)} className="w-5 h-5" /> Ajouter ce destinataire à mon carnet</label>}
@@ -259,6 +260,7 @@ const CreateShipmentModal: React.FC<CreateShipmentModalProps> = ({ currentUser, 
               <FormInput id="shipment-weight" label="Poids en kg" type="number" min={0} step="0.1" inputMode="decimal" value={weight} onChange={e => setWeight(e.target.value)} error={fieldErrors.weight} />
               <FormInput label="Votre référence" value={clientReference} onChange={e => setClientReference(e.target.value)} />
               <FormTextarea label="Consignes de livraison" value={comment} onChange={e => setComment(e.target.value)} rows={3} />
+              {linkedId && <p className="text-sm text-slate-600">Les consignes du carnet sont reprises pour cet envoi. Vous pouvez les modifier ou les effacer sans modifier le carnet.</p>}
             </fieldset>
           </details>
           {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800 flex gap-2"><AlertTriangle size={18} className="shrink-0" />{error}</p>}

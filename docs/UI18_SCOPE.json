@@ -55,7 +55,14 @@
     "src/components/UserConnectionStatus.tsx",
     "src/components/CarrierBarcodeModal.tsx",
     "src/components/ResilientPage.tsx",
-    "src/components/StorageRecoveryNotice.tsx"
+    "src/components/StorageRecoveryNotice.tsx",
+    "src/components/client/ClientShipments.tsx",
+    "src/components/client/ClientRequestsPanel.tsx",
+    "src/components/client/ClientRequestsManager.tsx",
+    "src/components/ClientAnalytics.tsx",
+    "src/components/ClientLiveTracking.tsx",
+    "src/components/PODViewer.tsx",
+    "src/components/PackageTimeline.tsx"
   ],
   "exceptions": [
     {

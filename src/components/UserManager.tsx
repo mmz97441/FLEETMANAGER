@@ -5,8 +5,7 @@ import { Users, Plus, Shield, User as UserIcon, Settings, Briefcase, Truck, Edit
 import UserConnectionStatus from './UserConnectionStatus';
 import Modal from './shared/Modal';
 import ConfirmModal from './ConfirmModal';
-import { sendUserInvitationEmail } from '../services/emailService';
-import { createInvitation, getActivationUrl, resendInvitation } from '../services/invitationService';
+import { createInvitation, resendInvitation } from '../services/invitationService';
 import { toggleUserStatus, forcePasswordReset } from '../services/cloudFunctions';
 import { cleanupDuplicateUserProfiles } from '../services/firestore';
 import { notifySuccess, notifyError, notifyInfo } from '../services/logService';
@@ -363,7 +362,7 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
             }
 
             // ÉTAPE 3: Créer l'invitation avec TOUTES les infos du profil
-            const { token, expiresAt } = await createInvitation(
+            await createInvitation(
               userData.email,
               userData.id,
               {
@@ -378,24 +377,8 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
               }
             );
             
-            // ÉTAPE 4: Envoyer l'email d'invitation
-            const activationUrl = getActivationUrl(token);
-            
-            await sendUserInvitationEmail(
-              {
-                email: userData.email,
-                firstName: userData.firstName,
-                lastName: userData.lastName,
-                role: userData.role
-              },
-              {
-                firstName: currentUser.firstName,
-                lastName: currentUser.lastName
-              },
-              activationUrl,
-              expiresAt
-            );
-            
+            // The callable acknowledges one queued email; delivery is not inferred.
+
           } catch (error: any) {
             console.error('❌ Erreur création utilisateur:', error);
             alert(`Erreur lors de la création de l'utilisateur: ${error.message}\n\nVeuillez réessayer.`);
@@ -430,28 +413,12 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
         {
           id: currentUser.id,
           name: `${currentUser.firstName} ${currentUser.lastName}`
-        }
+        },
+        user.id
       );
       
       if (result) {
-        const activationUrl = getActivationUrl(result.token);
-        
-        await sendUserInvitationEmail(
-          {
-            email: user.email,
-            firstName: user.firstName,
-            lastName: user.lastName,
-            role: user.role
-          },
-          {
-            firstName: currentUser.firstName,
-            lastName: currentUser.lastName
-          },
-          activationUrl,
-          result.expiresAt
-        );
-        
-        alert(`✅ Invitation renvoyée à ${user.email}`);
+        alert(`L’envoi de l’invitation à ${user.email} a été pris en charge.`);
       } else {
         alert('❌ Erreur lors du renvoi de l\'invitation');
       }

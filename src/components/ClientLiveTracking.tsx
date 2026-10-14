@@ -19,6 +19,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { formatLogisticsTimestamp } from '../services/logisticsMetrics';
 
 import {
   Package as PackageType,
@@ -74,7 +75,7 @@ const formatEta = (iso?: string): string | null => {
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return null;
   return new Date(t).toLocaleString('fr-FR', {
-    day: '2-digit', month: '2-digit',
+    timeZone: 'Indian/Reunion', day: '2-digit', month: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
   });
@@ -83,10 +84,10 @@ const formatEta = (iso?: string): string | null => {
 /** Un colis est-il « en cours de livraison » (livreur live frais + non terminal) ? */
 const isInTransit = (p: PackageType, now: number): boolean => {
   const ld = p.liveDriver;
-  if (!ld) return false;
+  if (!ld || p.status !== PackageStatus.IN_DELIVERY || !Number.isFinite(ld.lat) || !Number.isFinite(ld.lng) || Math.abs(ld.lat) > 90 || Math.abs(ld.lng) > 180) return false;
   const t = Date.parse(ld.updatedAt);
   if (Number.isNaN(t)) return false;
-  if (now - t >= FRESH_MS) return false;
+  if (now - t >= FRESH_MS || t > now + 60_000) return false;
   if (TERMINAL_STATUSES.includes(p.status)) return false;
   return true;
 };
@@ -239,14 +240,16 @@ const ClientLiveTracking: React.FC<ClientLiveTrackingProps> = ({ packages }) => 
     [packages, now]
   );
 
+  const outForDelivery = useMemo(() => packages.filter(p => p.status === PackageStatus.IN_DELIVERY), [packages]);
+
   // Tri par imminence : le plus proche de la livraison d'abord
   const sortedParcels = useMemo(() => {
     const rank = (p: PackageType): number =>
       typeof p.remainingBeforeMine === 'number'
         ? p.remainingBeforeMine
         : Number.POSITIVE_INFINITY;
-    return [...inTransit].sort((a, b) => rank(a) - rank(b));
-  }, [inTransit]);
+    return [...outForDelivery].sort((a, b) => rank(a) - rank(b));
+  }, [outForDelivery]);
 
   // Groupes de livreurs (marqueurs verts)
   const driverGroups = useMemo(() => groupByDriver(inTransit), [inTransit]);
@@ -279,14 +282,14 @@ const ClientLiveTracking: React.FC<ClientLiveTrackingProps> = ({ packages }) => 
   const pendingCount = useMemo(
     () =>
       packages.filter(
-        (p) => !isInTransit(p, now) && !TERMINAL_STATUSES.includes(p.status)
+        (p) => p.status !== PackageStatus.IN_DELIVERY && ![PackageStatus.DELIVERED, PackageStatus.RETURNED].includes(p.status)
       ).length,
     [packages, now]
   );
 
   const recenterOnParcel = (p: PackageType) => {
     const ld = p.liveDriver;
-    if (!ld) return;
+    if (!ld || !isInTransit(p, now)) return;
     const name = ld.driverName?.trim();
     const key = name || `${ld.lat.toFixed(4)},${ld.lng.toFixed(4)}`;
     setSelectedKey(key);
@@ -297,7 +300,7 @@ const ClientLiveTracking: React.FC<ClientLiveTrackingProps> = ({ packages }) => 
   // RENDER — état vide
   // -------------------------------------------------------------------------
 
-  if (inTransit.length === 0) {
+  if (outForDelivery.length === 0) {
     return (
       <div className="flex flex-col gap-4">
         <Header />
@@ -312,7 +315,7 @@ const ClientLiveTracking: React.FC<ClientLiveTrackingProps> = ({ packages }) => 
           </p>
           {pendingCount > 0 && (
             <div className="mt-4 inline-flex items-center gap-2 rounded-full bg-indigo-50 px-4 py-1.5 text-sm font-medium text-indigo-700">
-              📦 {pendingCount} colis en préparation
+              📦 {pendingCount} colis à traiter — consultez leur suivi
             </div>
           )}
         </div>
@@ -327,7 +330,7 @@ const ClientLiveTracking: React.FC<ClientLiveTrackingProps> = ({ packages }) => 
   return (
     <div className="flex flex-col gap-4">
       <Header
-        subtitle={`${inTransit.length} colis en cours de livraison${
+        subtitle={`${outForDelivery.length} colis en cours de livraison${
           driverGroups.length > 1 ? ` · ${driverGroups.length} livreurs` : ''
         }`}
       />
@@ -335,7 +338,7 @@ const ClientLiveTracking: React.FC<ClientLiveTrackingProps> = ({ packages }) => 
       <div className="flex flex-col gap-4 lg:flex-row">
         {/* CARTE */}
         <div className="order-1 flex-1 overflow-hidden rounded-2xl border border-slate-200 shadow-sm">
-          <div className="h-[55vh] min-h-[360px] w-full">
+          {inTransit.length === 0 ? <div className="p-6 text-sm text-slate-700"><p className="font-semibold">Position temporairement indisponible</p><p className="mt-2">Vos {outForDelivery.length} colis restent en livraison. La carte réapparaîtra à réception d’une position récente.</p></div> : <div className="h-[55vh] min-h-[360px] w-full">
             <MapContainer
               center={DEFAULT_CENTER}
               zoom={DEFAULT_ZOOM}
@@ -382,7 +385,7 @@ const ClientLiveTracking: React.FC<ClientLiveTrackingProps> = ({ packages }) => 
                 </Marker>
               ))}
             </MapContainer>
-          </div>
+          </div>}
         </div>
 
         {/* LISTE */}
@@ -391,6 +394,7 @@ const ClientLiveTracking: React.FC<ClientLiveTrackingProps> = ({ packages }) => 
             <ParcelRow
               key={p.id}
               parcel={p}
+              positionAvailable={isInTransit(p, now)}
               onClick={() => recenterOnParcel(p)}
             />
           ))}
@@ -416,9 +420,10 @@ const Header: React.FC<{ subtitle?: string }> = ({ subtitle }) => (
 interface ParcelRowProps {
   parcel: PackageType;
   onClick: () => void;
+  positionAvailable: boolean;
 }
 
-const ParcelRow: React.FC<ParcelRowProps> = ({ parcel, onClick }) => {
+const ParcelRow: React.FC<ParcelRowProps> = ({ parcel, onClick, positionAvailable }) => {
   const colors = PACKAGE_STATUS_COLORS[parcel.status] || {
     bg: 'bg-slate-100',
     text: 'text-slate-700',
@@ -430,7 +435,8 @@ const ParcelRow: React.FC<ParcelRowProps> = ({ parcel, onClick }) => {
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={positionAvailable ? onClick : undefined}
+      aria-disabled={!positionAvailable}
       className="w-full rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition-colors hover:border-indigo-300 hover:bg-indigo-50/40 focus:outline-none focus:ring-2 focus:ring-indigo-300"
     >
       {/* Ligne principale : destinataire + ville */}
@@ -440,17 +446,17 @@ const ParcelRow: React.FC<ParcelRowProps> = ({ parcel, onClick }) => {
           {parcel.city && <span className="text-slate-500"> · {parcel.city}</span>}
         </span>
         <span
-          className={`flex-shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${colors.bg} ${colors.text}`}
+          className={`flex-shrink-0 rounded-full px-2 py-0.5 text-sm font-medium ${colors.bg} ${colors.text}`}
         >
           {parcel.status}
         </span>
       </div>
 
       {/* Numéro de colis */}
-      <div className="mt-0.5 text-xs text-slate-400">Colis {parcelNumber(parcel)}</div>
+      <div className="mt-0.5 text-sm text-slate-400">Colis {parcelNumber(parcel)}</div>
 
       {/* Position dans la file */}
-      {typeof remaining === 'number' && remaining >= 0 && (
+      {positionAvailable && typeof remaining === 'number' && remaining >= 0 && (
         <div className="mt-2">
           {remaining === 0 ? (
             <span className="inline-flex items-center gap-1 rounded-lg bg-green-50 px-2.5 py-1 text-sm font-semibold text-green-700">
@@ -475,10 +481,10 @@ const ParcelRow: React.FC<ParcelRowProps> = ({ parcel, onClick }) => {
       {!eta && <p className="mt-2 text-sm text-slate-600">Heure d’arrivée non disponible.</p>}
       {(parcel.timeWindowStart || parcel.timeWindowEnd) && <p className="mt-1 text-sm text-slate-700">Créneau demandé : {parcel.timeWindowStart || 'sans heure de début'} – {parcel.timeWindowEnd || 'sans heure de fin'}</p>}
       {parcel.requestedDeliveryDate && <p className="mt-1 text-sm text-slate-700">Date demandée : {parcel.requestedDeliveryDate.split('-').reverse().join('/')}</p>}
-      {parcel.updatedAt && !Number.isNaN(Date.parse(parcel.updatedAt)) && <p className="mt-1 text-sm text-slate-600">Fiche du colis actualisée le {new Date(parcel.updatedAt).toLocaleString('fr-FR')}</p>}
+      {parcel.updatedAt && !Number.isNaN(Date.parse(parcel.updatedAt)) && <p className="mt-1 text-sm text-slate-600">Fiche du colis actualisée le {formatLogisticsTimestamp(parcel.updatedAt)}</p>}
       {/* Livreur */}
-      <div className="mt-1 text-xs text-slate-500">
-        Livreur : {driverName} · position reçue {timeAgo(parcel.liveDriver?.updatedAt)}
+      <div className="mt-1 text-sm text-slate-500">
+        Livreur : {driverName} · {positionAvailable ? `position reçue ${timeAgo(parcel.liveDriver?.updatedAt)}` : `Position temporairement indisponible${parcel.liveDriver?.updatedAt ? ` · dernière position ${timeAgo(parcel.liveDriver.updatedAt)}` : ''}`}
       </div>
     </button>
   );

@@ -1,5 +1,6 @@
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import app from '../firebaseConfig';
+import type { QuoteOfferSnapshot } from '../utils/quoteOffer';
 /**
  * DELIVERY SERVICE
  * 
@@ -206,10 +207,12 @@ export const getAvailableSlotsForZone = (
  */
 export const convertQuoteToPackage = async (
   quote: QuoteRequest,
-  convertedBy: User
+  convertedBy: User,
+  expectedOffer?: QuoteOfferSnapshot
 ): Promise<{ packageId: string; zone: Zone } | null> => {
-  const call = httpsCallable<{quoteId: string}, {packageId: string; zone: Zone}>(getFunctions(app, 'europe-west1'), 'acceptQuote');
-  return (await call({quoteId: quote.id})).data;
+  if (!expectedOffer && !quote.convertedToPackageId) throw new Error('Rouvrez l’offre pour vérifier son montant et ses conditions avant acceptation.');
+  const call = httpsCallable<{quoteId: string; expectedOffer?: QuoteOfferSnapshot}, {packageId: string; zone: Zone}>(getFunctions(app, 'europe-west1'), 'acceptQuote');
+  return (await call({quoteId: quote.id, ...(expectedOffer ? { expectedOffer } : {})})).data;
 };
 
 /**

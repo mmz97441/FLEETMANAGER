@@ -57,7 +57,7 @@ it('uses the same resolved-attempt denominator for the global KPI and zone group
   calls.invoke.mockResolvedValue(response({ ...spec, metric: 'deliveryRate' }));
   expect(await runQuery(packages, 'Taux global', { pharmacies: [], zones: ['Nord'] })).toHaveProperty('kpi.value', '33');
   calls.invoke.mockResolvedValue(response({ ...spec, metric: 'deliveryRate', dimension: 'zone', chart: 'bar' }));
-  expect(await runQuery(packages, 'Taux par zone', { pharmacies: [], zones: ['Nord'] })).toHaveProperty('series', [{ name: 'Nord', value: 33 }]);
+  expect(await runQuery(packages, 'Taux par zone', { pharmacies: [], zones: ['Nord'] })).toHaveProperty('series', [{ name: 'Zone historique non renseignée', value: 33 }]);
 });
 
 it('groups delivered volume by the field handover day, independently of creation', async () => {
@@ -76,4 +76,15 @@ it('retains the actual collection time when grouping delivery delays by handover
   expect(await runQuery(packages, 'Délai moyen', { pharmacies: [], zones: [] })).toHaveProperty('kpi.value', '2h');
   calls.invoke.mockResolvedValue(response({ ...spec, metric: 'avgDelayHours', dimension: 'day', chart: 'line' }));
   expect(await runQuery(packages, 'Délai moyen par jour', { pharmacies: [], zones: [] })).toHaveProperty('series', [{ name: '2026-10-14', value: 2 }]);
+});
+
+ it('groups a failed attempt under its historical recipient rather than a later corrected destination', async () => {
+  const packages = [{ id: 'p', status: PackageStatus.DELIVERED, contactName: 'B', zone: 'Nord', createdAt: '2026-10-01', movements: [], deliveryAttempts: [
+    { id: 'old_s', missionId: 'old', stopId: 's', driverId: 'd', outcome: 'FAILURE', recordedAt: '2026-10-01T05:00:00Z', destination: { contactName: 'A', address: 'Rue A', postalCode: '97400', city: 'Ville', zone: 'Ouest' } },
+    { id: 'new_s', missionId: 'new', stopId: 's', driverId: 'd', outcome: 'SUCCESS', recordedAt: '2026-10-14T05:00:00Z', destination: { contactName: 'B', address: 'Rue B', postalCode: '97400', city: 'Ville', zone: 'Nord' } },
+  ] }] as unknown as Package[];
+  calls.invoke.mockResolvedValue(response({ ...spec, metric: 'deliveryRate', dimension: 'pharmacy', chart: 'bar' }));
+  expect(await runQuery(packages, 'Succès par pharmacie', { pharmacies: ['A', 'B'], zones: ['Nord', 'Ouest'] })).toHaveProperty('series', [{ name: 'B', value: 100 }, { name: 'A', value: 0 }]);
+  calls.invoke.mockResolvedValue(response({ ...spec, metric: 'failRate', pharmacy: 'A' }));
+  expect(await runQuery(packages, 'Échecs pharmacie A', { pharmacies: ['A', 'B'], zones: ['Nord', 'Ouest'] })).toHaveProperty('kpi.value', '100');
 });

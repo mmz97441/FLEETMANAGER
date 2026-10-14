@@ -1,0 +1,27 @@
+{
+  "method": "Current main acceptQuote/createInvitation callback AST extracted unchanged, dependencies replaced by in-memory transactional db and synthetic caller; no network or production writes",
+  "results": [
+    {
+      "case": "offer_changed_while_confirmation_open",
+      "originallyDisplayedPrice": 50,
+      "acceptedPrice": 150,
+      "payload": {
+        "quoteId": "quote-a"
+      },
+      "response": {
+        "packageId": "quote-1cda9ec65e782ab48babe5f623de23da5c8bc958665b6588cc6e98b0f05f43c5",
+        "zone": "Nord"
+      },
+      "defectConfirmed": true
+    },
+    {
+      "case": "duplicate_pending_team_profiles",
+      "initialInvite": "accepted using userId",
+      "resendPayload": {
+        "email": "same@example.invalid"
+      },
+      "resendError": "Profil unique introuvable.",
+      "defectConfirmed": true
+    }
+  ]
+}

@@ -2,6 +2,7 @@ import { getPackageProofs } from '../services/podService';
 import { subscribeParcelFeed, type ParcelCoverage, type ParcelFeedController } from '../services/parcelFeed';
 import RecoveryPanel from './RecoveryPanel';
 import ReturnHubModal from './ReturnHubModal';
+import ClientRequestsManager from './client/ClientRequestsManager';
 import PackageScanInfo from './PackageScanInfo';
 import { escapeHtml } from '../utils/html';
 import { useUrlParam, updateUrlParams } from '../hooks/useUrlState';
@@ -108,6 +109,9 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   const [parcelCoverage, setParcelCoverage] = useState<ParcelCoverage | null>(null);
   const [analyticsReady, setAnalyticsReady] = useState(false);
   const [showRecovery, setShowRecovery] = useState(false);
+  const [showClientRequests, setShowClientRequests] = useState(false);
+  const [clientRequestParam] = useUrlParam<string>('clientRequest', '');
+  useEffect(() => { if (clientRequestParam) setShowClientRequests(true); }, [clientRequestParam]);
   const [returningPackage, setReturningPackage] = useState<Package | null>(null);
   const [activeTab, setActiveTab] = useUrlParam<TabType>('tab', 'dashboard', ['dashboard', 'dispatch', 'imports', 'missions', 'packages', 'hubs']);
   const [missions, setMissions] = useState<Mission[]>([]);
@@ -2421,6 +2425,12 @@ const MissionManager: React.FC<MissionManagerProps> = ({
         </div>)}
       </div>}
       {/* Content */}
+      <details className="mb-4 rounded-xl border border-brand-200 bg-white p-3" open={showClientRequests} onToggle={event => setShowClientRequests(event.currentTarget.open)}>
+        <summary className="cursor-pointer min-h-11 font-semibold text-brand-900">Demandes client à traiter</summary>
+        <ClientRequestsManager currentUser={currentUser} focusRequestId={clientRequestParam || undefined} onInspect={packageId => {
+          updateUrlParams({ tab: 'packages', package: packageId, scope: 'all' });
+        }} />
+      </details>
       <details className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3" open={showRecovery} onToggle={event => setShowRecovery(event.currentTarget.open)}>
         <summary className="cursor-pointer min-h-11 font-semibold text-amber-950">Reprise des colis anciens, échecs et retours</summary>
         {showRecovery && <RecoveryPanel currentUser={currentUser} onReplanify={() => setActiveTab('dispatch')} onReturn={setReturningPackage} onInspect={async (missionId) => {

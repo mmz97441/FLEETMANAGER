@@ -1,0 +1,85 @@
+{
+  "checks": [
+    {
+      "name": "Tracking preserves delivery without GPS at 320",
+      "pass": true
+    },
+    {
+      "name": "Tracking has no horizontal overflow at 320",
+      "pass": true
+    },
+    {
+      "name": "Proof shows real references, reserves and Reunion date at 320",
+      "pass": true
+    },
+    {
+      "name": "Proof has no horizontal overflow at 320",
+      "pass": true
+    },
+    {
+      "name": "Tracking preserves delivery without GPS at 390",
+      "pass": true
+    },
+    {
+      "name": "Tracking has no horizontal overflow at 390",
+      "pass": true
+    },
+    {
+      "name": "Proof shows real references, reserves and Reunion date at 390",
+      "pass": true
+    },
+    {
+      "name": "Proof has no horizontal overflow at 390",
+      "pass": true
+    },
+    {
+      "name": "Tracking preserves delivery without GPS at 1280",
+      "pass": true
+    },
+    {
+      "name": "Tracking has no horizontal overflow at 1280",
+      "pass": true
+    },
+    {
+      "name": "Proof shows real references, reserves and Reunion date at 1280",
+      "pass": true
+    },
+    {
+      "name": "Proof has no horizontal overflow at 1280",
+      "pass": true
+    },
+    {
+      "name": "Printed proof preserves reserve and actual reference",
+      "pass": true
+    },
+    {
+      "name": "Accessible export controls",
+      "pass": true
+    },
+    {
+      "name": "Analytics no horizontal overflow",
+      "pass": true
+    },
+    {
+      "name": "Export refreshes server and uses historical recipient A",
+      "pass": true
+    },
+    {
+      "name": "Offline refresh shows error and closes incomplete report",
+      "pass": true
+    },
+    {
+      "name": "Cached history does not enable exports",
+      "pass": true
+    },
+    {
+      "name": "Blocked popup has actionable error and does not fetch",
+      "pass": true
+    },
+    {
+      "name": "Account switch discards delayed export and releases the next account",
+      "pass": true
+    }
+  ],
+  "errors": []
+}

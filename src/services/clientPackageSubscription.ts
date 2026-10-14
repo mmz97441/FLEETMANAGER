@@ -29,7 +29,7 @@ export function subscribeClientParcelFeed(
   const trackingUnsubs = scopes.map((scope, i) => onSnapshot(query(collection(db, 'client_tracking'), where(scope.field, '==', scope.value)), snapshot => {
     trackingById.set(String(i), snapshot.docs.map(doc => doc.data())); emit();
   }, error => { trackingById.delete(String(i)); emit(); reportError('tracking.subscribe', error, { silent: true }); }));
-  return { loadMore: () => feed.loadMore(), loadAll: async () => withTracking(await feed.loadAll()),
+  return { loadMore: () => feed.loadMore(), loadAll: async () => withTracking(await feed.loadAll()), watchParcel: (id, onError) => feed.watchParcel(id, onError),
     unsubscribe: () => { stopped = true; feed.unsubscribe(); trackingUnsubs.forEach(unsub => unsub()); } };
 }
 

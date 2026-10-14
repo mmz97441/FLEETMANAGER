@@ -102,11 +102,9 @@ service cloud.firestore {
         request.auth.uid == userId || isAdminRole()
         || (isClient() && getUserData().get('companyName', '') != '' && resource.data.companyName == getUserData().companyName)
       );
-      allow create: if isAdminRole() || (isClient() && userId != request.auth.uid
-        && request.resource.data.role == 'Client'
-        && getUserData().get('companyName','') != '' && request.resource.data.companyName == getUserData().companyName
-        && !request.resource.data.keys().hasAny(['customPermissions','activatedAt','originalUserId'])
-        && request.resource.data.get('leaveBalance', 0) == 0);
+      // Client team creation is an atomic server transaction (unique email,
+      // profile, invitation and queued message). Legacy direct writes are denied.
+      allow create: if isAdminRole();
       allow update: if isAdminRole() || (isAuthenticated()
         && (request.auth.uid == userId || (isClient() && resource.data.role == 'Client' && resource.data.companyName == getUserData().companyName))
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny(userImmutableFields()));
@@ -252,11 +250,11 @@ service cloud.firestore {
     match /savedAddresses/{addressId} {
       allow read: if isAdminRole()
         || (isClient() && getUserData().get('companyName','') != '' && resource.data.companyName == getUserData().companyName);
-      allow create: if isAdminRole()
-        || (isClient() && getUserData().get('companyName','') != '' && request.resource.data.companyName == getUserData().companyName);
+      allow create: if isAdminRole(); // Client recipient identity is checked on the server.
       allow update: if isAdminRole()
         || (isClient() && getUserData().get('companyName','') != '' && resource.data.companyName == getUserData().companyName
-            && request.resource.data.companyName == resource.data.companyName);
+            && request.resource.data.companyName == resource.data.companyName
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isFavorite','usageCount','updatedAt']));
       allow delete: if isAdminRole()
         || (isClient() && getUserData().get('companyName','') != '' && resource.data.companyName == getUserData().companyName);
     }
@@ -493,5 +491,17 @@ service cloud.firestore {
         resource.data.recipientId == request.auth.uid;
       allow delete: if false;
     }
+
+    // Customer requests are acknowledged and processed by server transactions.
+    // A request is never a direct permission to alter a parcel or its proof.
+    match /client_requests/{requestId} {
+      allow read: if isAdminRole() || (isClient() && (
+        resource.data.clientId == request.auth.uid ||
+        (getUserData().get('companyName','') != '' && resource.data.companyName == getUserData().companyName)
+      ));
+      allow write: if false;
+    }
+    match /client_request_operations/{operationId} { allow read, write: if false; }
+    match /client_team_operations/{operationId} { allow read, write: if false; }
   }
 }

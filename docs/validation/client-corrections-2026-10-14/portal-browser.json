@@ -1,0 +1,295 @@
+{
+  "fixture": "Real ClientPortal, ClientShipments, CreateShipmentModal, ImportShipmentsModal and PackageTimeline. Mock service boundaries and synthetic records; external Firebase endpoints blocked. Browser timezone Europe/Paris.",
+  "widths": [
+    320,
+    390,
+    1440
+  ],
+  "checks": [
+    {
+      "name": "Separate recipients at same address; mixed group not all delivered 320",
+      "pass": true
+    },
+    {
+      "name": "Shipment list fits viewport 320",
+      "pass": true
+    },
+    {
+      "name": "Detail retains ten cartons and missing pickup 320",
+      "pass": true
+    },
+    {
+      "name": "Expanded shipment list fits viewport 320",
+      "pass": true
+    },
+    {
+      "name": "Eighteen search keystrokes load full history once 320",
+      "pass": true
+    },
+    {
+      "name": "Offer confirmation includes price, route, Reunion date, window and conditions 320",
+      "pass": true
+    },
+    {
+      "name": "Offer modal fits viewport 320",
+      "pass": true
+    },
+    {
+      "name": "Open confirmation remains frozen after remote offer changes 320",
+      "pass": true
+    },
+    {
+      "name": "Changed offer rejects old snapshot without accepting new price 320",
+      "pass": true
+    },
+    {
+      "name": "Profile failure keeps editable input and has no success message 320",
+      "pass": true
+    },
+    {
+      "name": "Profile fits viewport 320",
+      "pass": true
+    },
+    {
+      "name": "Read-only create/import controls disabled 320",
+      "pass": true
+    },
+    {
+      "name": "Read-only operational requests disabled 320",
+      "pass": true
+    },
+    {
+      "name": "Read-only list fits viewport 320",
+      "pass": true
+    },
+    {
+      "name": "Read-only profile mutation disabled 320",
+      "pass": true
+    },
+    {
+      "name": "Read-only quote acceptance absent; no mutations 320",
+      "pass": true
+    },
+    {
+      "name": "Saved recipient carries editable instructions 320",
+      "pass": true
+    },
+    {
+      "name": "Creation form fits viewport 320",
+      "pass": true
+    },
+    {
+      "name": "Clearing shipment instructions preserves address book 320",
+      "pass": true
+    },
+    {
+      "name": "Separate recipients at same address; mixed group not all delivered 390",
+      "pass": true
+    },
+    {
+      "name": "Shipment list fits viewport 390",
+      "pass": true
+    },
+    {
+      "name": "Detail retains ten cartons and missing pickup 390",
+      "pass": true
+    },
+    {
+      "name": "Expanded shipment list fits viewport 390",
+      "pass": true
+    },
+    {
+      "name": "Eighteen search keystrokes load full history once 390",
+      "pass": true
+    },
+    {
+      "name": "Offer confirmation includes price, route, Reunion date, window and conditions 390",
+      "pass": true
+    },
+    {
+      "name": "Offer modal fits viewport 390",
+      "pass": true
+    },
+    {
+      "name": "Open confirmation remains frozen after remote offer changes 390",
+      "pass": true
+    },
+    {
+      "name": "Changed offer rejects old snapshot without accepting new price 390",
+      "pass": true
+    },
+    {
+      "name": "Profile failure keeps editable input and has no success message 390",
+      "pass": true
+    },
+    {
+      "name": "Profile fits viewport 390",
+      "pass": true
+    },
+    {
+      "name": "Read-only create/import controls disabled 390",
+      "pass": true
+    },
+    {
+      "name": "Read-only operational requests disabled 390",
+      "pass": true
+    },
+    {
+      "name": "Read-only list fits viewport 390",
+      "pass": true
+    },
+    {
+      "name": "Read-only profile mutation disabled 390",
+      "pass": true
+    },
+    {
+      "name": "Read-only quote acceptance absent; no mutations 390",
+      "pass": true
+    },
+    {
+      "name": "Saved recipient carries editable instructions 390",
+      "pass": true
+    },
+    {
+      "name": "Creation form fits viewport 390",
+      "pass": true
+    },
+    {
+      "name": "Clearing shipment instructions preserves address book 390",
+      "pass": true
+    },
+    {
+      "name": "Separate recipients at same address; mixed group not all delivered 1440",
+      "pass": true
+    },
+    {
+      "name": "Shipment list fits viewport 1440",
+      "pass": true
+    },
+    {
+      "name": "Detail retains ten cartons and missing pickup 1440",
+      "pass": true
+    },
+    {
+      "name": "Expanded shipment list fits viewport 1440",
+      "pass": true
+    },
+    {
+      "name": "Eighteen search keystrokes load full history once 1440",
+      "pass": true
+    },
+    {
+      "name": "Offer confirmation includes price, route, Reunion date, window and conditions 1440",
+      "pass": true
+    },
+    {
+      "name": "Offer modal fits viewport 1440",
+      "pass": true
+    },
+    {
+      "name": "Open confirmation remains frozen after remote offer changes 1440",
+      "pass": true
+    },
+    {
+      "name": "Changed offer rejects old snapshot without accepting new price 1440",
+      "pass": true
+    },
+    {
+      "name": "Profile failure keeps editable input and has no success message 1440",
+      "pass": true
+    },
+    {
+      "name": "Profile fits viewport 1440",
+      "pass": true
+    },
+    {
+      "name": "Read-only create/import controls disabled 1440",
+      "pass": true
+    },
+    {
+      "name": "Read-only operational requests disabled 1440",
+      "pass": true
+    },
+    {
+      "name": "Read-only list fits viewport 1440",
+      "pass": true
+    },
+    {
+      "name": "Read-only profile mutation disabled 1440",
+      "pass": true
+    },
+    {
+      "name": "Read-only quote acceptance absent; no mutations 1440",
+      "pass": true
+    },
+    {
+      "name": "Saved recipient carries editable instructions 1440",
+      "pass": true
+    },
+    {
+      "name": "Creation form fits viewport 1440",
+      "pass": true
+    },
+    {
+      "name": "Clearing shipment instructions preserves address book 1440",
+      "pass": true
+    },
+    {
+      "name": "Quote pickup minimum uses Reunion working hours despite Paris browser",
+      "pass": true
+    },
+    {
+      "name": "Past pickup choice is blocked by the real form constraint",
+      "pass": true
+    },
+    {
+      "name": "Valid pickup opens delivery with Reunion minimum three hours later",
+      "pass": true
+    },
+    {
+      "name": "Workbook identifies ignored column and invalid row before import",
+      "pass": true
+    },
+    {
+      "name": "Partial import shows 75 confirmed and one uncertain",
+      "pass": true
+    },
+    {
+      "name": "Imported row dates, windows, service time and ground floor are preserved",
+      "pass": true
+    },
+    {
+      "name": "Retry sends only unconfirmed reference and reports invalid row",
+      "pass": true
+    },
+    {
+      "name": "Import result fits mobile viewport",
+      "pass": true
+    }
+  ],
+  "errors": [],
+  "snapshots": [
+    "portal-group-detail-320.png",
+    "portal-offer-conditions-320.png",
+    "portal-offer-changed-320.png",
+    "portal-profile-failure-320.png",
+    "portal-readonly-320.png",
+    "portal-saved-instructions-320.png",
+    "portal-group-detail-390.png",
+    "portal-offer-conditions-390.png",
+    "portal-offer-changed-390.png",
+    "portal-profile-failure-390.png",
+    "portal-readonly-390.png",
+    "portal-saved-instructions-390.png",
+    "portal-group-detail-1440.png",
+    "portal-offer-conditions-1440.png",
+    "portal-offer-changed-1440.png",
+    "portal-profile-failure-1440.png",
+    "portal-readonly-1440.png",
+    "portal-saved-instructions-1440.png",
+    "portal-quote-dates-390.png",
+    "portal-import-validation-390.png",
+    "portal-import-interrupted-390.png",
+    "portal-import-resumed-390.png"
+  ]
+}

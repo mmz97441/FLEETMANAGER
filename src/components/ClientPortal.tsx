@@ -12,8 +12,7 @@ import { FormInput } from './shared/FormInput';
 import { useUrlParam, updateUrlParams } from '../hooks/useUrlState';
 import ConfirmModal from './ConfirmModal';
 import PackageTimeline from './PackageTimeline';
-import { sendUserInvitationEmail } from '../services/emailService';
-import { createInvitation, getActivationUrl, resendInvitation } from '../services/invitationService';
+import { resendInvitation, type ClientTeamInviteReceipt } from '../services/invitationService';
 import { subscribeToSavedAddresses, addSavedAddress, incrementAddressUsage, updateUserProfile, updateSavedAddress, deleteSavedAddress } from '../services/firestore';
 import { getDeliveryScheduleConfig, getAvailableSlotsForZone, estimateZoneFromAddress } from '../services/deliveryService';
 import { getPODByPackage, getPackageProofs } from '../services/podService';
@@ -22,7 +21,15 @@ import { generateBatchLabelsHTML } from '../services/pickupService';
 import ShippingLabel, { quoteToLabelData, ShippingLabelData } from './ShippingLabel';
 import PODViewer from './PODViewer';
 import { openDeliveryNote } from '../utils/deliveryNote';
-import { placeKey } from '../utils/address';
+import { saveSavedAddressForUse } from '../services/firestore';
+import { quoteOfferSnapshot, type QuoteOfferSnapshot } from '../utils/quoteOffer';
+import { quoteShipmentFields } from '../utils/shipmentContract';
+import { quoteWindowLabel } from '../utils/requestedDateTime';
+import { earliestRequestedTime, requestedDateTimeLabel } from '../utils/requestedDateTime';
+import { clientParcelNeedsAttention, type ClientParcelFilter } from '../utils/clientParcelView';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import ClientShipments from './client/ClientShipments';
+import ClientRequestsPanel from './client/ClientRequestsPanel';
 import { formatEuro, formatWeight } from '../utils/format';
 import CreateShipmentModal from './CreateShipmentModal';
 import ImportShipmentsModal from './ImportShipmentsModal';
@@ -223,8 +230,8 @@ interface ClientPortalProps {
   companyUsers?: User[];
   onNavigate?: (view: ViewState) => void;
   onAddQuote: (quote: QuoteRequest) => void;
-  onUpdateQuoteStatus: (id: string, status: QuoteStatus) => void;
-  onAddTeamMember?: (user: User) => void;
+  onUpdateQuoteStatus: (id: string, status: QuoteStatus, expectedOffer?: QuoteOfferSnapshot) => void | Promise<void>;
+  onAddTeamMember?: (user: User) => Promise<ClientTeamInviteReceipt>;
   onUpdateTeamMember?: (user: User) => void;
   onDeleteTeamMember?: (userId: string) => void;
   previewMode?: boolean;
@@ -280,6 +287,10 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
     runMutation: (action, operation) => runClientMutation({ readOnly, audit: previewMode ? interventionAudit : undefined, onAuditFailure: () => notifyWarning("Le résultat de l’intervention n’a pas pu être journalisé. La demande initiale reste tracée ; vérifiez le résultat avant toute relance.") }, action, operation),
   }), [readOnly, previewMode, interventionAudit, interventionActorLabel, currentUser.companyName, currentUser.email]);
   const [quoteError, setQuoteError] = useState('');
+  const [offerError, setOfferError] = useState('');
+  const [requestParcel, setRequestParcel] = useState<PackageType | null>(null);
+  const [showClientRequests, setShowClientRequests] = useState(false);
+  const [detailError, setDetailError] = useState('');
   const [quoteResult, setQuoteResult] = useState<{ reference: string; addresses: Array<{ label: string; status: 'saved' | 'existing' | 'unconfirmed' }> } | null>(null);
   const [teamMessages, setTeamMessages] = useState<Record<string, string>>({});
   const [sendingInvitation, setSendingInvitation] = useState<string | null>(null);
@@ -334,6 +345,8 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   const [destLabel, setDestLabel] = useState('');
   const [selectedOriginLabel, setSelectedOriginLabel] = useState<string | null>(null);
   const [selectedDestLabel, setSelectedDestLabel] = useState<string | null>(null);
+  const [destinationInstructions, setDestinationInstructions] = useState('');
+  const [originInstructions, setOriginInstructions] = useState('');
   const [addressSaveMessage, setAddressSaveMessage] = useState<string | null>(null);
 
   // Créneaux de livraison
@@ -341,7 +354,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   const [selectedSlot, setSelectedSlot] = useState<DeliveryTimeSlot | null>(null);
   const [detectedZone, setDetectedZone] = useState<Zone | null>(null);
   const [labelData, setLabelData] = useState<ShippingLabelData | null>(null);
-  const [viewingPOD, setViewingPOD] = useState<{ pod: ProofOfDelivery; quote: QuoteRequest } | null>(null);
+  const [viewingPOD, setViewingPOD] = useState<{ pod: ProofOfDelivery; quote: QuoteRequest; parcel?: PackageType } | null>(null);
   const [loadingPOD, setLoadingPOD] = useState<string | null>(null);
 
   // === MON ENTREPRISE (identité expéditeur pour les BL) ===
@@ -352,10 +365,16 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
     companyPhone: currentUser.companyPhone || '',
   });
   const [companySaveMsg, setCompanySaveMsg] = useState('');
+  const [companySaveFailed, setCompanySaveFailed] = useState(false);
+  const [savedCompanyForm, setSavedCompanyForm] = useState(() => JSON.stringify(companyForm));
   const [savingCompany, setSavingCompany] = useState(false);
   const companyInfoComplete = !!(companyForm.companyName.trim() && companyForm.companyAddress.trim());
+  useUnsavedChanges(!readOnly && JSON.stringify(companyForm) !== savedCompanyForm, savingCompany);
   const handleSaveCompany = async () => {
+    if (savingCompany || readOnly) return;
     setSavingCompany(true);
+    setCompanySaveFailed(false);
+    setCompanySaveMsg('');
     try {
       await access.runMutation('Enregistrer les informations entreprise', () => updateUserProfile({
         ...currentUser,
@@ -364,8 +383,10 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
         companySiret: companyForm.companySiret.trim(),
         companyPhone: companyForm.companyPhone.trim(),
       }));
+      setSavedCompanyForm(JSON.stringify(companyForm));
       setCompanySaveMsg('Infos entreprise enregistrées — elles apparaîtront sur vos BL.');
     } catch (e) {
+      setCompanySaveFailed(true);
       setCompanySaveMsg(e instanceof Error ? e.message : 'Échec de l’enregistrement. Vos informations sont conservées ; réessayez.');
     }
     setSavingCompany(false);
@@ -428,14 +449,14 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
     }
   };
 
-  const [shipmentSearch, setShipmentSearchParam] = useUrlParam<string>('clientSearch', '');
+  const [shipmentSearch] = useUrlParam<string>('clientSearch', '');
+  const [clientRequestParam] = useUrlParam<string>('clientRequest', '');
+  useEffect(() => { if (clientRequestParam) setShowClientRequests(true); }, [clientRequestParam]);
   const setShipmentSearch = (value: string) => updateUrlParams({ clientSearch: value, package: null }, true);
-  const [shipmentFilter, setShipmentFilterParam] = useUrlParam<'all' | 'pending' | 'transit' | 'delivered' | 'failed'>('clientStatus', 'all', ['all', 'pending', 'transit', 'delivered', 'failed']);
-  const setShipmentFilter = (value: 'all' | 'pending' | 'transit' | 'delivered' | 'failed') => updateUrlParams({ clientStatus: value === 'all' ? null : value, package: null });
+  const [shipmentFilter] = useUrlParam<ClientParcelFilter>('clientStatus', 'all', ['all', 'attention', 'pending', 'transit', 'delivered', 'failed']);
+  const setShipmentFilter = (value: ClientParcelFilter) => updateUrlParams({ clientStatus: value === 'all' ? null : value, package: null });
   const [expandedShipmentId, setExpandedShipmentParam] = useUrlParam<string>('package', '');
   const setExpandedShipmentId = (id: string | null) => setExpandedShipmentParam(id || '');
-  const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null); // groupe pharmacie déplié
-  const [selectedLabels, setSelectedLabels] = useState<Set<string>>(new Set());
   const [showCreateShipment, setShowCreateShipment] = useState(false);
   const [showImportShipments, setShowImportShipments] = useState(false);
   const [showImportRecipients, setShowImportRecipients] = useState(false);
@@ -450,12 +471,9 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
       companyPhone: fields.companyPhone.trim(),
       companySiret: fields.companySiret.trim(),
     }));
-    setCompanyForm({
-      companyName: currentUser.companyName || '',
-      companyAddress: fields.companyAddress.trim(),
-      companySiret: fields.companySiret.trim(),
-      companyPhone: fields.companyPhone.trim(),
-    });
+    const confirmed = { companyName: currentUser.companyName || '', companyAddress: fields.companyAddress.trim(), companySiret: fields.companySiret.trim(), companyPhone: fields.companyPhone.trim() };
+    setCompanyForm(confirmed);
+    setSavedCompanyForm(JSON.stringify(confirmed));
   };
 
   // Charger la config créneaux au montage
@@ -498,16 +516,35 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
     return () => { feed.unsubscribe(); if (clientParcelFeed.current === feed) clientParcelFeed.current = null; };
   }, [currentUser.id, currentUser.companyName, packagesRetry]);
 
+  const needsHistory = Boolean(shipmentSearch.trim() || expandedShipmentId);
+  const coverageRef = useRef(parcelCoverage);
+  coverageRef.current = parcelCoverage;
   useEffect(() => {
     let active = true;
     setAnalyticsReady(false);
     if (isLoadingPackages || !clientParcelFeed.current) return;
-    if (activeView !== 'client_analytics' && activeView !== 'client_recipients' && !expandedShipmentId && !shipmentSearch) return;
+    if (activeView !== 'client_analytics' && activeView !== 'client_recipients' && !needsHistory) return;
+    if (coverageRef.current?.historyComplete && activeView !== 'client_analytics') { setAnalyticsReady(true); return; }
+    // Search/detail loads missing history once. Keystrokes reuse that snapshot.
     void clientParcelFeed.current.loadAll().then(items => { if (active) { setClientPackages(items); setAnalyticsReady(true); } }).catch(error => {
       if (active) setPackagesError(error instanceof Error ? error.message : 'Historique incomplet.');
     });
     return () => { active = false; };
-  }, [activeView, isLoadingPackages, packagesRetry, expandedShipmentId, shipmentSearch]);
+  }, [activeView, isLoadingPackages, packagesRetry, needsHistory]);
+
+  useEffect(() => {
+    setDetailError('');
+    if (!expandedShipmentId || isLoadingPackages) return;
+    return clientParcelFeed.current?.watchParcel(expandedShipmentId, () => setDetailError('Le suivi de ce colis ne peut pas être actualisé. Vérifiez votre connexion ou rouvrez sa fiche.'));
+  }, [expandedShipmentId, isLoadingPackages, packagesRetry, currentUser.id, currentUser.companyName]);
+
+  const refreshClientPackages = async (): Promise<PackageType[]> => {
+    const feed = clientParcelFeed.current;
+    if (!feed) throw new Error('Attendez le chargement de vos colis.');
+    const items = await feed.loadAll();
+    if (feed === clientParcelFeed.current) { setClientPackages(items); setPackagesError(''); }
+    return items;
+  };
 
   // Détecter la zone quand l'adresse destination change
   useEffect(() => {
@@ -547,20 +584,13 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   // Fonction pour sauvegarder une nouvelle adresse (avec vérification doublons)
   const handleSaveNewAddress = async (
     type: 'pickup' | 'delivery',
-    data: { address: string; city: string; contactName: string; contactPhone: string },
+    data: { address: string; city: string; contactName: string; contactPhone: string; notes?: string },
     label: string
   ): Promise<'saved' | 'existing' | 'unconfirmed'> => {
     if (!currentUser.companyName) return 'unconfirmed';
     
-    // Vérifier si l'adresse existe déjà (même point de livraison, cf. address.ts)
-    const exists = savedAddresses.some(addr => placeKey(addr) === placeKey(data));
-    
-    if (exists) {
-      return 'existing';
-    }
-    
     try {
-      await access.runMutation('Ajouter une adresse au carnet', () => addSavedAddress({
+      const result = await access.runMutation('Ajouter une adresse au carnet', () => saveSavedAddressForUse({
         companyName: currentUser.companyName!,
         createdBy: currentUser.id,
         label: label || `${type === 'pickup' ? 'Enlèvement' : 'Livraison'} - ${data.city}`,
@@ -569,10 +599,11 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
         city: data.city,
         contactName: data.contactName,
         contactPhone: data.contactPhone,
+        notes: data.notes || '',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       }));
-      return 'saved';
+      return result.outcome === 'existing' ? 'existing' : 'saved';
     } catch (error) {
       console.error('Erreur sauvegarde adresse:', error);
       return 'unconfirmed';
@@ -640,27 +671,8 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
       }
   }, [newRequest.length, newRequest.width, newRequest.height]);
 
-  const getMinPickupDate = () => {
-      const now = new Date();
-      now.setHours(now.getHours() + 2);
-      if (now.getHours() >= 17) {
-          now.setDate(now.getDate() + 1);
-          now.setHours(8, 0, 0, 0);
-      }
-      return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0,16);
-  };
-  const getMinDeliveryDate = () => {
-      if (!newRequest.pickupDate) return '';
-      const pickup = new Date(newRequest.pickupDate);
-      pickup.setHours(pickup.getHours() + 3);
-      if (pickup.getHours() >= 17) {
-          pickup.setDate(pickup.getDate() + 1);
-          pickup.setHours(8, 0, 0, 0);
-      }
-      return new Date(pickup.getTime() - pickup.getTimezoneOffset() * 60000).toISOString().slice(0,16);
-  };
-  const minPickup = getMinPickupDate();
-  const minDelivery = getMinDeliveryDate();
+  const minPickup = earliestRequestedTime(new Date(), 2);
+  const minDelivery = newRequest.pickupDate ? earliestRequestedTime(newRequest.pickupDate, 3) : '';
 
   // --- CONFIRMATION HANDLERS ---
   const executePendingAction = async () => {
@@ -680,7 +692,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                       address: newRequest.originAddress,
                       city: newRequest.originCity,
                       contactName: newRequest.originContactName,
-                      contactPhone: newRequest.originContactPhone
+                      contactPhone: newRequest.originContactPhone, notes: originInstructions
                   }, originLabel);
                   addressResults.push({ label: 'Adresse d’enlèvement', status });
               }
@@ -689,7 +701,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                       address: newRequest.destinationAddress,
                       city: newRequest.destinationCity,
                       contactName: newRequest.destContactName,
-                      contactPhone: newRequest.destContactPhone
+                      contactPhone: newRequest.destContactPhone, notes: destinationInstructions
                   }, destLabel);
                   addressResults.push({ label: 'Adresse de livraison', status });
               }
@@ -709,50 +721,19 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
               setDestLabel('');
               setSelectedOriginLabel(null);
               setSelectedDestLabel(null);
+              setDestinationInstructions(''); setOriginInstructions('');
               setSelectedSlot(null);
               break;
           }
           case 'ADD_MEMBER':
-              if (onAddTeamMember) {
-                  await onAddTeamMember(pendingAction.data);
-                  setIsTeamModalOpen(false);
-                  setMemberForm({ firstName: '', lastName: '', email: '' });
-                  
-                  // Créer l'invitation avec token et envoyer l'email
-                  try {
-                    const { token, expiresAt } = await createInvitation(
-                      pendingAction.data.email,
-                      pendingAction.data.id,
-                      {
-                        id: currentUser.id,
-                        name: `${currentUser.firstName} ${currentUser.lastName}`
-                      }
-                    );
-                    
-                    const activationUrl = getActivationUrl(token);
-                    
-                    const sent = await sendUserInvitationEmail(
-                      {
-                        email: pendingAction.data.email,
-                        firstName: pendingAction.data.firstName,
-                        lastName: pendingAction.data.lastName,
-                        role: pendingAction.data.role || 'Client'
-                      },
-                      {
-                        firstName: currentUser.firstName,
-                        lastName: currentUser.lastName
-                      },
-                      activationUrl,
-                      expiresAt
-                    );
-                    if (!sent) throw new Error('Email non envoyé.');
-                    notifySuccess(`Invitation envoyée à ${pendingAction.data.email}.`);
-                    setTeamMessages(messages => ({ ...messages, [pendingAction.data.id]: 'Invitation envoyée. Le lien d’activation est valable 7 jours.' }));
-                  } catch (emailError) {
-                    console.error('Erreur envoi email invitation:', emailError);
-                    setTeamMessages(messages => ({ ...messages, [pendingAction.data.id]: 'Collaborateur ajouté, mais email non envoyé. Utilisez Renvoyer l’invitation sur cette fiche.' }));
-                    notifyWarning('Collaborateur ajouté, mais email non envoyé. Vous pouvez renvoyer l’invitation depuis sa fiche.');
-                  }
+              if (!onAddTeamMember) throw new Error('L’invitation n’est pas disponible dans cette session.');
+              {
+                const receipt = await onAddTeamMember(pendingAction.data);
+                const message = receipt.outcome === 'INVITED' ? 'Invitation enregistrée, envoi en cours. Le lien d’activation est valable 7 jours.' : 'Ce collaborateur existe déjà. Consultez sa fiche ; aucune nouvelle invitation n’a été créée.';
+                setTeamMessages(messages => ({ ...messages, [receipt.userId]: message }));
+                notifySuccess(message);
+                setIsTeamModalOpen(false);
+                setMemberForm({ firstName: '', lastName: '', email: '' });
               }
               break;
           case 'UPDATE_MEMBER':
@@ -769,7 +750,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
               }
               break;
           case 'ACCEPT_OFFER':
-              await onUpdateQuoteStatus(pendingAction.data.id, QuoteStatus.ACCEPTED);
+              await onUpdateQuoteStatus(pendingAction.data.id, QuoteStatus.ACCEPTED, pendingAction.data.expectedOffer);
               break;
           case 'REJECT_OFFER':
               await onUpdateQuoteStatus(pendingAction.data.id, QuoteStatus.REJECTED);
@@ -811,7 +792,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
           volume: newRequest.volume,
           pickupDate: newRequest.pickupDate,
           deliveryDate: newRequest.deliveryDate,
-          clientNotes: newRequest.clientNotes,
+          clientNotes: [originInstructions.trim() ? `Consignes d’enlèvement : ${originInstructions.trim()}` : '', destinationInstructions.trim() ? `Consignes de livraison : ${destinationInstructions.trim()}` : '', newRequest.clientNotes.trim()].filter(Boolean).join('\n'),
           status: QuoteStatus.REQUESTED,
           // Créneau de livraison choisi
           deliverySlotId: selectedSlot?.id,
@@ -822,6 +803,8 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
           } : undefined
       };
 
+      try { quoteShipmentFields(request); quoteShipmentFields({ destination: request.origin, destinationAddress: request.originAddress, destinationContact: request.originContact }); }
+      catch (error) { setQuoteError(error instanceof Error ? error.message : 'Vérifiez les adresses et dates de votre demande.'); return; }
       setPendingAction({ type: 'ADD_QUOTE', data: request });
       setIsConfirmModalOpen(true);
   };
@@ -842,7 +825,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
           setPendingAction({ type: 'UPDATE_MEMBER', data: updatedUser });
       } else {
           const newUser: User = {
-              id: `u-${Date.now()}`,
+              id: `u-${crypto.randomUUID()}`,
               firstName: memberForm.firstName,
               lastName: memberForm.lastName,
               email: normalizedEmail,
@@ -893,12 +876,14 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   };
 
   const confirmStatusChange = (id: string, status: QuoteStatus) => {
-      if (status === QuoteStatus.ACCEPTED) {
-          setPendingAction({ type: 'ACCEPT_OFFER', data: { id } });
-      } else {
-          setPendingAction({ type: 'REJECT_OFFER', data: { id } });
-      }
-      setIsConfirmModalOpen(true);
+    setOfferError('');
+    if (status === QuoteStatus.ACCEPTED) {
+      const quote = myQuotes.find(item => item.id === id);
+      if (!quote) { setOfferError('Cette offre n’est plus disponible. Actualisez vos devis.'); return; }
+      try { setPendingAction({ type: 'ACCEPT_OFFER', data: { id, expectedOffer: quoteOfferSnapshot(quote) } }); }
+      catch (error) { setOfferError(error instanceof Error ? error.message : 'L’offre doit être vérifiée.'); return; }
+    } else setPendingAction({ type: 'REJECT_OFFER', data: { id } });
+    setIsConfirmModalOpen(true);
   };
 
   // FAQ DATA
@@ -921,6 +906,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   return (
     <ClientAccessContext.Provider value={access}>
     <div className="space-y-4 animate-fade-in pb-10 min-w-0">
+        {offerError && <p role="alert" className="ui-notice ui-notice-danger">{offerError}</p>}
         {quoteResult && <div role={quoteResult.addresses.some(address => address.status === 'unconfirmed') ? 'alert' : 'status'} className={`ui-notice ${quoteResult.addresses.some(address => address.status === 'unconfirmed') ? 'ui-notice-warning' : 'ui-notice-success'}`}>
             <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="font-semibold">Demande de devis enregistrée</p><p className="text-sm break-words">Référence : {quoteResult.reference}</p></div><button type="button" onClick={() => setQuoteResult(null)} className="ui-button ui-button-ghost shrink-0" aria-label="Fermer le bilan du devis"><X size={18} aria-hidden="true" /></button></div>
             {quoteResult.addresses.length > 0 && <ul className="mt-2 space-y-1">{quoteResult.addresses.map(address => <li key={address.label}>{address.label} : {address.status === 'saved' ? 'ajout au carnet confirmé.' : address.status === 'existing' ? 'déjà présente dans le carnet.' : 'ajout au carnet non confirmé.'}</li>)}</ul>}
@@ -960,6 +946,8 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                 {[
                   { icon: Plus, label: 'Créer une expédition', hint: 'Créer les colis à collecter',  writes: true, onClick: () => setShowCreateShipment(true) },
                   { icon: Search, label: 'Suivre mes colis', hint: 'Où sont mes envois ?',  onClick: () => onNavigate?.('client_shipments') },
+                  { icon: AlertTriangle, label: 'Colis à traiter', hint: `${clientPackages.filter(clientParcelNeedsAttention).length} difficulté(s) dans les colis chargés`, onClick: () => { updateUrlParams({ clientStatus: 'attention', clientSearch: null, package: null }); onNavigate?.('client_shipments'); } },
+                  { icon: FileQuestion, label: 'Mes demandes', hint: 'Suivi des réponses de l’exploitation', onClick: () => setShowClientRequests(true) },
                   { icon: Navigation, label: 'Suivi des livraisons', hint: 'Dernières positions reçues',  onClick: () => onNavigate?.('client_tracking') },
                   { icon: BarChart3, label: 'Mes statistiques', hint: 'Résultats et tendances',  onClick: () => onNavigate?.('client_analytics') },
                   { icon: UserPlus, label: 'Mes destinataires', hint: 'Ajouter, modifier, importer',  onClick: () => onNavigate?.('client_recipients') },
@@ -1088,7 +1076,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                   </button>
                 </div>
               </div>
-              {companySaveMsg && <p className="text-sm font-medium text-slate-600 mt-2">{companySaveMsg}</p>}
+              {companySaveMsg && <p role={companySaveFailed ? 'alert' : 'status'} className={`text-sm font-medium mt-2 ${companySaveFailed ? 'text-red-800' : 'text-green-800'}`}>{companySaveMsg}</p>}
             </div>
           </div>
         )}
@@ -1242,25 +1230,10 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                       setSendingInvitation(user.id);
                                       setTeamMessages(messages => ({ ...messages, [user.id]: '' }));
                                       try {
-                                        const result = await resendInvitation(
-                                          user.email,
-                                          {
-                                            id: currentUser.id,
-                                            name: `${currentUser.firstName} ${currentUser.lastName}`
-                                          }
-                                        );
-                                        
+                                        const result = await resendInvitation(user.email, { id: currentUser.id, name: `${currentUser.firstName} ${currentUser.lastName}` }, user.id);
                                         if (result) {
-                                          const activationUrl = getActivationUrl(result.token);
-                                          const sent = await sendUserInvitationEmail(
-                                            { email: user.email, firstName: user.firstName, lastName: user.lastName, role: 'Client' },
-                                            { firstName: currentUser.firstName, lastName: currentUser.lastName },
-                                            activationUrl,
-                                            result.expiresAt
-                                          );
-                                          if (!sent) throw new Error('Email non envoyé.');
-                                          notifySuccess(`Invitation renvoyée à ${user.email}.`);
-                                          setTeamMessages(messages => ({ ...messages, [user.id]: 'Invitation renvoyée. Le lien d’activation est valable 7 jours.' }));
+                                          notifySuccess(`Renvoi de l’invitation enregistré pour ${user.email}.`);
+                                          setTeamMessages(messages => ({ ...messages, [user.id]: 'Renvoi enregistré, envoi en cours. Le lien d’activation est valable 7 jours.' }));
                                         } else {
                                           setTeamMessages(messages => ({ ...messages, [user.id]: 'L’invitation n’a pas pu être renouvelée. Réessayez depuis cette fiche.' }));
                                         }
@@ -1382,8 +1355,9 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                         </div>
                                     </div>
                                     
+                                    <p className="text-sm text-slate-700">Livraison souhaitée : {requestedDateTimeLabel(quote.deliveryDate)} · Créneau : {quoteWindowLabel(quote.deliveryTimeWindow)}</p>
                                     {quote.adminNotes && (
-                                        <div className="hidden md:block flex-1 mx-6 px-4 py-2 bg-white rounded-lg border border-blue-100 text-sm text-slate-600 italic">
+                                        <div className="w-full md:w-auto flex-1 md:mx-6 px-4 py-2 bg-white rounded-lg border border-blue-100 text-sm text-slate-700 whitespace-pre-wrap break-words">
                                             " {quote.adminNotes} "
                                         </div>
                                     )}
@@ -1465,7 +1439,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
 
         {/* --- VIEW: STATISTIQUES (Studio Analytique) --- */}
         {activeView === 'client_analytics' && !isLoadingPackages && !packagesError && (
-            <>{analyticsReady ? <ClientAnalytics packages={clientPackages} /> : <p role="status">Chargement de l’historique complet pour calculer vos indicateurs…</p>}</>
+            <>{analyticsReady ? <ClientAnalytics packages={clientPackages} clientId={currentUser.id} clientName={currentUser.companyName} coverage={parcelCoverage || undefined} refreshPackages={refreshClientPackages} /> : <p role="status">Chargement de l’historique complet pour calculer vos indicateurs…</p>}</>
         )}
 
         {/* --- VIEW: SUIVI LIVE (livreurs de mes colis en cours) --- */}
@@ -1477,12 +1451,6 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
         {activeView === 'client_help' && (
             <ClientHelp embedded onNavigate={handleHelpNavigate} onClose={() => onNavigate?.('client_dashboard')} />
         )}
-
-        {activeView === 'client_shipments' && !isLoadingPackages && !packagesError && !parcelCoverage?.historyComplete && <div className="rounded-lg bg-blue-50 p-3 mb-3 text-sm text-blue-950">
-          <p>Tous vos colis actifs sont affichés. L’historique des colis terminés se charge par pages ; les compteurs portent sur les colis chargés.</p>
-          <div className="flex flex-wrap gap-2 mt-2"><button disabled={parcelCoverage?.historyLoading} className="ui-button ui-button-secondary" onClick={() => void clientParcelFeed.current?.loadMore().catch(error => setPackagesError(error.message))}>{parcelCoverage?.historyLoading ? 'Chargement…' : 'Charger la suite de l’historique'}</button>
-          <button disabled={parcelCoverage?.historyLoading} className="ui-button ui-button-secondary" onClick={() => void clientParcelFeed.current?.loadAll().catch(error => setPackagesError(error.message))}>Charger tout l’historique</button></div>
-        </div>}
 
         {/* --- VIEW: MES DESTINATAIRES (carnet, CRUD) --- */}
         {activeView === 'client_recipients' && (
@@ -1496,213 +1464,22 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
             />
         )}
 
-        {/* --- VIEW: MES EXPÉDITIONS (Tracking + Étiquettes) --- */}
-        {activeView === 'client_shipments' && (
-            <div className="space-y-4 animate-fade-in">
-                <PageHeader title="Mes expéditions" description={isLoadingPackages ? 'Chargement du nombre de colis…' : packagesError ? 'Nombre de colis indisponible' : `${clientPackages.length} colis chargés${parcelCoverage?.historyComplete ? ' — historique complet' : ' — tous les colis actifs inclus'}`} actions={
-                    <button type="button" disabled={readOnly} onClick={() => setShowCreateShipment(true)} className="ui-button ui-button-primary"><Plus size={18} aria-hidden="true" />Créer une expédition</button>
-                } />
-                <div className="space-y-3" aria-label="Rechercher et filtrer mes colis">
-                    <div className="relative">
-                        <Search size={18} aria-hidden="true" className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600" />
-                        <input type="search" aria-label="Rechercher dans mes colis" value={shipmentSearch} onChange={event => setShipmentSearch(event.target.value)} placeholder="Code, destinataire ou adresse" className="w-full min-h-11 pl-10 pr-3 border border-slate-300 rounded-xl text-base focus:ring-2 focus:ring-brand-700 outline-none" />
-                    </div>
-                    {(() => {
-                        const filters = [
-                            { label: 'Tous', count: clientPackages.length, filter: 'all' as const },
-                            { label: 'En attente', count: clientPackages.filter(p => p.status === PackageStatus.PENDING).length, filter: 'pending' as const },
-                            { label: 'En transit', count: clientPackages.filter(p => [PackageStatus.COLLECTED, PackageStatus.AT_HUB, PackageStatus.SORTED, PackageStatus.IN_TRANSIT, PackageStatus.LOADED, PackageStatus.IN_DELIVERY].includes(p.status)).length, filter: 'transit' as const },
-                            { label: 'Livrés', count: clientPackages.filter(p => p.status === PackageStatus.DELIVERED).length, filter: 'delivered' as const },
-                            { label: 'Échecs / retours', count: clientPackages.filter(p => [PackageStatus.FAILED, PackageStatus.RETURNED, PackageStatus.RETURN_REQUESTED].includes(p.status)).length, filter: 'failed' as const },
-                        ];
-                        return <>
-                            <label className="flex items-center gap-3 text-sm font-semibold text-slate-700 sm:hidden">Statut<select aria-label="Filtrer mes colis par statut" value={shipmentFilter} disabled={isLoadingPackages || Boolean(packagesError)} onChange={event => setShipmentFilter(event.target.value as typeof shipmentFilter)} className="min-h-11 min-w-0 flex-1 rounded-lg border border-slate-300 px-3 bg-white text-base">{filters.map(filter => <option key={filter.filter} value={filter.filter}>{filter.label} ({isLoadingPackages || packagesError ? '—' : filter.count})</option>)}</select></label>
-                            <div className="hidden sm:flex flex-wrap items-center gap-2" role="group" aria-label="Filtrer par statut"><span className="text-sm font-semibold text-slate-700 mr-1">Statut</span>{filters.map(filter => <button type="button" key={filter.filter} disabled={isLoadingPackages || Boolean(packagesError)} aria-pressed={shipmentFilter === filter.filter} onClick={() => setShipmentFilter(filter.filter)} className="ui-filter">{filter.label} <span>({isLoadingPackages || packagesError ? '—' : filter.count})</span></button>)}</div>
-                        </>;
-                    })()}
-                    <details className="text-sm text-slate-700">
-                        <summary className="min-h-11 cursor-pointer py-3 font-semibold">Imports et étiquettes</summary>
-                        <div className="flex flex-wrap gap-2 py-2">
-                            <button type="button" disabled={readOnly} onClick={() => setShowImportRecipients(true)} className="ui-button ui-button-secondary"><UserPlus size={18} aria-hidden="true" />Importer des destinataires</button>
-                            <button type="button" disabled={readOnly} onClick={() => setShowImportShipments(true)} className="ui-button ui-button-secondary"><FileSpreadsheet size={18} aria-hidden="true" />Importer des expéditions</button>
-                            <button type="button" disabled={isLoadingPackages || Boolean(packagesError) || !clientPackages.some(p => p.status === PackageStatus.PENDING)} onClick={() => printShipmentLabels(clientPackages.filter(p => p.status === PackageStatus.PENDING))} className="ui-button ui-button-secondary"><Printer size={18} aria-hidden="true" />Étiquettes en attente ({isLoadingPackages || packagesError ? '—' : clientPackages.filter(p => p.status === PackageStatus.PENDING).length})</button>
-                            {selectedLabels.size > 0 && <button type="button" onClick={() => { const selected = clientPackages.filter(p => selectedLabels.has(p.id)); if (selected.length) printShipmentLabels(selected); }} className="ui-button ui-button-secondary"><Printer size={18} aria-hidden="true" />Imprimer {selectedLabels.size} étiquette{selectedLabels.size > 1 ? 's' : ''}</button>}
-                        </div>
-                    </details>
-                </div>
-                {labelPrintError && <p role="alert" className="ui-notice ui-notice-danger">{labelPrintError}</p>}
-
-                {/* Liste des colis */}
-{expandedShipmentId && <div role="status" className="rounded-xl border border-indigo-200 bg-indigo-50 p-3 flex flex-wrap justify-between gap-3 text-sm text-brand-900">
-                      <p>{packagesError ? 'Le colis demandé ne peut pas être vérifié tant que le chargement a échoué.' : isLoadingPackages || !parcelCoverage?.historyComplete ? 'Chargement du colis demandé dans tout l’historique…' : clientPackages.some(parcel => parcel.id === expandedShipmentId) ? 'Colis ouvert depuis un lien. Les filtres précédents sont temporairement ignorés.' : 'Ce colis est indisponible dans votre compte ou n’existe plus.'}</p>
-                      <button type="button" onClick={() => updateUrlParams({ package: null, clientSearch: null, clientStatus: null })} className="ui-button ui-button-ghost underline min-h-11">Afficher tous mes colis</button>
-                    </div>}
-                                {(() => {
-                    const filtered = clientPackages.filter(p => {
-                        if (expandedShipmentId) return p.id === expandedShipmentId;
-                        // Filtre statut
-                        if (shipmentFilter === 'pending' && p.status !== PackageStatus.PENDING) return false;
-                        if (shipmentFilter === 'transit' && ![PackageStatus.COLLECTED, PackageStatus.AT_HUB, PackageStatus.SORTED, PackageStatus.IN_TRANSIT, PackageStatus.LOADED, PackageStatus.IN_DELIVERY].includes(p.status)) return false;
-                        if (shipmentFilter === 'delivered' && p.status !== PackageStatus.DELIVERED) return false;
-                        if (shipmentFilter === 'failed' && p.status !== PackageStatus.FAILED && p.status !== PackageStatus.RETURNED && p.status !== PackageStatus.RETURN_REQUESTED) return false;
-                        // Filtre recherche
-                        if (shipmentSearch) {
-                            const term = shipmentSearch.toLowerCase();
-                            return (
-                                (p.externalId || '').toLowerCase().includes(term) ||
-                                (p.barcode || '').toLowerCase().includes(term) ||
-                                p.orderNumber.toLowerCase().includes(term) ||
-                                p.contactName.toLowerCase().includes(term) ||
-                                p.address.toLowerCase().includes(term) ||
-                                p.city.toLowerCase().includes(term)
-                            );
-                        }
-                        return true;
-                    }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-                    // Exposer pour le bouton "Toutes les étiquettes"
-
-                    return (
-                        <div className="ui-panel overflow-hidden">
-                            {/* En-tête : une ligne par PHARMACIE (point de livraison), dépliable */}
-                            <div className="px-4 py-3 border-b border-slate-200 text-sm text-slate-600">
-                                Colis regroupés par destinataire
-                            </div>
-
-                            {/* Lignes — regroupées par jour puis par pharmacie */}
-                            <div className="divide-y divide-slate-200">
-                                {(() => {
-                                    // Regroupement par JOUR puis par PHARMACIE (point de livraison, cf. address.ts)
-                                    const pointKey = (p: PackageType) => placeKey(p);
-                                    const dayOf = (p: PackageType) => new Date(p.createdAt).toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
-                                    const dayMap = new Map<string, Map<string, PackageType[]>>();
-                                    for (const p of filtered) {
-                                        const d = dayOf(p);
-                                        if (!dayMap.has(d)) dayMap.set(d, new Map());
-                                        const pm = dayMap.get(d)!;
-                                        const k = pointKey(p);
-                                        if (!pm.has(k)) pm.set(k, []);
-                                        pm.get(k)!.push(p);
-                                    }
-                                    const summaryStatus = (pkgs: PackageType[]) => {
-                                        if (pkgs.some(p => p.status === PackageStatus.FAILED || p.status === PackageStatus.RETURNED)) return PackageStatus.FAILED;
-                                        if (pkgs.some(p => p.status === PackageStatus.IN_DELIVERY)) return PackageStatus.IN_DELIVERY;
-                                        if (pkgs.every(p => p.status === PackageStatus.DELIVERED)) return PackageStatus.DELIVERED;
-                                        if (pkgs.some(p => [PackageStatus.COLLECTED,PackageStatus.AT_HUB,PackageStatus.SORTED,PackageStatus.IN_TRANSIT,PackageStatus.LOADED].includes(p.status))) return PackageStatus.IN_TRANSIT;
-                                        return pkgs[0].status;
-                                    };
-                                    return Array.from(dayMap.entries()).map(([day, pointsMap]) => {
-                                        const dayCount = Array.from(pointsMap.values()).reduce((acc: number, arr) => acc + arr.length, 0);
-                                        return (
-                                        <React.Fragment key={day}>
-                                            <div className="px-4 py-3 bg-slate-50 flex flex-wrap items-center justify-between gap-1">
-                                                <p className="text-sm font-semibold text-slate-700 flex items-center gap-2"><Calendar size={16} aria-hidden="true" />{day}</p>
-                                                <span className="text-sm text-slate-600">{dayCount} colis · {pointsMap.size} destinataire{pointsMap.size > 1 ? 's' : ''}</span>
-                                            </div>
-                                            {Array.from(pointsMap.entries()).map(([key, pkgs]) => {
-                                                const rep = pkgs[0];
-                                                const groupId = day + '||' + key;
-                                                const open = expandedGroupId === groupId || pkgs.some(parcel => parcel.id === expandedShipmentId);
-                                                const sStatus = summaryStatus(pkgs);
-                                                const sColors = PACKAGE_STATUS_COLORS[sStatus] || { bg:'bg-slate-100', text:'text-slate-700' };
-                                                const delivered = pkgs.filter(p => p.status === PackageStatus.DELIVERED).length;
-                                                const etaPkg = pkgs.find(p => p.status === PackageStatus.IN_DELIVERY && p.estimatedDeliveryAt);
-                                                return (
-                                                <React.Fragment key={groupId}>
-                                                    <div data-client-shipment-group className="p-4 space-y-3 sm:flex sm:items-start sm:justify-between sm:gap-4 sm:space-y-0">
-                                                        <div className="min-w-0 flex-1 space-y-1">
-                                                            <p className="text-base font-semibold text-slate-900 break-words">{rep.contactName}</p>
-                                                            <p className="text-sm text-slate-600 break-words">{rep.address} · {rep.postalCode} {rep.city}</p>
-                                                            <p className="flex flex-wrap items-center gap-2 pt-1 text-sm"><span className={`inline-flex rounded-md px-2 py-1 font-semibold ${sColors.bg} ${sColors.text}`} title={STATUS_TOOLTIP[sStatus]}>{delivered === pkgs.length ? (pkgs.length > 1 ? 'Tous livrés' : 'Livré') : delivered > 0 ? `${delivered}/${pkgs.length} livrés` : packageStatusLabel(sStatus)}</span><span className="text-slate-600">{pkgs.length} colis</span></p>
-                                                            {etaPkg && (() => { const eta=new Date(etaPkg.estimatedDeliveryAt!); if(isNaN(eta.getTime()))return null; const today=eta.toDateString()===new Date().toDateString(); const hhmm=eta.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}); return <p className="text-sm text-slate-700 flex items-start gap-2 pt-1"><Clock size={16} aria-hidden="true" className="shrink-0 mt-0.5" />Estimation d’arrivée {today?`vers ${hhmm}`:`le ${eta.toLocaleDateString('fr-FR')} vers ${hhmm}`}</p>; })()}
-                                                        </div>
-                                                        <button type="button" aria-label={open ? 'Masquer les colis du destinataire' : 'Afficher les colis du destinataire'} aria-expanded={open} onClick={() => { if (open && pkgs.some(parcel => parcel.id === expandedShipmentId)) setExpandedShipmentId(null); setExpandedGroupId(open ? null : groupId); }} className="ui-button ui-button-secondary shrink-0">{open ? <ChevronUp size={18} aria-hidden="true" /> : <ChevronDown size={18} aria-hidden="true" />}{open ? 'Masquer les colis' : 'Voir les colis'}</button>
-                                                    </div>
-                                                    {open && (
-                                                        <div className="border-t border-slate-200 divide-y divide-slate-200">
-                                                            <div className="px-4 py-3 flex flex-wrap gap-2 bg-slate-50">
-                                                                <button type="button" aria-label="Imprimer les étiquettes du destinataire" onClick={() => printShipmentLabels(pkgs)} className="ui-button ui-button-secondary"><Printer size={18} aria-hidden="true" />Étiquettes du destinataire</button>
-                                                                <button type="button" disabled={!parcelCoverage?.historyComplete} title={!parcelCoverage?.historyComplete ? 'Chargez tout l’historique pour un bon complet.' : undefined} aria-label="Ouvrir le bon de livraison du destinataire" onClick={() => openDeliveryNote(rep as PackageType, clientPackages, { companyName: companyForm.companyName || currentUser?.companyName || rep.clientName, address: companyForm.companyAddress || undefined, siret: companyForm.companySiret || undefined, phone: companyForm.companyPhone || undefined, email: currentUser?.email })} className="ui-button ui-button-secondary"><FileText size={18} aria-hidden="true" />Bon de livraison</button>
-                                                            </div>
-                                                            {pkgs.map(pkg => {
-                                                                const sc = PACKAGE_STATUS_COLORS[pkg.status] || { bg:'bg-slate-100', text:'text-slate-700' };
-                                                                const tOpen = expandedShipmentId === pkg.id;
-                                                                return (
-                                                                <div key={pkg.id} className="p-4 space-y-3">
-                                                                    <div className="space-y-3 sm:flex sm:items-start sm:justify-between sm:gap-4 sm:space-y-0">
-                                                                        <div className="min-w-0 flex-1 space-y-2">
-                                                                            <p><span className={`inline-flex px-2 py-1 rounded-md text-sm font-semibold ${sc.bg} ${sc.text}`} title={STATUS_TOOLTIP[pkg.status]}>{packageStatusLabel(pkg.status)}</span></p>
-                                                                            <ShipmentReference reference={pkg.externalId || pkg.barcode || pkg.orderNumber} />
-                                                                            <p className="text-sm text-slate-600 break-words">Commande : {pkg.orderNumber}{pkg.clientReference ? ` · Votre référence : ${pkg.clientReference}` : ''}</p>
-                                                                            {pkg.requestedDeliveryDate && pkg.status !== PackageStatus.DELIVERED && <p className="text-sm text-slate-700">Créneau demandé : {new Date(pkg.requestedDeliveryDate + 'T00:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })}</p>}
-                                                                        </div>
-                                                                        <div className="flex flex-wrap gap-2 sm:max-w-64 sm:justify-end">
-                                                                            <button type="button" aria-label={tOpen ? 'Masquer le suivi du colis' : 'Afficher le suivi du colis'} aria-expanded={tOpen} onClick={() => setExpandedShipmentId(tOpen ? null : pkg.id)} className="ui-button ui-button-secondary">{tOpen ? <ChevronUp size={18} aria-hidden="true" /> : <ChevronDown size={18} aria-hidden="true" />}{tOpen ? 'Masquer le suivi' : 'Voir le suivi'}</button>
-                                                                            <button type="button" aria-label={`Imprimer l’étiquette du colis ${pkg.externalId || pkg.orderNumber}`} onClick={() => printShipmentLabels([pkg])} className="ui-button ui-button-ghost"><Printer size={18} aria-hidden="true" />Étiquette</button>
-                                                                            {getPackageProofs(pkg).map(proof => <button key={`${proof.missionId}_${proof.stopId}`} type="button" onClick={() => setViewingPOD({ pod: proof, quote: { id: pkg.id, clientName: pkg.clientName, destination: pkg.city, destinationAddress: pkg.address, destinationContact: { name: pkg.contactName } } as any })} className="ui-button ui-button-ghost"><Eye size={18} aria-hidden="true" />{proof.type === 'FAILURE' ? 'Preuve d’échec' : 'Preuve de livraison'}</button>)}
-                                                                        </div>
-                                                                    </div>
-                                                                    {tOpen && (
-                                                                        <div className="mt-2">
-                                                                            <PackageTimeline movements={pkg.movements || []} showActors pod={pkg.pod} proofs={getPackageProofs(pkg)} />
-                                                                        </div>
-                                                                    )}
-                                                                </div>
-                                                                );
-                                                            })}
-                                                        </div>
-                                                    )}
-                                                </React.Fragment>
-                                                );
-                                            })}
-                                        </React.Fragment>
-                                        );
-                                    });
-                                })()}
-
-                                {isLoadingPackages && filtered.length === 0 && (
-                                    <div role="status" className="text-center py-16">
-                                        <div className="inline-block w-8 h-8 border-2 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-3" />
-                                        <p className="text-slate-600 font-medium">Chargement de vos expéditions…</p>
-                                    </div>
-                                )}
-
-                                {!isLoadingPackages && !packagesError && filtered.length === 0 && (
-                                    <div className="text-center py-16">
-                                        <Package className="mx-auto text-slate-300 mb-3" size={40} />
-                                        <p className="text-slate-600 font-bold">
-                                            {shipmentSearch || shipmentFilter !== 'all' ? 'Aucun colis ne correspond à ces filtres' : 'Vous n’avez pas encore de colis'}
-                                        </p>
-                                        <p className="text-sm text-slate-600 mt-1 mb-4">
-                                            {shipmentSearch || shipmentFilter !== 'all' ? 'Modifiez la recherche ou effacez les filtres.' : 'Créez votre première expédition en un clic.'}
-                                        </p>
-                                        {(shipmentSearch || shipmentFilter !== 'all') && <button type="button" onClick={() => updateUrlParams({ clientSearch: null, clientStatus: null, package: null })} className="ui-button ui-button-secondary min-h-11 border">Effacer les filtres</button>}
-                                        {!shipmentSearch && shipmentFilter === 'all' && (
-                                            <button
-                                                disabled={readOnly} onClick={() => setShowCreateShipment(true)}
-                                                className="ui-button ui-button-primary inline-flex items-center gap-2 text-sm"
-                                            >
-                                                <Plus size={16} /> Créer une expédition
-                                            </button>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* Footer */}
-                            {filtered.length > 0 && (
-                                <div className="px-4 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-sm text-slate-600">
-                                    <span>{filtered.length} colis affiché{filtered.length > 1 ? 's' : ''}</span>
-                                    {selectedLabels.size > 0 && (
-                                        <span className="font-bold text-brand-600">{selectedLabels.size} sélectionnée{selectedLabels.size > 1 ? 's' : ''}</span>
-                                    )}
-                                </div>
-                            )}
-                        </div>
-                    );
-                })()}
-            </div>
-        )}
+        {activeView === 'client_shipments' && <>
+          {detailError && <p role="alert" className="ui-notice ui-notice-warning">{detailError}</p>}
+          <ClientShipments parcels={clientPackages} coverage={parcelCoverage} loading={isLoadingPackages} error={packagesError} readOnly={readOnly}
+            search={shipmentSearch} filter={shipmentFilter} expandedId={expandedShipmentId} printError={labelPrintError}
+            onSearch={setShipmentSearch} onFilter={setShipmentFilter} onExpand={setExpandedShipmentId}
+            onClear={() => updateUrlParams({ clientSearch: null, clientStatus: null, package: null })}
+            onCreate={() => setShowCreateShipment(true)} onImportRecipients={() => setShowImportRecipients(true)} onImportShipments={() => setShowImportShipments(true)}
+            onPrint={printShipmentLabels}
+            onDeliveryNote={parcel => { setLabelPrintError(''); try { openDeliveryNote(parcel, clientPackages, { companyName: currentUser.companyName || parcel.clientName, address: currentUser.companyAddress || undefined, siret: currentUser.companySiret || undefined, phone: currentUser.companyPhone || undefined, email: currentUser.email }); } catch (error) { setLabelPrintError(error instanceof Error ? error.message : 'Le bon de livraison n’a pas pu être ouvert. Réessayez.'); } }}
+            onProof={(parcel, pod) => setViewingPOD({ pod, parcel, quote: { id: parcel.id, clientName: parcel.clientName, destination: parcel.city, destinationAddress: parcel.address, destinationContact: { name: parcel.contactName } } as QuoteRequest })}
+            onRequest={parcel => setRequestParcel(parcel)}
+            onLoadMore={() => void clientParcelFeed.current?.loadMore().catch(error => setPackagesError(error.message))}
+            onRefresh={() => void refreshClientPackages().catch(error => setPackagesError(error.message))}
+          />
+          <button type="button" onClick={() => setShowClientRequests(true)} className="ui-button ui-button-secondary">Mes demandes à l’exploitation</button>
+        </>}
 
         {activeView === 'help' && <ClientHelp embedded onNavigate={handleHelpNavigate} onClose={() => onNavigate?.('client_dashboard')} />}
 
@@ -1710,7 +1487,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
         <Modal mobileFullscreen
             isOpen={!previewMode && isModalOpen}
             onClose={() => setIsModalOpen(false)}
-            dirty={newRequest.originAddress !== _origin.street || newRequest.originCity !== _origin.city || newRequest.originContactName !== (currentUser.companyName || '') || newRequest.originContactPhone !== (currentUser.companyPhone || '') || Object.entries(newRequest).some(([key, value]) => !['originAddress', 'originCity', 'originContactName', 'originContactPhone', 'volume'].includes(key) && Boolean(value)) || saveOriginAddress || saveDestAddress}
+            dirty={newRequest.originAddress !== _origin.street || newRequest.originCity !== _origin.city || newRequest.originContactName !== (currentUser.companyName || '') || newRequest.originContactPhone !== (currentUser.companyPhone || '') || Object.entries(newRequest).some(([key, value]) => !['originAddress', 'originCity', 'originContactName', 'originContactPhone', 'volume'].includes(key) && Boolean(value)) || saveOriginAddress || saveDestAddress || Boolean(originInstructions || destinationInstructions)}
             title="Demander un devis"
             footer={<button type="submit" form={`${formFieldId}-quote`} className="ui-button ui-button-primary w-full"><Send size={18} aria-hidden="true" />Envoyer ma demande de devis</button>}
             subtitle={`Demandeur : ${currentUser.firstName} ${currentUser.lastName}`}
@@ -1758,13 +1535,14 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                     const addr = savedAddresses.find(a => a.id === addressId);
                                     if (addr) {
                                         setSelectedOriginLabel(addr.label || addr.address);
+                                        setOriginInstructions(addr.notes || '');
                                     }
                                     void access.runMutation('Utiliser une adresse du carnet', () => incrementAddressUsage(addressId)).catch(() => notifyWarning('L’utilisation de cette adresse n’a pas pu être mémorisée.'));
                                     setSaveOriginAddress(false);
                                 }}
                                 selectedLabel={selectedOriginLabel || undefined}
                                 onClearSelection={() => {
-                                    setSelectedOriginLabel(null);
+                                    setSelectedOriginLabel(null); setOriginInstructions('');
                                     setNewRequest({
                                         ...newRequest,
                                         originAddress: '',
@@ -1780,18 +1558,18 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                             <InputField 
                                 icon={MapPin} type="text" required placeholder="Rue et Numéro"
                                 value={newRequest.originAddress}
-                                onChange={(e: any) => setNewRequest({...newRequest, originAddress: e.target.value})}
+                                onChange={(e: any) => { setSelectedOriginLabel(null); setNewRequest({...newRequest, originAddress: e.target.value}); }}
                             />
                             <InputField 
                                 icon={Building2} type="text" required placeholder="Code Postal et Ville"
                                 value={newRequest.originCity}
-                                onChange={(e: any) => setNewRequest({...newRequest, originCity: e.target.value})}
+                                onChange={(e: any) => { setSelectedOriginLabel(null); setNewRequest({...newRequest, originCity: e.target.value}); }}
                             />
                             <div className="grid grid-cols-2 gap-3">
                                 <InputField 
                                     icon={UserIcon} type="text" required placeholder="Contact"
                                     value={newRequest.originContactName}
-                                    onChange={(e: any) => setNewRequest({...newRequest, originContactName: e.target.value})}
+                                    onChange={(e: any) => { setSelectedOriginLabel(null); setNewRequest({...newRequest, originContactName: e.target.value}); }}
                                 />
                                 <InputField 
                                     icon={Phone} type="tel" required placeholder="Tél."
@@ -1863,13 +1641,14 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                     const addr = savedAddresses.find(a => a.id === addressId);
                                     if (addr) {
                                         setSelectedDestLabel(addr.label || addr.address);
+                                        setDestinationInstructions(addr.notes || '');
                                     }
                                     void access.runMutation('Utiliser une adresse du carnet', () => incrementAddressUsage(addressId)).catch(() => notifyWarning('L’utilisation de cette adresse n’a pas pu être mémorisée.'));
                                     setSaveDestAddress(false);
                                 }}
                                 selectedLabel={selectedDestLabel || undefined}
                                 onClearSelection={() => {
-                                    setSelectedDestLabel(null);
+                                    setSelectedDestLabel(null); setDestinationInstructions('');
                                     setNewRequest({
                                         ...newRequest,
                                         destinationAddress: '',
@@ -1885,18 +1664,18 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                             <InputField 
                                 icon={MapPin} type="text" required placeholder="Rue et Numéro"
                                 value={newRequest.destinationAddress}
-                                onChange={(e: any) => setNewRequest({...newRequest, destinationAddress: e.target.value})}
+                                onChange={(e: any) => { setSelectedDestLabel(null); setNewRequest({...newRequest, destinationAddress: e.target.value}); }}
                             />
                             <InputField 
                                 icon={Building2} type="text" required placeholder="Code Postal et Ville"
                                 value={newRequest.destinationCity}
-                                onChange={(e: any) => setNewRequest({...newRequest, destinationCity: e.target.value})}
+                                onChange={(e: any) => { setSelectedDestLabel(null); setNewRequest({...newRequest, destinationCity: e.target.value}); }}
                             />
                             <div className="grid grid-cols-2 gap-3">
                                 <InputField 
                                     icon={UserIcon} type="text" required placeholder="Contact"
                                     value={newRequest.destContactName}
-                                    onChange={(e: any) => setNewRequest({...newRequest, destContactName: e.target.value})}
+                                    onChange={(e: any) => { setSelectedDestLabel(null); setNewRequest({...newRequest, destContactName: e.target.value}); }}
                                 />
                                 <InputField 
                                     icon={Phone} type="tel" required placeholder="Tél."
@@ -2037,6 +1816,12 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                     <StickyNote size={20} className="text-yellow-600" /> Consignes de transport
                                 </h4>
                                 <div className="relative">
+                                    <label className="block text-sm font-semibold text-slate-700 mb-3">Consignes d’enlèvement transmises
+                                      <textarea value={originInstructions} onChange={event => setOriginInstructions(event.target.value)} className="mt-1 w-full min-h-20 rounded-xl border border-slate-300 p-3 text-base" />
+                                    </label>
+                                    <label className="block text-sm font-semibold text-slate-700 mb-3">Consignes de livraison transmises
+                                      <textarea value={destinationInstructions} onChange={event => setDestinationInstructions(event.target.value)} className="mt-1 w-full min-h-20 rounded-xl border border-slate-300 p-3 text-base" />
+                                    </label>
                                     <textarea 
                                         id={`${formFieldId}-quote-notes`} aria-label="Consignes de transport" rows={2} placeholder="Ex: Besoin d'un hayon, code portail 1234, appeler 30min avant..."
                                         className="w-full px-4 py-3 border border-yellow-300 rounded-xl text-base text-slate-900 font-medium focus:ring-2 focus:ring-yellow-500 outline-none bg-white placeholder:text-slate-600 min-h-11"
@@ -2053,6 +1838,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
         {/* --- MODAL ADD/EDIT TEAM MEMBER --- */}
         <Modal mobileFullscreen
             isOpen={!previewMode && isTeamModalOpen}
+            dirty={editingMember ? memberForm.firstName !== editingMember.firstName || memberForm.lastName !== editingMember.lastName || memberForm.email !== editingMember.email : Boolean(memberForm.firstName || memberForm.lastName || memberForm.email)}
             onClose={() => setIsTeamModalOpen(false)}
             title={editingMember ? 'Modifier Collaborateur' : 'Ajouter un Collaborateur'}
             size="md"
@@ -2108,7 +1894,16 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                 title="Confirmer l'action"
                 message={
                     pendingAction.type === 'ADD_QUOTE' ? "Vous êtes sur le point d'envoyer une demande de devis. Confirmez-vous ?" :
-                    pendingAction.type === 'ACCEPT_OFFER' ? "En acceptant cette offre, vous validez la commande de transport." :
+                    pendingAction.type === 'ACCEPT_OFFER' ? <div className="space-y-3 text-left break-words">
+                      <p className="font-semibold">Montant du transport : {formatEuro(pendingAction.data.expectedOffer.priceOffer)} HT</p>
+                      <p>Départ : {String(pendingAction.data.expectedOffer.request.originAddress || '')} {String(pendingAction.data.expectedOffer.request.origin || '')}</p>
+                      <p>Destination : {String(pendingAction.data.expectedOffer.request.destinationAddress || '')} {String(pendingAction.data.expectedOffer.request.destination || '')}</p>
+                      <p>Enlèvement souhaité : {requestedDateTimeLabel(pendingAction.data.expectedOffer.request.pickupDate)}</p>
+                      <p>Livraison souhaitée : {requestedDateTimeLabel(pendingAction.data.expectedOffer.request.deliveryDate)}</p>
+                      <p className="whitespace-pre-wrap"><strong>Conditions de l’offre</strong><br />{pendingAction.data.expectedOffer.adminNotes || 'Aucune condition complémentaire indiquée.'}</p>
+                      <p>Créneau de livraison : {quoteWindowLabel(pendingAction.data.expectedOffer.request.deliveryTimeWindow)}</p>
+                      <p>Vous confirmez cette offre et les informations de votre demande.</p>
+                    </div> :
                     pendingAction.type === 'REJECT_OFFER' ? "Êtes-vous sûr de vouloir refuser cette offre ?" :
                     pendingAction.type === 'ADD_MEMBER' ? `Inviter ${pendingAction.data.firstName} ${pendingAction.data.lastName} à rejoindre l'équipe entreprise ?` :
                     pendingAction.type === 'UPDATE_MEMBER' ? `Enregistrer les modifications pour ${pendingAction.data.firstName} ?` :
@@ -2180,13 +1975,17 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
           />
         )}
 
+        {(requestParcel || showClientRequests) && <ClientRequestsPanel currentUser={currentUser} parcel={requestParcel || undefined} focusRequestId={clientRequestParam || undefined} readOnly={readOnly} onClose={() => { setRequestParcel(null); setShowClientRequests(false); updateUrlParams({ clientRequest: null }); }} />}
+
         {/* PREUVE DE LIVRAISON */}
         {viewingPOD && (
           <PODViewer
             pod={viewingPOD.pod}
             onClose={() => setViewingPOD(null)}
             packageInfo={{
-              orderNumber: viewingPOD.quote.id.slice(-8),
+              orderNumber: viewingPOD.parcel?.orderNumber || 'Q' + viewingPOD.quote.id.slice(-10),
+              parcelReference: viewingPOD.parcel?.externalId || viewingPOD.parcel?.barcode || viewingPOD.quote.id,
+              clientReference: viewingPOD.parcel?.clientReference,
               contactName: viewingPOD.quote.destinationContact?.name || 'Destinataire',
               address: viewingPOD.quote.destinationAddress || viewingPOD.quote.destination,
               city: viewingPOD.quote.destination

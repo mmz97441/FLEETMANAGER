@@ -1,4 +1,5 @@
-import { Package, PackageStatus } from '../types';
+import { Package, PackageStatus, ProofOfDelivery } from '../types';
+import { proofForAttempt } from '../utils/deliveryProofState';
 const dayFormatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Indian/Reunion', year: 'numeric', month: '2-digit', day: '2-digit' });
 
 /** Logistics calendars use the operating timezone, independently of the device. */
@@ -9,6 +10,20 @@ export function logisticsDay(value: string | number | Date): string {
     ? dayFormatter.format(date)
     : '';
 }
+export function formatLogisticsTimestamp(value?: string): string {
+  const date = value ? new Date(value) : null;
+  return date && Number.isFinite(date.getTime()) ? date.toLocaleString('fr-FR', {
+    timeZone: 'Indian/Reunion', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  }) : 'Non renseigné';
+}
+export interface LogisticsDimensions { pharmacy?: string; zone?: string }
+export const UNKNOWN_RECIPIENT = 'Destinataire historique non renseigné';
+export const UNKNOWN_ZONE = 'Zone historique non renseignée';
+export const currentDimensions = (pkg: Package) => ({ pharmacy: pkg.contactName?.trim() || '—', zone: String(pkg.zone || '').trim() || '—' });
+export const eventDimensions = (event: DeliveryEvent) => ({ pharmacy: event.destination?.contactName?.trim() || UNKNOWN_RECIPIENT,
+  zone: event.destination?.zone?.trim() || UNKNOWN_ZONE });
+export const matchesLogisticsDimensions = (value: LogisticsDimensions, filter: LogisticsDimensions = {}) =>
+  (!filter.pharmacy || value.pharmacy === filter.pharmacy.trim()) && (!filter.zone || value.zone === filter.zone.trim());
 export interface LogisticsRange { start: string; end: string }
 export function logisticsDateRange(day: string, period: 'today' | 'week' | 'month'): LogisticsRange {
   const date = new Date(`${day}T00:00:00Z`);
@@ -34,6 +49,9 @@ export interface DeliveryEvent {
   timestamp?: string;
   driverId?: string;
   reason?: string;
+  notes?: string;
+  destination?: ProofOfDelivery['destination'];
+  proof?: ProofOfDelivery;
   promisedDeliveryAt?: string | null;
   estimatedDeliveryAt?: string | null;
 }
@@ -46,7 +64,8 @@ export function deliveryEvents(pkg: Package): DeliveryEvent[] {
   const events: DeliveryEvent[] = [];
   for (const attempt of pkg.deliveryAttempts || []) {
     if (events.some(event => event.id === attempt.id)) continue;
-    events.push({ id: attempt.id, package: pkg, outcome: attempt.outcome,
+    const proof = proofForAttempt(pkg, attempt);
+    events.push({ id: attempt.id, package: pkg, outcome: attempt.outcome, proof, destination: attempt.destination || proof?.destination, notes: attempt.failureNotes,
       timestamp: validTime(attempt.recordedAt), driverId: attempt.driverId,
       reason: attempt.failureReason, promisedDeliveryAt: attempt.promisedDeliveryAt, estimatedDeliveryAt: attempt.estimatedDeliveryAt });
   }
@@ -60,7 +79,7 @@ export function deliveryEvents(pkg: Package): DeliveryEvent[] {
     const id = movement.proofId || (movement.missionId && movement.stopId ? `${movement.missionId}_${movement.stopId}` : `legacy:${movement.action}:${movement.timestamp}:${index}`);
     if (proofMatches && events.some(event => event.id === (matchingProof.proofId || `${matchingProof.missionId}_${matchingProof.stopId}`))) continue;
     if (events.some(event => event.id === id || (event.outcome === outcome && event.timestamp === movement.timestamp))) continue;
-    events.push({ id, package: pkg, outcome,
+    events.push({ id, package: pkg, outcome, proof: proofMatches ? matchingProof : undefined, destination: proofMatches ? matchingProof.destination : undefined, notes: movement.notes,
       timestamp: validTime(proofMatches ? matchingProof.timestamp : movement.timestamp),
       driverId: movement.driverId, reason: movement.failureReason || (outcome === 'FAILURE' ? pkg.failureReason : undefined) });
   }
@@ -71,7 +90,7 @@ export function deliveryEvents(pkg: Package): DeliveryEvent[] {
     if (events.some(event => event.id === id || (event.outcome === outcome && event.timestamp === proof.timestamp))) continue;
     // Old movements have no mission/stop: the latest proof already corrected its date above.
     if (events.some(event => event.outcome === outcome && event.id.startsWith('legacy:'))) continue;
-    events.push({ id, package: pkg, outcome, timestamp: validTime(proof.timestamp), driverId: proof.driverId, reason: proof.failureReason });
+    events.push({ id, package: pkg, outcome, proof, destination: proof.destination, notes: proof.failureNotes || proof.notes, timestamp: validTime(proof.timestamp), driverId: proof.driverId, reason: proof.failureReason });
   }
   const currentOutcome = pkg.status === PackageStatus.DELIVERED ? 'SUCCESS'
     : [PackageStatus.FAILED, PackageStatus.RETURNED].includes(pkg.status) ? 'FAILURE' : undefined;
@@ -84,8 +103,8 @@ export function deliveryEvents(pkg: Package): DeliveryEvent[] {
   return events;
 }
 
-export const outcomeEventsInRange = (packages: Package[], range?: LogisticsRange): DeliveryEvent[] =>
-  packages.flatMap(deliveryEvents).filter(event => inLogisticsRange(event.timestamp, range));
+export const outcomeEventsInRange = (packages: Package[], range?: LogisticsRange, dimensions?: LogisticsDimensions): DeliveryEvent[] =>
+  packages.flatMap(deliveryEvents).filter(event => inLogisticsRange(event.timestamp, range) && matchesLogisticsDimensions(eventDimensions(event), dimensions));
 
 export function deliveryTimestamp(pkg: Package): string | undefined {
   return deliveryEvents(pkg).filter(event => event.outcome === 'SUCCESS' && event.timestamp)
@@ -100,13 +119,14 @@ export function promisedDeadline(pkg: Package): string | undefined {
   return validTime(`${pkg.requestedDeliveryDate}T${time}+04:00`);
 }
 
-export function summarizeLogistics(packages: Package[], range?: LogisticsRange) {
-  const events = outcomeEventsInRange(packages, range);
+export function summarizeLogistics(packages: Package[], range?: LogisticsRange, dimensions?: LogisticsDimensions) {
+  const events = outcomeEventsInRange(packages, range, dimensions);
+  const currentPackages = packages.filter(pkg => matchesLogisticsDimensions(currentDimensions(pkg), dimensions));
   const delivered = events.filter(event => event.outcome === 'SUCCESS').length;
   const failed = events.length - delivered;
-  const created = packages.filter(pkg => inLogisticsRange(pkg.createdAt, range));
-  const pending = packages.filter(pkg => pkg.status === PackageStatus.PENDING).length;
-  const active = packages.filter(pkg => ![PackageStatus.DELIVERED, PackageStatus.RETURNED].includes(pkg.status));
+  const created = currentPackages.filter(pkg => inLogisticsRange(pkg.createdAt, range));
+  const pending = currentPackages.filter(pkg => pkg.status === PackageStatus.PENDING).length;
+  const active = currentPackages.filter(pkg => ![PackageStatus.DELIVERED, PackageStatus.RETURNED].includes(pkg.status));
   const byDay = new Map<string, { date: string; total: number; delivered: number; failed: number }>();
   const day = (key: string) => {
     if (!byDay.has(key)) byDay.set(key, { date: key, total: 0, delivered: 0, failed: 0 });
@@ -129,8 +149,8 @@ export function summarizeLogistics(packages: Package[], range?: LogisticsRange) 
   return {
     total: created.length, delivered, failed, resolved: events.length,
     deliveryRate: successRate(delivered, failed), pending,
-    inDelivery: packages.filter(pkg => pkg.status === PackageStatus.IN_DELIVERY).length,
-    workInProgress: active.length, undatedOutcomes: packages.flatMap(deliveryEvents).filter(event => !event.timestamp).length,
+    inDelivery: currentPackages.filter(pkg => pkg.status === PackageStatus.IN_DELIVERY).length,
+    workInProgress: active.length, undatedOutcomes: packages.flatMap(deliveryEvents).filter(event => !event.timestamp && matchesLogisticsDimensions(eventDimensions(event), dimensions)).length,
     punctualityRate: punctual.length ? 100 * punctual.filter(event => Date.parse(event.timestamp!) <= Date.parse(promise(event)!)).length / punctual.length : null,
     etaAdherenceRate: estimated.length ? 100 * estimated.filter(event => Date.parse(event.timestamp!) <= Date.parse(estimate(event)!)).length / estimated.length : null,
     avgDelayHours: delays.length ? delays.reduce((sum, value) => sum + value, 0) / delays.length : null,

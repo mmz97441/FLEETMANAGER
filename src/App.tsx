@@ -103,6 +103,8 @@ import {
 
 import { logActivity } from './services/activityLogService';
 import { convertQuoteToPackage } from './services/deliveryService';
+import { inviteClientTeamMember } from './services/invitationService';
+import type { QuoteOfferSnapshot } from './utils/quoteOffer';
 import { ActivityAction, ActivityCategory, MaintenanceStatus } from './types';
 import { normalizeRole } from './utils/role';
 
@@ -632,14 +634,15 @@ const App: React.FC = () => {
       });
     }
   };
-  const handleUpdateQuoteStatus = async (id: string, status: QuoteStatus) => {
+  const handleUpdateQuoteStatus = async (id: string, status: QuoteStatus, expectedOffer?: QuoteOfferSnapshot) => {
     const quote = quotes.find(q => q.id === id);
+    if (!quote) throw new Error('Ce devis n’est plus disponible dans votre liste. Actualisez avant de confirmer.');
     if (quote) {
       const updatedQuote = { ...quote, status };
 
       // Si le devis est ACCEPTÉ → créer automatiquement un colis
       if (status === QuoteStatus.ACCEPTED && currentUser) {
-        const result = await convertQuoteToPackage(quote, currentUser);
+        const result = await convertQuoteToPackage(quote, currentUser, expectedOffer);
         if (!result) throw new Error('Le devis n’a pas été accepté : sa conversion en colis a échoué.');
         updatedQuote.convertedToPackageId = result.packageId;
         updatedQuote.convertedAt = new Date().toISOString();
@@ -713,13 +716,9 @@ const App: React.FC = () => {
   
   // Client Team
   const handleAddTeamMember = async (user: User) => {
-      // Force le rôle CLIENT et la société du créateur pour la sécurité
-      const safeUser = {
-          ...user,
-          role: UserRole.CLIENT,
-          companyName: currentUser?.companyName // Héritage strict
-      };
-      await handleAddUser(safeUser);
+      // The server atomically owns the profile, company, invitation and email.
+      // Existing profiles are returned for inspection without duplicate creation.
+      return inviteClientTeamMember(user);
   };
   const handleUpdateTeamMember = async (user: User) => {
       await handleUpdateUser(user);

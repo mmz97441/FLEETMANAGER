@@ -1,43 +1,24 @@
 /**
  * BON DE LIVRAISON (BL)
  *
- * Génère un bon de livraison imprimable / téléchargeable (PDF via la boîte
- * d'impression du navigateur) pour un POINT DE LIVRAISON — c'est-à-dire tous
- * les colis d'une même adresse regroupés, afin de sécuriser le NOMBRE de colis
- * remis au destinataire (cf. règle de regroupement par adresse+CP+ville+tél).
- *
- * Le document est auto-rempli depuis les données (colis + preuve de livraison).
- * La ZONE PREUVE (chauffeur, heure, GPS, signature, photos) est figée.
- * Seuls deux champs libres sont éditables à la demande AVANT impression :
- * la référence / n° de chantier et les réserves à la livraison (contenteditable).
- *
- * Aucune dépendance ajoutée : HTML + window.print (comme clientReport.ts).
+ * Récapitule le groupe affiché dans le portail : identité stricte du
+ * destinataire et jour de création à La Réunion. Chaque colis conserve ses
+ * propres dates demandées, créneaux, consignes et preuves historiques.
  */
-import { Package, PackageStatus, ProofOfDelivery, DeliveryLocation } from '../types';
-// Source de vérité UNIQUE du « même point de livraison ? » (adresse OU tél+CP).
-import { sameDeliveryPoint } from './address';
-import { localDatePart } from './date';
+import { Package, PackageStatus } from '../types';
+import { recipientKey } from './address';
 import { formatWeight } from './format';
+import { deliveryEvents, formatLogisticsTimestamp, logisticsDay } from '../services/logisticsMetrics';
+import { presentProof, proofFactsHTML } from './proofPresentation';
+import { hasPendingDeliveryProof } from './deliveryProofState';
 
-// ---------------------------------------------------------------------------
-// Regroupement par point de livraison : on délègue à sameDeliveryPoint
-// (utils/address.ts) pour que le BL groupe EXACTEMENT comme le dispatch et le
-// chauffeur (adresse OU tél+CP, sans n° de commande ni nom).
-// ---------------------------------------------------------------------------
-
-/**
- * Renvoie les colis du MÊME POINT DE LIVRAISON (pharmacie) que `pkg`, et du
- * MÊME JOUR d'envoi. Le BL est donc « un BL par pharmacie » (pour cet envoi),
- * pas un BL fourre-tout de toutes les livraisons de la journée ni de l'historique
- * complet de la pharmacie.
- */
+/** Same recipient/day group as the client list; different visits stay explicit. */
 export const packagesAtSamePoint = (pkg: Package, all: Package[]): Package[] => {
-  const day = localDatePart(pkg.createdAt || '');
-  return all.filter(p => {
-    if (p.id === pkg.id) return true;
-    const sameDay = !day || localDatePart(p.createdAt || '') === day;
-    return sameDeliveryPoint(pkg, p) && sameDay;
-  });
+  const complete = (p: Package) => p.contactName?.trim() && p.address?.trim() && p.city?.trim() && p.postalCode?.trim();
+  if (!complete(pkg)) return [pkg];
+  const day = logisticsDay(pkg.createdAt || '');
+  const key = recipientKey(pkg);
+  return [pkg, ...all.filter(p => p.id !== pkg.id && complete(p) && logisticsDay(p.createdAt || '') === day && recipientKey(p) === key)];
 };
 
 // ---------------------------------------------------------------------------
@@ -46,18 +27,7 @@ export const packagesAtSamePoint = (pkg: Package, all: Package[]): Package[] => 
 const esc = (v: unknown): string =>
   String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
-const fmtDateTime = (iso?: string): string => {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return '—';
-  return `${d.toLocaleDateString('fr-FR')} à ${d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`;
-};
-
-const fmtDate = (iso?: string): string => {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('fr-FR');
-};
+const fmtDate = (iso?: string): string => formatLogisticsTimestamp(iso);
 
 /** N° de BL déterministe : BL-AAAAMMJJ-<commande la plus ancienne>. */
 const buildBlNumber = (pkgs: Package[]): string => {
@@ -66,7 +36,7 @@ const buildBlNumber = (pkgs: Package[]): string => {
   )[0];
   const ref = (first?.orderNumber || first?.externalId || first?.id || '').toString().slice(-8);
   const d = new Date(first?.createdAt || Date.now());
-  const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+  const ymd = logisticsDay(d).replace(/-/g, '');
   return `BL-${ymd}-${ref || '0000'}`;
 };
 
@@ -94,9 +64,6 @@ export const buildDeliveryNoteHTML = (
 ): string => {
   if (!pkgs.length) return '<html><body>Aucun colis</body></html>';
 
-  // POD de référence : celle du 1er colis livré (chauffeur/heure/signature communs au point).
-  const delivered = pkgs.filter(p => p.status === PackageStatus.DELIVERED && p.pod);
-  const pod: ProofOfDelivery | undefined = delivered[0]?.pod;
   const dest = pkgs[0];
 
   const blNumber = buildBlNumber(pkgs);
@@ -110,88 +77,21 @@ export const buildDeliveryNoteHTML = (
         <td style="text-align:center">${i + 1}</td>
         <td class="mono">${esc(p.externalId || p.barcode || p.orderNumber)}</td>
         <td class="mono">${esc(p.orderNumber)}</td>
-        <td>${p.comment ? esc(p.comment) : '<span style="color:#94a3b8">—</span>'}</td>
+        <td>${esc([p.comment, p.timeWindowStart || p.timeWindowEnd ? `Créneau ${p.timeWindowStart || '—'} – ${p.timeWindowEnd || '—'} (La Réunion)` : '', p.requestedDeliveryDate ? `Date demandée : ${p.requestedDeliveryDate}${p.requestedDeliveryTime ? ` à ${p.requestedDeliveryTime}` : ''} (La Réunion)` : ''].filter(Boolean).join(' · ')) || '—'}</td>
         <td style="text-align:right">${formatWeight(p.weight) || '—'}</td>
         <td style="color:${st.color};font-weight:600;text-align:center">${esc(st.label)}</td>
       </tr>`;
   }).join('');
 
-  // Bloc preuve (figé) — visible seulement si une POD existe.
-  const locLabel = pod?.deliveryLocation
-    ? (Object.values(DeliveryLocation).includes(pod.deliveryLocation) ? pod.deliveryLocation : String(pod.deliveryLocation))
-    : '—';
-  const gps = pod?.coordinates
-    ? `${pod.coordinates.lat.toFixed(5)}, ${pod.coordinates.lng.toFixed(5)}`
-    : '—';
-  const mapsUrl = pod?.coordinates
-    ? `https://www.google.com/maps?q=${pod.coordinates.lat},${pod.coordinates.lng}`
-    : '';
-
-  const photosHtml = (pod?.photoUrls || [])
-    .slice(0, 4)
-    .map(u => `<img class="photo" src="${esc(u)}" alt="photo livraison" />`)
-    .join('');
-
-  const proofBlock = pod ? `
-    <div class="section">
-      <div class="section-title">Preuve de livraison (générée automatiquement — non modifiable)</div>
-      <table class="kv">
-        <tr><td class="k">Livré le</td><td class="v"><b>${esc(fmtDateTime(pod.timestamp))}</b></td>
-            <td class="k">Réceptionné par</td><td class="v">${esc(pod.recipientName || '—')}</td></tr>
-        <tr><td class="k">Chauffeur</td><td class="v">${esc(pod.driverName || '—')}</td>
-            <td class="k">Lieu de remise</td><td class="v">${esc(locLabel)}</td></tr>
-        <tr><td class="k">Véhicule</td><td class="v">${esc(pod.vehiclePlate || '—')}</td>
-            <td class="k">Position GPS</td><td class="v">${mapsUrl ? `<a href="${esc(mapsUrl)}">${esc(gps)}</a>` : esc(gps)}</td></tr>
-        ${pod.notes ? `<tr><td class="k">Note</td><td class="v" colspan="3">${esc(pod.notes)}</td></tr>` : ''}
-      </table>
-      <div class="proofs">
-        ${pod.signatureUrl ? `<div class="sig-wrap"><div class="proof-label">Signature du destinataire</div><img class="sig" src="${esc(pod.signatureUrl)}" alt="signature" /></div>` : ''}
-        ${photosHtml ? `<div class="photos-wrap"><div class="proof-label">Photos</div><div class="photos">${photosHtml}</div></div>` : ''}
-      </div>
-    </div>` : `
-    <div class="section pending">
-      <div class="section-title">Preuve de livraison</div>
-      <p style="color:#b45309;margin:6px 0 0;font-size:12px">⏳ Livraison non finalisée — la preuve (signature, heure, GPS) apparaîtra ici une fois les colis livrés.</p>
-    </div>`;
-
-  // Section « état de la marchandise » : figée depuis la POD si livré, sinon éditable (bon de préparation)
-  const podHasCondition = !!pod && typeof pod.merchandiseGoodCondition === 'boolean';
-  const merchandiseSection = podHasCondition
-    ? `
-    <div class="section">
-      <div class="section-title">État de la marchandise à la réception</div>
-      ${pod!.merchandiseGoodCondition
-        ? `<div class="checkline"><span class="ro-check">✓</span><span>Marchandises reçues en <b>bon état</b>, sans réserve <span class="hint">(confirmé à la livraison)</span></span></div>`
-        : `<div class="reserve-label">⚠️ Réserves émises par le destinataire à la réception :</div>
-           <div class="reserve-readonly">${esc(pod!.reservesNote || 'Réserves signalées.')}</div>`}
-      <div class="signbox">
-        <div class="box"><div class="lbl">Signature expéditeur / cachet</div></div>
-        <div class="box"><div class="lbl">Signature destinataire</div></div>
-      </div>
-    </div>`
-    : `
-    <div class="section">
-      <div class="section-title">État de la marchandise à la réception</div>
-      <label class="checkline">
-        <input type="checkbox" id="goodState" checked onchange="toggleReserve()">
-        <span>Marchandises reçues en <b>bon état</b>, sans réserve. <span class="hint noprint">(décochez pour émettre des réserves)</span></span>
-      </label>
-      <div id="reserveBlock" class="reserve-block" style="display:none">
-        <div class="reserve-label">⚠️ Réserves / commentaire du destinataire :</div>
-        <div class="editable" contenteditable="true" style="min-height:40px" data-placeholder="Précisez : colis manquant, emballage endommagé, contenu non conforme…"></div>
-      </div>
-      <div class="signbox">
-        <div class="box"><div class="lbl">Signature expéditeur / cachet</div></div>
-        <div class="box"><div class="lbl">Signature destinataire</div></div>
-      </div>
-    </div>
-    <script>
-      function toggleReserve(){
-        var cb = document.getElementById('goodState');
-        var block = document.getElementById('reserveBlock');
-        block.style.display = cb.checked ? 'none' : 'block';
-      }
-    </script>`;
+  const proofBlock = pkgs.map(pkg => {
+    const proofs = deliveryEvents(pkg).flatMap(event => event.proof ? [event.proof] : []);
+    const info = { orderNumber: pkg.orderNumber, parcelReference: pkg.externalId || pkg.barcode || pkg.orderNumber || pkg.id,
+      clientReference: pkg.clientReference, contactName: pkg.contactName, address: pkg.address, city: pkg.city };
+    const pending = hasPendingDeliveryProof(pkg);
+    return `<section class="section"><div class="section-title">Colis ${esc(info.parcelReference)} — preuves propres à ce colis</div>
+      ${proofs.map(proof => { const model = presentProof(proof, info); return `<article><h3>${esc(model.title)}</h3>${proofFactsHTML(model)}</article>`; }).join('')}
+      ${pending ? '<p>Dernière tentative enregistrée — preuve en cours de transmission.</p>' : !proofs.length ? `<p>${pkg.status === PackageStatus.DELIVERED ? 'Livraison enregistrée — preuve historique indisponible.' : 'Aucune preuve de remise enregistrée pour ce colis.'}</p>` : ''}</section>`;
+  }).join('');
 
   const senderAddressMissing = !sender.address || !sender.address.trim();
   const senderLines = [
@@ -231,7 +131,7 @@ export const buildDeliveryNoteHTML = (
       .reserve-label { font-size: 11px; font-weight: 700; color: #b45309; margin-bottom: 4px; }
       .reserve-readonly { border: 1px solid #fde68a; background: #fffbeb; border-radius: 6px; padding: 8px 10px; font-size: 12px; color: #92400e; }
       .ro-check { display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:5px; background:#16a34a; color:#fff; font-weight:800; flex-shrink:0; }
-      .section {border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; margin-bottom: 14px; }
+      .signature{max-width:100%;max-height:160px}dt{font-weight:bold;margin-top:8px}dd{margin:2px 0;white-space:pre-wrap;overflow-wrap:anywhere}article{border-top:1px solid #cbd5e1;padding-top:8px;margin-top:12px}.section {border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; margin-bottom: 14px; }
       .section.pending { background:#fffbeb; border-color:#fde68a; }
       .section-title { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing:.06em; color:#334155; margin-bottom: 8px; }
       table.pkgs { width: 100%; border-collapse: collapse; }
@@ -279,7 +179,7 @@ export const buildDeliveryNoteHTML = (
     </style></head><body>
 
     <div class="toolbar noprint">
-      <span>${podHasCondition ? '📄 Bon de livraison prêt — imprimez ou enregistrez en PDF.' : '💡 Décochez « bon état » pour saisir des réserves, puis imprimez ou enregistrez en PDF.'}</span>
+      <span>📄 Chaque preuve ci-dessous concerne uniquement le colis indiqué. Les réserves enregistrées sont conservées.</span>
       <button onclick="window.print()">🖨️ Imprimer / PDF</button>
     </div>
 
@@ -304,7 +204,7 @@ export const buildDeliveryNoteHTML = (
         <div>Transport &amp; livraison</div>
       </div>
       <div class="party">
-        <h3>Destinataire (livré à)</h3>
+        <h3>Destinataire actuel des colis</h3>
         <div class="name">${esc(dest.contactName)}</div>
         <div>${esc(dest.address)}</div>
         <div>${esc(dest.postalCode)} ${esc(dest.city)}</div>
@@ -313,10 +213,10 @@ export const buildDeliveryNoteHTML = (
     </div>
 
     <div class="section">
-      <div class="section-title">Colis livrés à ce point &nbsp; <span class="count-badge">${deliveredCount} / ${pkgs.length} colis</span></div>
+      <div class="section-title">Situation actuelle des colis &nbsp; <span class="count-badge">${deliveredCount} livré${deliveredCount > 1 ? 's' : ''} / ${pkgs.length} colis</span></div>
       <div class="table-wrap">
       <table class="pkgs">
-        <thead><tr><th>#</th><th>N° Colis</th><th>N° Commande</th><th>Remarque client</th><th style="text-align:right">Poids</th><th style="text-align:center">Statut</th></tr></thead>
+        <thead><tr><th>#</th><th>N° Colis</th><th>N° Commande</th><th>Consignes / créneau</th><th style="text-align:right">Poids</th><th style="text-align:center">Statut</th></tr></thead>
         <tbody>${rowsHtml}</tbody>
         <tfoot><tr><td colspan="4">TOTAL</td><td style="text-align:right">${formatWeight(totalWeight) || '—'}</td><td style="text-align:center">${pkgs.length} colis</td></tr></tfoot>
       </table>
@@ -325,10 +225,9 @@ export const buildDeliveryNoteHTML = (
 
     ${proofBlock}
 
-    ${merchandiseSection}
 
     <div class="mentions">
-      Le présent bon de livraison atteste la remise des colis listés ci-dessus. La zone « Preuve de livraison »
+      Le présent document récapitule les colis listés ci-dessus. Seules leurs preuves propres attestent une tentative ou une remise ; une preuve ne s’applique pas aux autres colis du groupe. La zone « Preuve de livraison »
       (date, heure, chauffeur, véhicule, position GPS, signature et photos) est générée automatiquement par le
       système et ne peut être modifiée. Toute réserve doit être formulée au moment de la réception.
     </div>
@@ -347,8 +246,7 @@ export const openDeliveryNote = (
   const group = packagesAtSamePoint(pkg, allPackages);
   const html = buildDeliveryNoteHTML(group, sender, transporter);
   const win = window.open('', '_blank');
-  if (win) {
-    win.document.write(html);
-    win.document.close();
-  }
+  if (!win) throw new Error('Le navigateur a bloqué le bon de livraison. Autorisez les fenêtres pour ouvrir ce document.');
+  win.document.write(html);
+  win.document.close();
 };

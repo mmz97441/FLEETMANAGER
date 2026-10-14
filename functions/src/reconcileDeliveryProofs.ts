@@ -110,8 +110,8 @@ export async function reconcileDeliveryProofsHandler(_data: unknown, context: fu
         for (const [id, { parcel, pkg, proof }] of repairs) {
           const { packageIds: _privateIds, ...publicProof } = proof;
           const proofId = `${candidate.id}_${proof.stopId}`;
-          const projection = { ...publicProof, packageId: id, proofId };
           const previous = (pkg.deliveryAttempts || []).find((attempt: any) => attempt.id === proofId);
+          const projection = { ...publicProof, destination: previous?.destination || proof.destination, packageId: id, proofId };
           const attempt = cleanUndefined({ ...previous, id: proofId, proofId, missionId: candidate.id, stopId: proof.stopId,
             driverId: proof.driverId, outcome: 'SUCCESS', recordedAt: previous?.recordedAt || proof.timestamp,
             destination: previous?.destination || proof.destination,

@@ -1,0 +1,85 @@
+{
+  "checks": [
+    {
+      "name": "Client request has no horizontal overflow at 320",
+      "pass": true
+    },
+    {
+      "name": "Office request has no horizontal overflow at 320",
+      "pass": true
+    },
+    {
+      "name": "Client request has no horizontal overflow at 390",
+      "pass": true
+    },
+    {
+      "name": "Office request has no horizontal overflow at 390",
+      "pass": true
+    },
+    {
+      "name": "Client request has no horizontal overflow at 1280",
+      "pass": true
+    },
+    {
+      "name": "Office request has no horizontal overflow at 1280",
+      "pass": true
+    },
+    {
+      "name": "Offline result is not presented as confirmed",
+      "pass": true
+    },
+    {
+      "name": "Closing and reopening retains exact pending intention",
+      "pass": true
+    },
+    {
+      "name": "Another user cannot see the pending draft",
+      "pass": true
+    },
+    {
+      "name": "Original actor recovers pending draft",
+      "pass": true
+    },
+    {
+      "name": "Replay uses the same request ID and waits for acknowledgement",
+      "pass": true
+    },
+    {
+      "name": "Confirmed request leaves one tracked record and clears pending storage",
+      "pass": true
+    },
+    {
+      "name": "Read-only preview cannot submit",
+      "pass": true
+    },
+    {
+      "name": "Concurrent closure updates history without hiding unsent response",
+      "pass": true
+    },
+    {
+      "name": "Concurrent terminal status blocks ordinary new validation",
+      "pass": true
+    },
+    {
+      "name": "Own acknowledgement advances version without spurious reread",
+      "pass": true
+    },
+    {
+      "name": "Office reply is confirmed and tracked",
+      "pass": true
+    },
+    {
+      "name": "StrictMode allows an explicitly activated intervention",
+      "pass": true
+    },
+    {
+      "name": "Stop immediately disables a waiting intervention",
+      "pass": true
+    },
+    {
+      "name": "Revoked waiting action never reaches the mutation",
+      "pass": true
+    }
+  ],
+  "errors": []
+}
