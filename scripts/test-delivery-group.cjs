@@ -46,6 +46,17 @@ async function seed(parcelCount = 3) {
     assert.equal((await read('missions', missionId)).stops.length, 1);
     assert.equal((await db.collection('activity_logs').where('targetId', '==', missionId).get()).size, 1);
   });
+  await check('different senders and reference formats share the same recipient stop', async () => {
+    const { prepare, ids, missionId } = await seed();
+    const codes = ['BR-MIXED-SENDER', 'EXP-MIXED/0042', '000012349876543210'];
+    for (let i = 0; i < ids.length; i++) await db.collection('packages').doc(ids[i]).update({ clientId: 'sender-' + i, clientName: 'Expéditeur ' + i, externalId: codes[i] });
+    const { mission } = await prepare({ arrive: true });
+    assert.equal(mission.stops.length, 1); assert.equal(mission.stops[0].packageCount, 3);
+    for (let i = 0; i < ids.length; i++) {
+      const receipt = await service.scanPackage.run({ requestId: randomUUID(), source: 'driver-delivery', code: codes[i], packageId: ids[i], targetMissionId: missionId, stopId: 's0' }, ctx(driver));
+      assert.equal(receipt.accepted, true); assert.equal(receipt.packageId, ids[i]);
+    }
+  });
   for (const parcelCount of [1, 10]) await check(`${parcelCount} parcels for one recipient are prepared and individually verified`, async () => {
     const { prepare, ids, missionId } = await seed(parcelCount);
     const { mission } = await prepare({ arrive: true });

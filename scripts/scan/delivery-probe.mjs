@@ -22,16 +22,23 @@ try {
     await check(`No horizontal overflow at ${width}`,"document.documentElement.scrollWidth<=innerWidth+1");
     if(width===390)await shot('before-arrival-390');
   }
-  for (const count of [1,3,10]) {
+  for (const scenario of [1,3,10,'mixed']) {
+  const mixed=scenario==='mixed',count=mixed?3:scenario;
+  const codes=mixed?['BR1000','EXP-A/0042','000012345678','EXP-WRONG/99']:Array.from({length:count+1},(_,i)=>'BR'+(1000+i));
   await call('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
-  await call('Page.navigate',{url:'http://127.0.0.1:5252/?count='+count});
+  await call('Page.navigate',{url:'http://127.0.0.1:5252/?count='+count+(mixed?'&mixed':'')});
   await wait(`document.body.innerText.includes('${count} colis à prendre')`);
+  if(mixed) {
+    await wait("document.body.innerText.includes('000012345678')");
+    await check('Mixed sender references and names visible before arrival', "(()=>{const text=document.querySelector('section[aria-label=\"Colis à prendre pour cet arrêt\"]').innerText;return ['BR1000','EXP-A/0042','000012345678','Boiron','Expéditeur Alpha','Expéditeur Beta'].every(value=>text.includes(value))&&!text.includes('Repérez ces BR')})()");
+    await shot('mixed-before-arrival');
+  }
   await click('Je suis arrivé');
   const scanLabel=count===1?'Scanner ce colis':`Scanner les ${count} colis`;
   await wait(`document.body.innerText.includes(${JSON.stringify(scanLabel)})`);
   await check(`${count} parcels prepared as one visit`, `window.missions[0].stops.length===2&&window.missions[0].stops[0].packageIds.length===${count}`);
   await click(scanLabel);await wait("window.cameras?.some(c=>c.active)");
-  await ev(`window.cameras.find(c=>c.active).success('BR${1000+count}')`);
+  await ev(`window.cameras.find(c=>c.active).success(${JSON.stringify(codes[count])})`);
   await wait("!!document.querySelector('[data-scan-feedback=error]')");
   await check(`${count}: red cross identifies wrong client, no parcel counted`, `(()=>{const b=document.querySelector('[data-scan-feedback=error]');return b?.getAttribute('role')==='alert'&&b.classList.contains('bg-red-700')&&!!b.querySelector('.lucide-xcircle')&&b.innerText.includes('Mauvais colis')&&b.innerText.includes('Ne pas remettre à Pharmacie du Centre')&&b.innerText.includes('Destiné à Pharmacie du Port')&&document.body.innerText.includes('0/${count}')&&window.cameras.filter(c=>c.active).length===1})()`);
   if(count===10)await shot('wrong-client-10');
@@ -45,10 +52,10 @@ try {
   await ev('window.scanDelay=200');
   if(count>1) {
     // Camera accepts a burst; server confirmations stay queued and count distinct BRs.
-    await ev(`for(let i=1;i<${count-1};i++)window.cameras.find(c=>c.active).success('BR'+(1000+i));window.cameras.find(c=>c.active).success('BR1000')`);
+    await ev(`for(let i=1;i<${count-1};i++)window.cameras.find(c=>c.active).success(${JSON.stringify(codes)}[i]);window.cameras.find(c=>c.active).success('BR1000')`);
     await wait(`document.body.innerText.includes('${count-1}/${count}')`);
     await check(`${count}: repeat stays uncounted in one camera session`, "window.cameras.length===1&&window.cameras[0].active&&window.calls.filter(c=>c.name==='scan'&&c.code==='BR1000').length===1");
-    await ev(`window.cameras.find(c=>c.active).success('BR${999+count}')`);
+    await ev(`window.cameras.find(c=>c.active).success(${JSON.stringify(codes[count-1])})`);
     await wait(`document.body.innerText.includes('${count}/${count}')`);
   }
   await check(`${count}: last green confirmation is visible before auto advance`, "!!document.querySelector('[data-scan-feedback=ok]')&&window.cameras.some(c=>c.active)");
@@ -68,16 +75,16 @@ try {
   await call('Input.dispatchMouseEvent',{type:'mouseReleased',x:rect.x+140,y:rect.y+50,button:'left',clickCount:1});
   await click('Valider signature');await click('Continuer');
   const confirmLabel=count===1?'Confirmer la livraison de ce colis':`Confirmer la livraison de ces ${count} colis`;
-  await wait(`document.body.innerText.includes(${JSON.stringify(confirmLabel)})`);await shot('common-proof-'+count);
+  await wait(`document.body.innerText.includes(${JSON.stringify(confirmLabel)})`);await shot('common-proof-'+scenario);
   await click(confirmLabel);await wait('window.deliveries.length===1');
   await check(`${count}: one submission with one photo, recipient and signature`, `(()=>{const p=window.deliveries[0];return p.action.packageOutcomes.length===${count}&&p.proof.packageIds.length===${count}&&p.proof.photosBase64.length===1&&p.proof.recipientName==='Réceptionnaire fictif'&&!!p.proof.signatureBase64})()`);
-  await wait(`document.body.innerText.includes('BR${1000+count}')`);
+  await wait(`document.body.innerText.includes(${JSON.stringify(codes[count])})`);
   await check(`${count}: next client has no inherited proof`,"!document.body.innerText.includes('BR1000')&&!document.body.innerText.includes('Signature enregistrée')&&window.deliveries.length===1");
   }
-  await call('Page.navigate',{url:'http://127.0.0.1:5252/?load-error'});await wait("document.body.innerText.includes('Impossible de charger les BR')");
+  await call('Page.navigate',{url:'http://127.0.0.1:5252/?load-error'});await wait("document.body.innerText.includes('Impossible de charger les références')");
   await check('Failed load preserves expected parcel count',"document.body.innerText.includes('3 colis à prendre')&&!document.body.innerText.includes('0 colis à prendre')");
-  await click('Recharger les BR');await wait("document.body.innerText.includes('BR1002')");
-  await check('References can be reloaded without a refresh or duplicate preparation',"window.calls.length===0&&!document.body.innerText.includes('Impossible de charger les BR')");
+  await click('Recharger les références');await wait("document.body.innerText.includes('BR1002')");
+  await check('References can be reloaded without a refresh or duplicate preparation',"window.calls.length===0&&!document.body.innerText.includes('Impossible de charger les références')");
   await call('Page.navigate',{url:'http://127.0.0.1:5252/?count=1'});
   await wait("document.body.innerText.includes('BR1000')");await click('Je suis arrivé');
   await wait("document.body.innerText.includes('Scanner ce colis')");await click('Scanner ce colis');

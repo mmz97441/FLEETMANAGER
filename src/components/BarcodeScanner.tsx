@@ -65,7 +65,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   alreadyScanned = [],
   title = 'Scanner un code-barres',
   progress,
-  hint = 'Scannez le code individuel du carton. Pour Boiron : le code DELIVREX ou le numéro BR… en saisie manuelle.',
+  hint = 'Scannez le code-barres du carton ou saisissez sa référence individuelle, quel que soit l’expéditeur.',
   isMatch,
   checklist,
   countLabel,
@@ -272,7 +272,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
           const retry = allowCameraRecovery(recoveryAttempts.current, Date.now());
           reportError('scanner.camera.interrupted', new Error(retry ? 'Flux caméra interrompu : reprise du lecteur.' : 'Interruptions caméra répétées : saisie manuelle disponible.'), { silent: true, level: 'warning', extra: { cause, automaticRetry: retry, attempts: recoveryAttempts.current.length } });
           if (retry) setCameraAttempt(value => value + 1);
-          else { setError('La caméra s’interrompt plusieurs fois. Vos scans sont conservés. Saisissez le BR ou appuyez sur Retour caméra.'); setManualMode(true); }
+          else { setError('La caméra s’interrompt plusieurs fois. Vos scans sont conservés. Saisissez la référence du colis ou appuyez sur Retour caméra.'); setManualMode(true); }
         };
         removeListeners = monitorCamera(video, tracks, recover);
         try { if (camera.getRunningTrackCameraCapabilities().torchFeature().isSupported()) setTorchAvailable(true); } catch {}
@@ -560,7 +560,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
                       value={manualInput}
                       onChange={(e) => setManualInput(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && handleManualSubmit()}
-                      placeholder="N° du carton (ex : BR0513)"
+                      placeholder="Référence individuelle du carton"
                       autoFocus
                       className="min-w-0 flex-1 px-4 py-3 bg-white rounded-xl text-base font-mono font-bold text-slate-800 focus:ring-2 focus:ring-brand-400 outline-none"
                     />

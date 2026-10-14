@@ -83,42 +83,47 @@ async function scanPackageHandler(data, context, deps) {
         let packageSnap;
         let ambiguous = false;
         let matchedOrderReference = null;
-        if (data.packageId) {
-            packageSnap = await tx.get(db.collection('packages').doc(data.packageId));
-            if (code && packageSnap.exists) {
-                const fields = packageSnap.data();
-                const tokens = (0, scanCode_1.extractScanTokens)(code);
-                const matches = [fields.carrierBarcode, fields.barcode, fields.externalId, fields.orderNumber].some(v => typeof v === 'string' && tokens.includes(v.trim().toUpperCase())) ||
-                    [fields.barcode, fields.externalId].some(v => (0, scanCode_1.containsIndividualCode)(code, v));
-                if (!matches)
-                    throw new functions.https.HttpsError('invalid-argument', 'Le code lu ne correspond pas au colis sélectionné.');
-            }
-        }
+        const selected = data.packageId ? await tx.get(db.collection('packages').doc(data.packageId)) : undefined;
+        if (selected?.exists && code && !(0, scanCode_1.matchesParcelScanCode)(selected.data(), code))
+            throw new functions.https.HttpsError('invalid-argument', 'Le code lu ne correspond pas au colis sélectionné.');
+        if (!code)
+            packageSnap = selected;
         else {
-            const candidates = [...new Set([code, ...(0, scanCode_1.extractScanTokens)(code)])].slice(0, 12);
-            // Shared order references are search hints, never sufficient to move an arbitrary parcel.
-            search: for (const field of ['carrierBarcode', 'barcode', 'externalId', 'orderNumber', 'clientReference']) {
-                for (const candidate of candidates) {
-                    const found = await tx.get(db.collection('packages').where(field, '==', candidate).limit(2));
-                    if (!found.empty) {
-                        ambiguous = found.size > 1;
-                        packageSnap = found.docs[0];
-                        break search;
-                    }
+            // Inspect every identifier field: two senders may reuse the same number,
+            // including in different fields. A browser-selected parcel cannot resolve that ambiguity.
+            const lookup = async (values) => {
+                const candidates = [...new Set(values.filter(Boolean))];
+                if (!candidates.length)
+                    return [];
+                if (candidates.length > 30)
+                    throw new functions.https.HttpsError('invalid-argument', 'Étiquette complexe : scannez ou saisissez la référence individuelle du carton.');
+                const snapshots = await Promise.all(scanCode_1.parcelCodeFields.map(field => tx.get(db.collection('packages').where(field, 'in', candidates).limit(2))));
+                return [...new Map(snapshots.flatMap(snap => snap.docs).map(doc => [doc.id, doc])).values()];
+            };
+            const knownCodes = selected?.exists ? scanCode_1.parcelCodeFields.map(field => selected.data()[field]).filter((v) => typeof v === 'string') : [];
+            const exact = [...(0, scanCode_1.exactScanCandidates)(code), ...knownCodes.filter(v => (0, scanCode_1.normalizeScanCode)(v) === (0, scanCode_1.normalizeScanCode)(code))];
+            let found = await lookup(exact);
+            if (!found.length)
+                found = await lookup([...(0, scanCode_1.individualScanCandidates)(code),
+                    ...knownCodes.filter(v => (0, scanCode_1.containsIndividualCode)(code, v))].filter(v => !exact.includes(v)));
+            ambiguous = found.length > 1;
+            packageSnap = found[0] || selected;
+            if (!ambiguous && selected?.exists && found.length && found[0].id !== selected.id)
+                throw new functions.https.HttpsError('invalid-argument', 'Le code complet identifie un autre colis. Vérifiez la référence individuelle du carton.');
+            // Shared order references identify an order, never authorize a carton scan.
+            if (!packageSnap?.exists) {
+                const hint = (0, scanCode_1.orderReferenceHint)(code);
+                const references = [...new Set([...(0, scanCode_1.individualScanCandidates)(code), ...(hint ? [hint] : [])])];
+                if (references.length && references.length <= 30) {
+                    const orders = await tx.get(db.collection('packages').where('clientReference', 'in', references).limit(1));
+                    if (!orders.empty)
+                        matchedOrderReference = String(orders.docs[0].data().clientReference);
                 }
-            }
-            // The carrier's order label is not an individual carton identifier.
-            // Recognize the order without proposing a duplicate out-of-import parcel.
-            const hint = (0, scanCode_1.orderReferenceHint)(code);
-            if (!packageSnap && hint) {
-                const orders = await tx.get(db.collection('packages').where('clientReference', '==', hint).limit(1));
-                if (!orders.empty)
-                    matchedOrderReference = hint;
             }
         }
         const pkg = packageSnap?.exists ? { ...packageSnap.data(), id: packageSnap.id } : null;
         const base = { requestId: data.requestId, scannedAt: timestamp, driverId, driverName, source: data.source,
-            packageId: pkg?.id || null, packageCode: pkg?.externalId || pkg?.barcode || pkg?.orderNumber || code,
+            packageId: pkg?.id || null, packageCode: pkg ? (0, scanCode_1.parcelDisplayCode)(pkg) || code : code,
             contactName: pkg?.contactName || '', missionId: null, missionDate: null, stopId: null };
         const finish = (result) => {
             tx.create(receiptRef, { fingerprint, result, createdAt: timestamp, driverId, recordedBy: caller.id });
@@ -136,11 +141,11 @@ async function scanPackageHandler(data, context, deps) {
         };
         const refused = (outcome, message, extra = {}) => finish({ ...base, ...extra, accepted: false, outcome, message });
         if (matchedOrderReference)
-            return refused('ambiguous', (0, scanCode_1.orderReferenceMessage)(matchedOrderReference), { matchedOrderReference });
+            return refused('ambiguous', (0, scanCode_1.orderReferenceHint)(code) === matchedOrderReference ? (0, scanCode_1.orderReferenceMessage)(matchedOrderReference) : `La référence ${matchedOrderReference} correspond à une commande. Scannez la référence individuelle du carton ou son code DELIVREX. Aucun colis validé.`, { matchedOrderReference });
         if (ambiguous)
-            return refused('ambiguous', 'Ce code correspond à plusieurs colis. Scannez le code individuel DELIVREX ou saisissez le numéro imprimé sur ce carton.', { packageId: null, packageCode: code, contactName: '' });
+            return refused('ambiguous', 'Cette référence correspond à plusieurs colis ou expéditeurs. Scannez un autre identifiant unique du carton, par exemple son code DELIVREX. Aucun colis validé.', { packageId: null, packageCode: code, contactName: '' });
         if (!pkg)
-            return refused('not_found', 'Code non retrouvé. Scannez le BR du carton ou faites vérifier son import par le bureau. Le refus est enregistré dans le suivi des scans.');
+            return refused('not_found', 'Référence de colis non retrouvée. Vérifiez le numéro imprimé sur le carton et son import avec le bureau. Le refus est enregistré dans le suivi des scans.');
         if (['Livré', 'Retourné', 'À retourner'].includes(pkg.status))
             return refused('terminal', terminalScanMessage(pkg), { missionId: pkg.missionId || null, missionDate: pkg.missionDate || null });
         if (pkg.missionId && !validId(pkg.missionId))

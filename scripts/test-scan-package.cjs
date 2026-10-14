@@ -136,6 +136,43 @@ async function check(name, test) {
     await assert.rejects(t.scan({ packageId: t.parcelId, code: 'BR9051' }), e => e.code === 'invalid-argument');
     assert.equal((await t.state()).missionId, t.oldId);
   });
+  await check('other senders can use complete alphanumeric and zero-prefixed numeric references', async t => {
+    for (const code of ['EXP-A/00042', '000098765432109876']) {
+      await t.pkgRef.update({ externalId: code, clientId: 'sender-other', clientName: 'Autre expéditeur' });
+      const result = await t.scan({ code: `]d2REF:${code};DEST:97400` });
+      assert.equal(result.accepted, true); assert.equal(result.packageId, t.parcelId);
+      assert.equal(result.packageCode, code);
+    }
+  });
+  await check('a long numeric label never resolves to a shorter parcel number', async t => {
+    await t.pkgRef.update({ externalId: '000088887777' });
+    assert.equal((await t.scan({ code: '000088887777123' })).outcome, 'not_found');
+    await assert.rejects(t.scan({ packageId: t.parcelId, code: '000088887777123' }), e => e.code === 'invalid-argument');
+    assert.equal((await t.state()).missionId, t.oldId);
+  });
+  await check('the complete label wins over a different parcel matching an embedded fragment', async t => {
+    await t.pkgRef.update({ externalId: 'LABEL-ABC6543-0002' });
+    await db.collection('packages').doc(t.parcelId + '-fragment').set({ carrierBarcode: 'ABC6543', status: 'En attente' });
+    assert.equal((await t.scan({ code: 'LABEL-ABC6543-0002' })).packageId, t.parcelId);
+  });
+  await check('identical codes from different senders and fields cannot be resolved by a supplied package id', async t => {
+    const other = db.collection('packages').doc(t.parcelId + '-sender');
+    await t.pkgRef.update({ clientId: 'sender-a' });
+    await other.set({ clientId: 'sender-b', externalId: 'OTHER-' + t.id, carrierBarcode: t.id, status: 'En attente' });
+    for (const options of [{}, { packageId: t.parcelId }]) {
+      const result = await t.scan(options);
+      assert.equal(result.outcome, 'ambiguous'); assert.equal(result.accepted, false); assert.equal(result.packageId, null);
+    }
+    assert.equal((await t.state()).missionId, t.oldId);
+    assert.equal((await other.get()).data().status, 'En attente');
+    assert.equal((await t.scan({ packageId: t.parcelId, code: 'label-' + t.id })).accepted, true);
+  });
+  await check('a generic order reference alone cannot authorize even a single matching carton', async t => {
+    await t.pkgRef.update({ clientReference: 'COMMANDE-' + t.id });
+    const result = await t.scan({ code: 'COMMANDE-' + t.id });
+    assert.equal(result.outcome, 'ambiguous'); assert.match(result.message, /référence individuelle/);
+    assert.equal((await t.state()).missionId, t.oldId);
+  });
   await check('explicit active tour wins when driver has several tours', async t => {
     for (const suffix of ['a', 'b']) await db.collection('missions').doc(`${t.id}-${suffix}`).set({ driverId: t.driverId, date: '2026-09-17', type: 'Livraison', status: 'En cours', stops: [] });
     assert.equal((await t.scan({ targetMissionId: `${t.id}-b` })).missionId, `${t.id}-b`);

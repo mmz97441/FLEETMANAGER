@@ -10,7 +10,7 @@
  * sont obligés de ré-étiqueter chaque carton au dépôt.
  */
 
-import { containsIndividualCode, extractScanTokens } from '../../functions/src/scanCode';
+import { matchesParcelScanCode, parcelDisplayCode } from '../../functions/src/scanCode';
 export { extractScanTokens, orderReferenceHint, orderReferenceMessage } from '../../functions/src/scanCode';
 
 /** A decoded label needs an individual carton code; this is not a network error. */
@@ -26,51 +26,19 @@ export interface ScannableCodes {
   clientReference?: string;
 }
 
-/**
- * Codes servant à VALIDER un colis à la livraison : uniquement le code DELIVREX
- * DISTINCT par colis (barcode / externalId / orderNumber, ex. BR1018).
- * On N'INCLUT PAS clientReference (= le n° de commande du client, PARTAGÉ entre
- * tous les colis d'une commande) : sinon scanner ce code partagé validerait
- * plusieurs colis d'un coup et bloquerait le 2e en « déjà scanné ».
- *
- * POLITIQUE (asymétrie VOULUE, ne pas « corriger ») : la RECHERCHE d'un colis en
- * base (findPackageByCode / findDispatchedPackageByCode dans missionService)
- * inclut, elle, clientReference en DERNIER recours — c'est de l'IDENTIFICATION
- * (retrouver le colis pour l'afficher/prendre en charge), pas de la VALIDATION.
- * Identifier par n° de commande est acceptable ; valider une livraison dessus ne
- * l'est pas. Ces deux couches ne doivent donc PAS être « unifiées » sur ce point.
- */
+/** Individual sender/carrier/internal identifiers. A shared clientReference is
+ * only an order lookup hint and never confirms a carton. The server checks
+ * uniqueness across senders before accepting any of these codes. */
 export const packageScanCodes = (pkg: ScannableCodes): string[] =>
   [pkg.carrierBarcode, pkg.barcode, pkg.externalId, pkg.orderNumber]
     .filter((c): c is string => !!c && c.trim() !== '')
     .map(c => c.trim().toUpperCase());
 
-/**
- * Le code scanné correspond-il à ce colis ? Vrai si :
- * - correspondance exacte (tracking GFL, N° colis BR…, N° commande), ou
- * - le payload 2D scanné contient l'identifiant unique du colis (BR… ou GFL…).
- * On n'étend pas la correspondance « contient » au N° de commande (partagé
- * entre colis d'un même envoi) pour éviter de valider plusieurs colis d'un coup.
- */
-export const packageMatchesCode = (pkg: ScannableCodes, scannedCode: string): boolean => {
-  const scanned = scannedCode.trim().toUpperCase();
-  if (!scanned) return false;
-  const codes = packageScanCodes(pkg);
-  if (codes.length === 0) return false;
-  // Correspondance sur un des identifiants extraits (BR…, N° commande, sans rang)
-  if (extractScanTokens(scanned).some(t => codes.includes(t))) return true;
-  // Payload 2D enrichi contenant un identifiant UNIQUE du colis (BR… / GFL…)
-  for (const unique of [pkg.externalId, pkg.barcode]) {
-    if (containsIndividualCode(scanned, unique)) return true;
-  }
-  return false;
-};
+/** Match complete individual identifiers using the same parser as the server. */
+export const packageMatchesCode = (pkg: ScannableCodes, code: string): boolean => matchesParcelScanCode(pkg, code);
 
-/** Le code affiché au chauffeur : celui de l'étiquette physique en priorité. */
-export const packageDisplayCode = (pkg: ScannableCodes): string => {
-  const br = [pkg.externalId, pkg.orderNumber, pkg.barcode].find(code => /^BR[-A-Z0-9]+$/i.test(code?.trim() || ''));
-  return br?.trim().toUpperCase() || pkg.externalId || pkg.barcode || pkg.orderNumber || '';
-};
+/** The sender's individual reference, with legacy and internal label fallbacks. */
+export const packageDisplayCode = parcelDisplayCode;
 
 /**
  * Assigne chaque code scanné à AU PLUS UN colis (glouton, 1:1), et renvoie
