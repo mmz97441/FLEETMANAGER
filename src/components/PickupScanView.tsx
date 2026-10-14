@@ -22,6 +22,7 @@ import {
 import { packageMatchesCode, packageDisplayCode, matchScansToPackages, packageScanCodes } from '../utils/barcode';
 import { formatWeight } from '../utils/format';
 import ScanGateDialog from './ScanGateDialog';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 
 interface PickupPackage {
   id: string;
@@ -64,6 +65,7 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [showSignature, setShowSignature] = useState(false);
   const [showGate, setShowGate] = useState(false);
+  useUnsavedChanges(false, isProcessing, showSignature || showGate);
 
   // Mapper les scans aux colis en 1:1 (matchScansToPackages) : un scan couvre AU
   // PLUS un colis → pas de sur-comptage quand plusieurs colis partagent un code.
@@ -355,6 +357,7 @@ const SignaturePadMini: React.FC<{ onSave: (data: string) => void; onCancel: () 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [hasContent, setHasContent] = useState(false);
+  useUnsavedChanges(hasContent, isDrawing, true);
 
   const getCoords = (e: React.TouchEvent | React.MouseEvent) => {
     const canvas = canvasRef.current;

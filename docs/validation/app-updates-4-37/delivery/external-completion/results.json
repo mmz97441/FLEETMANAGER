@@ -1,0 +1,41 @@
+{
+  "checks": [
+    {
+      "name": "1 parcels prepared as one visit",
+      "pass": true
+    },
+    {
+      "name": "1: red cross identifies wrong client, no parcel counted",
+      "pass": true
+    },
+    {
+      "name": "1: scanner fits mobile viewport",
+      "pass": true
+    },
+    {
+      "name": "1: no green before server confirmation",
+      "pass": true
+    },
+    {
+      "name": "1: correct parcel has green check and recipient",
+      "pass": true
+    },
+    {
+      "name": "1: last green confirmation is visible before auto advance",
+      "pass": true
+    },
+    {
+      "name": "External completion keeps the unsaved photo, signature and recipient accessible",
+      "pass": true
+    },
+    {
+      "name": "Explicit confirmed abandonment releases the update without sending another delivery",
+      "pass": true
+    },
+    {
+      "name": "No uncaught browser exception",
+      "pass": true
+    }
+  ],
+  "errors": []
+}

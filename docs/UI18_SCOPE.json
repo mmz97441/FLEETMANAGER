@@ -2,6 +2,7 @@
   "description": "Écrans et composants couverts par VIS-01 à VIS-18, version 4.27.0. Le contrôle statique complète les preuves navigateur ; il ne mesure pas le contraste ni les dimensions calculées.",
   "files": [
     "src/components/AccountHub.tsx",
+    "src/components/AppUpdateGate.tsx",
     "src/components/BarcodeScanner.tsx",
     "src/components/ClientHelp.tsx",
     "src/components/ClientPortal.tsx",

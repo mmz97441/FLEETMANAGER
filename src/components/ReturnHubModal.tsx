@@ -6,6 +6,8 @@ import { compressImage } from '../services/podService';
 import { packageDisplayCode } from '../utils/barcode';
 import Modal from './shared/Modal';
 import SignaturePad from './DeliverySignaturePad';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import { beginUpdateOperation } from '../services/updateSafety';
 
 type ReturnDraft = { photos: string[]; hubId: string; requestId: string; signature?: string };
 export default function ReturnHubModal({ pkg, currentUser, onClose }: { pkg: Package; currentUser: User; onClose: () => void }) {
@@ -21,9 +23,11 @@ export default function ReturnHubModal({ pkg, currentUser, onClose }: { pkg: Pac
   const latestDraft = useRef(draft);
   const [saving, setSaving] = useState(false);
   const [capturing, setCapturing] = useState(false);
+  const [draftUnstored, setDraftUnstored] = useState(false);
+  useUnsavedChanges(draftUnstored, busy || capturing || saving, true);
   useEffect(() => subscribeToHubs(rows => setHubs(rows.filter(hub => hub.isActive)), e => setError(e.message)), []);
   useEffect(() => {
-    let active = true; pendingSave.current = Promise.resolve(); setBusy(false); setLoadedScope(''); setSaving(false); setCapturing(false); setSignatureOpen(false); setError('');
+    let active = true; pendingSave.current = Promise.resolve(); setBusy(false); setLoadedScope(''); setSaving(false); setCapturing(false); setSignatureOpen(false); setError(''); setDraftUnstored(false);
     Promise.all([readFieldDraft<ReturnDraft>(key, currentUser.id), fieldOperations(currentUser.id)]).then(([saved, pending]) => {
       if (!active) return;
       const restored = saved || { photos: [], hubId: '', requestId: crypto.randomUUID() };
@@ -36,14 +40,15 @@ export default function ReturnHubModal({ pkg, currentUser, onClose }: { pkg: Pac
   const persist = async (change: (previous: ReturnDraft) => ReturnDraft, capturedScope = scope) => {
     if (!ready || currentScope.current !== capturedScope || queued) return;
     const next = change(latestDraft.current);
-    latestDraft.current = next; setDraft(next); setSaving(true); setError('');
+    const release = beginUpdateOperation();
+    latestDraft.current = next; setDraft(next); setSaving(true); setDraftUnstored(true); setError('');
     // key and owner are captured by this handler. Later prop changes cannot
     // redirect an old photo/signature into a new driver's or attempt's draft.
     const save = pendingSave.current.catch(() => {}).then(() => saveFieldDraft(key, currentUser.id, next));
     pendingSave.current = save;
-    try { await save; }
+    try { await save; if (currentScope.current === capturedScope && pendingSave.current === save) setDraftUnstored(false); }
     catch (cause) { if (currentScope.current === capturedScope) setError('La preuve n’a pas pu être conservée sur ce téléphone. Gardez cet écran ouvert.'); throw cause; }
-    finally { if (currentScope.current === capturedScope && pendingSave.current === save) setSaving(false); }
+    finally { release(); if (currentScope.current === capturedScope && pendingSave.current === save) setSaving(false); }
   };
   const close = async () => {
     if (capturing || busy) return;
@@ -85,13 +90,13 @@ export default function ReturnHubModal({ pkg, currentUser, onClose }: { pkg: Pac
       <label className="block font-semibold">Photo du carton remis au dépôt
         <input type="file" accept="image/*" capture="environment" disabled={draft.photos.length >= 5} className="block mt-2 max-w-full" onChange={async e => {
           const file = e.target.files?.[0]; e.target.value = ''; if (!file) return;
-          const capturedScope = scope; setCapturing(true);
+          const capturedScope = scope; const release = beginUpdateOperation(); setCapturing(true);
           try {
             const raw = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsDataURL(file); });
             const photo = await compressImage(raw);
             if (currentScope.current === capturedScope) await persist(old => ({ ...old, photos: [...old.photos, photo].slice(0, 5) }), capturedScope);
           } catch { if (currentScope.current === capturedScope) setError('La photo n’a pas pu être conservée. Réessayez.'); }
-          finally { if (currentScope.current === capturedScope) setCapturing(false); }
+          finally { release(); if (currentScope.current === capturedScope) setCapturing(false); }
         }} />
       </label>
       <div className="flex flex-wrap gap-2">{draft.photos.map((photo, index) => <div key={index}><img src={photo} alt={`Carton au dépôt ${index + 1}`} className="w-24 h-24 object-cover rounded" /><button className="ui-button ui-button-ghost" onClick={() => { void persist(old => ({ ...old, photos: old.photos.filter((_, i) => i !== index) })).catch(() => {}); }}>Retirer</button></div>)}</div>

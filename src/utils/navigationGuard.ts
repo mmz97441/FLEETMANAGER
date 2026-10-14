@@ -1,6 +1,7 @@
 import { confirmAction } from '../services/confirmationService';
+import { getUpdateSafetySnapshot, registerUpdateSafetySource } from '../services/updateSafety';
 
-type Draft = { dirty: boolean; busy: boolean };
+type Draft = { dirty: boolean; busy: boolean; active?: boolean };
 const drafts = new Map<symbol, () => Draft>();
 let asking = false;
 const historyKey = '__fleetNavigation';
@@ -21,7 +22,8 @@ function readHistoryStamp(state: unknown): HistoryStamp | null {
 export function registerNavigationDraft(read: () => Draft) {
   const key = Symbol('draft');
   drafts.set(key, read);
-  return () => { drafts.delete(key); };
+  const releaseSafety = registerUpdateSafetySource(read);
+  return () => { drafts.delete(key); releaseSafety(); };
 }
 
 export function navigationDraftState(): Draft {
@@ -127,10 +129,18 @@ export function installNavigationGuard() {
     }
   };
   window.addEventListener('popstate', onPop, true);
+  const onUnload = (event: BeforeUnloadEvent) => {
+    const state = getUpdateSafetySnapshot();
+    if (state.dirty || state.busy || state.active) {
+      event.preventDefault(); event.returnValue = '';
+    }
+  };
+  window.addEventListener('beforeunload', onUnload);
   return () => {
     alive = false;
     history.pushState = push;
     history.replaceState = replace;
     window.removeEventListener('popstate', onPop, true);
+    window.removeEventListener('beforeunload', onUnload);
   };
 }

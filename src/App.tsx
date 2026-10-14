@@ -7,7 +7,7 @@ import PendingSyncBanner from './components/PendingSyncBanner';
 
 import React, { useState, useMemo, useEffect, useLayoutEffect, useRef, Suspense } from 'react';
 import { resilientLazy as lazy } from './components/ResilientPage';
-import { reloadApplication } from './utils/reloadApplication';
+import AppUpdateGate from './components/AppUpdateGate';
 // @ts-ignore
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { auth } from "./firebaseConfig";
@@ -187,7 +187,7 @@ const App: React.FC = () => {
   // Publie la position du chauffeur connecté (~30s) pour la carte dispatch
   useDriverLocationPublisher(currentUser);
   // Propose la nouvelle version sans interrompre une saisie ou un envoi.
-  const updateAvailable = useAutoUpdate();
+  const appUpdate = useAutoUpdate();
   const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
   const [absences, setAbsences] = useState<Absence[]>([]);
   const [quotes, setQuotes] = useState<QuoteRequest[]>([]);
@@ -1214,7 +1214,7 @@ const App: React.FC = () => {
               <div className="max-w-7xl mx-auto min-h-full">
                 <div className="lg:hidden mb-3"><WorkspaceSearch onNavigate={handleViewChange} /></div>
                 {isOffline && <div role="status" className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 flex items-start gap-2"><WifiOff size={18} className="shrink-0 mt-0.5"/><span>Hors connexion : les validations de livraison sont conservées sur ce téléphone. Les autres opérations nécessitent le réseau.</span></div>}
-                {updateAvailable && <div role="status" className="mb-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950 flex flex-wrap items-center gap-3"><span className="flex-1">Une mise à jour des parcours de scan est disponible. Installez-la dès que votre saisie est terminée ; vos preuves en attente restent conservées sur cet appareil.</span><button type="button" onClick={() => void reloadApplication()} className="min-h-11 px-3 rounded-lg border border-blue-400 font-semibold">Installer la mise à jour</button></div>}
+                <AppUpdateGate mandatory={normalizeRole(currentUser.role) === UserRole.DRIVER} update={appUpdate} />
                 <PendingSyncBanner userId={currentUser.id} />
                 <Suspense fallback={<PageLoader />}>
                   {renderContent()}

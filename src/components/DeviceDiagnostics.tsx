@@ -3,6 +3,7 @@ import JsBarcode from 'jsbarcode';
 import { Camera, MapPin, Download, Printer, Smartphone } from 'lucide-react';
 import { FormInput, FormSelect } from './shared/FormInput';
 import { buildDeviceDiagnosticReport, downloadDiagnosticJson, fieldScenarios, initialFieldResults, DiagnosticOutcome } from '../utils/deviceDiagnostic';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 
 import BarcodeScanner from './Scanner';
 const testCode = 'TEST-FLEETGENIUS-0000';
@@ -17,6 +18,7 @@ export default function DeviceDiagnostics() {
   const [cameraBusy, setCameraBusy] = useState(false);
   const [cameraRunning, setCameraRunning] = useState(false);
   const [scan, setScan] = useState(false);
+  useUnsavedChanges(false, cameraBusy, cameraRunning || scan);
   const [print, setPrint] = useState('Non testé');
   const [scanResult, setScanResult] = useState('Non testé');
   const [results, setResults] = useState(initialFieldResults);

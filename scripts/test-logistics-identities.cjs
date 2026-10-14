@@ -16,7 +16,7 @@ const imports = (packages, uid = clientA) => service.importPackages.run({ packag
 let checks = 0, seq = 0;
 const check = async (name, task) => { await task(); console.log('PASS', name); checks++; };
 const read = async (col, id) => (await db.collection(col).doc(id).get()).data();
-const scan = (code, options = {}) => service.scanPackage.run({ requestId: randomUUID(), source: 'driver-claim', code, ...options }, context(driver));
+const scan = (code, options = {}) => service.scanPackage.run({ clientVersion: '4.37.0', requestId: randomUUID(), source: 'driver-claim', code, ...options }, context(driver));
 async function seed(changes = {}, extra = []) {
   const id = prefix + '-mission-' + (++seq), p = id + '-p';
   const pkg = parcel(id + '-code', clientA, { ...changes, missionId: id, stopId: 'stop', currentDriverId: driver, status: 'En livraison' });
@@ -77,7 +77,7 @@ async function seed(changes = {}, extra = []) {
     const wrong = parcel(prefix + '-wrong-code', clientB, { contactName: 'Cabinet B', missionId: t.id, stopId: 'stop', currentDriverId: driver, status: 'En livraison' });
     await db.collection('packages').doc(otherId).set({ ...wrong, scanCodes: parcelScanCodes(wrong) });
     const before = await read('missions', t.id);
-    await assert.rejects(service.prepareDeliveryStop.run({ missionId: t.id, stopId: 'stop', arrive: true }, context(driver)), e => e.code === 'failed-precondition');
+    await assert.rejects(service.prepareDeliveryStop.run({ clientVersion: '4.37.0', missionId: t.id, stopId: 'stop', arrive: true }, context(driver)), e => e.code === 'failed-precondition');
     for (const code of [t.pkg.externalId, wrong.externalId]) assert.equal((await scan(code, { source: 'driver-delivery', targetMissionId: t.id, stopId: 'stop' })).outcome, 'wrong_stop');
     assert.deepEqual(await read('missions', t.id), before);
   });
@@ -94,11 +94,11 @@ async function seed(changes = {}, extra = []) {
     const pkg = parcel(prefix + '-new-arrived'); await db.collection('packages').doc(prefix + '-new-arrived').set({ ...pkg, scanCodes: parcelScanCodes(pkg) });
     const result = await scan(pkg.externalId, { targetMissionId: t.id }); assert.equal(result.accepted, true); assert.notEqual(result.stopId, 'stop');
     const stops = (await read('missions', t.id)).stops; assert.deepEqual(stops[0].packageIds, [t.p]); assert.equal(stops.length, 2);
-    await assert.rejects(service.prepareDeliveryStop.run({ missionId: t.id, stopId: 'stop', packageIds: [prefix + '-new-arrived'] }, context(driver)), e => e.code === 'failed-precondition');
+    await assert.rejects(service.prepareDeliveryStop.run({ clientVersion: '4.37.0', missionId: t.id, stopId: 'stop', packageIds: [prefix + '-new-arrived'] }, context(driver)), e => e.code === 'failed-precondition');
   });
   await check('a planned window wider than the parcel window is rejected even on the original stop', async () => {
     const t = await seed(); await db.collection('packages').doc(t.p).update({ timeWindowStart: '14:00', timeWindowEnd: '15:00' });
-    await assert.rejects(service.prepareDeliveryStop.run({ missionId: t.id, stopId: 'stop' }, context(driver)), e => e.code === 'failed-precondition');
+    await assert.rejects(service.prepareDeliveryStop.run({ clientVersion: '4.37.0', missionId: t.id, stopId: 'stop' }, context(driver)), e => e.code === 'failed-precondition');
   });
   await check('ten parcels from mixed senders remain eligible for one common delivery', async () => {
     const t = await seed();
@@ -107,14 +107,14 @@ async function seed(changes = {}, extra = []) {
       await db.collection('packages').doc(prefix + '-ten-' + i).set({ ...pkg, scanCodes: parcelScanCodes(pkg) });
       assert.equal((await scan(pkg.externalId, { targetMissionId: t.id })).accepted, true);
     }
-    const result = await service.prepareDeliveryStop.run({ missionId: t.id, stopId: 'stop', arrive: true }, context(driver));
+    const result = await service.prepareDeliveryStop.run({ clientVersion: '4.37.0', missionId: t.id, stopId: 'stop', arrive: true }, context(driver));
     assert.equal(result.mission.stops.length, 1); assert.equal(result.mission.stops[0].packageCount, 10);
   });
   await check('returns awaiting a decision and final sender returns cannot be reclaimed', async () => {
     for (const returnDisposition of ['AWAITING_DECISION', 'SENDER_RETURNED']) {
       const t = await seed(); await db.collection('packages').doc(t.p).update({ returnDisposition });
       assert.equal((await scan(t.pkg.externalId, { targetMissionId: t.id })).accepted, false);
-      await assert.rejects(service.prepareDeliveryStop.run({ missionId: t.id, stopId: 'stop' }, context(driver)), e => e.code === 'failed-precondition');
+      await assert.rejects(service.prepareDeliveryStop.run({ clientVersion: '4.37.0', missionId: t.id, stopId: 'stop' }, context(driver)), e => e.code === 'failed-precondition');
     }
   });
   await check('historical lowercase imports replay by canonical identity without changing original references', async () => {

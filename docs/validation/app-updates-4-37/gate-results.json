@@ -1,0 +1,95 @@
+{
+  "checks": [
+    {
+      "name": "A pending delivery with its original photo and signature is durable before any update",
+      "pass": true
+    },
+    {
+      "name": "Mandatory gate cannot be dismissed or tabbed around at 320px",
+      "pass": true
+    },
+    {
+      "name": "No automatic reload and no horizontal overflow at 320px",
+      "pass": true
+    },
+    {
+      "name": "A verified rollback reopens the current build without reloading at 320px",
+      "pass": true
+    },
+    {
+      "name": "Mandatory gate cannot be dismissed or tabbed around at 390px",
+      "pass": true
+    },
+    {
+      "name": "No automatic reload and no horizontal overflow at 390px",
+      "pass": true
+    },
+    {
+      "name": "A verified rollback reopens the current build without reloading at 390px",
+      "pass": true
+    },
+    {
+      "name": "Mandatory gate cannot be dismissed or tabbed around at 1440px",
+      "pass": true
+    },
+    {
+      "name": "No automatic reload and no horizontal overflow at 1440px",
+      "pass": true
+    },
+    {
+      "name": "A verified rollback reopens the current build without reloading at 1440px",
+      "pass": true
+    },
+    {
+      "name": "Offline known requirement remains blocking and offers no destructive reload",
+      "pass": true
+    },
+    {
+      "name": "A failed install verification keeps the gate and local proofs",
+      "pass": true
+    },
+    {
+      "name": "Explicit retry accepts a recovered server rollback without a reload",
+      "pass": true
+    },
+    {
+      "name": "A real outbox upload already in progress defers entry to the gate",
+      "pass": true
+    },
+    {
+      "name": "An upload starting after entry disables installation while keeping the gate",
+      "pass": true
+    },
+    {
+      "name": "A captured photo and open return form remain usable when the new version arrives",
+      "pass": true
+    },
+    {
+      "name": "An explicit install reload preserves the exact return photo and pending delivery proof",
+      "pass": true
+    },
+    {
+      "name": "The gate can enter before a later Suspense sibling finishes mounting",
+      "pass": true
+    },
+    {
+      "name": "A later Suspense sibling restoring a form releases the earlier gate without deadlock",
+      "pass": true
+    },
+    {
+      "name": "The mandatory gate resumes once the restored form closes",
+      "pass": true
+    },
+    {
+      "name": "Office sees server target and outdated device without a mandatory driver gate",
+      "pass": true
+    },
+    {
+      "name": "Office status and app layout share one manifest request",
+      "pass": true
+    }
+  ],
+  "errors": [],
+  "externalRequests": [],
+  "dialogs": []
+}

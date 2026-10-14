@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.reconcileDeliveryProofs = exports.replanPickup = exports.publishDeliveryProof = exports.receiveTransferredPackageAtHub = exports.indexPackageScanCodes = exports.prepareDeliveryStop = exports.createAdHocPackage = exports.interpretAnalytics = exports.acceptQuote = exports.getTeamDirectory = exports.notifyPackageStatus = exports.setParcelSorting = exports.correctDeliveryPlan = exports.commitDeliveryOutcome = exports.finalizePickup = exports.resolveReturnedPackage = exports.returnPackage = exports.deleteAbsence = exports.deleteVehicle = exports.importPackages = exports.assignVehicle = exports.askFleetGenius = exports.sendBusinessNotification = exports.transferPackages = exports.scanPackage = exports.dispatchMissions = exports.finishMission = exports.receivePackagesAtHub = exports.saveAbsence = exports.revokeOwnSessions = exports.linkAuthToProfile = exports.recordUserPresence = exports.getOwnProfile = exports.createInvitation = exports.activateAccount = exports.validateInvitationToken = exports.forcePasswordReset = exports.toggleUserStatus = exports.cleanupExpiredInvitations = exports.deleteUserCompletely = exports.optimizeTours = exports.employeeVoting = exports.recordClientErrors = exports.associateCarrierBarcode = void 0;
 const prepareDeliveryStop_1 = require("./prepareDeliveryStop");
+const appVersion_1 = require("./appVersion");
 const adhocPackage_1 = require("./adhocPackage");
 const importManifest_1 = require("./importManifest");
 const hubReception_1 = require("./hubReception");
@@ -836,6 +837,13 @@ async function requireActiveCaller(context) {
         throw new functions.https.HttpsError('permission-denied', 'Compte indisponible.');
     return { ...snap.data(), id: snap.id };
 }
+// Only new scan/preparation entry points are gated. Already captured evidence
+// must still synchronize from older clients, including after a lost connection.
+const requireCurrentScanCaller = (data) => async (context) => {
+    const caller = await requireActiveCaller(context);
+    (0, appVersion_1.requireDriverScanVersion)(normalizeRole(caller.role), data?.clientVersion);
+    return caller;
+};
 exports.createInvitation = functions
     .region('europe-west1')
     .https.onCall(async (data, context) => {
@@ -1201,7 +1209,7 @@ exports.dispatchMissions = functions
         throw new functions.https.HttpsError('permission-denied', 'Dispatch réservé à l’exploitation.');
     return (0, dispatchMissions_1.dispatchMissionsTransaction)(db, data, caller);
 });
-exports.scanPackage = functions.region('europe-west1').https.onCall((data, context) => (0, scanPackage_1.scanPackageHandler)(data, context, { db, requireActiveCaller, isAdminCaller }));
+exports.scanPackage = functions.region('europe-west1').https.onCall((data, context) => (0, scanPackage_1.scanPackageHandler)(data, context, { db, requireActiveCaller: requireCurrentScanCaller(data), isAdminCaller }));
 exports.transferPackages = functions
     .region('europe-west1')
     .https.onCall(async (data, context) => {
@@ -2114,8 +2122,8 @@ Exemple : {"metric":"deliveryRate","dimension":"zone","period":"month","chart":"
             .join('') || '',
     };
 });
-exports.createAdHocPackage = functions.region('europe-west1').https.onCall((data, context) => (0, adhocPackage_1.createAdHocPackageHandler)(data, context, { db, requireActiveCaller, isAdminCaller }));
-exports.prepareDeliveryStop = functions.region('europe-west1').https.onCall((data, context) => (0, prepareDeliveryStop_1.prepareDeliveryStopHandler)(data, context, { db, requireActiveCaller }));
+exports.createAdHocPackage = functions.region('europe-west1').https.onCall((data, context) => (0, adhocPackage_1.createAdHocPackageHandler)(data, context, { db, requireActiveCaller: requireCurrentScanCaller(data), isAdminCaller }));
+exports.prepareDeliveryStop = functions.region('europe-west1').https.onCall((data, context) => (0, prepareDeliveryStop_1.prepareDeliveryStopHandler)(data, context, { db, requireActiveCaller: requireCurrentScanCaller(data) }));
 exports.indexPackageScanCodes = functions.region('europe-west1').firestore.document('packages/{packageId}').onWrite(async (_change, context) => (0, parcelReferenceIndex_1.repairParcelScanCodes)(db, context.params.packageId));
 exports.receiveTransferredPackageAtHub = functions.region('europe-west1').https.onCall((data, context) => (0, hubReception_1.receiveTransferredPackageAtHubHandler)(data, context, { db, requireActiveCaller, isAdminCaller }));
 exports.publishDeliveryProof = functions.region('europe-west1').https.onCall((data, context) => (0, publishDeliveryProof_1.publishDeliveryProofHandler)(data, context, { db, requireActiveCaller }));

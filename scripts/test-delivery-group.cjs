@@ -19,7 +19,7 @@ async function seed(parcelCount = 3) {
   await db.collection('missions').doc(missionId).set({ driverId: driver, date: scanBusinessDay(new Date()), status: 'En cours', type: 'Livraison', stops, totalPackages: parcelCount });
   await Promise.all(ids.map((id, i) => db.collection('packages').doc(id).set({ ...point, externalId: 'BR' + sequence + i, orderNumber: 'ORDER' + i,
     status: 'En livraison', currentDriverId: driver, missionId, stopId: 's' + i, movements: [] })));
-  const prepare = (options = {}, who = driver) => service.prepareDeliveryStop.run({ missionId, stopId: 's0', ...options }, ctx(who));
+  const prepare = (options = {}, who = driver) => service.prepareDeliveryStop.run({ clientVersion: '4.37.0', missionId, stopId: 's0', ...options }, ctx(who));
   return { missionId, ids, stops, prepare };
 }
 (async () => {
@@ -36,7 +36,7 @@ async function seed(parcelCount = 3) {
     const retry = await prepare({ stopId: 's1', arrive: true }); assert.equal(retry.addedCount, 0);
     assert.equal((await db.collection('activity_logs').where('targetId', '==', missionId).get()).size, 1);
     for (const id of ids) {
-      const receipt = await service.scanPackage.run({ requestId: randomUUID(), source: 'driver-delivery', packageId: id, targetMissionId: missionId, stopId: 's1' }, ctx(driver));
+      const receipt = await service.scanPackage.run({ clientVersion: '4.37.0', requestId: randomUUID(), source: 'driver-delivery', packageId: id, targetMissionId: missionId, stopId: 's1' }, ctx(driver));
       assert.equal(receipt.accepted, true);
     }
   });
@@ -53,7 +53,7 @@ async function seed(parcelCount = 3) {
     const { mission } = await prepare({ arrive: true });
     assert.equal(mission.stops.length, 1); assert.equal(mission.stops[0].packageCount, 3);
     for (let i = 0; i < ids.length; i++) {
-      const receipt = await service.scanPackage.run({ requestId: randomUUID(), source: 'driver-delivery', code: codes[i], packageId: ids[i], targetMissionId: missionId, stopId: 's0' }, ctx(driver));
+      const receipt = await service.scanPackage.run({ clientVersion: '4.37.0', requestId: randomUUID(), source: 'driver-delivery', code: codes[i], packageId: ids[i], targetMissionId: missionId, stopId: 's0' }, ctx(driver));
       assert.equal(receipt.accepted, true); assert.equal(receipt.packageId, ids[i]);
     }
   });
@@ -64,7 +64,7 @@ async function seed(parcelCount = 3) {
     assert.equal(mission.stops[0].packageCount, parcelCount);
     assert.deepEqual(mission.stops[0].packageIds, ids);
     for (const packageId of ids) {
-      const receipt = await service.scanPackage.run({ requestId: randomUUID(), source: 'driver-delivery', packageId, targetMissionId: missionId, stopId: 's0' }, ctx(driver));
+      const receipt = await service.scanPackage.run({ clientVersion: '4.37.0', requestId: randomUUID(), source: 'driver-delivery', packageId, targetMissionId: missionId, stopId: 's0' }, ctx(driver));
       assert.equal(receipt.accepted, true);
     }
   });

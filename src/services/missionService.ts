@@ -1297,7 +1297,7 @@ export const createAndClaimPackage = async (params: {
   const call = httpsCallable<Record<string, unknown>, { package: Package }>(getFunctions(app, 'europe-west1'), 'createAdHocPackage');
   const response = await call({ code: params.code, clientId: params.clientId, contactName: params.contactName,
     address: params.address, postalCode: params.postalCode, city: params.city, contactPhone: params.contactPhone || '',
-    zone, verifiedMissing: params.verifiedMissing });
+    zone, verifiedMissing: params.verifiedMissing, clientVersion: __APP_VERSION__ });
   const created = response.data.package;
   const receipt = await scanPackage({ packageId: created.id, driverId: params.driver.id, targetMissionId: params.targetMissionId, source: 'manual-create' });
   if (!receipt.accepted) throw new Error(receipt.message);
@@ -1442,7 +1442,7 @@ export const addManualStopToMission = async (
 /** Prepare one shared delivery on the server, preserving any existing proof. */
 export const prepareDeliveryStop = async (missionId: string, stopId: string, options: { arrive?: boolean; packageIds?: string[] } = {}): Promise<{ mission: Mission; addedCount: number }> => {
   const call = httpsCallable<any, { mission: Mission; addedCount: number }>(getFunctions(app, 'europe-west1'), 'prepareDeliveryStop');
-  return (await call({ missionId, stopId, ...options })).data;
+  return (await call({ missionId, stopId, ...options, clientVersion: __APP_VERSION__ })).data;
 };
 
 /** The server removes attached parcels from their previous pending stop atomically. */

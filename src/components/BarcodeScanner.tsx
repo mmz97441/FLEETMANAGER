@@ -16,6 +16,7 @@ import Modal from './shared/Modal';
 import ScanFeedback, { type ScanFeedbackValue } from './ScanFeedback';
 import { recordDiagnosticAction } from '../utils/runtimeDiagnostics';
 import { reportError } from '../services/logService';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { createScannerCameraSession, waitForCameraImage, waitForCameraRelease, monitorCamera, allowCameraRecovery } from '../utils/scannerCameraSession';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import {
@@ -76,6 +77,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   const [isScanning, setIsScanning] = useState(false);
   const [manualMode, setManualMode] = useState(false);
   const [manualInput, setManualInput] = useState('');
+  useUnsavedChanges(!!manualInput.trim(), busy, true);
   const [lastScanned, setLastScanned] = useState<string | null>(null);
   const [lastScanResult, setLastScanResult] = useState<'success' | 'duplicate' | 'unknown' | 'read' | null>(null);
   const [error, setError] = useState<string | null>(null);

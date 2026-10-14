@@ -10,6 +10,7 @@ import { packageDisplayCode } from '../utils/barcode';
 import Modal from './shared/Modal';
 import BarcodeScanner from './Scanner';
 import { subscribeToRecoveryPackages } from '../services/recoveryService';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 
 export interface RecoveryPanelProps {
   currentUser: User;
@@ -31,6 +32,11 @@ export default function RecoveryPanel({ currentUser, onResume, onReturn, onInspe
   const [incident, setIncident] = useState<Package | null>(null), [incidentNotes, setIncidentNotes] = useState('');
   const [requestId, setRequestId] = useState('');
   const [recollect, setRecollect] = useState<Package | null>(null), [drivers, setDrivers] = useState<User[]>([]), [driverId, setDriverId] = useState('');
+  useUnsavedChanges(
+    (!!target && (!!notes.trim() || !!photo || !!code || physical)) || (!!incident && !!incidentNotes.trim()) || (!!recollect && !!driverId),
+    busy,
+    !!target || !!incident || !!recollect || scanner,
+  );
   useEffect(() => subscribeToMissions(setMissions, office ? undefined : { driverId: currentUser.id }, e => setError(e.message)), [office, currentUser.id]);
   useEffect(() => {
     return subscribeToRecoveryPackages(currentUser, setPackages, e => setError(e.message));
@@ -78,7 +84,7 @@ export default function RecoveryPanel({ currentUser, onResume, onReturn, onInspe
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Collecte non planifiée.'); }
     finally { setBusy(false); }
   };
-  if (!unresolved.length && !proofs.length && !error) return null;
+  if (!unresolved.length && !proofs.length && !error && !target && !incident && !recollect && !scanner && !busy) return null;
   return <section className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-left" aria-label="Colis et preuves à reprendre">
     <button className="w-full text-left font-semibold min-h-11" onClick={() => setOpen(v => !v)}>{unresolved.length} colis à résoudre · {proofs.length} preuve(s) à synchroniser {open ? '▴' : '▾'}</button>
     {error && <p role="alert" className="text-red-800 break-words">{error}</p>}

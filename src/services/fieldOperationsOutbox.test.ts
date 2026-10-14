@@ -79,3 +79,43 @@ it('return drafts are isolated between delivery attempts of the same carton', as
   expect(await outbox.readFieldDraft('return/p/second-tour', 'driver')).toBeNull();
   expect(await outbox.readFieldDraft('return/p/first-tour', 'another')).toBeNull();
 });
+it('blocks reload while a local draft commits, then allows the safely retained draft', async () => {
+  const outbox = await import('./fieldOperationsOutbox');
+  const safety = await import('./updateSafety');
+  const work = outbox.saveFieldDraft('return/p/m', 'driver', { photos: ['photo'], signature: 'signed' });
+  expect(safety.getUpdateSafetySnapshot().busy).toBe(true);
+  await work;
+  expect(safety.getUpdateSafetySnapshot()).toEqual({ dirty: false, busy: false, active: false });
+  expect(await outbox.readFieldDraft('return/p/m', 'driver')).toEqual({ photos: ['photo'], signature: 'signed' });
+});
+it('keeps reload blocked continuously through pickup persistence and the server transaction', async () => {
+  const outbox = await import('./fieldOperationsOutbox');
+  const safety = await import('./updateSafety');
+  const states: boolean[] = [];
+  const unsubscribe = safety.subscribeUpdateSafety(() => states.push(safety.getUpdateSafetySnapshot().busy));
+  let finish!: () => void;
+  calls.pickup.mockImplementationOnce(() => new Promise(resolve => { finish = () => resolve({}); }));
+  const work = outbox.submitFieldOperation(pickup());
+  expect(safety.getUpdateSafetySnapshot().busy).toBe(true);
+  await vi.waitFor(() => expect(calls.pickup).toHaveBeenCalledOnce());
+  expect(states).toEqual([true]);
+  finish(); await work;
+  expect(states).toEqual([true, false]);
+  unsubscribe();
+});
+it('releases reload protection after an offline return is durable and after an upload failure', async () => {
+  const outbox = await import('./fieldOperationsOutbox');
+  const safety = await import('./updateSafety');
+  vi.stubGlobal('navigator', { onLine: false });
+  await expect(outbox.submitFieldOperation(returned())).rejects.toThrow('Conservé');
+  expect(safety.getUpdateSafetySnapshot().busy).toBe(false);
+  vi.stubGlobal('navigator', { onLine: true });
+  let fail!: () => void;
+  calls.upload.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = () => reject(new Error('Upload failed')); }));
+  const result = expect(outbox.submitFieldOperation((await outbox.fieldOperations('driver'))[0])).rejects.toThrow('Upload failed');
+  await vi.waitFor(() => expect(calls.upload).toHaveBeenCalledOnce());
+  expect(safety.getUpdateSafetySnapshot().busy).toBe(true);
+  fail(); await result;
+  expect(safety.getUpdateSafetySnapshot().busy).toBe(false);
+  expect((await outbox.fieldOperations('driver'))[0]).toMatchObject({ payload: { photosBase64: ['photo1', 'photo2'], signatureBase64: 'signature' } });
+});
