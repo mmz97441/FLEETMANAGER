@@ -1,7 +1,21 @@
 import { describe, it, expect } from 'vitest';
-import { packageMatchesCode, matchScansToPackages, packageScanCodes, extractScanTokens, orderReferenceHint } from './barcode';
+import { packageMatchesCode, packageDisplayCode, matchScansToPackages, packageScanCodes, extractScanTokens, orderReferenceHint } from './barcode';
 
 describe('packageMatchesCode', () => {
+  it('recognizes sender references with punctuation and keeps leading zeroes', () => {
+    for (const code of ['EXP-A/00042', '000012345678', 'XYZ-007', 'BR1352']) {
+      expect(packageMatchesCode({ externalId: code }, code)).toBe(true);
+      expect(packageMatchesCode({ externalId: code }, `]d2REF:${code};DEST:97400`)).toBe(true);
+    }
+    expect(packageMatchesCode({ carrierBarcode: 'CARTON-ABC/789' }, 'REF:CARTON-ABC/789;')).toBe(true);
+    expect(packageMatchesCode({ externalId: '000012345' }, '000012345678')).toBe(false);
+    expect(packageMatchesCode({ externalId: '12345678' }, '000012345678')).toBe(false);
+  });
+  it('displays the sender reference without replacing it with an unrelated BR order', () => {
+    expect(packageDisplayCode({ externalId: 'EXP-A/00042', orderNumber: 'BR1234', barcode: 'GFL-1' })).toBe('EXP-A/00042');
+    expect(packageDisplayCode({ externalId: '000012345678' })).toBe('000012345678');
+    expect(packageDisplayCode({ carrierBarcode: 'CARTON-0001', barcode: 'GFL-1' })).toBe('CARTON-0001');
+  });
   it('matche sur externalId (BR…), y compris via DataMatrix enrichi', () => {
     const p = { externalId: 'BR1352', orderNumber: '13881963' };
     expect(packageMatchesCode(p, 'BR1352')).toBe(true);

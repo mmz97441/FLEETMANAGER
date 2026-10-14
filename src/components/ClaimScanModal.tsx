@@ -205,7 +205,7 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
               value={manualCode}
               onChange={e => setManualCode(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') { lookupCode(manualCode); setManualCode(''); } }}
-              placeholder="N° individuel du carton (ex : BR0513)"
+              placeholder="Référence individuelle du carton"
               className="flex-1 px-3 py-2.5 border border-slate-300 rounded-xl text-sm font-mono focus:ring-2 focus:ring-green-500 outline-none"
             />
             <button
@@ -318,7 +318,7 @@ const ClaimScanModal: React.FC<ClaimScanModalProps> = ({ currentUser, onClose, o
             <div className="p-4 space-y-3">
               <div className="flex items-start gap-2 p-2.5 bg-amber-50 border border-amber-200 rounded-xl">
                 <span>⚠️</span>
-                <p className="text-sm text-amber-800">Le code n’a pas été retrouvé. Vérifiez d’abord le BR et l’import avec le bureau. Une création exceptionnelle devra être réconciliée avec le fichier client.</p>
+                <p className="text-sm text-amber-800">Le code n’a pas été retrouvé. Vérifiez d’abord la référence du colis et l’import avec le bureau. Une création exceptionnelle devra être réconciliée avec le fichier client.</p>
               </div>
               <p className="text-sm text-slate-500">N° colis : <b className="font-mono">{createFor}</b></p>
 

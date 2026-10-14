@@ -36,7 +36,8 @@ import {
   PackageTransfer, TransferStatus, TransferReason, ProofOfDelivery,
   PostalCodeMapping, User, UserRole
 } from '../types';
-import { extractScanTokens, orderReferenceHint, orderReferenceMessage, ScanIdentificationError } from '../utils/barcode';
+import { orderReferenceHint, orderReferenceMessage, ScanIdentificationError } from '../utils/barcode';
+import { exactScanCandidates, individualScanCandidates, parcelCodeFields } from '../../functions/src/scanCode';
 import { placeKey } from '../utils/address';
 import { localDatePart } from '../utils/date';
 import { cleanUndefined } from '../utils/firestore';
@@ -1187,39 +1188,32 @@ export const confirmTransfer = async (transferId: string, toSignatureUrl?: strin
 };
 
 // ── Recherche colis par code scanné — SOCLE COMMUN (une seule logique) ───────
-// Les deux points d'entrée (findPackageByCode / findDispatchedPackageByCode)
-// partageaient jadis 90% du code MAIS divergeaient sur un détail critique :
-// seul findPackageByCode appliquait extractScanTokens (isole le BR… d'un
-// DataMatrix, retire le rang -002). Résultat : la passation entre chauffeurs
-// échouait sur des étiquettes qui marchaient partout ailleurs. On centralise :
-// mêmes candidats, même requête ; une référence partagée demande un code individuel.
-
-/** Candidats de recherche extraits d'un code scanné : chaîne brute + tokens
- *  (N° colis BR…, N° commande, version sans rang). Couvre les DataMatrix clients. */
-const scanSearchCandidates = (code: string): string[] => {
-  const list = [code.trim(), code.trim().toUpperCase(), ...extractScanTokens(code)].filter(Boolean);
-  return [...new Set(list)];
-};
-
-/** Requête Firestore : renvoie le 1er lot de colis correspondant à un candidat.
- *  Champs testés dans l'ordre : identifiants uniques d'abord, clientReference
- *  (N° de commande potentiellement partagé) en DERNIER. */
-const queryPackagesByCandidates = async (uniq: string[]): Promise<Package[]> => {
-  for (const field of ['carrierBarcode', 'barcode', 'externalId', 'orderNumber', 'clientReference'] as const) {
-    for (const value of uniq) {
-      const snap = await getDocs(query(
-        collection(db, PACKAGES_COLLECTION),
-        where(field, '==', value),
-        limit(2)
-      ));
-      if (snap.size > 1) throw new ScanIdentificationError('Ce code correspond à plusieurs colis. Scannez le code individuel DELIVREX ou saisissez le numéro imprimé sur ce carton.');
-      if (!snap.empty) return snap.docs.map(d => ({ id: d.id, ...d.data() } as Package));
+/** Sender-neutral lookup: complete labels first, ambiguity checked across every field. */
+const scanSearchCandidates = individualScanCandidates;
+const queryPackagesByCandidates = async (values: string[]): Promise<Package[]> => {
+  const lookup = async (candidates: string[]) => {
+    if (!candidates.length) return [];
+    if (candidates.length > 30) throw new ScanIdentificationError('Étiquette complexe : saisissez la référence individuelle du carton.');
+    const snapshots = await Promise.all(parcelCodeFields.map(field => getDocs(query(
+      collection(db, PACKAGES_COLLECTION), where(field, 'in', candidates), limit(2)
+    ))));
+    const matches = [...new Map(snapshots.flatMap(snap => snap.docs).map(d => [d.id, { ...d.data(), id: d.id } as Package])).values()];
+    if (matches.length > 1) throw new ScanIdentificationError('Cette référence correspond à plusieurs colis ou expéditeurs. Scannez un autre identifiant unique du carton, par exemple son code DELIVREX.');
+    return matches;
+  };
+  const exact = exactScanCandidates(values[0] || '');
+  const found = await lookup(exact);
+  if (found.length) return found;
+  const embedded = await lookup(values.filter(value => !exact.includes(value)));
+  if (embedded.length) return embedded;
+  const hint = orderReferenceHint(values[0] || '');
+  const references = [...new Set([...values, ...(hint ? [hint] : [])])];
+  if (references.length && references.length <= 30) {
+    const orders = await getDocs(query(collection(db, PACKAGES_COLLECTION), where('clientReference', 'in', references), limit(1)));
+    if (!orders.empty) {
+      const reference = String(orders.docs[0].data().clientReference || hint || values[0]);
+      throw new ScanIdentificationError(hint === reference ? orderReferenceMessage(reference) : `La référence ${reference} correspond à une commande. Scannez la référence individuelle du carton ou son code DELIVREX.`);
     }
-  }
-  const hint = orderReferenceHint(uniq[0] || '');
-  if (hint) {
-    const orders = await getDocs(query(collection(db, PACKAGES_COLLECTION), where('clientReference', '==', hint), limit(1)));
-    if (!orders.empty) throw new ScanIdentificationError(orderReferenceMessage(hint));
   }
   return [];
 };
@@ -1241,9 +1235,7 @@ export const findDispatchedPackageByCode = async (code: string): Promise<Package
 /**
  * Recherche un colis par n'importe quel code : tracking interne GFL,
  * N° colis client (externalId, ex BR0513), ou N° de commande (ex 13926865).
- * Repli : si le code scanné se termine par un suffixe d'index (ex "13926865-002"
- * ou "13926865002" pour "colis 02"), on réessaie sur le N° de commande nu —
- * les étiquettes clients encodent souvent commande + rang du colis.
+ * Une référence numérique reste entière : aucun retrait de suffixe ou de zéro initial.
  * Un code partagé demande le numéro individuel, sans choisir le plus récent.
  */
 export const findPackageByCode = async (code: string): Promise<Package | null> => {

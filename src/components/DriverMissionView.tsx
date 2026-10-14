@@ -593,10 +593,10 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
       .then(pkgs => {
         if (cancelled) return;
         setStopPackages(pkgs);
-        if (ids.some(id => !pkgs.some(p => p.id === id))) setPackagesError('La liste des BR est incomplète. Rechargez-la avant de préparer les cartons.');
+        if (ids.some(id => !pkgs.some(p => p.id === id))) setPackagesError('La liste des références est incomplète. Rechargez-la avant de préparer les cartons.');
       })
       .catch(err => {
-        if (!cancelled) setPackagesError('Impossible de charger les BR de cet arrêt. Vérifiez la connexion puis réessayez.');
+        if (!cancelled) setPackagesError('Impossible de charger les références de cet arrêt. Vérifiez la connexion puis réessayez.');
         // Ne PAS laisser stopPackages à [] sur erreur : combiné au gate, « 0 colis »
         // vaudrait « tout scanné ». On loggue ; le gate reste fermé car il compare
         // au compte autoritaire currentStop.packageIds (voir expectedStopCount).
@@ -3352,7 +3352,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
               expectedBarcodes={[]}
               alreadyScanned={scannedBarcodes}
               title={`${isPickupStop ? 'Scan enlèvement' : 'Scan livraison'} — ${currentStop?.contactName || ''}`}
-              hint="Scannez les BR à la suite, sans fermer la caméra. Une seule validation après le dernier colis."
+              hint="Scannez les codes-barres des colis à la suite, sans fermer la caméra. Une seule validation après le dernier colis."
               progress={stopPackages.length > 0 ? { done: deliveryScannedCount, total: expectedStopCount } : undefined}
 
               checklist={stopPackages.map(p => ({ code: packageDisplayCode(p) || 'sans code', done: scannedStopIds.has(p.id) }))}
