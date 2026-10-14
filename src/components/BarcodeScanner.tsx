@@ -13,6 +13,7 @@
 
 import React, { useEffect, useRef, useState, useCallback, useId } from 'react';
 import Modal from './shared/Modal';
+import ScanFeedback, { type ScanFeedbackValue } from './ScanFeedback';
 import { recordDiagnosticAction } from '../utils/runtimeDiagnostics';
 import { reportError } from '../services/logService';
 import { createScannerCameraSession, waitForCameraImage, waitForCameraRelease, monitorCamera, allowCameraRecovery } from '../utils/scannerCameraSession';
@@ -54,7 +55,7 @@ export interface BarcodeScannerProps {
   // Message d'issue AUTORITAIRE piloté par le parent (résultat réel après recherche
   // async : « pris », « introuvable », « passation »…), affiché PAR-DESSUS la caméra.
   // Sans lui, le flash interne (synchrone) ne connaît pas encore le vrai résultat.
-  flashMessage?: { type: 'ok' | 'warn'; text: string; } | null;
+  flashMessage?: ScanFeedbackValue | null;
 }
 
 const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
@@ -99,7 +100,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
     else if (!/confirmation en cours|vérification en cours/i.test(text)) setPersistentWarning(text);
   }, []);
   useEffect(() => {
-    if (flashMessage) recordScan(flashMessage.text, flashMessage.type === 'warn');
+    if (flashMessage) recordScan(flashMessage.text, flashMessage.type !== 'ok');
   }, [flashMessage?.type, flashMessage?.text, recordScan]);
 
   // Feedback haptique + visuel
@@ -168,12 +169,13 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   const autoCloseTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(autoCloseTimer.current), []);
   useEffect(() => {
-    if (busy || !checklist || checklist.length === 0 || autoClosedRef.current) return;
+    if (busy || (flashMessage && flashMessage.type !== 'ok') || !checklist || checklist.length === 0 || autoClosedRef.current) return;
     if (checklist.every(c => c.done)) {
       autoClosedRef.current = true;
       autoCloseTimer.current = setTimeout(() => { if (!busyRef.current) onCloseRef.current(); else autoClosedRef.current = false; }, 1200);
     }
-  }, [checklist, busy]);
+    return () => { clearTimeout(autoCloseTimer.current); autoClosedRef.current = false; };
+  }, [checklist, busy, flashMessage?.type]);
 
   const stopAndClear = useCallback(() => cameraCleanup.current(), []);
 
@@ -403,26 +405,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
         )}
 
         {/* Footer — Switch mode */}
-        {flashMessage && (
-          <div
-            className={`px-4 py-3 text-white text-center text-sm font-black ${flashMessage.type === 'ok' ? 'bg-green-700' : "bg-amber-800"}`}
-          >
-            {flashMessage.type === 'ok' ? (
-              <CheckCircle
-                size={18}
-                className="inline mr-1"
-                aria-hidden="true"
-              />
-            ) : (
-              <AlertTriangle
-                size={18}
-                className="inline mr-1"
-                aria-hidden="true"
-              />
-            )}{" "}
-            {flashMessage.text}
-          </div>
-        )}
+        {flashMessage && <ScanFeedback message={flashMessage} busy={busy} />}
 
         {/* Footer — Switch mode */}
         {!manualMode && progress && progress.total > 0 && !checklist && (
@@ -454,9 +437,9 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
         )}
 
         {/* Footer — Switch mode */}
-        {lastScanResult && (
+        {lastScanResult && (!flashMessage || lastScanResult === 'duplicate') && (
           <div
-            className={`absolute top-14 left-4 right-4 z-20 px-4 py-3 rounded-xl text-sm font-bold text-center break-words animate-fade-in ${
+            className={`shrink-0 px-4 py-3 text-sm font-bold text-center break-words animate-fade-in ${
               lastScanResult === 'success'
                 ? "bg-green-700 text-white"
                 : lastScanResult === 'duplicate'
@@ -595,7 +578,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
           )}
         </div>
 
-        {persistentWarning && (
+        {persistentWarning && persistentWarning !== flashMessage?.text && (
           <div role="alert" className="flex items-start gap-2 px-3 py-2 bg-amber-100 text-amber-950 text-sm">
             <p className="flex-1 break-words">{persistentWarning}</p>
             <button type="button" aria-label="Masquer cet avertissement de scan" onClick={() => setPersistentWarning('')} className="shrink-0 min-w-11 min-h-11 rounded-lg border border-amber-400">
@@ -617,7 +600,7 @@ const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
             </ol>
           </details>
         )}
-        {checklist?.length && checklist.every(item => item.done) ? (
+        {checklist?.length && checklist.every(item => item.done) && !busy && (!flashMessage || flashMessage.type === 'ok') ? (
           <p role="status" className="bg-green-800 text-white px-3 py-2 text-sm">
             Tous les colis sont scannés. Retour à la livraison…
           </p>

@@ -1,4 +1,5 @@
 import DeliveryParcelList from './DeliveryParcelList';
+import type { ScanFeedbackValue } from './ScanFeedback';
 import { deliveryStopGroup } from '../utils/deliveryGroup';
 import PackageScanInfo from './PackageScanInfo';
 import PackageTimeline from './PackageTimeline';
@@ -383,7 +384,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   // Pickup/Scan state
   const [showScanner, setShowScanner] = useState(false);
   const [scanPending, setScanPending] = useState(0);
-  const [scanFeedback, setScanFeedback] = useState<{ type: 'ok' | 'warn'; text: string } | null>(null);
+  const [scanFeedback, setScanFeedback] = useState<ScanFeedbackValue | null>(null);
   const stopScanQueue = useRef(Promise.resolve());
   const scanContextRef = useRef('');
   const [scannedBarcodes, setScannedBarcodes] = useState<string[]>([]);
@@ -1127,12 +1128,17 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   useEffect(() => {
     if (isPickupStop || currentStop?.status !== StopStatus.ARRIVED || deliveryStep !== 0 || !deliveryPrepared || scanPending > 0) return;
     if (expectedStopCount > 0 && deliveryScannedCount >= expectedStopCount && !autoAdvancedRef.current.has(0)) {
-      autoAdvancedRef.current.add(0);
-      if (showScanner) setShowScanner(false);
-      setDeliveryStep(1);
-      setStepAnnouncement('Tous les colis sont scannés. Étape 2 sur 5 : état de la marchandise.');
+      if (showScanner && scanFeedback?.type !== 'ok') return;
+      // Let the driver see the last green confirmation, even for a single parcel.
+      const timer = window.setTimeout(() => {
+        autoAdvancedRef.current.add(0);
+        setShowScanner(false);
+        setDeliveryStep(1);
+        setStepAnnouncement('Tous les colis sont scannés. Étape 2 sur 5 : état de la marchandise.');
+      }, showScanner ? 1200 : 0);
+      return () => window.clearTimeout(timer);
     }
-  }, [deliveryScannedCount, expectedStopCount, deliveryStep, currentStop?.status, isPickupStop, showScanner, deliveryPrepared, scanPending]);
+  }, [deliveryScannedCount, expectedStopCount, deliveryStep, currentStop?.status, isPickupStop, showScanner, deliveryPrepared, scanPending, scanFeedback?.type]);
 
   // Étape Preuve : PAS d'auto-avance. Le nombre de photos est variable (le chauffeur
   // peut en vouloir plusieurs) → on le laisse ajouter photo(s) + signature, puis
@@ -1343,20 +1349,30 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   scanContextRef.current = `${activeMissionId}/${currentStop?.id}`;
   const handleBarcodeScan = (barcode: string) => {
     if (!activeMission || !currentStop) return;
+    if (scannedBarcodes.includes(barcode)) {
+      setScanFeedback({ type: 'ok', text: `${barcode} — Déjà vérifié pour ${currentStop.contactName || 'ce client'}.` });
+      return;
+    }
     const expected = stopPackages.filter(p => packageMatchesCode(p, barcode));
     const context = `${activeMission.id}/${currentStop.id}`;
     const missionId = activeMission.id, stopId = currentStop.id;
     const source = isPickupStop ? 'driver-pickup' : 'driver-delivery';
-    setScanFeedback({ type: 'warn', text: `${barcode} — confirmation en cours…` });
+    setScanFeedback(previous => previous?.type === 'ok' || previous?.type === 'error' ? previous : { type: 'pending', text: `${barcode} — vérification en cours…` });
     setScanPending(n => n + 1);
     stopScanQueue.current = stopScanQueue.current.then(async () => {
       try {
-        setScanFeedback({ type: 'warn', text: `${barcode} — confirmation en cours…` });
+        setScanFeedback(previous => previous?.type === 'ok' || previous?.type === 'error' ? previous : { type: 'pending', text: `${barcode} — vérification en cours…` });
         const receipt = await scanPackage({ code: barcode, ...(expected.length === 1 ? { packageId: expected[0].id } : {}),
           driverId: currentUser.id, targetMissionId: missionId, stopId, source });
         const here = receipt.missionId === missionId && receipt.stopId === stopId;
-        const text = `${scanReceiptLabel(receipt)}${receipt.accepted && !here ? ' — visible dans sa tournée, à un autre arrêt.' : ''}`;
-        setScanFeedback({ type: receipt.accepted && here ? 'ok' : 'warn', text });
+        const accepted = receipt.accepted && here;
+        const wrongStop = receipt.outcome === 'wrong_stop' || (receipt.accepted && !here);
+        const text = accepted
+          ? `${receipt.packageCode || barcode} — Bon colis pour ${currentStop.contactName || 'ce client'}.`
+          : wrongStop
+            ? `${receipt.packageCode || barcode} — Mauvais colis pour cet arrêt. Ne pas remettre à ${currentStop.contactName || 'ce client'}.${receipt.contactName && receipt.contactName !== currentStop.contactName ? ` Destiné à ${receipt.contactName}.` : ''}`
+            : scanReceiptLabel(receipt);
+        setScanFeedback({ type: accepted ? 'ok' : 'error', text });
         showNotif(text);
         if (receipt.accepted && here && scanContextRef.current === context) {
           setScannedBarcodes(prev => prev.includes(barcode) ? prev : [...prev, barcode]);
@@ -1366,7 +1382,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
       } catch (error) {
         const reason = error instanceof Error ? error.message : 'Vérifiez la connexion puis scannez à nouveau.';
         const text = `${barcode} — scan non confirmé. ${reason}`;
-        setScanFeedback({ type: 'warn', text }); showNotif(text);
+        setScanFeedback({ type: 'error', text }); showNotif(text);
       } finally { setScanPending(n => Math.max(0, n - 1)); }
     });
   };
@@ -2109,7 +2125,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                                     className={`ui-button ${allStopScanned ? "ui-button-secondary" : "ui-button-primary"} gap-1.5`}
                                   >
                                     <ScanLine aria-hidden="true" size={18} />
-                                    Scanner les {preparationIds.length} colis
+                                    {preparationIds.length === 1 ? 'Scanner ce colis' : `Scanner les ${preparationIds.length} colis`}
                                   </button>
                                 </div>
                                 <details className="rounded-xl border border-slate-200 px-3">
@@ -3329,6 +3345,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
           >
             <BarcodeScanner
               onScan={handleBarcodeScan}
+              forwardDuplicates
               busy={scanPending > 0}
               flashMessage={scanFeedback}
               onClose={() => setShowScanner(false)}

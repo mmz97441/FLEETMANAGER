@@ -3,6 +3,7 @@ import { recordDiagnosticAction } from '../utils/runtimeDiagnostics';
 import { withDeadline } from '../utils/asyncDeadline';
 import Modal from './shared/Modal';
 import type { BarcodeScannerProps } from './BarcodeScanner';
+import ScanFeedback from './ScanFeedback';
 
 /** Kept in the calling screen's bundle: a missing camera chunk must not crash the tour or discard its draft. */
 export function ManualScanFallback({ onScan, onClose, busy, title, flashMessage, countLabel, onRetryCamera }: BarcodeScannerProps & { onRetryCamera?: () => void }) {
@@ -15,7 +16,7 @@ export function ManualScanFallback({ onScan, onClose, busy, title, flashMessage,
       <input id="fallback-scan-code" autoFocus value={code} onChange={event => setCode(event.target.value)} className="ui-input w-full" autoComplete="off" />
       <button type="submit" disabled={!code.trim() || busy} className="ui-button ui-button-primary w-full">{busy ? 'Confirmation en cours…' : 'Vérifier ce colis'}</button>
     </form>
-    {flashMessage && <p role="status" className={`mt-4 text-sm ${flashMessage.type === 'warn' ? 'text-amber-900' : 'text-green-800'}`}>{flashMessage.text}</p>}
+    {flashMessage && <div className="mt-4"><ScanFeedback message={flashMessage} busy={busy} /></div>}
     {countLabel && <p className="mt-3 text-sm">{countLabel}</p>}
   </Modal>;
 }
