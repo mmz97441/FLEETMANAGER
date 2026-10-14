@@ -1,3 +1,5 @@
+import DeliveryParcelList from './DeliveryParcelList';
+import { deliveryStopGroup } from '../utils/deliveryGroup';
 import PackageScanInfo from './PackageScanInfo';
 import PackageTimeline from './PackageTimeline';
 import { scanPackage, scanReceiptLabel, rememberScanMission } from '../services/scanService';
@@ -43,7 +45,7 @@ import {
   startDriverMission,
   recomputeMissionCounters,
   getPackagesByIds,
-  addPackagesToStop
+  prepareDeliveryStop
 } from '../services/missionService';
 import { UploadProgress } from '../services/podService';
 import { finalizePickup } from '../services/pickupService';
@@ -58,7 +60,7 @@ import TransferReceiveModal from './TransferReceiveModal';
 import ClaimScanModal from './ClaimScanModal';
 import ScanGateDialog from './ScanGateDialog';
 import StopReorderModal from './StopReorderModal';
-import { packageMatchesCode, packageScanCodes, packageDisplayCode, matchScansToPackages } from '../utils/barcode';
+import { packageMatchesCode, packageDisplayCode, matchScansToPackages } from '../utils/barcode';
 import { sameDeliveryPoint } from '../utils/address';
 import { getTourProgress } from '../utils/missionProgress';
 import { getCurrentPosition } from '../utils/geo';
@@ -437,7 +439,11 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
     setShowFinishBlocked(false);
     setFinishError('');
   }, [activeMissionId]);
-  const [stopPackages, setStopPackages] = useState<Package[]>([]);
+  const [loadedStopPackages, setStopPackages] = useState<Package[]>([]);
+  const [packagesLoading, setPackagesLoading] = useState(false);
+  const [packagesError, setPackagesError] = useState('');
+  const [packagesReload, setPackagesReload] = useState(0);
+  const [preparingStopId, setPreparingStopId] = useState<string | null>(null);
   // Filet de sécurité : colis à la même adresse NON inclus dans l'arrêt courant
   const [otherAtAddress, setOtherAtAddress] = useState<Package[]>([]);
 
@@ -454,7 +460,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   const closeIssue = useUnsavedChanges(showIssue && (!!issueForm.description.trim() || issueForm.category !== 'Véhicule / panne' || issueForm.priority !== 'Medium'), issueSubmitting);
   const closeFailure = useUnsavedChanges(showFailureModal && (!!failureNotes || failurePhotos.length > 0 || failureReason !== FailureReason.ABSENT), isProcessing);
   const closeReturn = useUnsavedChanges(showReturnModal && (returnPhotos.length > 0 || !!returnSignature), isProcessing);
-  const changeStop = useUnsavedChanges(!!signatureData || capturedPhotos.length > 0 || !!recipientName || !!reservesNote || scannedBarcodes.length > 0, isProcessing || scanPending > 0);
+  const changeStop = useUnsavedChanges(!!signatureData || capturedPhotos.length > 0 || !!recipientName || !!reservesNote || scannedBarcodes.length > 0, isProcessing || scanPending > 0 || !!preparingStopId);
   useEffect(() => () => clearTimeout(notificationTimer.current), []);
   useEffect(() => {
     let active = true;
@@ -548,7 +554,10 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
     activeMission ? [...activeMission.stops].sort((a, b) => a.sequence - b.sequence) : []
   , [activeMission]);
 
-  const currentStop = sortedStops[activeStopIndex] || null;
+  const currentStop = (preparingStopId ? sortedStops.find(stop => stop.id === preparingStopId) : null) || sortedStops[activeStopIndex] || null;
+  const deliveryGroup = useMemo(() => currentStop ? deliveryStopGroup(sortedStops, currentStop) : [], [sortedStops, currentStop]);
+  const preparationIds = [...new Set(deliveryGroup.flatMap(stop => stop.packageIds || []))];
+  const stopPackages = loadedStopPackages.filter(parcel => preparationIds.includes(parcel.id));
   const isPickupStop = currentStop?.type === 'PICKUP';
 
   // Tous les arrêts sont traités (livrés / échoués / passés) → on peut proposer de
@@ -571,21 +580,27 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
       setOtherAtAddress([]);
       return;
     }
-    const ids = currentStop.packageIds || [];
+    const ids = preparationIds;
     let cancelled = false;
+    setStopPackages([]); setPackagesLoading(true); setPackagesError('');
 
     // #1 : les colis de l'arrêt sont chargés par leurs IDs EXACTS (getPackagesByIds),
     // et NON en filtrant les « 500 plus récents » — sinon, sur gros volume ou colis
     // importés un jour précédent, la liste devenait vide/incomplète (compte faux et
     // gate de scan neutralisé). Par IDs, le compte est toujours complet.
     getPackagesByIds(ids)
-      .then(pkgs => { if (!cancelled) setStopPackages(pkgs); })
+      .then(pkgs => {
+        if (cancelled) return;
+        setStopPackages(pkgs);
+        if (ids.some(id => !pkgs.some(p => p.id === id))) setPackagesError('La liste des BR est incomplète. Rechargez-la avant de préparer les cartons.');
+      })
       .catch(err => {
+        if (!cancelled) setPackagesError('Impossible de charger les BR de cet arrêt. Vérifiez la connexion puis réessayez.');
         // Ne PAS laisser stopPackages à [] sur erreur : combiné au gate, « 0 colis »
         // vaudrait « tout scanné ». On loggue ; le gate reste fermé car il compare
         // au compte autoritaire currentStop.packageIds (voir expectedStopCount).
         console.error('Chargement colis de l’arrêt échoué:', err);
-      });
+      }).finally(() => { if (!cancelled) setPackagesLoading(false); });
 
     // Filet de sécurité (livraison uniquement) : colis destinés à CE point mais PAS
     // dans l'arrêt (oubli / mal regroupé). Requête large volontairement (best-effort).
@@ -608,7 +623,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
       setOtherAtAddress([]);
     }
     return () => { cancelled = true; unsub(); };
-  }, [currentStop?.id, currentStop?.type, (currentStop?.packageIds || []).join(','), activeMission?.id, currentUser.id, today]);
+  }, [currentStop?.id, currentStop?.type, preparationIds.join(','), activeMission?.id, currentUser.id, today, packagesReload]);
 
   // Reset COMPLET quand on change de stop. CRUCIAL avec le mode guidé auto : sans
   // remise à zéro de la preuve (photo/signature/nom), un arrêt non terminé laissait
@@ -628,7 +643,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
     setCapturedPhotos([]);
     setRecipientName('');
     setDeliveryLocation(DeliveryLocation.HAND_DELIVERY);
-  }, [currentStop?.id]);
+    setScanFeedback(null);
+  }, [activeMission?.id, currentStop?.id]);
 
   // Scan de contrôle à la livraison : chaque colis du stop doit être scanné
   // (étiquette client BR… ou tracking GFL…) avant de pouvoir valider.
@@ -642,7 +658,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   // (réseau), le gate ne s'auto-valide pas à tort (il reste à scanner ou forcer).
   const expectedStopCount = currentStop?.packageIds?.length || 0;
   const allStopScanned = expectedStopCount === 0 || deliveryScannedCount === expectedStopCount;
-  const scanRequirementMet = allStopScanned || scanBypass;
+  const deliveryPrepared = deliveryGroup.length <= 1 && !preparingStopId;
+  const scanRequirementMet = deliveryPrepared && scanPending === 0 && (allStopScanned || scanBypass);
   const missingStopCodes = stopPackages
     .filter(p => !scannedStopIds.has(p.id))
     .map(p => packageDisplayCode(p) || 'sans code');
@@ -753,16 +770,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
       </Modal>
     );
 
-  // Rattacher à l'arrêt courant les colis détectés au MÊME point de livraison mais
-  // absents de l'arrêt (bandeau rouge). `otherAtAddress` est déjà restreint au même
-  // point (adresse OU téléphone) et aux colis pertinents ; on n'exclut ici que ceux
-  // affectés à un AUTRE chauffeur (sinon on lui volerait un colis). On les ajoute
-  // DIRECTEMENT à cet arrêt via addPackagesToStop (transaction atomique) → plus
-  // aucune dépendance au regroupement placeKey qui bloquait avant.
-  // On ne rattache QUE les colis « libres » : non affectés à un autre chauffeur ET
-  // non déjà rattachés à une AUTRE tournée (sinon on créerait un doublon inter-missions
-  // — le colis serait livré et compté deux fois). Un colis d'une autre mission doit
-  // passer par le flux TRANSFERT (qui le retire de la mission d'origine), pas par ici.
+  // Propose only parcels available to this driver. The server rechecks recipient,
+  // address, ownership and proofs, then removes each parcel from its former stop.
   const claimableOthers = useMemo(() =>
     otherAtAddress.filter(p =>
       (!p.currentDriverId || p.currentDriverId === currentUser.id) &&
@@ -779,15 +788,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
     }
     setIsClaimingOthers(true);
     try {
-      let location: { lat: number; lng: number } | undefined;
-      try { location = await getCurrentPosition({ timeout: 5000 }); } catch {}
-      const n = await addPackagesToStop(
-        activeMission.id,
-        currentStop.id,
-        claimableOthers,
-        { id: currentUser.id, name: `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() || currentUser.email },
-        location,
-      );
+      const { addedCount: n } = await prepareCurrentDelivery(false, claimableOthers.map(parcel => parcel.id));
       showNotif(n > 0 ? `📦 ${n} colis rattaché${n > 1 ? 's' : ''} à cet arrêt` : 'Aucun colis à rattacher');
     } catch (err) {
       showNotif(`❌ Rattachement impossible${err instanceof Error ? ` (${err.message})` : ''}`);
@@ -1002,6 +1003,29 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
     setIsProcessing(false);
   };
 
+  const prepareCurrentDelivery = async (arrive = false, packageIds?: string[]) => {
+    if (!activeMission || !currentStop) throw new Error('Arrêt introuvable.');
+    const missionId = activeMission.id, stopId = currentStop.id;
+    setPreparingStopId(stopId);
+    try {
+      const result = await prepareDeliveryStop(missionId, stopId, { arrive, ...(packageIds ? { packageIds } : {}) });
+      setMissions(previous => previous.map(m => m.id === missionId ? result.mission : m));
+      const ordered = [...result.mission.stops].sort((a, b) => a.sequence - b.sequence);
+      setActiveStopIndex(Math.max(0, ordered.findIndex(stop => stop.id === stopId)));
+      return result;
+    } finally { setPreparingStopId(null); }
+  };
+
+  const openDeliveryScanner = async () => {
+    if (isProcessing || scanPending > 0) return;
+    setIsProcessing(true);
+    try {
+      if (!isPickupStop && deliveryGroup.length > 1) await prepareCurrentDelivery();
+      setShowScanner(true);
+    } catch (error) { showNotif(`❌ ${error instanceof Error ? error.message : 'Impossible de préparer les colis.'}`); }
+    finally { setIsProcessing(false); }
+  };
+
   // Marquer arrivée au stop
   const handleArriveAtStop = async () => {
     if (!activeMission || !currentStop) return;
@@ -1012,14 +1036,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
       // ARRIVÉE IMMÉDIATE : on NE bloque PLUS sur le GPS. Le guide s'ouvre tout de
       // suite (avant, le bouton attendait la position jusqu'à ~10 s → « rien ne se
       // passe »). Le point GPS d'arrivée est capté en arrière-plan (best-effort).
-      await commitStopOutcome({
-        missionId,
-        stopId,
-        stopPatch: {
-          status: StopStatus.ARRIVED,
-          arrivalTime: new Date().toISOString()
-        }
-      });
+      if (currentStop.type === 'DELIVERY') await prepareCurrentDelivery(true);
+      else await commitStopOutcome({ missionId, stopId, stopPatch: { status: StopStatus.ARRIVED, arrivalTime: new Date().toISOString() } });
       getCurrentPosition({ timeout: 5000 })
         .then(coords => commitStopOutcome({ missionId, stopId, stopPatch: { arrivalCoordinates: coords } }))
         .catch(() => {});
@@ -1107,14 +1125,14 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   // Étape 1 (Colis) → dès que TOUS les colis de l'arrêt sont scannés : on referme le
   // scanner (s'il est ouvert) ET on passe à l'État. Le chauffeur enchaîne sans rien toucher.
   useEffect(() => {
-    if (isPickupStop || currentStop?.status !== StopStatus.ARRIVED || deliveryStep !== 0) return;
+    if (isPickupStop || currentStop?.status !== StopStatus.ARRIVED || deliveryStep !== 0 || !deliveryPrepared || scanPending > 0) return;
     if (expectedStopCount > 0 && deliveryScannedCount >= expectedStopCount && !autoAdvancedRef.current.has(0)) {
       autoAdvancedRef.current.add(0);
       if (showScanner) setShowScanner(false);
       setDeliveryStep(1);
       setStepAnnouncement('Tous les colis sont scannés. Étape 2 sur 5 : état de la marchandise.');
     }
-  }, [deliveryScannedCount, expectedStopCount, deliveryStep, currentStop?.status, isPickupStop, showScanner]);
+  }, [deliveryScannedCount, expectedStopCount, deliveryStep, currentStop?.status, isPickupStop, showScanner, deliveryPrepared, scanPending]);
 
   // Étape Preuve : PAS d'auto-avance. Le nombre de photos est variable (le chauffeur
   // peut en vouloir plusieurs) → on le laisse ajouter photo(s) + signature, puis
@@ -1126,6 +1144,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   // en cours pour CET arrêt (retry GPS), sinon tous remis.
   const handleDeliverySuccess = async (deliveredIds?: Set<string>) => {
     if (!activeMission || !currentStop) { deliverIntentRef.current = null; return; }
+    if (!deliveryPrepared || scanPending > 0) { showNotif('Terminez la préparation et la vérification des colis avant de valider.'); return; }
     if (deliveredIds !== undefined) {
       deliverIntentRef.current = { stopId: currentStop.id, ids: deliveredIds };
     }
@@ -1904,7 +1923,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-600">
                 <span className="inline-flex items-center gap-1.5">
                   <PackageIcon aria-hidden="true" size={16} />
-                  {currentStop.packageCount} colis
+                  {isPickupStop || currentStopDone ? currentStop.packageCount : preparationIds.length} colis
                 </span>
                 <span className="inline-flex items-center gap-1.5">
                   <Clock aria-hidden="true" size={16} />
@@ -1924,22 +1943,10 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                   </span>
                 )}
               </div>
-              {!isPickupStop && !currentStopDone &&
-                deliveryStep > 0 &&
-                stopPackages.length > 0 && (
-                  <details className="text-sm text-slate-700">
-                    <summary className="min-h-11 flex items-center cursor-pointer font-medium">
-                      Références des {stopPackages.length} colis
-                    </summary>
-                    <ul className="space-y-1 pb-2">
-                      {stopPackages.map((pkg) => (
-                        <li key={pkg.id} className="break-all font-mono">
-                          {packageDisplayCode(pkg) || "Sans code"}
-                        </li>
-                      ))}
-                    </ul>
-                  </details>
-                )}
+              {!isPickupStop && !currentStopDone && <DeliveryParcelList
+                packages={stopPackages} expectedCount={preparationIds.length} scannedIds={scannedStopIds}
+                loading={packagesLoading} error={packagesError} onRetry={() => setPackagesReload(n => n + 1)}
+              />}
 
               {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
                       Alerte si le colis est sur une autre tournée (passation) ;
@@ -2094,50 +2101,16 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                               <div className="space-y-3">
                                 <div className="flex items-center justify-between">
                                   <p className="text-sm font-bold text-slate-700">
-                                    Colis scannés : {deliveryScannedCount}/
-                                    {stopPackages.length}
+                                    Colis vérifiés : {deliveryScannedCount}/{preparationIds.length}
                                   </p>
                                   <button
-                                    onClick={() => setShowScanner(true)}
+                                    onClick={() => void openDeliveryScanner()}
+                                    disabled={isProcessing || packagesLoading || !!packagesError}
                                     className={`ui-button ${allStopScanned ? "ui-button-secondary" : "ui-button-primary"} gap-1.5`}
                                   >
                                     <ScanLine aria-hidden="true" size={18} />
-                                    Scanner
+                                    Scanner les {preparationIds.length} colis
                                   </button>
-                                </div>
-                                <div className="flex flex-wrap gap-1.5">
-                                  {stopPackages.map((p) => {
-                                    const ok = scannedStopIds.has(p.id);
-                                    const noCode = packageScanCodes(p).length === 0;
-                                    return (
-                                      <span
-                                        key={p.id}
-                                        title={noCode ? 'Ce colis n’a pas de code scannable — à valider en « Forcer »' : undefined}
-                                        className={`max-w-full break-all px-2 py-1 rounded-lg text-sm font-mono font-bold border ${
-                                          ok
-                                        ? 'bg-green-50 border-green-300 text-green-700'
-                                        : noCode
-                                          ? 'bg-amber-50 border-amber-300 text-amber-700'
-                                          : 'bg-slate-50 border-slate-200 text-slate-500'
-                                    }`}
-                                      >
-                                        {ok ? (
-                                          <CheckCircle
-                                            aria-hidden="true"
-                                            size={16}
-                                            className="inline mr-1"
-                                          />
-                                        ) : noCode ? (
-                                          <AlertTriangle
-                                            aria-hidden="true"
-                                            size={16}
-                                            className="inline mr-1"
-                                          />
-                                        ) : null}
-                                        {packageDisplayCode(p) || "Sans code"}
-                                      </span>
-                                    );
-                                  })}
                                 </div>
                                 <details className="rounded-xl border border-slate-200 px-3">
                                   <summary className="min-h-11 cursor-pointer py-3 text-sm font-semibold">Voir les scans et les tournées de ces colis</summary>
@@ -2250,7 +2223,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                         {deliveryStep === 2 && (
                           <div className="space-y-3">
                             <p className="text-lg font-black text-slate-800 px-1">
-                              Qui réceptionne le colis ?
+                              Qui réceptionne {expectedStopCount === 1 ? 'ce colis' : `ces ${expectedStopCount} colis`} ?
                             </p>
                             {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
                       Alerte si le colis est sur une autre tournée (passation) ;
@@ -2369,7 +2342,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                         {deliveryStep === 3 && (
                           <div className="space-y-3">
                             <p className="text-lg font-black text-slate-800 px-1">
-                              Prends 1 photo, puis fais signer
+                              Une photo et une signature pour {expectedStopCount === 1 ? 'ce colis' : `les ${expectedStopCount} colis`}
                             </p>
                             {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
                       Alerte si le colis est sur une autre tournée (passation) ;
@@ -2596,7 +2569,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
 
                             <button
                               onClick={() => { if (scanRequirementMet) { handleDeliverySuccess(); } else { setScanGateFrom('final'); setShowScanGate(true); } }}
-                              disabled={isProcessing || !signatureData || !recipientName.trim() || capturedPhotos.length === 0}
+                              disabled={isProcessing || scanPending > 0 || !deliveryPrepared || !signatureData || !recipientName.trim() || capturedPhotos.length === 0}
                               className="ui-button ui-button-primary w-full gap-2 disabled:cursor-not-allowed"
                             >
                               {isProcessing ? (
@@ -2604,7 +2577,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                               ) : (
                                 <CheckCircle size={18} />
                               )}
-                              Livré <CheckCircle size={18} aria-hidden="true" />
+                              Confirmer la livraison de {expectedStopCount === 1 ? "ce colis" : `ces ${expectedStopCount} colis`}
                             </button>
                           </div>
                         )}
@@ -2636,7 +2609,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                               setDeliveryStep(s => Math.min(4, s + 1));
                             }
                           }}
-                              disabled={deliveryStep === 3 && (!signatureData || capturedPhotos.length === 0)}
+                              disabled={isProcessing || scanPending > 0 || (deliveryStep === 0 && !deliveryPrepared) || (deliveryStep === 3 && (!signatureData || capturedPhotos.length === 0))}
                               className={`ui-button ${deliveryStep === 0 && !allStopScanned ? "ui-button-secondary" : "ui-button-primary"} flex-1 gap-2 disabled:cursor-not-allowed`}
                             >
                               Continuer{" "}
@@ -3356,15 +3329,14 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
           >
             <BarcodeScanner
               onScan={handleBarcodeScan}
-              forwardDuplicates
               busy={scanPending > 0}
               flashMessage={scanFeedback}
               onClose={() => setShowScanner(false)}
               expectedBarcodes={[]}
               alreadyScanned={scannedBarcodes}
               title={`${isPickupStop ? 'Scan enlèvement' : 'Scan livraison'} — ${currentStop?.contactName || ''}`}
-              hint="Scannez le code individuel DELIVREX du carton, ou saisissez son numéro complet (ex : BR0513)."
-              progress={stopPackages.length > 0 ? { done: deliveryScannedCount, total: stopPackages.length } : undefined}
+              hint="Scannez les BR à la suite, sans fermer la caméra. Une seule validation après le dernier colis."
+              progress={stopPackages.length > 0 ? { done: deliveryScannedCount, total: expectedStopCount } : undefined}
 
               checklist={stopPackages.map(p => ({ code: packageDisplayCode(p) || 'sans code', done: scannedStopIds.has(p.id) }))}
             />

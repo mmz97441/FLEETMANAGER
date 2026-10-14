@@ -85,6 +85,33 @@ it('saves optional proof fields and its package reference atomically under real 
   const replay = await uploadAndCreatePOD(proof);
   expect(replay?.signatureUrl).toBe(result?.signatureUrl);
 });
+
+it('one photo and one signature form a single shared proof for three distinct BR parcels', async () => {
+  const ids = ['proof-package', 'proof-package-two', 'proof-package-three'];
+  await env.withSecurityRulesDisabled(async (ctx: any) => {
+    for (const [i, id] of ids.entries()) await setDoc(doc(ctx.firestore(), 'packages', id), {
+      externalId: `BR100${i}`, currentDriverId: 'proof-driver', missionId: 'proof-mission', stopId: 'stop', clientId: 'clientA', status: 'Livré',
+    });
+    await setDoc(doc(ctx.firestore(), 'missions', 'proof-mission'), {
+      driverId: 'proof-driver', status: 'En cours', stops: [{ id: 'stop', type: 'DELIVERY', status: 'Terminé', packageIds: ids, proofSyncPending: true }],
+    });
+  });
+  const groupedProof = { ...proof, packageIds: ids };
+  const result = await uploadAndCreatePOD(groupedProof);
+  expect(result).not.toBeNull();
+  const saved = (await getDoc(doc(config.db, 'proofs_of_delivery', 'proof-mission_stop'))).data()!;
+  expect(saved.packageIds).toEqual(ids);
+  expect(saved.photoUrls).toHaveLength(1);
+  expect(saved.signatureUrl).toBeTruthy();
+  for (const id of ids) {
+    const parcel = (await getDoc(doc(config.db, 'packages', id))).data()!;
+    expect(parcel.pod.photoUrls).toEqual(saved.photoUrls);
+    expect(parcel.pod.signatureUrl).toBe(saved.signatureUrl);
+    expect(parcel.pod.recipientName).toBe(proof.recipientName);
+  }
+  const replay = await uploadAndCreatePOD(groupedProof);
+  expect(replay?.timestamp).toBe(result?.timestamp);
+});
 it('does not publish proof or partial references when any package is unauthorized', async () => {
   const result = await uploadAndCreatePOD({
     ...proof,
