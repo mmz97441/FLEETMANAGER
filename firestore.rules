@@ -460,6 +460,7 @@ service cloud.firestore {
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.action != 'PACKAGE_SCANNED'
         && request.resource.data.action != 'PACKAGE_CREATED_ADHOC'
+        && request.resource.data.action != 'DELIVERY_STOP_PREPARED'
         && !request.resource.data.action.matches('^VOTE_.*'); // Scan et gestion des votes : journal du serveur uniquement.
       allow update, delete: if false;
     }

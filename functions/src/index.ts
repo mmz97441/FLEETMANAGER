@@ -1,3 +1,4 @@
+import { prepareDeliveryStopHandler } from './prepareDeliveryStop';
 import { createAdHocPackageHandler } from './adhocPackage';
 import { importReference, validateImportManifest } from './importManifest';
 import { receivePackagesAtHubHandler } from './hubReception';
@@ -2651,3 +2652,4 @@ Exemple : {"metric":"deliveryRate","dimension":"zone","period":"month","chart":"
   });
 
 export const createAdHocPackage = functions.region('europe-west1').https.onCall((data, context) => createAdHocPackageHandler(data, context, { db, requireActiveCaller, isAdminCaller }));
+export const prepareDeliveryStop = functions.region('europe-west1').https.onCall((data, context) => prepareDeliveryStopHandler(data, context, { db, requireActiveCaller }));

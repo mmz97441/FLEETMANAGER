@@ -33,7 +33,8 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createAdHocPackage = exports.interpretAnalytics = exports.acceptQuote = exports.getTeamDirectory = exports.notifyPackageStatus = exports.returnPackage = exports.deleteAbsence = exports.deleteVehicle = exports.importPackages = exports.assignVehicle = exports.askFleetGenius = exports.sendBusinessNotification = exports.transferPackages = exports.scanPackage = exports.dispatchMissions = exports.finishMission = exports.receivePackagesAtHub = exports.saveAbsence = exports.revokeOwnSessions = exports.linkAuthToProfile = exports.recordUserPresence = exports.getOwnProfile = exports.createInvitation = exports.activateAccount = exports.validateInvitationToken = exports.forcePasswordReset = exports.toggleUserStatus = exports.cleanupExpiredInvitations = exports.deleteUserCompletely = exports.optimizeTours = exports.employeeVoting = exports.recordClientErrors = exports.associateCarrierBarcode = void 0;
+exports.prepareDeliveryStop = exports.createAdHocPackage = exports.interpretAnalytics = exports.acceptQuote = exports.getTeamDirectory = exports.notifyPackageStatus = exports.returnPackage = exports.deleteAbsence = exports.deleteVehicle = exports.importPackages = exports.assignVehicle = exports.askFleetGenius = exports.sendBusinessNotification = exports.transferPackages = exports.scanPackage = exports.dispatchMissions = exports.finishMission = exports.receivePackagesAtHub = exports.saveAbsence = exports.revokeOwnSessions = exports.linkAuthToProfile = exports.recordUserPresence = exports.getOwnProfile = exports.createInvitation = exports.activateAccount = exports.validateInvitationToken = exports.forcePasswordReset = exports.toggleUserStatus = exports.cleanupExpiredInvitations = exports.deleteUserCompletely = exports.optimizeTours = exports.employeeVoting = exports.recordClientErrors = exports.associateCarrierBarcode = void 0;
+const prepareDeliveryStop_1 = require("./prepareDeliveryStop");
 const adhocPackage_1 = require("./adhocPackage");
 const importManifest_1 = require("./importManifest");
 const hubReception_1 = require("./hubReception");
@@ -2110,4 +2111,5 @@ Exemple : {"metric":"deliveryRate","dimension":"zone","period":"month","chart":"
     };
 });
 exports.createAdHocPackage = functions.region('europe-west1').https.onCall((data, context) => (0, adhocPackage_1.createAdHocPackageHandler)(data, context, { db, requireActiveCaller, isAdminCaller }));
+exports.prepareDeliveryStop = functions.region('europe-west1').https.onCall((data, context) => (0, prepareDeliveryStop_1.prepareDeliveryStopHandler)(data, context, { db, requireActiveCaller }));
 //# sourceMappingURL=index.js.map

@@ -1563,89 +1563,17 @@ export const addManualStopToMission = async (
   });
 };
 
-/**
- * Rattache des colis à UN ARRÊT PRÉCIS d'une mission, DANS UNE SEULE TRANSACTION
- * (mission + colis écrits atomiquement). Utilisé par « Ajouter N colis à cet
- * arrêt » côté chauffeur : les colis détectés à la même adresse mais absents de
- * l'arrêt y sont ajoutés directement (pas de dépendance au regroupement placeKey).
- *
- * Compare-and-set : on NE touche PAS un colis déjà DELIVERED/RETURNED (jamais de
- * résurrection), et on dédoublonne s'il est déjà dans l'arrêt. Renvoie le nombre
- * réellement rattaché.
- */
-export const addPackagesToStop = async (
-  missionId: string,
-  stopId: string,
-  packages: Package[],
-  driver: { id: string; name: string },
-  location?: { lat: number; lng: number }
-): Promise<number> => {
-  const now = new Date().toISOString();
-  const ref = doc(db, MISSIONS_COLLECTION, missionId);
-  return await runTransaction(db, async (tx) => {
-    const snap = await tx.get(ref);
-    if (!snap.exists()) throw new Error('Tournée introuvable');
-    const mission = { id: snap.id, ...snap.data() } as Mission;
-    const stopIdx = mission.stops.findIndex(s => s.id === stopId);
-    if (stopIdx < 0) throw new Error('Arrêt introuvable');
-    // On ne rattache JAMAIS à un arrêt déjà terminé : sinon la resync verrait un
-    // arrêt COMPLETED contenant un colis « en cours » et le passerait à tort en Livré.
-    if (mission.stops[stopIdx].status === StopStatus.COMPLETED)
-      throw new Error('Arrêt déjà terminé — impossible d’y rattacher des colis');
-
-    // Lectures AVANT écritures (contrainte transaction Firestore).
-    const pkgRefs = packages.map(p => doc(db, PACKAGES_COLLECTION, p.id));
-    const pkgSnaps = await Promise.all(pkgRefs.map(r => tx.get(r)));
-
-    const already = new Set(mission.stops[stopIdx].packageIds || []);
-    const toAttach: { ref: ReturnType<typeof doc>; pkg: Package }[] = [];
-    for (let i = 0; i < packages.length; i++) {
-      const s = pkgSnaps[i];
-      if (!s.exists()) continue;
-      const cur = { id: s.id, ...s.data() } as Package;
-      if (cur.status === PackageStatus.DELIVERED || cur.status === PackageStatus.RETURNED) continue; // pas de résurrection
-      // Colis déjà rattaché à une AUTRE tournée → on ne le vole pas (doublon inter-missions).
-      // Le bon chemin est le transfert (qui le retire de la mission d'origine).
-      if (cur.missionId && cur.missionId !== missionId) continue;
-      if (already.has(cur.id)) continue;
-      toAttach.push({ ref: pkgRefs[i], pkg: cur });
-      already.add(cur.id);
-    }
-    if (toAttach.length === 0) return 0;
-
-    const stops = mission.stops.map((s, i) => {
-      if (i !== stopIdx) return s;
-      const packageIds = [...(s.packageIds || []), ...toAttach.map(t => t.pkg.id)];
-      return { ...s, packageIds, packageCount: packageIds.length };
-    });
-    tx.update(ref, cleanUndefined({
-      stops,
-      ...recomputeMissionCounters(stops),
-      status: mission.status === MissionStatus.COMPLETED ? MissionStatus.IN_PROGRESS : (mission.status || MissionStatus.IN_PROGRESS),
-      updatedAt: now,
-    }));
-
-    for (const { ref: pRef, pkg } of toAttach) {
-      const movement = cleanUndefined({
-        timestamp: now,
-        action: 'OUT_FOR_DELIVERY' as const,
-        driverId: driver.id, driverName: driver.name,
-        fromDriverName: pkg.currentDriverId && pkg.currentDriverId !== driver.id
-          ? [...(pkg.movements || [])].reverse().find(m => m.driverName)?.driverName : undefined,
-        vehicleId: mission.vehicleId, vehiclePlate: mission.vehiclePlate, location,
-        notes: `Rattaché à l'arrêt (livraison groupée même adresse) par ${driver.name}`,
-      }) as PackageMovement;
-      tx.update(pRef, cleanUndefined({
-        missionId, stopId,
-        currentDriverId: driver.id, currentVehicleId: mission.vehicleId,
-        status: PackageStatus.IN_DELIVERY,
-        movements: [...(pkg.movements || []), movement],
-        updatedAt: now,
-      }));
-    }
-    return toAttach.length;
-  });
+/** Prepare one shared delivery on the server, preserving any existing proof. */
+export const prepareDeliveryStop = async (missionId: string, stopId: string, options: { arrive?: boolean; packageIds?: string[] } = {}): Promise<{ mission: Mission; addedCount: number }> => {
+  const call = httpsCallable<any, { mission: Mission; addedCount: number }>(getFunctions(app, 'europe-west1'), 'prepareDeliveryStop');
+  return (await call({ missionId, stopId, ...options })).data;
 };
+
+/** The server removes attached parcels from their previous pending stop atomically. */
+export const addPackagesToStop = async (
+  missionId: string, stopId: string, packages: Package[],
+  _driver: { id: string; name: string }, _location?: { lat: number; lng: number },
+): Promise<number> => (await prepareDeliveryStop(missionId, stopId, { packageIds: packages.map(p => p.id) })).addedCount;
 
 // ============================================================================
 // DRIVERS HELPERS

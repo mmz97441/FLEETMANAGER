@@ -1,3 +1,4 @@
+import { packageDisplayCode } from '../utils/barcode';
 /**
  * DRIVER TOUR VIEW — Feuille de route chauffeur
  * 
@@ -485,7 +486,7 @@ const DriverTourView: React.FC<DriverTourViewProps> = ({ currentUser, vehicles }
                             pkg.status === PackageStatus.FAILED ? 'bg-red-500' :
                             'bg-slate-300'
                           }`} />
-                          <span className="font-mono text-slate-500">{pkg.barcode || pkg.orderNumber}</span>
+                          <span className="font-mono text-slate-500">{packageDisplayCode(pkg)}</span>
                           <span className="text-slate-700 font-medium truncate">{pkg.contactName}</span>
                         </div>
                       ))}

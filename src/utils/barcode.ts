@@ -67,8 +67,10 @@ export const packageMatchesCode = (pkg: ScannableCodes, scannedCode: string): bo
 };
 
 /** Le code affiché au chauffeur : celui de l'étiquette physique en priorité. */
-export const packageDisplayCode = (pkg: ScannableCodes): string =>
-  pkg.externalId || pkg.barcode || pkg.orderNumber || '';
+export const packageDisplayCode = (pkg: ScannableCodes): string => {
+  const br = [pkg.externalId, pkg.orderNumber, pkg.barcode].find(code => /^BR[-A-Z0-9]+$/i.test(code?.trim() || ''));
+  return br?.trim().toUpperCase() || pkg.externalId || pkg.barcode || pkg.orderNumber || '';
+};
 
 /**
  * Assigne chaque code scanné à AU PLUS UN colis (glouton, 1:1), et renvoie
