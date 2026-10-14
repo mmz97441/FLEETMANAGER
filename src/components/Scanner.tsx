@@ -4,10 +4,12 @@ import { withDeadline } from '../utils/asyncDeadline';
 import Modal from './shared/Modal';
 import type { BarcodeScannerProps } from './BarcodeScanner';
 import ScanFeedback from './ScanFeedback';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 
 /** Kept in the calling screen's bundle: a missing camera chunk must not crash the tour or discard its draft. */
 export function ManualScanFallback({ onScan, onClose, busy, title, flashMessage, countLabel, onRetryCamera }: BarcodeScannerProps & { onRetryCamera?: () => void }) {
   const [code, setCode] = useState('');
+  useUnsavedChanges(!!code.trim(), !!busy, true);
   return <Modal isOpen mobileFullscreen onClose={onClose} busy={busy} title={title || 'Scanner un colis'}>
     <p className="text-sm text-amber-900 bg-amber-50 rounded-xl p-3 mb-4">Le lecteur caméra est indisponible. Vous pouvez saisir le numéro du colis ou réessayer la caméra ici, sans vous déconnecter.</p>
     {onRetryCamera && <button type="button" disabled={busy} onClick={onRetryCamera} className="ui-button ui-button-secondary w-full mb-4">Réessayer la caméra</button>}
@@ -21,6 +23,7 @@ export function ManualScanFallback({ onScan, onClose, busy, title, flashMessage,
   </Modal>;
 }
 export default function Scanner(props: BarcodeScannerProps) {
+  useUnsavedChanges(false, !!props.busy, true);
   const [CameraScanner, setCameraScanner] = useState<React.ComponentType<BarcodeScannerProps> | null>(null);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);

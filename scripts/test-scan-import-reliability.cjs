@@ -65,7 +65,7 @@ const read = async (collection, id) => (await db.collection(collection).doc(id).
     const r = await scan({}); assert.equal(r.accepted, false); assert.match(r.message, /Autre chauffeur fictif/); assert.match(r.message, /11:20/);
     assert.equal((await read('packages', packageId)).status, 'Livré');
   });
-  const adhoc = { code: 'BR-MANUAL-TEST', clientId: client, contactName: 'Fictif', address: 'Adresse fictive', city: 'Saint-Denis', postalCode: '97400', verifiedMissing: true };
+  const adhoc = { clientVersion: '4.37.0', code: 'BR-MANUAL-TEST', clientId: client, contactName: 'Fictif', address: 'Adresse fictive', city: 'Saint-Denis', postalCode: '97400', verifiedMissing: true };
   await check('exceptional creation requires declared office verification, and cannot use an order label', async () => {
     await assert.rejects(service.createAdHocPackage.run({ ...adhoc, verifiedMissing: false }, context(driver)), e => e.code === 'invalid-argument');
     await assert.rejects(service.createAdHocPackage.run({ ...adhoc, code: '0012345678300123450101' }, context(driver)), e => e.code === 'failed-precondition');

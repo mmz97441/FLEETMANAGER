@@ -1,0 +1,221 @@
+{
+  "checks": [
+    {
+      "name": "1 parcels prepared as one visit",
+      "pass": true
+    },
+    {
+      "name": "1: red cross identifies wrong client, no parcel counted",
+      "pass": true
+    },
+    {
+      "name": "1: scanner fits mobile viewport",
+      "pass": true
+    },
+    {
+      "name": "1: no green before server confirmation",
+      "pass": true
+    },
+    {
+      "name": "1: correct parcel has green check and recipient",
+      "pass": true
+    },
+    {
+      "name": "1: last green confirmation is visible before auto advance",
+      "pass": true
+    },
+    {
+      "name": "final-success: photo in progress blocks progression and reload",
+      "pass": true
+    },
+    {
+      "name": "final-success: one submission with all photos, recipient and signature",
+      "pass": true
+    },
+    {
+      "name": "final-success: last visit leaves no invisible draft or active lock",
+      "pass": true
+    },
+    {
+      "name": "1 parcels prepared as one visit",
+      "pass": true
+    },
+    {
+      "name": "1: red cross identifies wrong client, no parcel counted",
+      "pass": true
+    },
+    {
+      "name": "1: scanner fits mobile viewport",
+      "pass": true
+    },
+    {
+      "name": "1: no green before server confirmation",
+      "pass": true
+    },
+    {
+      "name": "1: correct parcel has green check and recipient",
+      "pass": true
+    },
+    {
+      "name": "1: last green confirmation is visible before auto advance",
+      "pass": true
+    },
+    {
+      "name": "final-upload-failure: one submission with all photos, recipient and signature",
+      "pass": true
+    },
+    {
+      "name": "final-upload-failure: last visit leaves no invisible draft or active lock",
+      "pass": true
+    },
+    {
+      "name": "final-upload-failure: exact photo and signature remain in durable intent",
+      "pass": true
+    },
+    {
+      "name": "final-upload-failure: background replay finishes without an invisible reload blocker",
+      "pass": true
+    },
+    {
+      "name": "1 parcels prepared as one visit",
+      "pass": true
+    },
+    {
+      "name": "1: red cross identifies wrong client, no parcel counted",
+      "pass": true
+    },
+    {
+      "name": "1: scanner fits mobile viewport",
+      "pass": true
+    },
+    {
+      "name": "1: no green before server confirmation",
+      "pass": true
+    },
+    {
+      "name": "1: correct parcel has green check and recipient",
+      "pass": true
+    },
+    {
+      "name": "1: last green confirmation is visible before auto advance",
+      "pass": true
+    },
+    {
+      "name": "final-offline: one submission with all photos, recipient and signature",
+      "pass": true
+    },
+    {
+      "name": "final-offline: last visit leaves no invisible draft or active lock",
+      "pass": true
+    },
+    {
+      "name": "final-offline: exact photo and signature remain in durable intent",
+      "pass": true
+    },
+    {
+      "name": "Offline queued visit is explicit and cannot be submitted twice",
+      "pass": true
+    },
+    {
+      "name": "final-offline: background replay finishes without an invisible reload blocker",
+      "pass": true
+    },
+    {
+      "name": "1 parcels prepared as one visit",
+      "pass": true
+    },
+    {
+      "name": "1: red cross identifies wrong client, no parcel counted",
+      "pass": true
+    },
+    {
+      "name": "1: scanner fits mobile viewport",
+      "pass": true
+    },
+    {
+      "name": "1: no green before server confirmation",
+      "pass": true
+    },
+    {
+      "name": "1: correct parcel has green check and recipient",
+      "pass": true
+    },
+    {
+      "name": "1: last green confirmation is visible before auto advance",
+      "pass": true
+    },
+    {
+      "name": "Failed local write keeps the full editable draft and blocks update",
+      "pass": true
+    },
+    {
+      "name": "1 parcels prepared as one visit",
+      "pass": true
+    },
+    {
+      "name": "1: red cross identifies wrong client, no parcel counted",
+      "pass": true
+    },
+    {
+      "name": "1: scanner fits mobile viewport",
+      "pass": true
+    },
+    {
+      "name": "1: no green before server confirmation",
+      "pass": true
+    },
+    {
+      "name": "1: correct parcel has green check and recipient",
+      "pass": true
+    },
+    {
+      "name": "1: last green confirmation is visible before auto advance",
+      "pass": true
+    },
+    {
+      "name": "Failure photo in progress blocks confirmation and closing",
+      "pass": true
+    },
+    {
+      "name": "final-failure: last visit leaves no invisible draft or active lock",
+      "pass": true
+    },
+    {
+      "name": "1 parcels prepared as one visit",
+      "pass": true
+    },
+    {
+      "name": "1: red cross identifies wrong client, no parcel counted",
+      "pass": true
+    },
+    {
+      "name": "1: scanner fits mobile viewport",
+      "pass": true
+    },
+    {
+      "name": "1: no green before server confirmation",
+      "pass": true
+    },
+    {
+      "name": "1: correct parcel has green check and recipient",
+      "pass": true
+    },
+    {
+      "name": "1: last green confirmation is visible before auto advance",
+      "pass": true
+    },
+    {
+      "name": "final-late-photo: photo in progress blocks progression and reload",
+      "pass": true
+    },
+    {
+      "name": "Late photo cannot contaminate another visit or leave busy stuck",
+      "pass": true
+    },
+    {
+      "name": "No uncaught browser exception",
+      "pass": true
+    }
+  ],
+  "errors": []
+}

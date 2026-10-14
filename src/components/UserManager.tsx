@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { User, UserRole } from '../types';
 import { Users, Plus, Shield, User as UserIcon, Settings, Briefcase, Truck, Edit, Save, X, Trash2, Mail, Search, Filter, LayoutGrid, List, Building2, UserPlus, AlertTriangle, CheckCircle, Calendar, HeartPulse, Send, Ban, RefreshCw, Key, MoreVertical, GraduationCap, Lock, AlertCircle } from 'lucide-react';
 import UserConnectionStatus from './UserConnectionStatus';
@@ -13,6 +13,8 @@ import { notifySuccess, notifyError, notifyInfo } from '../services/logService';
 import { usePermissions, Permission } from '../usePermissions';
 import { roleKey } from '../utils/role';
 import { validateName, validateEmail, validatePhone, ValidationResult } from '../utils/validation';
+import { useAutoUpdate } from '../hooks/useAutoUpdate';
+import { userAppVersionStatus, type UserAppVersionState } from '../utils/appVersionStatus';
 
 interface UserManagerProps {
   users: User[];
@@ -79,6 +81,13 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
+  const [versionFilter, setVersionFilter] = useState<UserAppVersionState | 'all'>('all');
+  const appUpdate = useAutoUpdate();
+  const [versionSignalNow, setVersionSignalNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = window.setInterval(() => setVersionSignalNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   // FORM STATE
   const [formData, setFormData] = useState<Partial<User>>({
@@ -197,6 +206,7 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
             user.lastName.toLowerCase().includes(searchTerm.toLowerCase()) || 
             user.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
             (user.companyName || '').toLowerCase().includes(searchTerm.toLowerCase());
+          if (versionFilter !== 'all' && userAppVersionStatus(user, appUpdate, versionSignalNow).state !== versionFilter) return false;
           
           if (roleFilter === 'all') return matchesSearch;
 
@@ -216,7 +226,7 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
           
           return matchesSearch && matchesRole;
       });
-  }, [users, searchTerm, roleFilter]);
+  }, [users, searchTerm, roleFilter, versionFilter, versionSignalNow, appUpdate.latestVersion, appUpdate.latestBuildId]);
 
   // --- HELPERS UI (ICONES & BADGES) ---
   const getRoleIcon = (role: string) => {
@@ -548,7 +558,7 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
         {/* --- TOOLBAR AVEC ACTIONS CLAIRES --- */}
         <div className="bg-white p-3 rounded-2xl shadow-sm border border-slate-200 flex flex-col xl:flex-row justify-between items-center gap-4 sticky top-4 z-20">
             {/* Barre de Recherche & Filtres */}
-            <div className="flex flex-col md:flex-row items-center gap-3 w-full xl:w-auto">
+            <div className="flex flex-col md:flex-row md:flex-wrap items-center gap-3 w-full xl:w-auto">
                 <div className="relative w-full md:w-64">
                     <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                     <input 
@@ -578,6 +588,18 @@ const UserManager: React.FC<UserManagerProps> = ({ users, currentUser, onAddUser
                         <option value={UserRole.INTERN}>Stagiaires</option>
                     </select>
                 </div>
+                <select
+                    aria-label="Filtrer par état de mise à jour"
+                    value={versionFilter}
+                    onChange={e => setVersionFilter(e.target.value as UserAppVersionState | 'all')}
+                    className="w-full md:w-auto bg-slate-50 text-slate-700 font-semibold text-sm rounded-xl px-3 py-2.5"
+                >
+                    <option value="all">Toutes les versions</option>
+                    <option value="required">Mise à jour requise</option>
+                    <option value="stale">Signal ancien à vérifier</option>
+                    <option value="unknown">Version à vérifier</option>
+                    <option value="current">Appareils récents à jour</option>
+                </select>
                 
                 {/* Switch Grid/List */}
                 <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">

@@ -2,6 +2,7 @@ import { auth } from '../firebaseConfig';
 import { MissionStop, StopStatus, PackageStatus } from '../types';
 import { commitStopOutcome } from './missionService';
 import { uploadAndCreatePOD, uploadFailurePOD } from './podService';
+import { withUpdateOperation } from './updateSafety';
 
 type Action = Parameters<typeof commitStopOutcome>[0];
 type SuccessProof = Parameters<typeof uploadAndCreatePOD>[0];
@@ -47,17 +48,19 @@ function openDB(): Promise<IDBDatabase> {
   return dbPromise;
 }
 async function write(entry: PendingDelivery | string): Promise<void> {
-  const db = await openDB();
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction('deliveries', 'readwrite');
-    const store = tx.objectStore('deliveries');
-    if (typeof entry === 'string') store.delete(entry);
-    else store.put(entry);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error);
+  return withUpdateOperation(async () => {
+    const db = await openDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('deliveries', 'readwrite');
+      const store = tx.objectStore('deliveries');
+      if (typeof entry === 'string') store.delete(entry);
+      else store.put(entry);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+    window.dispatchEvent(new Event(CHANGE));
   });
-  window.dispatchEvent(new Event(CHANGE));
 }
 export async function pendingDeliveries(
   userId: string,
@@ -141,28 +144,47 @@ async function perform(entry: PendingDelivery) {
 function run(entry: PendingDelivery) {
   const existing = running.get(entry.id);
   if (existing) return existing;
-  const task = perform(entry).finally(() => running.delete(entry.id));
+  const task = withUpdateOperation(() => perform(entry)).finally(() => running.delete(entry.id));
   running.set(entry.id, task);
   return task;
 }
-export async function submitDelivery(entry: PendingDelivery) {
-  // One IndexedDB transaction also protects the original intention across tabs.
-  const db = await openDB();
-  const saved = await new Promise<PendingDelivery>((resolve, reject) => {
-    const tx = db.transaction('deliveries', 'readwrite');
-    const store = tx.objectStore('deliveries');
-    const request = store.get(entry.id);
-    let original = entry;
-    request.onsuccess = () => {
-      if (request.result) original = request.result as PendingDelivery;
-      else store.add(entry);
-    };
-    tx.oncomplete = () => resolve(original);
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error);
+function stableIntent(value: unknown): string {
+  if (Array.isArray(value)) return '[' + value.map(stableIntent).join(',') + ']';
+  if (value && typeof value === 'object') return '{' + Object.entries(value).filter(([, child]) => child !== undefined)
+    .sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => JSON.stringify(key) + ':' + stableIntent(child)).join(',') + '}';
+  return JSON.stringify(value);
+}
+function deliveryIntent(entry: PendingDelivery) {
+  // A retry obtains a fresh GPS/time automatically. The human-entered proof and
+  // parcel outcomes must still be exactly the intention durably stored first.
+  const { coordinates: _coordinates, recordedAt: _recordedAt, ...proof } = entry.proof;
+  return { id: entry.id, userId: entry.userId, kind: entry.kind, proof,
+    missionId: entry.action.missionId, stopId: entry.action.stopId,
+    status: entry.action.stopPatch.status, packageOutcomes: entry.action.packageOutcomes };
+}
+export async function submitDelivery(entry: PendingDelivery, onDurablyStored?: (matchesSubmittedIntent: boolean) => void) {
+  return withUpdateOperation(async () => {
+    // One IndexedDB transaction also protects the original intention across tabs.
+    const db = await openDB();
+    const saved = await new Promise<PendingDelivery>((resolve, reject) => {
+      const tx = db.transaction('deliveries', 'readwrite');
+      const store = tx.objectStore('deliveries');
+      const request = store.get(entry.id);
+      let original = entry;
+      request.onsuccess = () => {
+        if (request.result) original = request.result as PendingDelivery;
+        else store.add(entry);
+      };
+      tx.oncomplete = () => resolve(original);
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+    // This callback is reached only after IndexedDB tx.oncomplete, never after
+    // a request's onsuccess. Consumers can release precisely this saved draft.
+    onDurablyStored?.(saved === entry || stableIntent(deliveryIntent(saved)) === stableIntent(deliveryIntent(entry)));
+    window.dispatchEvent(new Event(CHANGE));
+    return run(saved);
   });
-  window.dispatchEvent(new Event(CHANGE));
-  return run(saved);
 }
 export async function syncDeliveries(userId: string) {
   const pending = await pendingDeliveries(userId);

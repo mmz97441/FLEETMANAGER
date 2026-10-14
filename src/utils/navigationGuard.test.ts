@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const confirm = vi.hoisted(() => vi.fn());
 vi.mock('../services/confirmationService', () => ({ confirmAction: confirm }));
 import { installNavigationGuard, registerNavigationDraft, requestNavigation } from './navigationGuard';
+import { beginUpdateOperation } from '../services/updateSafety';
 
 class Pop extends Event { state: unknown; constructor(_type: string, options: { state: unknown }) { super('popstate'); this.state = options.state; } }
 let browser: EventTarget & { location: URL; history: any };
@@ -58,6 +59,18 @@ it('combines nested drafts into one decision for an application view change', as
   const unregisterSecond = registerNavigationDraft(() => ({ dirty: true, busy: false }));
   try { confirm.mockResolvedValue(true); const change = vi.fn(); expect(await requestNavigation(change)).toBe(true); expect(confirm).toHaveBeenCalledOnce(); expect(change).toHaveBeenCalledOnce(); }
   finally { unregisterSecond(); }
+});
+
+it('guards a native reload during a background operation and releases it afterwards', () => {
+  const release = beginUpdateOperation();
+  try {
+    const busyReload = new Event('beforeunload', { cancelable: true });
+    browser.dispatchEvent(busyReload);
+    expect(busyReload.defaultPrevented).toBe(true);
+  } finally { release(); }
+  const safeReload = new Event('beforeunload', { cancelable: true });
+  browser.dispatchEvent(safeReload);
+  expect(safeReload.defaultPrevented).toBe(false);
 });
 
 it('preserves existing history after a full module reload, on both cancellation and acceptance', async () => {

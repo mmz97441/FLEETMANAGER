@@ -64,6 +64,68 @@ it('persists the full action without starting network writes offline', async () 
   expect(calls.commit).not.toHaveBeenCalled();
   expect(await outbox.pendingDeliveries('driver')).toHaveLength(1);
 });
+it('blocks reload from the first local write through network completion, then permits queued proof recovery', async () => {
+  const outbox = await import('./deliveryOutbox');
+  const safety = await import('./updateSafety');
+  const states: boolean[] = [];
+  const unsubscribe = safety.subscribeUpdateSafety(() => states.push(safety.getUpdateSafetySnapshot().busy));
+  let finish!: () => void;
+  calls.proof.mockImplementationOnce(() => new Promise(resolve => { finish = () => resolve(null); }));
+  const work = outbox.submitDelivery(entry());
+  const result = expect(work).rejects.toThrow('preuves en attente');
+  expect(safety.getUpdateSafetySnapshot().busy).toBe(true);
+  await vi.waitFor(() => expect(calls.proof).toHaveBeenCalledOnce());
+  expect(states).toEqual([true]);
+  finish(); await result;
+  expect(states).toEqual([true, false]);
+  expect(safety.getUpdateSafetySnapshot().busy).toBe(false);
+  expect((await outbox.pendingDeliveries('driver'))[0].proof.photosBase64).toEqual(['photo-data']);
+  unsubscribe();
+});
+it('reports a background retry as busy but does not block on a durable offline job', async () => {
+  const outbox = await import('./deliveryOutbox');
+  const safety = await import('./updateSafety');
+  vi.stubGlobal('navigator', { onLine: false });
+  await expect(outbox.submitDelivery(entry())).rejects.toThrow();
+  expect(safety.getUpdateSafetySnapshot().busy).toBe(false);
+  vi.stubGlobal('navigator', { onLine: true });
+  let finish!: () => void;
+  calls.proof.mockImplementationOnce(() => new Promise(resolve => { finish = () => resolve({ id: 'proof' }); }));
+  const work = outbox.syncDeliveries('driver');
+  await vi.waitFor(() => expect(calls.proof).toHaveBeenCalledOnce());
+  expect(safety.getUpdateSafetySnapshot().busy).toBe(true);
+  finish(); await work;
+  expect(safety.getUpdateSafetySnapshot().busy).toBe(false);
+  expect(await outbox.pendingDeliveries('driver')).toEqual([]);
+});
+it('acknowledges the exact durable intent before an offline or upload failure', async () => {
+  const outbox = await import('./deliveryOutbox');
+  const acknowledge = vi.fn();
+  vi.stubGlobal('navigator', { onLine: false });
+  await expect(outbox.submitDelivery(entry(), acknowledge)).rejects.toThrow();
+  expect(acknowledge).toHaveBeenCalledExactlyOnceWith(true);
+  expect((await outbox.pendingDeliveries('driver'))[0].proof.photosBase64).toEqual(['photo-data']);
+  vi.stubGlobal('navigator', { onLine: true });
+  calls.proof.mockResolvedValueOnce(null);
+  acknowledge.mockClear();
+  await expect(outbox.submitDelivery(entry(), acknowledge)).rejects.toThrow('preuves en attente');
+  expect(acknowledge).toHaveBeenCalledExactlyOnceWith(true);
+});
+it('never acknowledges a failed local write or a changed proof as the same durable intent', async () => {
+  const outbox = await import('./deliveryOutbox');
+  vi.stubGlobal('navigator', { onLine: false });
+  await expect(outbox.submitDelivery(entry())).rejects.toThrow();
+  const acknowledge = vi.fn();
+  const edited = { ...entry(), proof: { ...entry().proof, photosBase64: ['different-photo'] } };
+  await expect(outbox.submitDelivery(edited, acknowledge)).rejects.toThrow();
+  expect(acknowledge).toHaveBeenCalledExactlyOnceWith(false);
+  expect((await outbox.pendingDeliveries('driver'))[0].proof.photosBase64).toEqual(['photo-data']);
+  vi.resetModules();
+  vi.stubGlobal('indexedDB', { open: () => { throw new Error('Disk unavailable'); } });
+  const blocked = await import('./deliveryOutbox'); acknowledge.mockClear();
+  await expect(blocked.submitDelivery(entry(), acknowledge)).rejects.toThrow('Disk unavailable');
+  expect(acknowledge).not.toHaveBeenCalled();
+});
 it('reopens a browser-closed IndexedDB connection and retains photos and signatures', async () => {
   const factory = indexedDB;
   let connection!: IDBDatabase;

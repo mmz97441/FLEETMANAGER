@@ -4,6 +4,7 @@ import { finalizePickup } from './pickupService';
 import { uploadProofPhoto } from './podService';
 import { cleanUndefined } from '../utils/firestore';
 import type { ReturnProof } from '../types';
+import { withUpdateOperation } from './updateSafety';
 
 type PickupParams = Parameters<typeof finalizePickup>[0];
 export type FieldOperation = {
@@ -37,15 +38,18 @@ function openDB() {
   return opening;
 }
 async function transaction<T>(storeName: string, write: boolean, action: (store: IDBObjectStore, done: (value: T) => void) => void): Promise<T> {
-  const db = await openDB();
-  return new Promise<T>((resolve, reject) => {
-    const tx = db.transaction(storeName, write ? 'readwrite' : 'readonly');
-    let result: T;
-    action(tx.objectStore(storeName), value => { result = value; });
-    tx.oncomplete = () => resolve(result);
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error);
-  });
+  const work = async () => {
+    const db = await openDB();
+    return new Promise<T>((resolve, reject) => {
+      const tx = db.transaction(storeName, write ? 'readwrite' : 'readonly');
+      let result: T;
+      action(tx.objectStore(storeName), value => { result = value; });
+      tx.oncomplete = () => resolve(result);
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  };
+  return write ? withUpdateOperation(work) : work();
 }
 const changed = () => window.dispatchEvent(new Event(fieldOperationEvent));
 export async function fieldOperations(userId: string) {
@@ -106,15 +110,17 @@ async function perform(entry: FieldOperation) {
 }
 /** First local intent wins across tabs. Never overwrite scans/proofs on retry. */
 export async function submitFieldOperation(entry: FieldOperation): Promise<void> {
-  const retained = await transaction<FieldOperation>('operations', true, (store, done) => {
-    const r = store.get(entry.id);
-    r.onsuccess = () => { const saved = r.result || entry; if (!r.result) store.add(entry); done(saved); };
+  return withUpdateOperation(async () => {
+    const retained = await transaction<FieldOperation>('operations', true, (store, done) => {
+      const r = store.get(entry.id);
+      r.onsuccess = () => { const saved = r.result || entry; if (!r.result) store.add(entry); done(saved); };
+    });
+    changed();
+    if (retained.userId !== entry.userId) throw new Error('Cette opération appartient à un autre compte.');
+    const existing = running.get(retained.id);
+    if (existing) return existing;
+    const work = perform(retained).finally(() => running.delete(retained.id));
+    running.set(retained.id, work);
+    return work;
   });
-  changed();
-  if (retained.userId !== entry.userId) throw new Error('Cette opération appartient à un autre compte.');
-  const existing = running.get(retained.id);
-  if (existing) return existing;
-  const work = perform(retained).finally(() => running.delete(retained.id));
-  running.set(retained.id, work);
-  return work;
 }

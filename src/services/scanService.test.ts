@@ -17,6 +17,19 @@ it('reuses an uncertain request after reload and does not show a receipt on netw
   expect(receipt.replayed).toBe(true); expect(call.mock.calls[1][0]).toEqual(first);
   expect([...storage.keys()].some(k => k.includes('.pending.'))).toBe(false);
 });
+it('replays an older stored request with the running app version and the original business identity', async () => {
+  let service = await import('./scanService');
+  call.mockRejectedValueOnce({ code: 'functions/deadline-exceeded' });
+  const input = { code: 'BR-UPDATE', driverId: 'd', source: 'driver-claim' as const };
+  await expect(service.scanPackage(input)).rejects.toBeDefined();
+  const first = call.mock.calls[0][0];
+  const key = [...storage.keys()].find(key => key.includes('.pending.'))!;
+  storage.set(key, JSON.stringify({ ...JSON.parse(storage.get(key)!), clientVersion: '4.36.0' }));
+  vi.resetModules(); service = await import('./scanService');
+  call.mockResolvedValueOnce({ data: { ...result, requestId: first.requestId, replayed: true } });
+  await service.scanPackage(input);
+  expect(call.mock.calls[1][0]).toEqual({ ...first, clientVersion: __APP_VERSION__ });
+});
 it('a second physical scan gets a new request while concurrent callback noise shares the same request', async () => {
   const service = await import('./scanService');
   call.mockResolvedValue({ data: result });

@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { PenTool, CheckCircle, X, Undo2 } from 'lucide-react';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 const SignaturePad: React.FC<{
   onSave: (dataUrl: string) => void;
   onCancel: () => void;
@@ -8,6 +9,7 @@ const SignaturePad: React.FC<{
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [hasContent, setHasContent] = useState(false);
+  useUnsavedChanges(hasContent, isDrawing, true);
   const strokesRef = useRef<{ x: number; y: number }[][]>([]);
   const currentStrokeRef = useRef<{ x: number; y: number }[]>([]);
 

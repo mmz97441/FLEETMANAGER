@@ -1,4 +1,5 @@
 import SignaturePad from './DeliverySignaturePad';
+import { beginUpdateOperation } from '../services/updateSafety';
 import ReturnHubModal from './ReturnHubModal';
 import RecoveryPanel from './RecoveryPanel';
 import { readFieldDraft, saveFieldDraft, fieldOperations, submitFieldOperation } from '../services/fieldOperationsOutbox';
@@ -30,7 +31,7 @@ import { PendingManualStop, readPendingManualStop, reservePendingManualStop, cle
 import { stopFormPayload } from '../utils/missionStopForm';
 import { startUxTask } from '../utils/uxMetrics';
 import { missionStatusLabel, stopStatusLabel } from '../utils/operationalLabels';
-import React, { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import {
   Mission, MissionStatus, MissionType, MissionStop, StopStatus,
   PackageStatus, FailureReason, Package, DeliveryLocation,
@@ -177,6 +178,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   const [recipientName, setRecipientName] = useState('');
   const [deliveryLocation, setDeliveryLocation] = useState<DeliveryLocation>(DeliveryLocation.HAND_DELIVERY);
   const [capturedPhotos, setCapturedPhotos] = useState<string[]>([]);
+  const [photosReading, setPhotosReading] = useState(0);
   const MAX_PHOTOS = 5;
   // Assistant de livraison pas-à-pas (petits écrans) + état marchandise à la réception
   const [deliveryStep, setDeliveryStep] = useState(0);
@@ -190,6 +192,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   const DELIVERY_STEPS = ['Colis', 'État', 'Réception', 'Preuve', 'Validation'];
   const [signatureData, setSignatureData] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const submittingDelivery = useRef<{ scope: string; generation: number } | null>(null);
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
   const [failurePhotos, setFailurePhotos] = useState<string[]>([]);
   const [notification, setNotification] = useState<string | null>(null);
@@ -249,6 +252,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   const [showFinishBlocked, setShowFinishBlocked] = useState(false);
   const [finishError, setFinishError] = useState('');
   const [pendingProofs, setPendingProofs] = useState<string[]>([]);
+  const [pendingProofScope, setPendingProofScope] = useState('');
+  const [retainedDeliveryScope, setRetainedDeliveryScope] = useState('');
   const [pendingProofError, setPendingProofError] = useState('');
   const notificationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const stopCardRef = useRef<HTMLDivElement>(null);
@@ -277,15 +282,16 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   const [returningPackage, setReturningPackage] = useState<Package | null>(null);
 
 
-  const closeManual = useUnsavedChanges(showManualStop && !pendingManualStop && Object.values(manualStop).some(Boolean), isProcessing);
-  const closeIssue = useUnsavedChanges(showIssue && (!!issueForm.description.trim() || issueForm.category !== 'Véhicule / panne' || issueForm.priority !== 'Medium'), issueSubmitting);
-  const closeFailure = useUnsavedChanges(showFailureModal && (!!failureNotes || failurePhotos.length > 0 || failureReason !== FailureReason.ABSENT), isProcessing);
-  const changeStop = useUnsavedChanges(!!signatureData || capturedPhotos.length > 0 || !!recipientName || !!reservesNote || scannedBarcodes.length > 0, isProcessing || pickupDraftSaving || scanPending > 0 || !!preparingStopId);
+  const closeManual = useUnsavedChanges(showManualStop && !pendingManualStop && Object.values(manualStop).some(Boolean), isProcessing, showManualStop);
+  const closeIssue = useUnsavedChanges(showIssue && (!!issueForm.description.trim() || issueForm.category !== 'Véhicule / panne' || issueForm.priority !== 'Medium'), issueSubmitting, showIssue);
+  const closeFailure = useUnsavedChanges(showFailureModal && (!!failureNotes || failurePhotos.length > 0 || failureReason !== FailureReason.ABSENT), isProcessing || photosReading > 0, showFailureModal);
+  const deliveryHasDraft = !!signatureData || capturedPhotos.length > 0 || !!recipientName || !!reservesNote || scannedBarcodes.length > 0 || (showFailureModal && failurePhotos.length > 0);
+  const changeStop = useUnsavedChanges(deliveryHasDraft, isProcessing || pickupDraftSaving || photosReading > 0 || scanPending > 0 || !!preparingStopId || isOptimizing, showScanner || showSignature || showClaimModal || showTransferModal || showScanGate || showReorder);
   useEffect(() => () => clearTimeout(notificationTimer.current), []);
   useEffect(() => {
     let active = true;
     const refresh = () => pendingDeliveries(currentUser.id, activeMissionId || undefined).then(rows => {
-      if (active) { setPendingProofs(rows.map(row => row.action.stopId)); setPendingProofError(''); }
+      if (active) { setPendingProofs(rows.map(row => row.action.stopId)); setPendingProofScope(`${currentUser.id}/${activeMissionId || ''}`); setPendingProofError(''); }
     }).catch(() => { if (active) setPendingProofError('Impossible de vérifier les preuves conservées sur ce téléphone.'); });
     void refresh();
     window.addEventListener(outboxChangeEvent, refresh);
@@ -391,6 +397,43 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
     currentStop.status === StopStatus.COMPLETED || currentStop.status === StopStatus.FAILED ||
     currentStop.status === StopStatus.SKIPPED
   );
+  const stopDoneRef = useRef(currentStopDone); stopDoneRef.current = currentStopDone;
+  const deliveryScope = `${currentUser.id}/${activeMission?.id || ''}/${currentStop?.id || ''}`;
+  const photoContext = useRef({ scope: deliveryScope, generation: 0 });
+  if (photoContext.current.scope !== deliveryScope) photoContext.current = { scope: deliveryScope, generation: photoContext.current.generation + 1 };
+  const photoReads = useRef(new Set<{ reader: FileReader; finish: (updateCounter?: boolean) => void }>());
+  const hasCurrentPhotoRead = () => photoReads.current.size > 0;
+  useLayoutEffect(() => {
+    setPhotosReading(0);
+    if (submittingDelivery.current && submittingDelivery.current.scope !== deliveryScope) {
+      submittingDelivery.current = null; setIsProcessing(false);
+    }
+    return () => {
+      photoContext.current = { ...photoContext.current, generation: photoContext.current.generation + 1 };
+      for (const task of [...photoReads.current]) { task.finish(false); if (task.reader.readyState === 1) task.reader.abort(); }
+    };
+  }, [deliveryScope]);
+  const currentDeliveryQueued = !isPickupStop && !!currentStop && (retainedDeliveryScope === deliveryScope ||
+    (!deliveryHasDraft && pendingProofScope === `${currentUser.id}/${activeMissionId || ''}` && pendingProofs.includes(currentStop.id)));
+
+  // Let an arrived delivery finish before requiring an update, including a camera
+  // opened before its first photo has been stored.
+  useUnsavedChanges(false, false, currentStop?.status === StopStatus.ARRIVED && !currentStopDone && !currentDeliveryQueued);
+
+  const resetDeliveryDraft = () => {
+    setScannedBarcodes([]); setSignatureData(null); setCapturedPhotos([]); setRecipientName('');
+    setReservesNote(''); setShowSignature(false); setShowScanner(false); setShowScanGate(false);
+    setShowFailureModal(false); setFailureReason(FailureReason.ABSENT); setFailureNotes(''); setFailurePhotos([]);
+    setDeliveryLocation(DeliveryLocation.HAND_DELIVERY); setDeliveryStep(0); setMerchandiseGood(true); setShowReserves(false);
+  };
+  const acknowledgeDeliveryDraft = (context: typeof photoContext.current) => (matches: boolean) => {
+    if (!matches) throw new Error('Une validation différente est déjà conservée pour cet arrêt. Vos nouvelles informations n’ont pas remplacé cette preuve.');
+    if (photoContext.current.scope !== context.scope || photoContext.current.generation !== context.generation) return;
+    // The entire action/photo/signature was acknowledged by IndexedDB. The form
+    // can disappear even if the network later fails; its replay remains available.
+    setRetainedDeliveryScope(context.scope);
+    resetDeliveryDraft();
+  };
 
   // Charger les colis du stop courant (PICKUP : pour le scan ; DELIVERY : pour
   // afficher au chauffeur les N° de colis à remettre)
@@ -465,6 +508,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
     setRecipientName('');
     setDeliveryLocation(DeliveryLocation.HAND_DELIVERY);
     setScanFeedback(null);
+    setShowFailureModal(false); setFailurePhotos([]); setFailureNotes(''); setFailureReason(FailureReason.ABSENT);
+    setRetainedDeliveryScope('');
   }, [activeMission?.id, currentStop?.id, currentUser.id]);
 
   const pickupDraftKey = isPickupStop && activeMission && currentStop ? `pickup/${activeMission.id}/${currentStop.id}` : '';
@@ -906,6 +951,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   // en cours pour CET arrêt (retry GPS), sinon tous remis.
   const handleDeliverySuccess = async (deliveredIds?: Set<string>) => {
     if (!activeMission || !currentStop) { deliverIntentRef.current = null; return; }
+    if (isProcessing || hasCurrentPhotoRead() || currentDeliveryQueued || currentStopDone) return;
+    const context = photoContext.current;
     if (!deliveryPrepared || scanPending > 0) { showNotif('Terminez la préparation et la vérification des colis avant de valider.'); return; }
     if (deliveredIds !== undefined) {
       deliverIntentRef.current = { stopId: currentStop.id, ids: deliveredIds };
@@ -919,7 +966,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
       : deliveryScannedCount === stopPackages.length
         ? `Colis scannés: ${deliveryScannedCount}/${stopPackages.length}`
         : `⚠️ Validé sans scan complet (${deliveryScannedCount}/${stopPackages.length} scannés)`;
-    setIsProcessing(true);
+    submittingDelivery.current = context; setIsProcessing(true);
     // GPS OBLIGATOIRE : toute LIVRAISON doit avoir un point GPS précis (mode strict).
     // (La passation entre chauffeurs — prise en charge / transfert — n'est PAS
     // concernée : elle a son propre flux sans GPS obligatoire.)
@@ -927,7 +974,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
     // et on affiche une modale bloquante qui force l'activation du GPS du téléphone.
     let coords: { lat: number; lng: number };
     const pos = await ensureGps(handleDeliverySuccess);
-    if (!pos) { setIsProcessing(false); return; }
+    if (photoContext.current.scope !== context.scope || photoContext.current.generation !== context.generation) return;
+    if (stopDoneRef.current) { submittingDelivery.current = null; setIsProcessing(false); return; }
+    if (!pos) { submittingDelivery.current = null; setIsProcessing(false); return; }
     coords = pos;
     let observation: ReturnType<typeof startUxTask> | null = null;
     try {
@@ -971,9 +1020,10 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
           recipientName:recipientName || undefined,deliveryLocation,merchandiseGoodCondition:merchandiseGood,
           reservesNote:merchandiseGood ? undefined : reservesNote,signatureBase64:signatureData || undefined,
           photosBase64:capturedPhotos,coordinates: coords,notes:scanTrace }
-      });
+      }, acknowledgeDeliveryDraft(context));
 
       observation.finish('success', { items: stopIds.length });
+      if (photoContext.current.scope !== context.scope || photoContext.current.generation !== context.generation) return;
 
       // 4bis. JOURNAL — livraison (succès + éventuels non remis). Trace « qui a livré
       //       quoi » visible par le président. Best-effort, n'interrompt jamais.
@@ -995,6 +1045,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
 
       // Reset UI
       deliverIntentRef.current = null; // repartir « tous livrés » pour le prochain stop
+      setScannedBarcodes([]);
       setSignatureData(null);
       setCapturedPhotos([]);
       setRecipientName('');
@@ -1014,20 +1065,23 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
       // « fuiter » sur une prochaine livraison. Le chauffeur repart propre.
       deliverIntentRef.current = null;
       reportError('driver.delivery', err, { silent: true });
-      showNotif(`❌ Erreur livraison${err instanceof Error ? ` — ${err.message}` : ''}`);
+      if (photoContext.current.scope === context.scope && photoContext.current.generation === context.generation) showNotif(`⚠️ ${err instanceof Error ? err.message : 'Livraison non confirmée. Vérifiez les envois en attente.'}`);
     }
-    setIsProcessing(false);
+    if (submittingDelivery.current === context) { submittingDelivery.current = null; setIsProcessing(false); }
   };
 
   // Échec livraison
   const handleDeliveryFailure = async () => {
-    if (!activeMission || !currentStop || isProcessing) return;
+    if (!activeMission || !currentStop || isProcessing || hasCurrentPhotoRead() || currentDeliveryQueued || currentStopDone) return;
+    const context = photoContext.current;
     if (!failurePhotos.length) { showNotif('❌ Une photo est obligatoire pour déclarer l’échec.'); return; }
-    setIsProcessing(true);
+    submittingDelivery.current = context; setIsProcessing(true);
     let observation: ReturnType<typeof startUxTask> | null = null;
     try {
       let coords: { lat: number; lng: number } | undefined;
       try { coords = await getCurrentPosition(); } catch {}
+      if (photoContext.current.scope !== context.scope || photoContext.current.generation !== context.generation) return;
+      if (stopDoneRef.current) { submittingDelivery.current = null; setIsProcessing(false); return; }
 
       const now = new Date().toISOString();
 
@@ -1041,9 +1095,10 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
         proof:{missionId: activeMission.id,stopId: currentStop.id,packageIds:currentStop.packageIds,
           driverId: currentUser.id,driverName: `${currentUser.firstName} ${currentUser.lastName}`,vehicleId: activeMission.vehicleId || '',vehiclePlate: activeMission.vehiclePlate || '',
           failureReason,failureNotes,photosBase64:failurePhotos,coordinates:coords ?? null}
-      });
+      }, acknowledgeDeliveryDraft(context));
 
       observation.finish('success', { items: currentStop.packageIds.length });
+      if (photoContext.current.scope !== context.scope || photoContext.current.generation !== context.generation) return;
 
       // FIX BUG 2: Prochain arrêt dans l'ORDRE TRIÉ
       const updatedSorted = [...updatedStops].sort((a, b) => a.sequence - b.sequence);
@@ -1053,6 +1108,12 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
       if (nextSortedIdx >= 0) setActiveStopIndex(nextSortedIdx);
 
       // Reset
+      setScannedBarcodes([]);
+      setSignatureData(null);
+      setShowSignature(false);
+      setCapturedPhotos([]);
+      setRecipientName('');
+      setReservesNote('');
       setShowFailureModal(false);
       setFailureReason(FailureReason.ABSENT);
       setFailureNotes('');
@@ -1063,41 +1124,41 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
     } catch (err) {
       observation?.finish('error', { items: currentStop.packageIds.length, errors: 1 });
       reportError('driver.markFailed', err, { silent: true });
-      showNotif(`❌ Erreur${err instanceof Error ? ` — ${err.message}` : ''}`);
+      if (photoContext.current.scope === context.scope && photoContext.current.generation === context.generation) showNotif(`⚠️ ${err instanceof Error ? err.message : 'Échec à synchroniser.'}`);
     }
-    setIsProcessing(false);
+    if (submittingDelivery.current === context) { submittingDelivery.current = null; setIsProcessing(false); }
   };
 
-  // Photo livraison
-  const handlePhotoCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // A reader belongs to an account/visit generation, including late load events.
+  const readDeliveryPhoto = (e: React.ChangeEvent<HTMLInputElement>, failure: boolean) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
-    if (capturedPhotos.length >= MAX_PHOTOS) return;
+    if (isProcessing || currentDeliveryQueued || (failure ? failurePhotos : capturedPhotos).length >= MAX_PHOTOS) return;
+    const context = photoContext.current;
+    const isCurrent = () => photoContext.current.scope === context.scope && photoContext.current.generation === context.generation;
+    const release = beginUpdateOperation();
+    setPhotosReading(count => count + 1);
     const reader = new FileReader();
+    let settled = false;
+    const task = { reader, finish: (updateCounter = true) => {
+      if (settled) return;
+      settled = true; photoReads.current.delete(task); release();
+      if (updateCounter && isCurrent()) setPhotosReading(count => Math.max(0, count - 1));
+    } };
+    photoReads.current.add(task);
+    reader.onloadend = () => task.finish();
+    reader.onerror = () => { if (isCurrent()) showNotif('❌ Photo illisible. Reprenez la photo avant de valider.'); };
     reader.onload = () => {
-      if (reader.result) {
-        setCapturedPhotos(prev => prev.length < MAX_PHOTOS ? [...prev, reader.result as string] : prev);
+      if (reader.result && isCurrent()) {
+        (failure ? setFailurePhotos : setCapturedPhotos)(prev => prev.length < MAX_PHOTOS ? [...prev, reader.result as string] : prev);
       }
     };
-    reader.readAsDataURL(file);
-    // Reset pour pouvoir reprendre la même photo
-    e.target.value = '';
+    try { reader.readAsDataURL(file); }
+    catch { task.finish(); if (isCurrent()) showNotif('❌ Photo illisible. Reprenez la photo avant de valider.'); }
   };
-
-  // Photo échec (preuve de tentative)
-  const handleFailurePhotoCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (failurePhotos.length >= MAX_PHOTOS) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (reader.result) {
-        setFailurePhotos(prev => prev.length < MAX_PHOTOS ? [...prev, reader.result as string] : prev);
-      }
-    };
-    reader.readAsDataURL(file);
-    e.target.value = '';
-  };
+  const handlePhotoCapture = (event: React.ChangeEvent<HTMLInputElement>) => readDeliveryPhoto(event, false);
+  const handleFailurePhotoCapture = (event: React.ChangeEvent<HTMLInputElement>) => readDeliveryPhoto(event, true);
 
   // ============================================================================
   // SCAN / ENLÈVEMENT
@@ -1808,7 +1869,11 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                   {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
                       Alerte si le colis est sur une autre tournée (passation) ;
                       ajoute les colis non affectés (prise en charge directe). */}
-                  {currentStop.status === StopStatus.ARRIVED && !isPickupStop && (
+                  {currentDeliveryQueued && <div role="status" className="ui-notice ui-notice-warning">
+                    <p>Validation et preuves conservées sur ce téléphone. Synchronisation en attente ; ne recommencez pas la remise.</p>
+                    <button type="button" className="ui-button ui-button-secondary mt-2" onClick={openPendingProofs}>Vérifier les envois en attente</button>
+                  </div>}
+                  {currentStop.status === StopStatus.ARRIVED && !isPickupStop && !currentDeliveryQueued && (
                       <>
                         {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
                       Alerte si le colis est sur une autre tournée (passation) ;
@@ -2310,7 +2375,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
 
                             <button
                               onClick={() => { if (scanRequirementMet) { handleDeliverySuccess(); } else { setScanGateFrom('final'); setShowScanGate(true); } }}
-                              disabled={isProcessing || scanPending > 0 || !deliveryPrepared || !signatureData || !recipientName.trim() || capturedPhotos.length === 0}
+                              disabled={isProcessing || photosReading > 0 || scanPending > 0 || !deliveryPrepared || !signatureData || !recipientName.trim() || capturedPhotos.length === 0}
                               className="ui-button ui-button-primary w-full gap-2 disabled:cursor-not-allowed"
                             >
                               {isProcessing ? (
@@ -2350,7 +2415,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                               setDeliveryStep(s => Math.min(4, s + 1));
                             }
                           }}
-                              disabled={isProcessing || scanPending > 0 || (deliveryStep === 0 && !deliveryPrepared) || (deliveryStep === 3 && (!signatureData || capturedPhotos.length === 0))}
+                              disabled={isProcessing || photosReading > 0 || scanPending > 0 || (deliveryStep === 0 && !deliveryPrepared) || (deliveryStep === 3 && (!signatureData || capturedPhotos.length === 0))}
                               className={`ui-button ${deliveryStep === 0 && !allStopScanned ? "ui-button-secondary" : "ui-button-primary"} flex-1 gap-2 disabled:cursor-not-allowed`}
                             >
                               Continuer{" "}
@@ -2364,7 +2429,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                       ajoute les colis non affectés (prise en charge directe). */}
                         <button
                           onClick={() => setShowFailureModal(true)}
-                          disabled={isProcessing}
+                          disabled={isProcessing || photosReading > 0}
                           className="ui-button ui-button-secondary w-full gap-1.5"
                         >
                           <XCircle size={14} />
@@ -2378,6 +2443,18 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
             {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
                       Alerte si le colis est sur une autre tournée (passation) ;
                       ajoute les colis non affectés (prise en charge directe). */}
+            {currentStopDone && (deliveryHasDraft || photosReading > 0) && <section className="ui-notice ui-notice-warning m-3 space-y-3" aria-label="Saisie non enregistrée de cet arrêt">
+              <p className="font-bold">Cet arrêt a déjà été traité. Votre saisie n’a pas été envoyée.</p>
+              <p>Ces informations restent sur cet écran. Vérifiez la preuve enregistrée avec le bureau avant d’abandonner cette saisie.</p>
+              {recipientName && <p>Réceptionnaire : {recipientName}</p>}
+              {scannedBarcodes.length > 0 && <p>Colis scannés : {scannedBarcodes.join(', ')}</p>}
+              {reservesNote && <p>Réserves : {reservesNote}</p>}
+              {failureNotes && <p>Motif : {failureNotes}</p>}
+              {photosReading > 0 && <p role="status">Lecture de la photo en cours…</p>}
+              <div className="flex flex-wrap gap-2">{[...capturedPhotos, ...failurePhotos].map((photo, index) => <img key={index} src={photo} alt={`Photo non enregistrée ${index + 1}`} className="w-32 h-32 rounded object-contain bg-white" />)}</div>
+              {signatureData && <img src={signatureData} alt="Signature non enregistrée" className="max-w-full h-28 bg-white object-contain" />}
+              <button type="button" className="ui-button ui-button-secondary" disabled={isProcessing || photosReading > 0} onClick={() => { void changeStop(resetDeliveryDraft); }}>Abandonner cette saisie non enregistrée</button>
+            </section>}
             {(currentStop.status === StopStatus.COMPLETED || currentStop.status === StopStatus.FAILED) && (
               <div className={`p-4 border-t ${currentStop.status === StopStatus.COMPLETED ? 'bg-green-50' : 'bg-red-50'}`}>
                 <p className="text-sm font-bold text-center">
@@ -2915,7 +2992,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
             isOpen
             onClose={() => { void closeFailure(() => setShowFailureModal(false)); }}
             title="Déclarer un échec de livraison"
-            preventClose={isProcessing}
+            preventClose={isProcessing || photosReading > 0}
             closeOnOverlay={false}
             bodyClassName="!p-0"
             footer={
@@ -2928,7 +3005,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                 </button>
                 <button
                   onClick={handleDeliveryFailure}
-                  disabled={isProcessing || failurePhotos.length === 0}
+                  disabled={isProcessing || photosReading > 0 || failurePhotos.length === 0}
                   className="ui-button ui-button-danger flex-1"
                 >
                   {isProcessing

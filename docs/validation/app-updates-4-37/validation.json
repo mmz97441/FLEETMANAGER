@@ -1,0 +1,30 @@
+{
+  "version": "4.37.0",
+  "date": "2026-10-14",
+  "unit": 445,
+  "integration": 39,
+  "firestoreRules": 70,
+  "storageRules": 10,
+  "votingRules": 42,
+  "auditUnit": 6,
+  "auditServer": 7,
+  "mandatoryAppUpdateServerScenarios": 11,
+  "browser": {
+    "mandatoryUpdate": 22,
+    "deliveryUpdateSafety": 63
+  },
+  "typecheck": "passed",
+  "frontendBuild": "passed",
+  "functionsBuild": "passed",
+  "uiContracts": {
+    "files": 55,
+    "commands": 382,
+    "tables": 7,
+    "windows": 46,
+    "errors": 0
+  },
+  "emulatedSuite": "passed",
+  "dependencyAudit": "passed under existing build-only exception",
+  "productionBusinessTestWrites": 0,
+  "physicalDeviceTest": "not-performed"
+}

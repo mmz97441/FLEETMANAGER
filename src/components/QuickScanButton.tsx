@@ -90,7 +90,7 @@ const QuickScanButton: React.FC<QuickScanButtonProps> = ({ currentUser, clients 
 
   const busy = isSearching || isClaiming || creating || pendingClaims > 0;
   const dirty = showCreate && !claimed && Object.values(createForm).some(value => value.trim());
-  const requestClose = useUnsavedChanges(dirty, busy);
+  const requestClose = useUnsavedChanges(dirty, busy, showScanner || manifestScanning || showCreate || !!manifest || !!result);
   const close = () => { void requestClose(reset); };
   const scanAnother = () => { void requestClose(() => { reset(); setShowScanner(true); }); };
   const manifestMissing = manifest ? manifest.filter(p => !manifestClaimedIds.has(p.id)) : [];

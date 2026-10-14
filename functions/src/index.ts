@@ -1,4 +1,5 @@
 import { prepareDeliveryStopHandler } from './prepareDeliveryStop';
+import { requireDriverScanVersion } from './appVersion';
 import { createAdHocPackageHandler } from './adhocPackage';
 import { importReference, validateImportManifest } from './importManifest';
 import { receivePackagesAtHubHandler, receiveTransferredPackageAtHubHandler } from './hubReception';
@@ -987,6 +988,14 @@ async function requireActiveCaller(context: functions.https.CallableContext) {
   return { ...snap.data(), id: snap.id } as any;
 }
 
+// Only new scan/preparation entry points are gated. Already captured evidence
+// must still synchronize from older clients, including after a lost connection.
+const requireCurrentScanCaller = (data: any) => async (context: functions.https.CallableContext) => {
+  const caller = await requireActiveCaller(context);
+  requireDriverScanVersion(normalizeRole(caller.role), data?.clientVersion);
+  return caller;
+};
+
 export const createInvitation = functions
   .region('europe-west1')
   .https.onCall(async (data, context) => {
@@ -1480,7 +1489,7 @@ export const dispatchMissions = functions
   });
 
 export const scanPackage = functions.region('europe-west1').https.onCall((data, context) =>
-  scanPackageHandler(data, context, { db, requireActiveCaller, isAdminCaller }));
+  scanPackageHandler(data, context, { db, requireActiveCaller: requireCurrentScanCaller(data), isAdminCaller }));
 
 export const transferPackages = functions
   .region('europe-west1')
@@ -2613,8 +2622,8 @@ Exemple : {"metric":"deliveryRate","dimension":"zone","period":"month","chart":"
     };
   });
 
-export const createAdHocPackage = functions.region('europe-west1').https.onCall((data, context) => createAdHocPackageHandler(data, context, { db, requireActiveCaller, isAdminCaller }));
-export const prepareDeliveryStop = functions.region('europe-west1').https.onCall((data, context) => prepareDeliveryStopHandler(data, context, { db, requireActiveCaller }));
+export const createAdHocPackage = functions.region('europe-west1').https.onCall((data, context) => createAdHocPackageHandler(data, context, { db, requireActiveCaller: requireCurrentScanCaller(data), isAdminCaller }));
+export const prepareDeliveryStop = functions.region('europe-west1').https.onCall((data, context) => prepareDeliveryStopHandler(data, context, { db, requireActiveCaller: requireCurrentScanCaller(data) }));
 
 export const indexPackageScanCodes = functions.region('europe-west1').firestore.document('packages/{packageId}').onWrite(async (_change, context) => repairParcelScanCodes(db, context.params.packageId));
 

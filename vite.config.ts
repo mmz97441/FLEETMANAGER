@@ -5,7 +5,7 @@ const { version } = pkg;
 
 // https://vitejs.dev/config/
 // Identifiant unique de build (horodatage) → permet à l'app de détecter
-// qu'une nouvelle version est en ligne et de se recharger automatiquement.
+// qu'une nouvelle version est en ligne. L’installation reste une action explicite.
 const BUILD_ID = String(Date.now());
 
 // Plugin : écrit /version.json à la racine du build avec le BUILD_ID courant.
