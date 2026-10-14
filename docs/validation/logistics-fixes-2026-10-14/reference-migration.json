@@ -1,0 +1,18 @@
+{
+  "projectId": "fleet-genius-app",
+  "mode": "dry-run",
+  "generatedAt": "2026-10-14T05:50:06.029Z",
+  "packages": 1147,
+  "needingIndex": 0,
+  "distinctCodes": 1579,
+  "collisions": 154,
+  "updatedPackages": 0,
+  "updatedReservations": 0,
+  "skippedConcurrent": 0,
+  "individualCollisions": 89,
+  "sharedOrderReferences": 65,
+  "verifiedIndexedPackages": 1147,
+  "verifiedReferenceReservations": 1579,
+  "activeParcelsWithAmbiguousIndividualReference": 0,
+  "businessStatusesChangedByMigration": 0
+}

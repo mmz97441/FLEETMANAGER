@@ -34,7 +34,7 @@ Les tests portent sur les véritables composants et fonctions métier, avec Fire
 
 Validation locale globale réussie : 398 tests unitaires, 39 intégrations, 70 contrôles de règles Firestore, 10 Storage, 42 règles de vote, 6 régressions d’audit unitaires et 7 scénarios serveur issus de l’audit. Toutes les suites serveur passent, dont 43 contrôles métier généraux, 18 identités, 7 corrections de planification, 22 retours/reprise et 9 preuves. Les contrats UI couvrent 54 fichiers et 378 commandes, sans écart statique. Les 74 contrôles navigateur passent.
 
-L’état final du déploiement et de la migration est consigné après publication.
+Les 23 fonctions concernées ont été déployées et les trois nouveaux index sont prêts. Le résultat de publication du site et des règles est conservé dans la [PR #20](https://github.com/mmz97441/FLEETMANAGER/pull/20).
 
 ## Reprise des données historiques
 
@@ -43,3 +43,9 @@ Le script `scripts/migrate-parcel-references.cjs` est en lecture seule par défa
 La vérification initiale des 1 147 colis a trouvé 154 références canoniques partagées dans l’historique : 65 numéros de commande partagés et 89 collisions impliquant une référence individuelle historique. Parmi les 270 colis actifs, aucun ne manquait de référence individuelle unique et aucun n’avait de référence individuelle ambiguë.
 
 Une preuve du 9 octobre reste absente du serveur. Elle ne peut pas être reconstruite honnêtement à partir du seul statut de l’arrêt : il faut récupérer l’opération locale depuis l’appareil d’origine ou traiter le dossier avec les éléments opérationnels disponibles. La nouvelle file de reprise conserve cette anomalie visible.
+
+## Résultat de la migration
+
+Migration appliquée en production le 14 octobre 2026, puis vérifiée en lecture seule : 1 147 colis indexés, 1 579 réservations de références, zéro colis restant à indexer et zéro modification concurrente ignorée. Les 154 références partagées restent identifiées comme telles ; les 270 colis actifs disposent chacun d’une référence individuelle unique. Les statuts et affectations n’ont pas été modifiés par cette migration.
+
+Un rapprochement supplémentaire, exécuté sans autoriser aucune écriture, a vérifié 424 colis liés à des arrêts de livraison terminés : aucune réparation de statut supplémentaire n’est justifiée par les preuves disponibles.

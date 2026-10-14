@@ -26,5 +26,6 @@
   },
   "emulatedSuite": "passed",
   "productionBusinessTestWrites": 0,
-  "physicalDeviceTest": "not-performed"
+  "physicalDeviceTest": "not-performed",
+  "scanBusinessScenarios": 34
 }

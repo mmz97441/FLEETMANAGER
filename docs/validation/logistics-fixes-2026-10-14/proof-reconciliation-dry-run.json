@@ -1,0 +1,10 @@
+{
+  "mode": "dry-run-all-writes-intercepted",
+  "completedStopPackages": 424,
+  "plannedDelivered": 0,
+  "skippedUnproven": 0,
+  "skippedReassigned": 0,
+  "failed": 0,
+  "plannedPackageWrites": 0,
+  "plannedMissionWrites": 0
+}
