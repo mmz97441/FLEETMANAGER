@@ -1,0 +1,72 @@
+{
+  "method": "Current main source transpiled in isolation; actual Firebase serializer, network disabled; updateDoc replaced by deterministic rejection/capture; no production access",
+  "results": [
+    {
+      "case": "profile_write_denied",
+      "write": "permission-denied",
+      "promise": "resolved",
+      "audit": [
+        "requested",
+        "confirmed"
+      ],
+      "defectConfirmed": true
+    },
+    {
+      "case": "manual_recipient_optional_blank",
+      "contactEmailSet": false,
+      "notesSet": false,
+      "error": "Function addDoc() called with invalid data. Unsupported field value: undefined (found in field contactEmail in document savedAddresses/H2ULyZQX0Mbh9LyoE2M7)",
+      "defectConfirmed": true
+    },
+    {
+      "case": "manual_recipient_optional_blank",
+      "contactEmailSet": true,
+      "notesSet": false,
+      "error": "Function addDoc() called with invalid data. Unsupported field value: undefined (found in field notes in document savedAddresses/eVOzPiXhPb8GHLpA0C9u)",
+      "defectConfirmed": true
+    },
+    {
+      "case": "manual_recipient_optional_blank",
+      "contactEmailSet": false,
+      "notesSet": true,
+      "error": "Function addDoc() called with invalid data. Unsupported field value: undefined (found in field contactEmail in document savedAddresses/E3J99CEfyImwxbrc0bte)",
+      "defectConfirmed": true
+    },
+    {
+      "case": "clear_recipient_optional_fields",
+      "actualPatchKeys": [
+        "companyName",
+        "createdBy",
+        "label",
+        "type",
+        "address",
+        "city",
+        "contactName",
+        "contactPhone",
+        "createdAt",
+        "updatedAt"
+      ],
+      "persistedEmail": "obsolete@example.invalid",
+      "persistedNotes": "Obsolete gate code",
+      "defectConfirmed": true
+    },
+    {
+      "case": "end_intervention_while_intent_auditing",
+      "sequence": [
+        "requested",
+        "intervention_stopped",
+        "write_after_stop=true",
+        "confirmed"
+      ],
+      "defectConfirmed": true
+    },
+    {
+      "case": "address_saved_but_existing_pickup_or_other_recipient",
+      "samePlaceKey": true,
+      "existingContact": "Tenant A",
+      "intendedContact": "Tenant B",
+      "selectableForDelivery": false,
+      "defectConfirmed": true
+    }
+  ]
+}

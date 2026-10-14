@@ -3,6 +3,7 @@ process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8189';
 const assert = require('node:assert/strict');
 const { createRequire } = require('node:module');
 const req = createRequire(process.cwd() + '/functions/package.json');
+const { quoteOfferSnapshot } = require('../functions/lib/quoteOffer.js');
 const service = require('../functions/lib/index.js'),
   admin = req('firebase-admin');
 const db = req('firebase-admin/firestore').getFirestore(),
@@ -232,6 +233,7 @@ const check = async (name, fn) => {
       const packages = [
         {
           externalId: 'IMPORT-TEST',
+          postalCode: '97400', city: 'Saint-Denis',
           address: '1 rue fictive',
           contactName: 'Fictif',
           missionId: 'forged',
@@ -417,15 +419,15 @@ const check = async (name, fn) => {
         clientId: 'server-client',
         clientName: 'A',
         status: 'Offre envoyée',
-        destinationAddress: '1 rue fictive, 97400 Saint-Denis',
+        destinationAddress: '1 rue fictive', destination: '97400 Saint-Denis', destinationContact: { name: 'Destinataire', phone: '0262000000' }, priceOffer: 50, deliveryDate: '2026-10-20T10:30',
       });
       const results = await Promise.all([
         service.acceptQuote.run(
-          { quoteId: 'quote-race' },
+          { quoteId: 'quote-race', expectedOffer: quoteOfferSnapshot((await db.collection('quotes').doc('quote-race').get()).data()) },
           context('server-client'),
         ),
         service.acceptQuote.run(
-          { quoteId: 'quote-race' },
+          { quoteId: 'quote-race', expectedOffer: quoteOfferSnapshot((await db.collection('quotes').doc('quote-race').get()).data()) },
           context('server-client'),
         ),
       ]);
@@ -452,11 +454,11 @@ const check = async (name, fn) => {
       await db.collection('quotes').doc('quote-invalid').set({
         clientId: 'server-client',
         status: 'Offre envoyée',
-        destinationAddress: 'Adresse incomplète',
+        destinationAddress: 'Adresse incomplète', priceOffer: 50,
       });
       await assert.rejects(
         service.acceptQuote.run(
-          { quoteId: 'quote-invalid' },
+          { quoteId: 'quote-invalid', expectedOffer: quoteOfferSnapshot((await db.collection('quotes').doc('quote-invalid').get()).data()) },
           context('server-client'),
         ),
         (e) => e.code === 'failed-precondition',
@@ -509,6 +511,7 @@ const check = async (name, fn) => {
         externalId: `BULK-${i}`,
         orderNumber: `BULK-${i}`,
         importBatchId: 'bulk-900',
+        postalCode: '97400', city: 'Saint-Denis',
         address: '1 rue fictive',
         contactName: 'Test',
       }));

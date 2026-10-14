@@ -7,9 +7,12 @@ export const escapeHtml = (value: unknown): string =>
         c
       ]!,
   );
-export const safeImageUrl = (value: unknown): string => {
+export const trustedImageUrl = (value: unknown): string => {
   const url = String(value || '');
   return /^(https:\/\/|data:image\/(png|jpeg|webp);base64,)/i.test(url)
-    ? escapeHtml(url)
+    ? url
     : '';
 };
+
+/** Attribute escaping is for HTML strings only; React escapes its own attributes. */
+export const safeImageUrl = (value: unknown): string => escapeHtml(trustedImageUrl(value));

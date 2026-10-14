@@ -1,0 +1,45 @@
+<!doctype html><html lang="fr"><head><meta charset="utf-8">
+    <title>Rapport de livraison — Client A</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { font-family: Helvetica, Arial, sans-serif; color: #1e293b; margin: 32px; }
+      h1 { font-size: 20px; margin: 0 0 4px; }
+      .sub { color: #64748b; font-size: 12px; margin-bottom: 20px; }
+      .cards { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 22px; }
+      .card { border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 14px; min-width: 120px; }
+      .card .n { font-size: 22px; font-weight: 800; }
+      .card .l { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: .04em; }
+      .rate { color: #dc2626; }
+      table { width: 100%; border-collapse: collapse; font-size: 11px; }
+      th { text-align: left; background: #f8fafc; border-bottom: 2px solid #e2e8f0; padding: 6px 8px; color: #475569; }
+      td { padding: 6px 8px; border-bottom: 1px solid #f1f5f9; }
+      .mono { font-family: 'Courier New', monospace; }
+      .foot { margin-top: 20px; font-size: 10px; color: #94a3b8; }
+      @media print { body { margin: 12mm; } .noprint { display: none; } }
+    </style></head><body>
+    <h1>Rapport de livraison</h1>
+    <div class="sub"><b>Client A</b> · 1 octobre · généré le 14/10/2026 14:00</div>
+    <div class="cards">
+      <div class="card"><div class="n">1</div><div class="l">Colis</div></div>
+      <div class="card"><div class="n" style="color:#16a34a">0</div><div class="l">Livrés</div></div>
+      <div class="card"><div class="n" style="color:#dc2626">1</div><div class="l">Échecs / retours</div></div>
+      <div class="card"><div class="n" style="color:#2563eb">0</div><div class="l">En cours</div></div>
+      <div class="card"><div class="n rate">0%</div><div class="l">Succès / tentatives</div></div>
+      <div class="card"><div class="n">n/a</div><div class="l">Délai moyen</div></div>
+    </div>
+    <table>
+      <thead><tr><th>N° Colis</th><th>N° Commande</th><th>Destinataire</th><th>Ville</th><th>Statut</th><th>Livré le</th><th>Réceptionné par</th></tr></thead>
+      <tbody>
+    <tr>
+      <td class="mono">BR-1234-5678</td>
+      <td class="mono">ORDER-42</td>
+      <td>Pharmacie B</td>
+      <td>97400 Saint-Denis</td>
+      <td style="color:#16a34a;font-weight:600">Livré</td>
+      <td>14/10/2026 09:00</td>
+      <td>Réception B</td>
+    </tr></tbody>
+    </table>
+    <div class="foot">FleetGenius / DELIVREX — Créations et tentatives de la période ; encours toutes dates. Taux = succès / (succès + échecs décidés). Heure terrain, La Réunion. 1 colis concernés.</div>
+    <script>window.onload = function(){ setTimeout(function(){ window.print(); }, 300); };</script>
+    </body></html>

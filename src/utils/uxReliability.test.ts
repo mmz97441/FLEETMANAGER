@@ -33,6 +33,11 @@ describe('UX recovery without losing business identity', () => {
   it('opens the notified parcel in the correct office tab', () => {
     expect(notificationDestination({ actionType: 'navigate', actionTarget: 'missions', metadata: { missionId: 'm1', packageId: 'p1' } })).toEqual({ view: 'missions', params: { mission: 'm1', package: 'p1', tab: 'packages', scope: 'all' } });
   });
+  it('opens a contextual client request directly for both audiences', () => {
+    expect(notificationDestination({ actionType: 'navigate', actionTarget: 'client_shipments', metadata: { clientRequestId: 'dc1', packageId: 'p1' } })).toEqual({ view: 'client_shipments', params: { clientRequest: 'dc1', package: 'p1', scope: 'all' } });
+    expect(notificationDestination({ actionType: 'navigate', actionTarget: 'missions', metadata: { clientRequestId: 'dc1' } })?.params.clientRequest).toBe('dc1');
+    expect(notificationDestination({ actionType: 'navigate', actionTarget: 'missions', metadata: { clientRequestId: '../forbidden' } })?.params.clientRequest).toBeUndefined();
+  });
   it('only accepts internal known destinations and valid entity IDs', () => {
     for (const target of ['javascript:alert(1)', '//evil.invalid', 'https://evil.invalid', '/unknown', '/\\evil.invalid']) {
       expect(notificationDestination({ actionType: 'navigate', actionTarget: target })).toBeNull();

@@ -1,0 +1,31 @@
+{
+  "fixture": "Real ClientPortal with synthetic parcel feed, heavy child screens stubbed, external Firebase endpoints blocked",
+  "initial": {
+    "text": "Expéditeur fictif\n\nMes expéditions\n2 colis chargés — historique complet\nCréer une expédition\nStatut\nTous (2)\nEn attente (1)\nEn transit (0)\nLivrés (1)\nÉchecs / retours (0)\nImports et étiquettes\nColis regroupés par destinataire\n\nmercredi 14 octobre 2026\n\n2 colis · 1 destinataire\n\nDestinataire fictif\n\n1 rue de Test · 97400 Saint-Denis\n\n1/2 livrés\n2 colis\n\nVoir les colis\n2 colis affichés",
+    "groupBadge": [
+      {
+        "text": "1/2 livrés",
+        "title": "Livré au destinataire (preuve disponible)",
+        "classes": "inline-flex rounded-md px-2 py-1 font-semibold bg-green-100 text-green-700"
+      }
+    ],
+    "historyLoads": 0,
+    "overflow": false
+  },
+  "expanded": {
+    "text": "Expéditeur fictif\n\nMes expéditions\n2 colis chargés — historique complet\nCréer une expédition\nStatut\nTous (2)\nEn attente (1)\nEn transit (0)\nLivrés (1)\nÉchecs / retours (0)\nImports et étiquettes\nColis regroupés par destinataire\n\nmercredi 14 octobre 2026\n\n2 colis · 1 destinataire\n\nDestinataire fictif\n\n1 rue de Test · 97400 Saint-Denis\n\n1/2 livrés\n2 colis\n\nMasquer les colis\nÉtiquettes du destinataire\nBon de livraison\n\nLivré\n\nRéférence complète\n\nBR-AUDIT-001\n\nCopier\nPartager\n\nCommande : ORD-AUTO-001 · Votre référence : COMMANDE-CLIENT-42\n\nVoir le suivi\nÉtiquette\n\nEn attente\n\nRéférence complète\n\nBR-AUDIT-002\n\nCopier\nPartager\n\nCommande : ORD-AUTO-002\n\nVoir le suivi\nÉtiquette\n2 colis affichés",
+    "visibleReferences": 2
+  },
+  "details": {
+    "text": "Expéditeur fictif\n\nMes expéditions\n2 colis chargés — historique complet\nCréer une expédition\nStatut\nTous (2)\nEn attente (1)\nEn transit (0)\nLivrés (1)\nÉchecs / retours (0)\nImports et étiquettes\n\nColis ouvert depuis un lien. Les filtres précédents sont temporairement ignorés.\n\nAfficher tous mes colis\nColis regroupés par destinataire\n\nmercredi 14 octobre 2026\n\n1 colis · 1 destinataire\n\nDestinataire fictif\n\n1 rue de Test · 97400 Saint-Denis\n\nLivré\n1 colis\n\nMasquer les colis\nÉtiquettes du destinataire\nBon de livraison\n\nLivré\n\nRéférence complète\n\nBR-AUDIT-001\n\nCopier\nPartager\n\nCommande : ORD-AUTO-001 · Votre référence : COMMANDE-CLIENT-42\n\nMasquer le suivi\nÉtiquette\n1 colis affiché",
+    "visibleReferences": 1,
+    "historyLoads": 1
+  },
+  "search": {
+    "text": "Expéditeur fictif\n\nMes expéditions\n2 colis chargés — historique complet\nCréer une expédition\nStatut\nTous (2)\nEn attente (1)\nEn transit (0)\nLivrés (1)\nÉchecs / retours (0)\nImports et étiquettes\nColis regroupés par destinataire\n\nAucun colis ne correspond à ces filtres\n\nModifiez la recherche ou effacez les filtres.\n\nEffacer les filtres",
+    "historyLoads": 18,
+    "visibleGroups": 0,
+    "query": "COMMANDE-CLIENT-42"
+  },
+  "errors": []
+}

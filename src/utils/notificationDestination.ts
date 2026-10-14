@@ -17,6 +17,8 @@ export function notificationDestination(notification: { actionType?: string; act
       const value = notification.metadata?.[source];
       if (typeof value === 'string' && value && value.length <= 200 && !value.includes('/')) params[key] = value;
     }
+    const clientRequestId = notification.metadata?.clientRequestId;
+    if (['missions', 'client_shipments'].includes(view) && typeof clientRequestId === 'string' && clientRequestId && clientRequestId.length <= 200 && !clientRequestId.includes('/')) params.clientRequest = clientRequestId;
     if (view === 'missions') params.tab = params.package ? 'packages' : 'missions';
     if (params.package) params.scope = 'all';
   }

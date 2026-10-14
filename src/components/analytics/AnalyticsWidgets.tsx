@@ -62,18 +62,15 @@ export const KpiTile: React.FC<{
   value: string | number;
   suffix?: string;
   deltaPct?: number | null;
+  deltaUnit?: '%' | 'points';
+  numericValue?: number | null;
   objective?: { target: number; direction: 'up' | 'down' };
   hint?: string;
-}> = ({ label, value, suffix, deltaPct, objective, hint }) => {
-  // Couleur de la valeur selon l'objectif
+}> = ({ label, value, suffix, deltaPct, deltaUnit = '%', numericValue: suppliedValue, objective, hint }) => {
   let valueColor = 'text-slate-900';
-  if (objective) {
-    const numericValue = typeof value === 'number' ? value : Number(value);
-    const meetsTarget = Number.isNaN(numericValue)
-      ? false
-      : objective.direction === 'up'
-        ? numericValue >= objective.target
-        : numericValue <= objective.target;
+  const numericValue = suppliedValue === undefined ? (typeof value === 'number' ? value : Number.parseFloat(value)) : suppliedValue;
+  if (objective && numericValue !== null && Number.isFinite(numericValue)) {
+    const meetsTarget = objective.direction === 'up' ? numericValue >= objective.target : numericValue <= objective.target;
     valueColor = meetsTarget ? 'text-green-600' : 'text-amber-500';
   }
 
@@ -101,7 +98,7 @@ export const KpiTile: React.FC<{
       </div>
       {deltaPct != null && (
         <div className={`mt-1 text-xs font-medium ${deltaColor}`}>
-          {arrow} {Math.abs(deltaPct)}% vs période préc.
+          {arrow} {Number(Math.abs(deltaPct).toFixed(1))}{deltaUnit === 'points' ? ' points' : '%'} vs période préc.
         </div>
       )}
       {hint && <p className="mt-1 text-xs text-slate-400">{hint}</p>}

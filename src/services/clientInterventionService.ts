@@ -1,9 +1,10 @@
 import { addDoc, collection } from 'firebase/firestore';
 import { auth, db } from '../firebaseConfig';
 import { ActivityAction, ActivityCategory, User } from '../types';
+import type { ClientMutationPhase } from '../utils/clientMutation';
 
 /** Separate from best-effort activity logging: failure must block intervention intent. */
-export async function recordClientIntervention(actor: User, client: User, sessionId: string, action: string, phase: 'requested' | 'confirmed' | 'unconfirmed'): Promise<void> {
+export async function recordClientIntervention(actor: User, client: User, sessionId: string, action: string, phase: ClientMutationPhase): Promise<void> {
   const authenticated = auth.currentUser;
   if (!authenticated || authenticated.uid !== actor.id) throw new Error('L’identité de l’intervenant a changé. Fermez puis rouvrez la consultation.');
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -17,7 +18,7 @@ export async function recordClientIntervention(actor: User, client: User, sessio
     category: ActivityCategory.SYSTEM,
     targetType: 'user', targetId: client.id,
     targetName: client.companyName || `${client.firstName} ${client.lastName}`.trim(),
-    description: `Intervention client : ${action} — ${phase === 'requested' ? 'demandée' : phase === 'confirmed' ? 'confirmée' : 'résultat non confirmé'}`,
+    description: `Intervention client : ${action} — ${phase === 'requested' ? 'demandée' : phase === 'confirmed' ? 'confirmée' : phase === 'cancelled' ? 'annulée avant lancement' : 'résultat non confirmé'}`,
     outcome: phase === 'confirmed' ? 'success' : 'neutral',
     details: { metadata: { interventionSessionId: sessionId, actorId: authenticated.uid, clientId: client.id, action, phase } },
     createdAt: new Date().toISOString(),

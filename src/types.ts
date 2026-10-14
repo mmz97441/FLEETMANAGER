@@ -912,6 +912,7 @@ export interface Package {
   // Origine self-service client
   createdByClient?: boolean;       // Colis créé par l'expéditeur depuis son espace
   clientReference?: string;        // Référence propre du client (affichée en second)
+  requestedDeliveryTime?: string; // Requested local time, separate from the calendar date.
   requestedDeliveryDate?: string;  // Jour de livraison SOUHAITÉ (YYYY-MM-DD) choisi au dépôt client — sert à dater la tournée le bon jour (≠ jour de dépôt)
 
   // Contraintes
@@ -1133,7 +1134,7 @@ export interface Mission {
 // ============================================================================
 
 export interface DeliveryAttempt {
-  destination?: { contactName: string; address: string; city: string; postalCode: string; floor?: number; timeWindowStart?: string; timeWindowEnd?: string };
+  destination?: { contactName: string; address: string; city: string; postalCode: string; zone?: string; floor?: number; timeWindowStart?: string; timeWindowEnd?: string };
   promisedDeliveryAt?: string | null;
   estimatedDeliveryAt?: string | null;
   id: string;
@@ -1150,7 +1151,7 @@ export interface DeliveryAttempt {
 }
 
 export interface ProofOfDelivery {
-  destination?: { contactName: string; address: string; city: string; postalCode: string; floor?: number; timeWindowStart?: string; timeWindowEnd?: string };
+  destination?: { contactName: string; address: string; city: string; postalCode: string; zone?: string; floor?: number; timeWindowStart?: string; timeWindowEnd?: string };
   type?: 'SUCCESS' | 'FAILURE';
   failureReason?: string;
   failureNotes?: string | null;

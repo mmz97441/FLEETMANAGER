@@ -23,7 +23,7 @@ import {
   MetricPeriod,
   MetricsFilters, metricsRange,
 } from './clientMetrics';
-import { summarizeLogistics, logisticsDay, outcomeEventsInRange, LogisticsRange } from './logisticsMetrics';
+import { summarizeLogistics, logisticsDay, outcomeEventsInRange, LogisticsRange, eventDimensions } from './logisticsMetrics';
 
 // ----------------------------------------------------------------------------
 // Grammaire fermée (seules ces valeurs sont valides)
@@ -261,8 +261,7 @@ function executeSpec(packages: Package[], spec: AnalyticsSpec): ExecOutput {
   };
 
   const range = metricsRange(spec.period);
-  const dimensional = packages.filter(p => (!spec.pharmacy || p.contactName === spec.pharmacy) && (!spec.zone || p.zone === spec.zone));
-  const filtered = ['volume', 'weight'].includes(spec.metric) ? filterPackages(packages, filters) : dimensional;
+  const filtered = filterPackages(packages, filters);
 
   // --- KPI (dimension none) : on s'appuie sur computeClientMetrics ---
   if (spec.dimension === 'none') {
@@ -290,7 +289,7 @@ function executeSpec(packages: Package[], spec: AnalyticsSpec): ExecOutput {
         kpi = { label, value: formatDelay(m.avgDelayHours) };
         break;
       case 'failRate': {
-        const v = computeMetricValue(filtered, 'failRate', range);
+        const v = m.resolved ? Math.round(100 - m.deliveryRate) : null;
         kpi = { label, value: v === null ? '—' : String(v), suffix: v === null ? undefined : '%' };
         break;
       }
@@ -307,14 +306,14 @@ function executeSpec(packages: Package[], spec: AnalyticsSpec): ExecOutput {
   // --- Regroupement (pharmacy / zone / status / day) -> series[] ---
   const groups = new Map<string, Package[]>();
   const eventMetric = !['volume', 'weight'].includes(spec.metric);
-  const groupingList = spec.dimension === 'day' && eventMetric
-    ? outcomeEventsInRange(dimensional, range).filter(event => event.timestamp).map(event => ({
-        ...event.package,
+  const groupingList = eventMetric
+    ? outcomeEventsInRange(packages, range, filters).filter(event => spec.dimension !== 'day' || event.timestamp).map(event => ({
+        ...event.package, contactName: eventDimensions(event).pharmacy, zone: eventDimensions(event).zone as Package['zone'],
         movements: (event.package.movements || []).filter(movement => !['DELIVERED', 'FAILED'].includes(movement.action)),
         pod: undefined, failurePod: undefined,
         status: event.outcome === 'SUCCESS' ? PackageStatus.DELIVERED : PackageStatus.FAILED,
         deliveryAttempts: [{ id: event.id, missionId: '', stopId: '', driverId: event.driverId || '',
-          outcome: event.outcome, recordedAt: event.timestamp!, failureReason: event.reason,
+          outcome: event.outcome, recordedAt: event.timestamp || '', failureReason: event.reason, destination: event.destination,
           promisedDeliveryAt: event.promisedDeliveryAt, estimatedDeliveryAt: event.estimatedDeliveryAt }],
       })) : filtered;
   for (const p of groupingList) {

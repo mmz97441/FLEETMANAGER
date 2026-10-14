@@ -130,7 +130,10 @@
         { "fieldPath": "participantIds", "arrayConfig": "CONTAINS" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
-    }
+    },
+    {"collectionGroup": "client_requests", "queryScope": "COLLECTION", "fields": [{"fieldPath": "companyName", "order": "ASCENDING"}, {"fieldPath": "createdAt", "order": "DESCENDING"}]},
+    {"collectionGroup": "client_requests", "queryScope": "COLLECTION", "fields": [{"fieldPath": "clientId", "order": "ASCENDING"}, {"fieldPath": "createdAt", "order": "DESCENDING"}]},
+    {"collectionGroup": "client_requests", "queryScope": "COLLECTION", "fields": [{"fieldPath": "status", "order": "ASCENDING"}, {"fieldPath": "createdAt", "order": "DESCENDING"}]}
   ],
   "fieldOverrides": []
 }

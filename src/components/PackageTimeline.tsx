@@ -12,7 +12,7 @@
  * - `showInternalDetails` : ajoute les notes techniques internes (usage admin).
  */
 import React from 'react';
-import { PackageMovement, ProofOfDelivery } from '../types';
+import { PackageMovement, ProofOfDelivery, Package } from '../types';
 
 const MOVEMENT_META: Record<PackageMovement['action'], { label: string; icon: string; tone?: 'success' | 'error' }> = {
   SCANNED: { label: 'Colis scanné', icon: '📷' },
@@ -48,6 +48,9 @@ interface PackageTimelineProps {
   showInternalDetails?: boolean;
   showActors?: boolean;      // traçabilité expéditeur (intervenants + preuve)
   pod?: ProofOfDelivery;     // preuve de livraison, rattachée à l'étape « Livré »
+  returnDisposition?: Package['returnDisposition'];
+  returnDecision?: Package['returnDecision'];
+  proofPending?: boolean;
   proofs?: ProofOfDelivery[]; // All client-scoped attempt projections, including failures.
 }
 
@@ -58,9 +61,9 @@ const ProofCard: React.FC<{ pod: ProofOfDelivery }> = ({ pod }) => {
     : '';
   return (
     <div className={`mt-2 rounded-xl border p-3 space-y-2 ${pod.type === 'FAILURE' ? 'border-red-200 bg-red-50/60' : 'border-green-200 bg-green-50/60'}`}>
-      <p className="text-[11px] font-bold uppercase tracking-wide">{pod.type === 'FAILURE' ? 'Preuve de tentative non aboutie' : 'Preuve de livraison'}</p>
-      {pod.type === 'FAILURE' && <p className="text-xs text-red-800">{pod.failureReason || 'Motif non renseigné'}{pod.failureNotes ? ` · ${pod.failureNotes}` : ''}</p>}
-      <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
+      <p className="text-sm font-bold uppercase tracking-wide">{pod.type === 'FAILURE' ? 'Preuve de tentative non aboutie' : 'Preuve de livraison'}</p>
+      {pod.type === 'FAILURE' && <p className="text-sm text-red-800">{pod.failureReason || 'Motif non renseigné'}{pod.failureNotes ? ` · ${pod.failureNotes}` : ''}</p>}
+      <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
         {pod.recipientName && (
           <div><span className="text-slate-500">Réceptionné par</span><br /><span className="font-semibold text-slate-800">{pod.recipientName}</span></div>
         )}
@@ -78,13 +81,13 @@ const ProofCard: React.FC<{ pod: ProofOfDelivery }> = ({ pod }) => {
       {/* État marchandise */}
       {typeof pod.merchandiseGoodCondition === 'boolean' && (
         pod.merchandiseGoodCondition
-          ? <p className="text-[11px] font-semibold text-green-700">✓ Marchandises reçues en bon état</p>
-          : <p className="text-[11px] font-semibold text-amber-700">⚠️ Réserves : {pod.reservesNote || 'signalées à la réception'}</p>
+          ? <p className="text-sm font-semibold text-green-700">✓ Marchandises reçues en bon état</p>
+          : <p className="text-sm font-semibold text-amber-700">⚠️ Réserves : {pod.reservesNote || 'signalées à la réception'}</p>
       )}
 
       {/* GPS */}
       {pod.coordinates && (
-        <a href={mapsUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 underline">
+        <a href={mapsUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sm font-semibold text-blue-600 underline">
           📍 Voir le point GPS de livraison
         </a>
       )}
@@ -93,7 +96,7 @@ const ProofCard: React.FC<{ pod: ProofOfDelivery }> = ({ pod }) => {
       <div className="flex flex-wrap items-end gap-2 pt-1">
         {pod.signatureUrl && (
           <div>
-            <p className="text-[10px] text-slate-500 mb-0.5">Signature</p>
+            <p className="text-sm text-slate-500 mb-0.5">Signature</p>
             <img src={pod.signatureUrl} alt="signature" className="h-14 rounded-md border border-slate-200 bg-white p-1" />
           </div>
         )}
@@ -105,17 +108,18 @@ const ProofCard: React.FC<{ pod: ProofOfDelivery }> = ({ pod }) => {
   );
 };
 
-const PackageTimeline: React.FC<PackageTimelineProps> = ({ movements, showInternalDetails = false, showActors = false, pod, proofs = [] }) => {
+const PackageTimeline: React.FC<PackageTimelineProps> = ({ movements, showInternalDetails = false, showActors = false, pod, proofs = [], returnDisposition, returnDecision, proofPending = false }) => {
   const sorted = [...(movements || [])].sort(
     (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
   );
 
   if (sorted.length === 0) {
-    return <p className="text-xs text-slate-400 py-2">Aucun mouvement enregistré pour ce colis.</p>;
+    return <p className="text-sm text-slate-600 py-2">{proofPending ? 'Tentative enregistrée — preuve en cours de transmission.' : 'Aucun mouvement enregistré pour ce colis.'}</p>;
   }
 
   return (
     <div className="py-2">
+      {proofPending && <p role="status" className="mb-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">Tentative enregistrée — preuve en cours de transmission. Elle apparaîtra automatiquement ici.</p>}
       {sorted.map((move, i) => {
         const matchingProof = [...proofs, ...(pod ? [pod] : [])].find(proof => {
           if ((proof.type === 'FAILURE' ? 'FAILED' : 'DELIVERED') !== move.action) return false;
@@ -123,7 +127,9 @@ const PackageTimeline: React.FC<PackageTimelineProps> = ({ movements, showIntern
           if (move.missionId && move.stopId) return proof.missionId === move.missionId && proof.stopId === move.stopId;
           return sorted.filter(candidate => candidate.action === move.action).slice(-1)[0] === move;
         });
-        const meta = MOVEMENT_META[move.action] || { label: move.action, icon: '•' };
+        const senderReturn = move.action === 'RETURNED' && (move.outcome === 'SENDER_RETURNED' ||
+          (!move.outcome && returnDisposition === 'SENDER_RETURNED' && returnDecision?.decision === 'SENDER_RETURNED' && returnDecision.at === move.timestamp));
+        const meta = senderReturn ? { label: 'Retourné à l’expéditeur', icon: '↩️' } : MOVEMENT_META[move.action] || { label: move.action, icon: '•' };
         const isLast = i === sorted.length - 1;
         const dotColor =
           meta.tone === 'success' ? 'bg-green-500' :
@@ -153,20 +159,20 @@ const PackageTimeline: React.FC<PackageTimelineProps> = ({ movements, showIntern
 
             {/* Contenu */}
             <div className="pb-3 min-w-0 flex-1">
-              <p className={`text-xs font-bold ${isLast ? 'text-slate-800' : 'text-slate-600'}`}>
+              <p className={`text-sm font-bold ${isLast ? 'text-slate-800' : 'text-slate-600'}`}>
                 {meta.icon} {move.action === 'SCANNED' && move.outcome === 'already_scanned' ? 'Déjà scanné — contrôle répété' : move.action === 'SCANNED' && move.outcome === 'reassigned' ? 'Scanné et repris dans une nouvelle tournée' : meta.label}
                 {move.hubName && <span className="font-medium text-slate-500"> — {move.hubName}</span>}
               </p>
-              <p className="text-[11px] text-slate-400">{formatDateTime(matchingProof?.timestamp || move.timestamp)}</p>
-              {move.failureReason && <p className="text-xs text-red-700">{move.failureReason}</p>}
-              {showInternalDetails && move.receivedAt && move.receivedAt !== move.timestamp && <p className="text-[11px] text-slate-400">Reçu par le serveur le {formatDateTime(move.receivedAt)}</p>}
+              <p className="text-sm text-slate-400">{formatDateTime(matchingProof?.timestamp || move.timestamp)}</p>
+              {move.failureReason && <p className="text-sm text-red-700">{move.failureReason}</p>}
+              {showInternalDetails && move.receivedAt && move.receivedAt !== move.timestamp && <p className="text-sm text-slate-400">Reçu par le serveur le {formatDateTime(move.receivedAt)}</p>}
               {move.action === 'SCANNED' && move.missionDate && <p className="text-sm text-slate-700">
                 Tournée du {move.missionDate.split('-').reverse().join('/')}
                 {showInternalDetails && <> · <span className="break-all">{move.missionId}</span></>}
                 {move.fromMissionDate && <> · reprise de la tournée du {move.fromMissionDate.split('-').reverse().join('/')}{showInternalDetails && <> ({move.fromMissionId})</>}</>}
               </p>}
               {actors.length > 0 && (
-                <p className="text-[11px] text-slate-600 mt-0.5 font-medium">{actors.join('  ·  ')}</p>
+                <p className="text-sm text-slate-600 mt-0.5 font-medium">{actors.join('  ·  ')}</p>
               )}
               {/* Point GPS de l'étape (ex. enlèvement) quand il est enregistré. */}
               {showActors && move.location && (
@@ -174,13 +180,13 @@ const PackageTimeline: React.FC<PackageTimelineProps> = ({ movements, showIntern
                   href={`https://www.google.com/maps?q=${move.location.lat},${move.location.lng}`}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 underline mt-0.5"
+                  className="inline-flex items-center gap-1 text-sm font-semibold text-blue-600 underline mt-0.5"
                 >
                   📍 Point GPS de l'étape
                 </a>
               )}
               {showInternalDetails && move.notes && (
-                <p className="text-[11px] text-slate-500 mt-0.5">{move.notes}</p>
+                <p className="text-sm text-slate-500 mt-0.5">{move.notes}</p>
               )}
               {/* Preuve de livraison rattachée à l'étape Livré */}
               {showActors && matchingProof && <ProofCard pod={matchingProof} />}

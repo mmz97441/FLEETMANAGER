@@ -135,13 +135,10 @@ export const createUserProfile = async (user: User): Promise<boolean> => {
 };
 
 export const updateUserProfile = async (user: User) => {
-    try {
-        const ref = doc(db, "users", user.id);
-        const { id, lastSeenAt: _presence, lastLoginAt: _login, ...data } = user; // Ne pas réécrire l’identité ni les dates de connexion lors d’une modification du profil
-        await updateDoc(ref, cleanFirestoreData(data));
-    } catch (e) {
-        console.error("Error updating user:", e);
-    }
+    const ref = doc(db, "users", user.id);
+    const { id, lastSeenAt: _presence, lastLoginAt: _login, ...data } = user;
+    // A rejected write must leave the caller's form and audit unconfirmed.
+    await updateDoc(ref, cleanFirestoreData(data));
 };
 
 /**
@@ -689,41 +686,38 @@ export const subscribeToSavedAddresses = (
 
 // Ajouter une adresse
 export const addSavedAddress = async (address: Omit<SavedAddress, 'id'>): Promise<string> => {
-  const now = new Date().toISOString();
-  const docRef = await addDoc(collection(db, "savedAddresses"), {
-    ...address,
-    usageCount: 0,
-    createdAt: now,
-    updatedAt: now
-  });
-  return docRef.id;
+  return (await saveSavedAddressForUse(address)).id;
+};
+
+/** Server transaction preserves each recipient and merges pickup/delivery usage.
+ * Repeating an uncertain save returns the same recipient without duplicate rows. */
+export const saveSavedAddressForUse = async (address: Omit<SavedAddress, 'id'>): Promise<{ id: string; outcome: 'created' | 'existing' | 'usage_extended' }> => {
+  const call = httpsCallable<{ address: Omit<SavedAddress, 'id'> }, { id: string; outcome: 'created' | 'existing' | 'usage_extended' }>(getFunctions(app, 'europe-west1'), 'saveClientAddress');
+  return (await call({ address: cleanFirestoreData(address) })).data;
 };
 
 // Import en lot du carnet de destinataires (retourne le nombre créé)
 export const addSavedAddressesBatch = async (addresses: Omit<SavedAddress, 'id'>[]): Promise<number> => {
-  const now = new Date().toISOString();
   let created = 0;
-  await Promise.all(addresses.map(async (address) => {
+  for (const address of addresses) {
     try {
-      await addDoc(collection(db, "savedAddresses"), cleanFirestoreData({
-        ...address,
-        usageCount: 0,
-        createdAt: now,
-        updatedAt: now
-      }));
+      await addSavedAddress(address);
       created++;
     } catch { /* ignore une ligne en échec, on continue */ }
-  }));
+  }
   return created;
 };
 
 // Mettre à jour une adresse
 export const updateSavedAddress = async (address: SavedAddress): Promise<void> => {
-  const { id, ...data } = address;
-  await updateDoc(doc(db, "savedAddresses", id), {
-    ...cleanFirestoreData(data),
-    updatedAt: new Date().toISOString()
-  });
+  // Only editable fields are patched. Empty optional fields explicitly erase
+  // obsolete contacts/instructions; usage, favorites and ownership stay intact.
+  const call = httpsCallable(getFunctions(app, 'europe-west1'), 'updateClientAddress');
+  await call({ id: address.id, fields: {
+    contactName: address.contactName.trim(), address: address.address.trim(),
+    city: address.city.trim(), contactPhone: address.contactPhone.trim(),
+    contactEmail: address.contactEmail?.trim() || '', notes: address.notes?.trim() || '',
+  } });
 };
 
 // Supprimer une adresse

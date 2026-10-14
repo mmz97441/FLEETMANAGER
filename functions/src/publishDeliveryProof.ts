@@ -78,7 +78,7 @@ export async function publishDeliveryProofHandler(data: any, context: functions.
         vehicleId: mission.vehicleId || '', vehiclePlate: mission.vehiclePlate || '', type: data.type,
         timestamp, receivedAt, createdAt: receivedAt,
         destination: firstAttempt?.destination || { contactName: stop.contactName || '', address: stop.address || '', city: stop.city || '', postalCode: stop.postalCode || '',
-          floor: stop.floor, timeWindowStart: stop.timeWindowStart, timeWindowEnd: stop.timeWindowEnd },
+          zone: parcels[0].data()?.zone || undefined, floor: stop.floor, timeWindowStart: stop.timeWindowStart, timeWindowEnd: stop.timeWindowEnd },
         photoUrls: data.photoUrls, coordinates: validCoordinates(data.coordinates) ? { lat: data.coordinates.lat, lng: data.coordinates.lng } : null,
         locationStatus: validCoordinates(data.coordinates) ? 'captured' : 'unavailable',
         ...(data.type === 'SUCCESS' ? {
@@ -96,7 +96,7 @@ export async function publishDeliveryProofHandler(data: any, context: functions.
       const success = saved!.type === 'SUCCESS' && saved!.packageIds.includes(packageId);
       const attempts: any[] = pkg.deliveryAttempts || [], prior = attempts.find(a => a.id === proofId);
       const { packageIds: _privateIds, ...publicProof } = saved!;
-      const proof = clean({ ...publicProof, packageId, type: success ? 'SUCCESS' : 'FAILURE',
+      const proof = clean({ ...publicProof, destination: prior?.destination || publicProof.destination, packageId, type: success ? 'SUCCESS' : 'FAILURE',
         ...(!success ? { recipientName: undefined, deliveryLocation: undefined, signatureUrl: undefined,
           merchandiseGoodCondition: undefined, reservesNote: undefined, notes: undefined,
           failureReason: prior?.failureReason || pkg.failureReason || saved!.failureReason || 'Colis non remis',

@@ -1,400 +1,61 @@
-import { escapeHtml, safeImageUrl } from '../utils/html';
-/**
- * POD VIEWER — Visualisation Preuve de Livraison
- * 
- * Composant partagé utilisé par :
- * - MissionManager (back-office) : clic sur un colis livré → affiche POD
- * - ClientPortal : le client voit la preuve de ses livraisons
- * 
- * Affiche : signature, photos, coordonnées GPS, horodatage, réceptionnaire
- */
-
-import React, { useState } from 'react';
-import { ProofOfDelivery, DeliveryLocation } from '../types';
-import {
-  X, MapPin, Clock, User, Truck, Camera, PenTool,
-  ZoomIn, ChevronLeft, ChevronRight, ExternalLink, Printer,
-  CheckCircle, AlertTriangle
-} from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import type { ProofOfDelivery } from '../types';
+import { X, Printer, ChevronLeft, ChevronRight, CheckCircle, AlertTriangle } from 'lucide-react';
+import { buildProofPrintHTML, presentProof, type ProofPackageInfo } from '../utils/proofPresentation';
+import { trustedImageUrl } from '../utils/html';
 
 interface PODViewerProps {
   pod: ProofOfDelivery;
   onClose: () => void;
-  packageInfo?: {
-    orderNumber: string;
-    contactName: string;
-    address: string;
-    city: string;
-  };
-  showDriverInfo?: boolean;  // false pour le client (pas besoin de voir les détails véhicule)
+  packageInfo?: ProofPackageInfo;
+  showDriverInfo?: boolean;
 }
-
-const PODViewer: React.FC<PODViewerProps> = ({
-  pod,
-  onClose,
-  packageInfo,
-  showDriverInfo = true
-}) => {
-  const isFailure = pod.type === 'FAILURE';
-  const proofTitle = isFailure ? 'Preuve de tentative non aboutie' : 'Preuve de livraison';
-  const destination = pod.destination ? { ...pod.destination, city: `${pod.destination.postalCode} ${pod.destination.city}` } : packageInfo;
-  const addressLabel = pod.destination ? 'Adresse lors de la tentative' : 'Adresse actuelle (preuve historique sans adresse figée)';
-  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
-  const [lightboxIndex, setLightboxIndex] = useState(0);
-
-  const allImages = [
-    ...(pod.signatureUrl ? [{ url: pod.signatureUrl, type: 'signature' as const }] : []),
-    ...pod.photoUrls.map(url => ({ url, type: 'photo' as const }))
-  ];
-
-  const openLightbox = (url: string) => {
-    const idx = allImages.findIndex(img => img.url === url);
-    setLightboxIndex(idx >= 0 ? idx : 0);
-    setLightboxImage(url);
+const PODViewer: React.FC<PODViewerProps> = ({ pod, onClose, packageInfo, showDriverInfo = true }) => {
+  const model = presentProof(pod, packageInfo, showDriverInfo);
+  const images = [...(model.signature ? [{ url: model.signature, label: 'Signature du réceptionnaire' }] : []),
+    ...model.photos.map((url, i) => ({ url, label: `Photo ${i + 1}` }))];
+  const [imageIndex, setImageIndex] = useState<number | null>(null);
+  const [printError, setPrintError] = useState('');
+  useEffect(() => {
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { if (imageIndex !== null) setImageIndex(null); else onClose(); } };
+    window.addEventListener('keydown', escape); return () => window.removeEventListener('keydown', escape);
+  }, [imageIndex, onClose]);
+  const print = () => {
+    setPrintError('');
+    const target = window.open('', '_blank', 'width=800,height=950');
+    if (!target) { setPrintError('Le navigateur a bloqué le document. Autorisez les fenêtres pour imprimer la preuve.'); return; }
+    target.document.write(buildProofPrintHTML(model)); target.document.close();
   };
-
-  const navigateLightbox = (direction: 1 | -1) => {
-    const newIdx = lightboxIndex + direction;
-    if (newIdx >= 0 && newIdx < allImages.length) {
-      setLightboxIndex(newIdx);
-      setLightboxImage(allImages[newIdx].url);
-    }
-  };
-
-  const formatDate = (ts: string) => {
-    try {
-      return new Date(ts).toLocaleString('fr-FR', {
-        day: '2-digit', month: '2-digit', year: 'numeric',
-        hour: '2-digit', minute: '2-digit'
-      });
-    } catch { return ts; }
-  };
-
-  const handlePrint = () => {
-    const printWindow = window.open('', '_blank', 'width=700,height=900');
-    if (!printWindow) return;
-
-    const photosHtml = pod.photoUrls.map(url =>
-      `<div style="text-align:center;margin:10px 0;"><img src="${safeImageUrl(url)}" style="max-width:100%;max-height:300px;border:1px solid #ccc;border-radius:8px;" /></div>`
-    ).join('');
-
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html><head><title>POD - ${escapeHtml(packageInfo?.orderNumber || pod.packageId)}</title>
-      <style>
-        body { font-family: Arial, sans-serif; padding: 20px; max-width: 700px; margin: 0 auto; }
-        h1 { font-size: 18pt; border-bottom: 2px solid #000; padding-bottom: 10px; }
-        .row { display: flex; justify-content: space-between; margin: 8px 0; }
-        .label { font-weight: bold; color: #555; font-size: 10pt; }
-        .value { font-size: 11pt; }
-        .signature-block { margin: 20px 0; text-align: center; }
-        .signature-block img { border: 1px solid #ccc; border-radius: 8px; max-width: 400px; }
-        .signature-label { font-size: 9pt; color: #888; margin-top: 5px; }
-        hr { border: none; border-top: 1px dashed #ccc; margin: 15px 0; }
-        @media print { body { padding: 10px; } }
-      </style></head><body>
-        <h1>${proofTitle}</h1>
-        ${destination ? `
-          <div class="row"><span class="label">Commande :</span><span class="value">${escapeHtml(packageInfo?.orderNumber || pod.packageId)}</span></div>
-          <div class="row"><span class="label">Destinataire :</span><span class="value">${escapeHtml(destination.contactName)}</span></div>
-          <div class="row"><span class="label">${addressLabel} :</span><span class="value">${escapeHtml(destination.address)}, ${escapeHtml(destination.city)}</span></div>
-        ` : ''}
-        <hr />
-        ${!isFailure ? `<div class="row"><span class="label">Réceptionné par :</span><span class="value">${escapeHtml(pod.recipientName || 'Non renseigné')}</span></div>` : ''}
-        ${pod.deliveryLocation ? `<div class="row"><span class="label">Lieu de remise :</span><span class="value">${escapeHtml(pod.deliveryLocation)}</span></div>` : ''}
-        <div class="row"><span class="label">Date / Heure :</span><span class="value">${formatDate(pod.timestamp)}</span></div>
-        <div class="row"><span class="label">Chauffeur :</span><span class="value">${escapeHtml(pod.driverName)}</span></div>
-        <div class="row"><span class="label">Véhicule :</span><span class="value">${escapeHtml(pod.vehiclePlate)}</span></div>
-        <div class="row"><span class="label">Coordonnées GPS :</span><span class="value">${pod.coordinates ? `${pod.coordinates.lat.toFixed(6)}, ${pod.coordinates.lng.toFixed(6)}` : 'Position non disponible'}</span></div>
-        ${pod.notes ? `<div class="row"><span class="label">Notes :</span><span class="value">${escapeHtml(pod.notes)}</span></div>` : ''}
-        ${isFailure ? `<div class="row"><span class="label">Motif :</span><span class="value">${escapeHtml(pod.failureReason || 'Non renseigné')}</span></div>${pod.failureNotes ? `<p>${escapeHtml(pod.failureNotes)}</p>` : ''}` : ''}
-        <hr />
-        ${pod.signatureUrl ? `
-          <div class="signature-block">
-            <img src="${safeImageUrl(pod.signatureUrl)}" />
-            <p class="signature-label">Signature du réceptionnaire</p>
+  return <>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <button type="button" aria-label="Fermer la preuve" className="absolute inset-0 h-full w-full cursor-default" onClick={onClose} />
+      <section role="dialog" aria-modal="true" aria-label={model.title} className="relative max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white shadow-2xl">
+        <header className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 py-3">
+          <h2 className="text-base font-bold text-slate-900">{model.title}</h2>
+          <div className="flex shrink-0 gap-1">
+            <button type="button" onClick={print} className="ui-button ui-button-secondary"><Printer size={18} aria-hidden="true" />Imprimer</button>
+            <button type="button" onClick={onClose} aria-label="Fermer la preuve" className="ui-button ui-button-ghost"><X size={20} /></button>
           </div>
-        ` : '<p style="color:#999;text-align:center;">Pas de signature</p>'}
-        ${photosHtml ? `<hr /><h3 style="font-size:12pt;">Photos</h3>${photosHtml}` : ''}
-      </body></html>
-    `);
-    printWindow.document.close();
-    setTimeout(() => { printWindow.print(); printWindow.close(); }, 300);
-  };
-
-  return (
-    <>
-      {/* MODAL POD */}
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-        <div
-          className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto"
-          onClick={e => e.stopPropagation()}
-        >
-          {/* Header */}
-          <div className="sticky top-0 bg-white z-10 flex items-center justify-between px-5 py-3 border-b border-slate-200 rounded-t-2xl">
-            <div>
-              <h3 className="font-bold text-slate-800 text-sm">{proofTitle}</h3>
-              {packageInfo && (
-                <p className="text-xs text-slate-500">Commande {packageInfo.orderNumber}</p>
-              )}
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={handlePrint}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-600 rounded-lg text-xs font-medium hover:bg-slate-200 transition-colors"
-              >
-                <Printer size={12} />
-                Imprimer
-              </button>
-              <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100">
-                <X size={18} />
-              </button>
-            </div>
+        </header>
+        <div className="space-y-4 p-4">
+          {printError && <p role="alert" className="text-sm text-red-700">{printError}</p>}
+          <div className={`flex items-start gap-3 rounded-xl border p-3 ${model.failure ? 'border-red-200 bg-red-50 text-red-800' : 'border-green-200 bg-green-50 text-green-800'}`}>
+            {model.failure ? <AlertTriangle size={20} /> : <CheckCircle size={20} />}
+            <div><p className="font-semibold">{model.failure ? 'Colis non remis' : 'Livré avec succès'}</p><p className="text-sm">{model.timestamp} · La Réunion</p></div>
           </div>
-
-          {/* Content */}
-          <div className="p-5 space-y-4">
-
-            {/* Badge statut */}
-            <div className={`flex items-center gap-3 rounded-xl p-3 border ${isFailure ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'}`}>
-              <div className={`p-2 rounded-full ${isFailure ? 'bg-red-100' : 'bg-emerald-100'}`}>
-                {isFailure ? <AlertTriangle size={18} className="text-red-600" /> : <PenTool size={18} className="text-emerald-600" />}
-              </div>
-              <div>
-                <p className={`text-sm font-bold ${isFailure ? 'text-red-800' : 'text-emerald-800'}`}>{isFailure ? 'Colis non remis' : 'Livré avec succès'}</p>
-                <p className="text-xs text-emerald-600">
-                  {formatDate(pod.timestamp)}
-                </p>
-              </div>
-            </div>
-
-            {isFailure && <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-              <p className="font-bold">{pod.failureReason || 'Motif non renseigné'}</p>
-              {pod.failureNotes && <p className="mt-1">{pod.failureNotes}</p>}
-              {!pod.coordinates && <p className="mt-1 text-xs">Position non disponible lors de la tentative.</p>}
-            </div>}
-            {/* Destinataire */}
-            {destination && (
-              <div className="space-y-1">
-                <p className="text-xs font-bold text-slate-400 uppercase">Destinataire</p>
-                <p className="font-bold text-slate-800">{destination.contactName}</p>
-                <p className="text-xs text-slate-500">{addressLabel}</p>
-                <p className="text-sm text-slate-600">{destination.address}</p>
-                <p className="text-sm text-slate-600">{destination.city}</p>
-                {pod.destination?.floor != null && <p className="text-xs text-slate-500">Étage {pod.destination.floor}</p>}
-                {(pod.destination?.timeWindowStart || pod.destination?.timeWindowEnd) && <p className="text-xs text-slate-500">Créneau : {pod.destination.timeWindowStart || '—'} – {pod.destination.timeWindowEnd || '—'}</p>}
-              </div>
-            )}
-
-            {/* Réceptionné par */}
-            {!isFailure && <div className="flex items-center gap-3 bg-slate-50 rounded-xl p-3">
-              <User size={16} className="text-slate-400" />
-              <div className="flex-1">
-                <p className="text-xs text-slate-500">Réceptionné par</p>
-                <p className="font-bold text-slate-800 text-sm">{pod.recipientName || 'Non renseigné'}</p>
-              </div>
-              {pod.deliveryLocation && (
-                <span className="px-2 py-1 bg-green-100 text-green-700 rounded-lg text-[10px] font-bold">
-                  {pod.deliveryLocation === DeliveryLocation.HAND_DELIVERY && '🤝'}
-                  {pod.deliveryLocation === DeliveryLocation.NEIGHBOR && '🏠'}
-                  {pod.deliveryLocation === DeliveryLocation.CONCIERGE && '🔑'}
-                  {pod.deliveryLocation === DeliveryLocation.MAILBOX && '📬'}
-                  {pod.deliveryLocation === DeliveryLocation.RECEPTION && '🏢'}
-                  {pod.deliveryLocation === DeliveryLocation.SAFE_PLACE && '🔒'}
-                  {pod.deliveryLocation === DeliveryLocation.OTHER && '📋'}
-                  {' '}{pod.deliveryLocation}
-                </span>
-              )}
-            </div>}
-
-            {/* État de la marchandise à la réception */}
-            {typeof pod.merchandiseGoodCondition === 'boolean' && (
-              pod.merchandiseGoodCondition ? (
-                <div className="flex items-center gap-2 bg-green-50 rounded-xl p-3 border border-green-200">
-                  <CheckCircle size={16} className="text-green-600" />
-                  <span className="text-sm font-semibold text-green-800">Marchandises reçues en bon état</span>
-                </div>
-              ) : (
-                <div className="bg-amber-50 rounded-xl p-3 border border-amber-200">
-                  <p className="text-xs font-bold text-amber-700 flex items-center gap-1"><AlertTriangle size={14} /> Réserves émises à la réception</p>
-                  {pod.reservesNote && <p className="text-sm text-amber-800 mt-1">{pod.reservesNote}</p>}
-                </div>
-              )
-            )}
-
-            {/* Infos chauffeur (back-office uniquement) */}
-            {showDriverInfo && (
-              <div className="grid grid-cols-2 gap-3">
-                <div className="flex items-center gap-2 bg-slate-50 rounded-xl p-3">
-                  <Truck size={14} className="text-slate-400" />
-                  <div>
-                    <p className="text-[10px] text-slate-500 uppercase">Chauffeur</p>
-                    <p className="font-bold text-slate-800 text-xs">{pod.driverName}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 bg-slate-50 rounded-xl p-3">
-                  <Truck size={14} className="text-slate-400" />
-                  <div>
-                    <p className="text-[10px] text-slate-500 uppercase">Véhicule</p>
-                    <p className="font-bold text-slate-800 text-xs">{pod.vehiclePlate}</p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* GPS + Mini carte */}
-            {pod.coordinates && (pod.coordinates.lat !== 0 || pod.coordinates.lng !== 0) && (
-              <div className="space-y-2">
-                <div className="flex items-center gap-3 bg-blue-50 rounded-xl p-3 border border-blue-100">
-                  <MapPin size={16} className="text-blue-500" />
-                  <div className="flex-1">
-                    <p className="text-xs text-blue-600 font-medium">Position GPS vérifiée</p>
-                    <p className="text-xs text-blue-500 font-mono">
-                      {pod.coordinates.lat.toFixed(6)}, {pod.coordinates.lng.toFixed(6)}
-                    </p>
-                  </div>
-                  <a
-                    href={`https://maps.google.com/?q=${pod.coordinates.lat},${pod.coordinates.lng}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-500 hover:text-blue-700"
-                  >
-                    <ExternalLink size={14} />
-                  </a>
-                </div>
-                {/* Mini carte OpenStreetMap (gratuit, pas de clé API) */}
-                <a
-                  href={`https://maps.google.com/?q=${pod.coordinates.lat},${pod.coordinates.lng}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block rounded-xl overflow-hidden border border-slate-200 hover:border-blue-300 transition-colors"
-                >
-                  <img
-                    src={`https://staticmap.openstreetmap.de/staticmap.php?center=${pod.coordinates.lat},${pod.coordinates.lng}&zoom=16&size=480x160&markers=${pod.coordinates.lat},${pod.coordinates.lng},red-pushpin`}
-                    alt="Position livraison"
-                    className="w-full h-[100px] object-cover"
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                  />
-                </a>
-              </div>
-            )}
-
-            {/* Notes */}
-            {pod.notes && (
-              <div className="bg-amber-50 rounded-xl p-3 border border-amber-100">
-                <p className="text-xs text-amber-800">{pod.notes}</p>
-              </div>
-            )}
-
-            {/* SIGNATURE */}
-            <div>
-              <p className="text-xs font-bold text-slate-400 uppercase mb-2 flex items-center gap-1">
-                <PenTool size={12} /> Signature
-              </p>
-              {pod.signatureUrl ? (
-                <div
-                  onClick={() => openLightbox(pod.signatureUrl!)}
-                  className="bg-white border-2 border-slate-200 rounded-xl p-2 cursor-pointer hover:border-blue-300 transition-colors group relative"
-                >
-                  <img
-                    src={pod.signatureUrl}
-                    alt="Signature"
-                    className="w-full h-[100px] object-contain"
-                  />
-                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                    <div className="bg-black/40 rounded-full p-2">
-                      <ZoomIn size={16} className="text-white" />
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="bg-slate-50 rounded-xl p-4 text-center text-sm text-slate-400 border border-dashed border-slate-200">
-                  Pas de signature enregistrée
-                </div>
-              )}
-            </div>
-
-            {/* PHOTOS */}
-            {pod.photoUrls.length > 0 && (
-              <div>
-                <p className="text-xs font-bold text-slate-400 uppercase mb-2 flex items-center gap-1">
-                  <Camera size={12} /> Photos ({pod.photoUrls.length})
-                </p>
-                <div className="grid grid-cols-2 gap-2">
-                  {pod.photoUrls.map((url, i) => (
-                    <div
-                      key={i}
-                      onClick={() => openLightbox(url)}
-                      className="aspect-square rounded-xl overflow-hidden border border-slate-200 cursor-pointer group relative"
-                    >
-                      <img
-                        src={url}
-                        alt={`Photo ${i + 1}`}
-                        className="w-full h-full object-cover"
-                      />
-                      <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">
-                        <div className="bg-black/50 rounded-full p-2">
-                          <ZoomIn size={16} className="text-white" />
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+          <dl className="space-y-3 text-sm">{model.facts.map(fact => <div key={fact.label}><dt className="font-medium text-slate-600">{fact.label}</dt><dd className="mt-0.5 whitespace-pre-wrap break-words text-slate-900">{fact.href ? <a href={fact.href} target="_blank" rel="noreferrer" className="text-blue-700 underline">{fact.value} — Voir sur la carte</a> : fact.value}</dd></div>)}</dl>
+          {!model.signature && <p className="text-sm text-slate-600">Pas de signature enregistrée</p>}
+          <div className="grid grid-cols-2 gap-3">{images.map((image, index) => <button type="button" key={`${image.url}_${index}`} onClick={() => setImageIndex(index)} className="rounded-lg border border-slate-200 p-2 text-left">
+            <span className="mb-1 block text-sm text-slate-700">{image.label}</span><img src={trustedImageUrl(image.url)} alt={image.label} className="h-32 w-full object-contain" />
+          </button>)}</div>
         </div>
-      </div>
-
-      {/* LIGHTBOX PLEIN ÉCRAN */}
-      {lightboxImage && (
-        <div
-          className="fixed inset-0 z-[60] bg-black flex items-center justify-center"
-          onClick={() => setLightboxImage(null)}
-        >
-          {/* Navigation */}
-          {lightboxIndex > 0 && (
-            <button
-              onClick={(e) => { e.stopPropagation(); navigateLightbox(-1); }}
-              className="absolute left-4 z-10 bg-white/20 hover:bg-white/40 rounded-full p-2 transition-colors"
-            >
-              <ChevronLeft size={24} className="text-white" />
-            </button>
-          )}
-          {lightboxIndex < allImages.length - 1 && (
-            <button
-              onClick={(e) => { e.stopPropagation(); navigateLightbox(1); }}
-              className="absolute right-4 z-10 bg-white/20 hover:bg-white/40 rounded-full p-2 transition-colors"
-            >
-              <ChevronRight size={24} className="text-white" />
-            </button>
-          )}
-
-          {/* Close */}
-          <button
-            onClick={() => setLightboxImage(null)}
-            className="absolute top-4 right-4 z-10 bg-white/20 hover:bg-white/40 rounded-full p-2"
-          >
-            <X size={20} className="text-white" />
-          </button>
-
-          {/* Image */}
-          <img
-            src={lightboxImage}
-            alt="Zoom"
-            className="max-w-[95vw] max-h-[90vh] object-contain"
-            onClick={e => e.stopPropagation()}
-          />
-
-          {/* Type indicator */}
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-white/20 px-3 py-1 rounded-full text-white text-xs">
-            {allImages[lightboxIndex]?.type === 'signature' ? '✍️ Signature' : `📷 Photo ${lightboxIndex}`}
-            {' '}— {lightboxIndex + 1}/{allImages.length}
-          </div>
-        </div>
-      )}
-    </>
-  );
+      </section>
+    </div>
+    {imageIndex !== null && images[imageIndex] && <div className="fixed inset-0 z-[60] flex flex-col items-center justify-center gap-3 bg-black/90 p-4" role="dialog" aria-modal="true" aria-label={images[imageIndex].label}>
+      <button type="button" onClick={() => setImageIndex(null)} className="ui-button ui-button-secondary">Fermer l’image</button>
+      <img src={trustedImageUrl(images[imageIndex].url)} alt={images[imageIndex].label} className="max-h-[75vh] max-w-full object-contain" />
+      <div className="flex gap-4"><button type="button" disabled={imageIndex === 0} onClick={() => setImageIndex(imageIndex - 1)} aria-label="Image précédente" className="ui-button ui-button-secondary"><ChevronLeft /></button><button type="button" disabled={imageIndex === images.length - 1} onClick={() => setImageIndex(imageIndex + 1)} aria-label="Image suivante" className="ui-button ui-button-secondary"><ChevronRight /></button></div>
+    </div>}
+  </>;
 };
-
 export default PODViewer;

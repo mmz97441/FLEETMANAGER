@@ -11,6 +11,7 @@ import Modal from './shared/Modal';
 import PageHeader from './shared/PageHeader';
 import { FormInput, FormTextarea } from './shared/FormInput';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import { addressBookIdentity, addressBookFieldErrors } from '../utils/recipientImport';
 import { SavedAddress } from '../types';
 import {
   Plus,
@@ -155,6 +156,10 @@ const RecipientsManager: React.FC<RecipientsManagerProps> = ({
       const missing = (['contactName', 'address', 'city', 'contactPhone'] as const).find(key => !form[key].trim());
       if (missing) document.getElementById(`recipient-${missing}`)?.focus();
       return;
+    }
+    if (!editingAddress || addressBookIdentity(editingAddress) !== addressBookIdentity(form)) {
+      const errors = addressBookFieldErrors(form);
+      if (Object.keys(errors).length) { setError(Object.values(errors).join(' ')); document.getElementById('recipient-city')?.focus(); return; }
     }
     if (form.contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.contactEmail)) { setError('Corrigez l’adresse email ou laissez le champ vide.'); document.getElementById('recipient-contactEmail')?.focus(); return; }
     setSaving(true);

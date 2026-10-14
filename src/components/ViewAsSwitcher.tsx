@@ -9,14 +9,15 @@
  *
  * Volontairement autonome : n'altère pas le currentUser global de l'app.
  */
-import React, { useState, useMemo, useCallback, lazy, Suspense } from 'react';
+import React, { useState, useMemo, useCallback, useRef, useEffect, useSyncExternalStore, useLayoutEffect, lazy, Suspense } from 'react';
 import Modal from './shared/Modal';
 import { User, QuoteRequest, ViewState } from '../types';
 import { PermissionsProvider } from '../usePermissions';
 import { recordClientIntervention } from '../services/clientInterventionService';
 import { confirmAction } from '../services/confirmationService';
 import { notifyWarning } from '../services/logService';
-import { ClientMutationAudit } from '../utils/clientMutation';
+import { ClientMutationAudit, ClientMutationPhase, createInterventionScope } from '../utils/clientMutation';
+import { auth } from '../firebaseConfig';
 import { Eye, Search, Building2, Home, Package, MapPin, BarChart3, BookUser, FileText, HelpCircle, ShieldCheck } from 'lucide-react';
 
 const ClientPortal = lazy(() => import('./ClientPortal'));
@@ -37,16 +38,35 @@ const ViewAsSwitcher: React.FC<ViewAsSwitcherProps> = ({ currentUser, users, quo
   const [interventionSession, setInterventionSession] = useState<string | null>(null);
   const [startingIntervention, setStartingIntervention] = useState(false);
   const [interventionError, setInterventionError] = useState('');
-  const audit = useCallback<ClientMutationAudit>(async (action, phase) => {
+  const identity = `${currentUser.id}|${previewClient?.id || ''}|${interventionSession || ''}`;
+  const identityRef = useRef(identity); identityRef.current = identity;
+  const mounted = useRef(true);
+  useLayoutEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const scope = useMemo(() => createInterventionScope(() => mounted.current && auth.currentUser?.uid === currentUser.id && identityRef.current === identity && !!interventionSession), [identity]);
+  const operations = useSyncExternalStore(scope.subscribe, scope.getSnapshot, scope.getSnapshot);
+  const ending = useRef(new Set<string>());
+  const audit = useMemo<ClientMutationAudit>(() => Object.assign(async (action: string, phase: ClientMutationPhase) => {
     if (!previewClient || !interventionSession) throw new Error('Aucune intervention active.');
     await recordClientIntervention(currentUser, previewClient, interventionSession, action, phase);
-  }, [currentUser, previewClient, interventionSession]);
+  }, { assertActive: scope.assertActive, beginOperation: scope.beginOperation }), [currentUser, previewClient, interventionSession, scope]);
+  useEffect(() => {
+    if (!previewClient || !interventionSession || operations.active || operations.waiting || operations.dispatched || ending.current.has(interventionSession)) return;
+    const session = interventionSession;
+    ending.current.add(session);
+    void recordClientIntervention(currentUser, previewClient, session, 'Fin de l’intervention', 'confirmed')
+      .catch(() => notifyWarning('L’intervention est terminée, mais sa clôture n’a pas pu être journalisée. Les résultats des opérations restent conservés.'))
+      .finally(() => setInterventionSession(value => value === session ? null : value));
+  }, [operations, interventionSession, previewClient, currentUser]);
   const stopIntervention = () => {
-    if (previewClient && interventionSession) void recordClientIntervention(currentUser, previewClient, interventionSession, 'Fin de l’intervention', 'confirmed').catch(() => notifyWarning('L’intervention est terminée, mais sa clôture n’a pas pu être journalisée. Les intentions déjà enregistrées sont conservées.'));
-    setInterventionSession(null);
+    scope.stop();
     setInterventionError('');
   };
-  const closePreview = () => { if (startingIntervention) return; stopIntervention(); setPreviewClient(null); };
+  const interventionBusy = startingIntervention || operations.waiting > 0 || operations.dispatched > 0 || (!!interventionSession && !operations.active);
+  const closePreview = () => {
+    if (interventionBusy) return;
+    if (interventionSession) { stopIntervention(); return; }
+    setPreviewClient(null);
+  };
   const startIntervention = async () => {
     if (!previewClient || startingIntervention) return;
     setStartingIntervention(true); setInterventionError('');
@@ -55,6 +75,7 @@ const ViewAsSwitcher: React.FC<ViewAsSwitcherProps> = ({ currentUser, users, quo
       if (!confirmed) return;
       const sessionId = crypto.randomUUID();
       await recordClientIntervention(currentUser, previewClient, sessionId, 'Début de l’intervention', 'confirmed');
+      if (identityRef.current !== identity || auth.currentUser?.uid !== currentUser.id) throw new Error('Session modifiée.');
       setInterventionSession(sessionId);
     } catch {
       setInterventionError('L’intervention n’a pas pu être journalisée. Vous restez en consultation ; vérifiez votre connexion puis réessayez.');
@@ -120,13 +141,14 @@ const ViewAsSwitcher: React.FC<ViewAsSwitcherProps> = ({ currentUser, users, quo
 
       {/* Overlay d'aperçu (lecture seule) — portail → au-dessus de la sidebar */}
       {previewClient && (
-        <Modal mobileFullscreen isOpen onClose={closePreview} preventClose={startingIntervention} title={interventionSession ? 'Intervention client' : 'Consultation client'} subtitle={`Client : ${clientLabel(previewClient)} · Intervenant : ${currentUser.firstName} ${currentUser.lastName}`} size="full" closeOnOverlay={false} bodyClassName="!p-0 bg-slate-50">
+        <Modal mobileFullscreen isOpen onClose={closePreview} preventClose={interventionBusy} title={interventionSession ? 'Intervention client' : 'Consultation client'} subtitle={`Client : ${clientLabel(previewClient)} · Intervenant : ${currentUser.firstName} ${currentUser.lastName}`} size="full" closeOnOverlay={false} bodyClassName="!p-0 bg-slate-50">
         <div className="min-w-0 bg-slate-50 flex flex-col">
           <div className={`px-3 py-3 flex flex-wrap items-center justify-between gap-2 border-b ${interventionSession ? 'bg-amber-50 border-amber-200 text-amber-950' : 'bg-white border-slate-200 text-slate-700'}`}>
-            <p className="font-semibold text-sm flex items-center gap-2">{interventionSession ? <ShieldCheck size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}{interventionSession ? 'Intervention réelle active' : 'Consultation en lecture seule'}</p>
-            {interventionSession ? <button type="button" onClick={stopIntervention} className="ui-button ui-button-secondary">Terminer l’intervention</button> : <button type="button" disabled={startingIntervention} onClick={() => void startIntervention()} className="ui-button ui-button-secondary">{startingIntervention ? 'Activation en cours…' : 'Intervenir pour ce client'}</button>}
+            <p className="font-semibold text-sm flex items-center gap-2">{interventionSession ? <ShieldCheck size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}{interventionSession ? (operations.active ? 'Intervention réelle active' : 'Clôture de l’intervention') : 'Consultation en lecture seule'}</p>
+            {interventionSession ? <button type="button" disabled={!operations.active} onClick={stopIntervention} className="ui-button ui-button-secondary">{operations.active ? 'Terminer l’intervention' : 'Clôture en cours…'}</button> : <button type="button" disabled={interventionBusy} onClick={() => void startIntervention()} className="ui-button ui-button-secondary">{startingIntervention ? 'Activation en cours…' : 'Intervenir pour ce client'}</button>}
             <details className="text-sm open:w-full"><summary className="cursor-pointer min-h-11 py-3">Identités</summary><div className="space-y-1 break-words pb-2"><p>Intervenant : {currentUser.firstName} {currentUser.lastName} · {currentUser.email}</p><p>Client : {clientLabel(previewClient)} · {previewClient.email}</p><p>{interventionSession ? 'Les modifications autorisées sont réelles et journalisées sous votre identité.' : 'Les modifications sont désactivées. L’intervention nécessite une activation explicite.'}</p></div></details>
           </div>
+          {(operations.waiting > 0 || operations.dispatched > 0) && <p role="status" className="m-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-950">{operations.waiting} demande(s) en attente de journalisation · {operations.dispatched} opération(s) déjà lancée(s). {operations.active ? 'Terminer l’intervention annulera les demandes qui n’ont pas encore démarré.' : 'Les demandes en attente sont annulées. Attendez le résultat des opérations déjà lancées avant de fermer.'}</p>}
           {interventionError && <p role="alert" className="m-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-900">{interventionError}</p>}
           {/* Barre de navigation de l'aperçu (le portail n'a pas la sidebar) */}
           <nav aria-label="Navigation de l’aperçu client" className="bg-white border-b border-slate-200 px-3 py-2 flex items-center gap-1 overflow-x-auto shrink-0">
@@ -154,7 +176,7 @@ const ViewAsSwitcher: React.FC<ViewAsSwitcherProps> = ({ currentUser, users, quo
                     onAddQuote={noop}
                     onUpdateQuoteStatus={noop}
                     previewMode
-                    interventionAudit={interventionSession ? audit : undefined}
+                    interventionAudit={interventionSession && operations.active ? audit : undefined}
                     interventionActorLabel={`${currentUser.firstName} ${currentUser.lastName}`}
                   />
                 </PermissionsProvider>

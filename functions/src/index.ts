@@ -1,3 +1,8 @@
+import { saveClientAddressHandler, updateClientAddressHandler } from './clientAddressBook';
+import { inviteClientTeamMemberHandler, createInvitationHandler } from './clientTeam';
+import { createClientRequestHandler, updateClientRequestHandler } from './clientRequests';
+import { shipmentFieldErrors, quoteShipmentFields } from './shipmentContract';
+import { matchesQuoteOffer, quoteOfferSnapshot } from './quoteOffer';
 import { prepareDeliveryStopHandler } from './prepareDeliveryStop';
 import { requireDriverScanVersion } from './appVersion';
 import { createAdHocPackageHandler } from './adhocPackage';
@@ -996,86 +1001,8 @@ const requireCurrentScanCaller = (data: any) => async (context: functions.https.
   return caller;
 };
 
-export const createInvitation = functions
-  .region('europe-west1')
-  .https.onCall(async (data, context) => {
-    const caller = await requireActiveCaller(context);
-    if (!isAdminCaller(caller.role) && normalizeRole(caller.role) !== 'client')
-      throw new functions.https.HttpsError(
-        'permission-denied',
-        'Invitation non autorisée.',
-      );
-    const email = String(data?.email || '')
-      .toLowerCase()
-      .trim();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-      throw new functions.https.HttpsError(
-        'invalid-argument',
-        'Email invalide.',
-      );
-    const matches = await db
-      .collection('users')
-      .where('email', '==', email)
-      .get();
-    const target = data.userId
-      ? matches.docs.find((d) => d.id === data.userId)
-      : matches.docs.length === 1
-        ? matches.docs[0]
-        : undefined;
-    if (!target)
-      throw new functions.https.HttpsError(
-        'not-found',
-        'Profil unique introuvable.',
-      );
-    const user = target.data();
-    if (
-      !isAdminCaller(caller.role) &&
-      (normalizeRole(user.role) !== 'client' ||
-        !caller.companyName ||
-        user.companyName !== caller.companyName)
-    )
-      throw new functions.https.HttpsError(
-        'permission-denied',
-        'Vous ne pouvez inviter que votre équipe cliente.',
-      );
-    if (user.activatedAt)
-      throw new functions.https.HttpsError(
-        'already-exists',
-        'Compte déjà activé. Utilisez Mot de passe oublié.',
-      );
-    const token = randomBytes(32).toString('hex'),
-      expiresAt = new Date(Date.now() + 7 * 86400000).toISOString();
-    await db
-      .collection('invitations')
-      .doc(target.id)
-      .set({
-        schemaVersion: 2,
-        token,
-        email,
-        userId: target.id,
-        role: user.role,
-        firstName: user.firstName || '',
-        lastName: user.lastName || '',
-        companyName: user.companyName || '',
-        invitedBy: caller.id,
-        invitedByName: `${caller.firstName || ''} ${caller.lastName || ''}`,
-        createdAt: new Date().toISOString(),
-        expiresAt,
-        used: false,
-      });
-    await db
-      .collection('mail')
-      .add({
-        to: email,
-        message: {
-          subject: 'Votre invitation FleetGenius',
-          text: `Vous êtes invité à rejoindre FleetGenius. Activez votre compte : ${APP_URL}/activate?token=${token}\nCe lien expire le ${expiresAt}.`,
-        },
-        type: 'user_invitation',
-        createdAt: new Date().toISOString(),
-      });
-    return { token, expiresAt };
-  });
+export const createInvitation = functions.region('europe-west1').https.onCall((data, context) =>
+  createInvitationHandler(data, context, { db, requireActiveCaller, isAdminCaller, appUrl: APP_URL }));
 
 // Read-only bootstrap fallback when the browser Firestore cache/channel fails.
 // It never creates a profile, changes a role, or exposes another account.
@@ -2003,16 +1930,7 @@ export const importPackages = functions
       }
       if (p.carrierBarcodeFormat && !['generic', 'boiron'].includes(p.carrierBarcodeFormat))
         throw new functions.https.HttpsError('invalid-argument', 'Format du code transporteur invalide.');
-      if (p.requestedDeliveryDate) {
-        const day = p.requestedDeliveryDate;
-        if (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day) || !Number.isFinite(Date.parse(`${day}T00:00:00Z`)) || new Date(`${day}T00:00:00Z`).toISOString().slice(0, 10) !== day)
-          throw new functions.https.HttpsError('invalid-argument', 'Date de livraison souhaitée invalide.');
-      }
-      for (const field of ['timeWindowStart', 'timeWindowEnd']) if (p[field] && (typeof p[field] !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(p[field])))
-        throw new functions.https.HttpsError('invalid-argument', 'Créneau invalide : utilisez le format HH:MM.');
-      if (!intersectDeliveryWindows([p])) throw new functions.https.HttpsError('invalid-argument', 'La fin du créneau doit suivre son début.');
-      if (p.serviceTime != null && (typeof p.serviceTime !== 'number' || !Number.isFinite(p.serviceTime) || p.serviceTime <= 0 || p.serviceTime > 480))
-        throw new functions.https.HttpsError('invalid-argument', 'La durée de service doit être comprise entre 1 et 480 minutes.');
+      const contractErrors = shipmentFieldErrors(p);
       p.scanCodes = parcelScanCodes(p);
       p.movements = [
         {
@@ -2054,7 +1972,7 @@ export const importPackages = functions
             p.clientId + '\0' + code + '\0' + String(p.packageIndex || ''),
           )
           .digest('hex');
-      return { id, code, p };
+      return { id, code, p, contractErrors };
     });
     let manifest;
     try {
@@ -2081,6 +1999,9 @@ export const importPackages = functions
           return { docs, size: docs.length };
         }),
       );
+      const invalidRows = rows.flatMap((row: any, index: number) => !snapshots[index].exists && !legacy[index]?.docs[0] && Object.keys(row.contractErrors).length
+        ? [{ index, reference: row.code, fields: row.contractErrors }] : []);
+      if (invalidRows.length) throw new functions.https.HttpsError('invalid-argument', invalidRows.map((row: any) => `${row.reference} : ${Object.values(row.fields).join(' ')}`).join('\n'), { rows: invalidRows });
       if (legacy.some((result: any) => result && result.size > 1))
         throw new functions.https.HttpsError(
           'failed-precondition',
@@ -2391,15 +2312,16 @@ export const acceptQuote = functions
           'failed-precondition',
           'Attendez une offre avant d’accepter ce devis.',
         );
-      const destination = [quote.destinationAddress, quote.destination]
-          .filter(Boolean)
-          .join(', '),
-        postalCode = destination.match(/\b974\d{2}\b/)?.[0];
-      if (!postalCode)
-        throw new functions.https.HttpsError(
-          'failed-precondition',
-          'Complétez le code postal de destination avant acceptation.',
-        );
+      let acceptedOffer, shipment;
+      try {
+        if (!data?.expectedOffer) throw new Error('Actualisez l’application, puis rouvrez cette offre pour confirmer son montant, son trajet et ses conditions. Le transport n’a pas encore été accepté.');
+        if (!matchesQuoteOffer(quote, data?.expectedOffer)) throw new Error('L’offre a changé ou n’a pas été confirmée. Rouvrez-la pour vérifier le montant, le trajet et les conditions.');
+        acceptedOffer = quoteOfferSnapshot(quote);
+        shipment = quoteShipmentFields(quote);
+      } catch (error) {
+        throw new functions.https.HttpsError('failed-precondition', (error as Error).message, { reason: 'quote-review-required' });
+      }
+      const postalCode = shipment.postalCode;
       const mapping = await tx.get(
         db.collection('postal_code_mappings').doc(postalCode),
       );
@@ -2458,8 +2380,7 @@ export const acceptQuote = functions
         .collection('packages')
         .doc('quote-' + createHash('sha256').update(id).digest('hex'));
       const existing = await tx.get(packageRef),
-        now = new Date().toISOString(),
-        parts = destination.split(',').map((s) => s.trim());
+        now = new Date().toISOString();
       const quoteCodes = { externalId: id, orderNumber: 'Q' + id.slice(-10), barcode: 'Q' + id.slice(-10) };
       const quoteReservations = !existing.exists ? await readIndividualReferenceReservations(tx, db, [{ id: packageRef.id, parcel: quoteCodes }]) : [];
       writeIndividualReferenceReservations(tx, quoteReservations, caller.id, now);
@@ -2472,18 +2393,11 @@ export const acceptQuote = functions
           orderNumber: 'Q' + id.slice(-10),
           barcode: 'Q' + id.slice(-10),
           importBatchId: 'QUOTE-' + id,
-          address: parts[0] || destination,
-          city: parts[parts.length - 1] || '',
-          postalCode,
+          ...shipment,
           zone,
-          contactName: quote.destinationContact?.name || quote.clientName || '',
           contactPhone: quote.destinationContact?.phone || '',
-          requestedDeliveryDate:
-            quote.deliveryDate || quote.requestedDeliveryDate || null,
-          timeWindowStart: quote.deliveryTimeWindow?.start || null,
-          timeWindowEnd: quote.deliveryTimeWindow?.end || null,
           serviceTime: 10,
-          comment: [quote.goodsDescription, quote.clientNotes]
+          comment: [quote.goodsDescription, quote.clientNotes, shipment.requestedDeliveryTime ? `Heure de livraison souhaitée : ${shipment.requestedDeliveryTime} (La Réunion)` : '']
             .filter(Boolean)
             .join(' | '),
           volume: quote.volume || null,
@@ -2503,6 +2417,9 @@ export const acceptQuote = functions
       tx.update(ref, {
         status: 'Accepté (Commande)',
         convertedToPackageId: packageRef.id,
+        acceptedOffer,
+        acceptedBy: caller.id,
+        acceptedAt: now,
         convertedAt: now,
         updatedAt: now,
       });
@@ -2633,3 +2550,15 @@ export const publishDeliveryProof = functions.region('europe-west1').https.onCal
 export const replanPickup = functions.region('europe-west1').https.onCall((data, context) => replanPickupHandler(data, context, { db, requireActiveCaller, isAdminCaller }));
 
 export const reconcileDeliveryProofs = functions.region('europe-west1').runWith({timeoutSeconds: 540}).https.onCall((data, context) => reconcileDeliveryProofsHandler(data, context, {db, requireActiveCaller, isAdminCaller}));
+
+// Client actions: server-authoritative persistence and replay receipts.
+export const saveClientAddress = functions.region('europe-west1').https.onCall((data, context) =>
+  saveClientAddressHandler(data, context, { db, requireActiveCaller, isAdminCaller }));
+export const updateClientAddress = functions.region('europe-west1').https.onCall((data, context) =>
+  updateClientAddressHandler(data, context, { db, requireActiveCaller, isAdminCaller }));
+export const inviteClientTeamMember = functions.region('europe-west1').https.onCall((data, context) =>
+  inviteClientTeamMemberHandler(data, context, { db, requireActiveCaller, isAdminCaller, appUrl: APP_URL }));
+export const createClientRequest = functions.region('europe-west1').https.onCall((data, context) =>
+  createClientRequestHandler(data, context, { db, requireActiveCaller, isAdminCaller }));
+export const updateClientRequest = functions.region('europe-west1').https.onCall((data, context) =>
+  updateClientRequestHandler(data, context, { db, requireActiveCaller, isAdminCaller }));

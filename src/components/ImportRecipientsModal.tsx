@@ -10,6 +10,7 @@ import { useClientAccess } from './client/ClientAccessContext';
 import React, { useState, useRef, useEffect } from 'react';
 import Modal from './shared/Modal';
 import * as XLSX from 'xlsx';
+import { parseRecipientImport, RecipientImportRow as ParsedRow } from '../utils/recipientImport';
 import { decodeClientCsv } from '../utils/clientImportFile';
 import { User, SavedAddress } from '../types';
 import { addSavedAddress } from '../services/firestore';
@@ -22,39 +23,6 @@ interface ImportRecipientsModalProps {
   onDone: (count: number) => void;
   onViewRecipients?: () => void;
 }
-
-interface ParsedRow {
-  line: number;
-  contactName: string;
-  address: string;
-  city: string;         // "CP Ville"
-  contactPhone: string;
-  contactEmail?: string;
-  _status: 'ok' | 'duplicate' | 'invalid' | 'confirmed' | 'unconfirmed';
-  _reason?: string;
-}
-
-const norm = (s: string) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
-const digits = (s: string) => String(s || '').replace(/\D+/g, '');
-
-// Trouve la colonne dont l'entête matche un des alias.
-// Passe 1 = match EXACT (sinon l'alias 'nom' attrape 'prénom' par sous-chaîne et le
-// prénom se retrouve dans contactName). Passe 2 = repli sous-chaîne.
-const pick = (row: Record<string, any>, aliases: string[]): string => {
-  const keys = Object.keys(row);
-  const val = (key: string): string | null => {
-    const v = row[key];
-    return v != null && String(v).trim() !== '' ? String(v).trim() : null;
-  };
-  for (const key of keys) {
-    if (aliases.includes(norm(key))) { const v = val(key); if (v !== null) return v; }
-  }
-  for (const key of keys) {
-    const k = norm(key);
-    if (aliases.some(a => k.includes(a))) { const v = val(key); if (v !== null) return v; }
-  }
-  return '';
-};
 
 const ImportRecipientsModal: React.FC<ImportRecipientsModalProps> = ({ currentUser, existingAddresses, onClose, onDone, onViewRecipients }) => {
   const access = useClientAccess();
@@ -69,11 +37,6 @@ const ImportRecipientsModal: React.FC<ImportRecipientsModalProps> = ({ currentUs
   const resultRef = useRef<HTMLParagraphElement>(null);
   useEffect(() => { if (complete) resultRef.current?.focus({ preventScroll: true }); }, [complete]);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  const existKey = new Set(
-    existingAddresses.map(a => `${norm(a.contactName)}|${norm(a.address)}`)
-  );
-  const existPhones = new Set(existingAddresses.map(a => digits(a.contactPhone)).filter(Boolean));
 
   const handleFile = async (file: File) => {
     if (importing || complete) return;
@@ -90,35 +53,7 @@ const ImportRecipientsModal: React.FC<ImportRecipientsModalProps> = ({ currentUs
       const raw = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: '', raw: false });
 
       if (raw.length > 10000) { setError('Limite de 10 000 lignes par fichier.'); return; }
-      const seen = new Set<string>();
-      const parsed: ParsedRow[] = raw.map((r, index) => {
-        const contactName = pick(r, ['nom', 'destinataire', 'client', 'pharmacie', 'name', 'raison sociale']);
-        const address = pick(r, ['adresse', 'rue', 'address']);
-        const cp = pick(r, ['code postal', 'cp', 'postal', 'zip']);
-        let city = pick(r, ['ville', 'commune', 'city']);
-        if (cp && !norm(city).startsWith(norm(cp))) city = `${cp} ${city}`.trim();
-        const contactPhone = pick(r, ['telephone', 'tel', 'phone', 'portable', 'mobile', 'gsm']);
-        const contactEmail = pick(r, ['email', 'mail', 'courriel', 'e-mail']);
-
-        let _status: ParsedRow['_status'] = 'ok';
-        let _reason = '';
-        if (!contactName || !address || !contactPhone) {
-          _status = 'invalid';
-          _reason = 'Nom, adresse et téléphone obligatoires';
-        } else if (contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) {
-          _status = 'invalid'; _reason = 'Email invalide';
-        } else {
-          const key = `${norm(contactName)}|${norm(address)}`;
-          const phoneKey = digits(contactPhone);
-          if (existKey.has(key) || (phoneKey && existPhones.has(phoneKey)) || seen.has(key)) {
-            _status = 'duplicate';
-            _reason = seen.has(key) ? 'Doublon dans le fichier' : 'Déjà dans le carnet (même contact/adresse ou téléphone)';
-          } else {
-            seen.add(key);
-          }
-        }
-        return { line: Number.isInteger(r.__rowNum__) ? r.__rowNum__ + 1 : index + 2, contactName, address, city, contactPhone, contactEmail: contactEmail || undefined, _status, _reason };
-      });
+      const parsed = parseRecipientImport(raw, existingAddresses);
 
       if (parsed.length === 0) { setError('Aucune ligne trouvée dans le fichier.'); return; }
       setRows(parsed);
@@ -129,11 +64,11 @@ const ImportRecipientsModal: React.FC<ImportRecipientsModalProps> = ({ currentUs
 
   const downloadTemplate = () => {
     const example = [
-      { Nom: 'Pharmacie du Centre', Adresse: '12 rue des Lilas', 'Code postal': '97400', Ville: 'Saint-Denis', 'Téléphone': '0692 12 34 56', Email: 'contact@pharmacie-centre.re' },
-      { Nom: 'Pharmacie du Port', Adresse: '5 avenue de la Mer', 'Code postal': '97420', Ville: 'Le Port', 'Téléphone': '0262 00 00 00', Email: '' },
+      { Nom: 'Pharmacie du Centre', Adresse: '12 rue des Lilas', 'Code postal': '97400', Ville: 'Saint-Denis', 'Téléphone': '0692 12 34 56', Email: 'contact@pharmacie-centre.re', Consignes: 'Sonner à la porte arrière' },
+      { Nom: 'Pharmacie du Port', Adresse: '5 avenue de la Mer', 'Code postal': '97420', Ville: 'Le Port', 'Téléphone': '0262 00 00 00', Email: '', Consignes: '' },
     ];
     const ws = XLSX.utils.json_to_sheet(example);
-    ws['!cols'] = [{ wch: 24 }, { wch: 26 }, { wch: 12 }, { wch: 18 }, { wch: 16 }, { wch: 28 }];
+    ws['!cols'] = [{ wch: 24 }, { wch: 26 }, { wch: 12 }, { wch: 18 }, { wch: 16 }, { wch: 28 }, { wch: 35 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Destinataires');
     XLSX.writeFile(wb, 'modele-destinataires.xlsx');
@@ -148,7 +83,7 @@ const ImportRecipientsModal: React.FC<ImportRecipientsModalProps> = ({ currentUs
   const visibleRows = (rows || []).filter(row => !onlyErrors || ['invalid', 'unconfirmed', 'duplicate'].includes(row._status));
   const exportRejected = () => {
     const rejected = (rows || []).filter(row => ['invalid', 'unconfirmed', 'duplicate'].includes(row._status));
-    const sheet = XLSX.utils.json_to_sheet(rejected.map(row => ({ Nom: row.contactName, Adresse: row.address, Ville: row.city, Téléphone: row.contactPhone, Email: row.contactEmail || '', 'Ligne source': row.line, Motif: row._reason })));
+    const sheet = XLSX.utils.json_to_sheet(rejected.map(row => ({ Nom: row.contactName, Adresse: row.address, Ville: row.city, Téléphone: row.contactPhone, Email: row.contactEmail || '', Consignes: row.notes || '', 'Ligne source': row.line, Motif: row._reason })));
     const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, sheet, 'Destinataires à vérifier'); XLSX.writeFile(workbook, 'destinataires-a-corriger.xlsx');
   };
 
@@ -162,7 +97,7 @@ const ImportRecipientsModal: React.FC<ImportRecipientsModalProps> = ({ currentUs
       await Promise.all(okRows.slice(offset, offset + 10).map(async row => {
         const index = updated.findIndex(item => item.line === row.line);
         try {
-          await access.runMutation('Importer un destinataire', () => addSavedAddress({ companyName: currentUser.companyName || `${currentUser.firstName} ${currentUser.lastName}`, createdBy: currentUser.id, label: row.contactName, type: 'delivery', address: row.address, city: row.city, contactName: row.contactName, contactPhone: row.contactPhone, contactEmail: row.contactEmail, createdAt: '', updatedAt: '' }));
+          await access.runMutation('Importer un destinataire', () => addSavedAddress({ companyName: currentUser.companyName || `${currentUser.firstName} ${currentUser.lastName}`, createdBy: currentUser.id, label: row.contactName, type: 'delivery', address: row.address, city: row.city, contactName: row.contactName, contactPhone: row.contactPhone, contactEmail: row.contactEmail, notes: row.notes, createdAt: '', updatedAt: '' }));
           updated[index] = { ...row, _status: 'confirmed', _reason: 'Enregistrement confirmé' };
           confirmedCount++;
         } catch {
@@ -189,7 +124,7 @@ const ImportRecipientsModal: React.FC<ImportRecipientsModalProps> = ({ currentUs
         {!rows && (
           <>
             <p className="text-sm text-slate-600 mb-3">
-              Importez votre liste (Excel/CSV). Colonnes reconnues : <b>Nom</b>, <b>Adresse</b>, <b>Code postal</b>, <b>Ville</b>, <b>Téléphone</b>, <b>Email</b> (facultatif, pour la copie du bon de livraison).
+              Importez votre liste (Excel/CSV). Colonnes reconnues : <b>Nom</b>, <b>Adresse</b>, <b>Code postal</b>, <b>Ville</b>, <b>Téléphone</b>, <b>Email</b> (facultatif, pour la copie du bon de livraison) et <b>Consignes</b> (facultatif).
             </p>
             <button
               onClick={() => inputRef.current?.click()}
@@ -236,6 +171,7 @@ const ImportRecipientsModal: React.FC<ImportRecipientsModalProps> = ({ currentUs
                   <div className="min-w-0 flex-1">
                     <div className="font-semibold text-slate-800 break-words">Ligne {r.line} · {r.contactName || <span className="text-red-400">Nom manquant</span>}</div>
                     <div className="text-slate-600 break-words">{r.address} {r.city} · {r.contactPhone}{r.contactEmail ? ` · ${r.contactEmail}` : ''}</div>
+                    {r.notes && <div className="text-slate-600 break-words">Consignes : {r.notes}</div>}
                   </div>
                   {r._reason && <span className="col-start-2 text-sm text-slate-600 break-words">{r._reason}</span>}
                 </div>

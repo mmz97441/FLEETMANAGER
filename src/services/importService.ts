@@ -1,3 +1,4 @@
+import { shipmentFieldErrors } from '../utils/shipmentContract';
 import { decodeClientCsv } from '../utils/clientImportFile';
 import { importReference } from '../utils/importManifest';
 import { carrierBarcodeError, individualReferenceError, type CarrierBarcodeFormat } from '../utils/carrierBarcodeValidation';
@@ -300,7 +301,8 @@ const rowToPackage = async (
   const volume = typeof row.Volume === 'string' ? parseFloat(row.Volume) || 0 : row.Volume || 0;
   const weight = typeof row.Weight === 'string' ? parseFloat(row.Weight) || 0 : row.Weight || 0;
   const serviceTime = parseServiceTime(row.Service_Time);
-  if (!Number.isFinite(serviceTime) || serviceTime <= 0 || !intersectDeliveryWindows([{ timeWindowStart: row.Start, timeWindowEnd: row.End }])) return { package: null, error: { row: rowIndex, message: 'Durée de service positive et créneau horaire valide requis.' } };
+  const fieldErrors = shipmentFieldErrors({ contactName: row.Contact, address, city, postalCode, serviceTime, timeWindowStart: row.Start, timeWindowEnd: row.End });
+  if (Object.keys(fieldErrors).length) return { package: null, error: { row: rowIndex, message: Object.values(fieldErrors).join(' ') } };
   const orderNumber = String(row.Order_Number || row.Id);
   
   // Générer un tracking number unique FleetGenius
@@ -613,8 +615,7 @@ export const parseExcelForReview = async (file: File): Promise<ReviewResult> => 
     if (!raw.Telephone) warnings.push('Pas de téléphone');
     if (!raw.Start && !raw.End) warnings.push('Pas de créneau horaire');
     const svcTime = parseServiceTime(raw.Service_Time);
-    if (!Number.isFinite(svcTime) || svcTime <= 0) errors.push('Durée de service positive requise.');
-    if (!intersectDeliveryWindows([{ timeWindowStart: raw.Start, timeWindowEnd: raw.End }])) errors.push('Créneau invalide : fin après début, au format HH:MM.');
+    errors.push(...Object.values(shipmentFieldErrors({ contactName: raw.Contact, address, city, postalCode, serviceTime: svcTime, timeWindowStart: raw.Start, timeWindowEnd: raw.End })));
     if (svcTime > 60) warnings.push(`Temps de service élevé (${svcTime} min)`);
 
     const status = errors.length > 0 ? 'error' : warnings.length > 0 ? 'warning' : 'valid';
@@ -718,8 +719,7 @@ export const revalidateRow = async (row: ReviewRow, allRows: ReviewRow[]): Promi
 
   if (!row.contactPhone) warnings.push('Pas de téléphone');
   if (!row.timeWindowStart && !row.timeWindowEnd) warnings.push('Pas de créneau horaire');
-  if (!Number.isFinite(row.serviceTime) || row.serviceTime <= 0) errors.push('Durée de service positive requise.');
-  if (!intersectDeliveryWindows([row])) errors.push('Créneau invalide : fin après début, au format HH:MM.');
+  errors.push(...Object.values(shipmentFieldErrors(row)));
   if (row.serviceTime > 60) warnings.push(`Temps de service élevé (${row.serviceTime} min)`);
 
   // Vrai doublon = même N° colis qu'une autre ligne

@@ -3,7 +3,7 @@
 // Pur TypeScript (aucune dépendance React / Firebase). Aucune sortie console.
 // ============================================================================
 
-import { Package, PackageStatus, PackageMovement } from '../types';
+import { Package, PackageStatus } from '../types';
 // Source de vérité UNIQUE du regroupement par point de livraison.
 import { placeKey } from '../utils/address';
 
@@ -41,13 +41,13 @@ export interface ClientMetrics {
 }
 
 export interface ClientMetricsWithTrend extends ClientMetrics {
-  previous: Pick<ClientMetrics, 'total' | 'deliveryRate' | 'punctualityRate' | 'avgDelayHours'>;
+  previous: Pick<ClientMetrics, 'total' | 'resolved' | 'deliveryRate' | 'punctualityRate' | 'avgDelayHours'>;
 }
 
 // Cohort dimensions and event metrics deliberately have separate clocks.
 // A parcel created last month and handed over today contributes to today's
 // delivered count, never to today's created volume.
-import { summarizeLogistics, inLogisticsRange, logisticsDay, LogisticsRange } from './logisticsMetrics';
+import { summarizeLogistics, inLogisticsRange, logisticsDay, LogisticsRange, currentDimensions, matchesLogisticsDimensions, LogisticsDimensions } from './logisticsMetrics';
 
 export function metricsRange(period: MetricPeriod, now = new Date(), previous = false): LogisticsRange | undefined {
   if (period === 'all') return undefined;
@@ -64,8 +64,7 @@ export function metricsRange(period: MetricPeriod, now = new Date(), previous = 
   return { start: key(new Date(end.getTime() - (days - 1) * 86400000)), end: key(end) };
 }
 
-const matchesDimensions = (p: Package, filters: MetricsFilters) =>
-  (!filters.pharmacy || p.contactName === filters.pharmacy) && (!filters.zone || p.zone === filters.zone);
+const matchesDimensions = (p: Package, filters: MetricsFilters) => matchesLogisticsDimensions(currentDimensions(p), filters);
 
 /** Creation cohort, for lists of shipments created during the chosen period. */
 export function filterPackages(packages: Package[], filters: MetricsFilters): Package[] {
@@ -73,8 +72,8 @@ export function filterPackages(packages: Package[], filters: MetricsFilters): Pa
   return (Array.isArray(packages) ? packages : []).filter(p => p && matchesDimensions(p, filters) && inLogisticsRange(p.createdAt, range));
 }
 
-function computeCore(packages: Package[], range?: LogisticsRange): ClientMetrics {
-  const summary = summarizeLogistics(packages, range);
+function computeCore(packages: Package[], range?: LogisticsRange, dimensions?: LogisticsDimensions): ClientMetrics {
+  const summary = summarizeLogistics(packages, range, dimensions);
   const byPharmacy = new Map<string, { name: string; count: number; delivered: number }>();
   const byZone = new Map<string, number>();
   const statuses = new Map<string, number>();
@@ -103,11 +102,11 @@ function computeCore(packages: Package[], range?: LogisticsRange): ClientMetrics
 }
 
 export function computeClientMetrics(packages: Package[], filters: MetricsFilters): ClientMetricsWithTrend {
-  const list = (Array.isArray(packages) ? packages : []).filter(p => p && matchesDimensions(p, filters));
+  const list = (Array.isArray(packages) ? packages : []).filter(Boolean);
   const now = new Date();
-  const current = computeCore(list, metricsRange(filters.period, now));
+  const current = computeCore(list, metricsRange(filters.period, now), filters);
   const previous = filters.period === 'all'
-    ? { total: 0, deliveryRate: 0, punctualityRate: null, avgDelayHours: null }
-    : computeCore(list, metricsRange(filters.period, now, true));
+    ? { total: 0, resolved: 0, deliveryRate: 0, punctualityRate: null, avgDelayHours: null }
+    : computeCore(list, metricsRange(filters.period, now, true), filters);
   return { ...current, previous };
 }

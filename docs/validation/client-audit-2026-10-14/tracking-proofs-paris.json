@@ -1,0 +1,236 @@
+{
+  "reassignedMetrics": {
+    "A": {
+      "created": 0,
+      "delivered": 0,
+      "failed": 0,
+      "resolved": 0,
+      "workInProgress": 0,
+      "deliveryRate": 0,
+      "avgDelayHours": null
+    },
+    "B": {
+      "created": 1,
+      "delivered": 1,
+      "failed": 1,
+      "resolved": 2,
+      "workInProgress": 0,
+      "deliveryRate": 50,
+      "avgDelayHours": 312
+    },
+    "historicalFailureDestination": "Pharmacie A"
+  },
+  "insightsPending": {
+    "metrics": {
+      "created": 1,
+      "delivered": 0,
+      "failed": 0,
+      "resolved": 0,
+      "workInProgress": 1,
+      "deliveryRate": 0,
+      "avgDelayHours": null
+    },
+    "insights": [
+      {
+        "id": "all-good",
+        "kind": "positive",
+        "title": "Tout roule",
+        "detail": "Taux 0% · ponctualité — · délai moyen —"
+      },
+      {
+        "id": "concentration",
+        "kind": "info",
+        "title": "Pharmacie B = 100% de vos colis",
+        "detail": "1 colis sur 1 concentrés sur un seul point."
+      }
+    ]
+  },
+  "insightsOldMissing": {
+    "metrics": {
+      "created": 0,
+      "delivered": 0,
+      "failed": 0,
+      "resolved": 0,
+      "workInProgress": 1,
+      "deliveryRate": 0,
+      "avgDelayHours": null
+    },
+    "insights": [
+      {
+        "id": "no-data",
+        "kind": "info",
+        "title": "Pas encore de données",
+        "detail": "Créez des expéditions pour voir vos indicateurs."
+      }
+    ]
+  },
+  "noSampleTrends": {
+    "current": {
+      "created": 1,
+      "delivered": 0,
+      "failed": 0,
+      "resolved": 0,
+      "workInProgress": 1,
+      "deliveryRate": 0,
+      "avgDelayHours": null
+    },
+    "previous": {
+      "total": 1,
+      "delivered": 1,
+      "failed": 0,
+      "pending": 1,
+      "inDelivery": 0,
+      "deliveryRate": 100,
+      "punctualityRate": null,
+      "etaAdherenceRate": null,
+      "avgDelayHours": 288,
+      "resolved": 1,
+      "workInProgress": 1,
+      "undatedOutcomes": 0,
+      "pharmacies": 1,
+      "weightTotal": 0,
+      "byDay": [
+        {
+          "date": "2026-08-20",
+          "total": 1,
+          "delivered": 0,
+          "failed": 0
+        },
+        {
+          "date": "2026-09-01",
+          "total": 0,
+          "delivered": 1,
+          "failed": 0
+        }
+      ],
+      "byPharmacy": [
+        {
+          "name": "Pharmacie B",
+          "count": 1,
+          "delivered": 1
+        }
+      ],
+      "byZone": [
+        {
+          "zone": "Nord",
+          "count": 1
+        }
+      ],
+      "statusBreakdown": [
+        {
+          "status": "Livré",
+          "count": 1
+        }
+      ]
+    },
+    "uiDeliveryTrend": -100,
+    "uiDelayTrend": -100
+  },
+  "partialAttemptTotals": {
+    "created": 2,
+    "delivered": 1,
+    "failed": 1,
+    "resolved": 2,
+    "workInProgress": 1,
+    "deliveryRate": 50,
+    "avgDelayHours": 312
+  },
+  "historicalReport": {
+    "summary": {
+      "total": 1,
+      "delivered": 0,
+      "failed": 1,
+      "inProgress": 0,
+      "pending": 0,
+      "deliveryRate": 0,
+      "avgDelayHours": null
+    },
+    "detailRow": "BR-1234-5678 ORDER-42 Pharmacie B 97400 Saint-Denis Livré 14/10/2026 07:00 Réception B"
+  },
+  "trackingStale": "🚚 Suivi de mes livraisons Consultez les dernières positions reçues des livreurs qui transportent vos colis. 🛰️ Aucune livraison en cours Vos colis apparaîtront ici dès qu&#x27;ils partent en tournée. Vous pourrez alors suivre votre livreur en temps réel sur la carte. 📦 1 colis en préparation",
+  "trackingNoGps": "🚚 Suivi de mes livraisons Consultez les dernières positions reçues des livreurs qui transportent vos colis. 🛰️ Aucune livraison en cours Vos colis apparaîtront ici dès qu&#x27;ils partent en tournée. Vous pourrez alors suivre votre livreur en temps réel sur la carte. 📦 1 colis en préparation",
+  "trackingPendingMissing": "🚚 Suivi de mes livraisons Consultez les dernières positions reçues des livreurs qui transportent vos colis. 🛰️ Aucune livraison en cours Vos colis apparaîtront ici dès qu&#x27;ils partent en tournée. Vous pourrez alors suivre votre livreur en temps réel sur la carte. 📦 1 colis en préparation",
+  "pendingProofTimeline": "✅ Livré 14/10/2026 à 09:00:00",
+  "proofReferenceAndTime": "Preuve de livraison Commande 87654321 Imprimer Livré avec succès 13/10/2026 22:30 Destinataire Pharmacie B Adresse lors de la tentative 2 Rue B 97400 Saint-Denis Étage 2 Réceptionné par Réception B Signature Pas de signature enregistrée",
+  "printedReserves": {
+    "screenHasReserve": true,
+    "printHasReserve": false,
+    "printHasCondition": false
+  },
+  "proofAfterTerminalTransition": {
+    "watchers": [
+      [
+        {
+          "type": "where",
+          "args": [
+            "clientId",
+            "==",
+            "client-A"
+          ]
+        },
+        {
+          "type": "where",
+          "args": [
+            "status",
+            "in",
+            [
+              "En attente",
+              "Collecté",
+              "Au hub",
+              "Trié",
+              "En transit",
+              "Chargé",
+              "En livraison",
+              "Échec",
+              "À retourner"
+            ]
+          ]
+        }
+      ],
+      [
+        {
+          "type": "where",
+          "args": [
+            "clientId",
+            "==",
+            "client-A"
+          ]
+        },
+        {
+          "type": "where",
+          "args": [
+            "status",
+            "in",
+            [
+              "Livré",
+              "Retourné"
+            ]
+          ]
+        },
+        {
+          "type": "orderBy",
+          "args": [
+            "documentId"
+          ]
+        },
+        {
+          "type": "limit",
+          "n": 1
+        }
+      ]
+    ],
+    "visiblePodAfterPublished": false,
+    "storedPodAfterPublished": true
+  },
+  "removedHistoricalDocument": {
+    "visibleIds": [
+      "firestore-autoid-87654321"
+    ],
+    "historyComplete": true
+  },
+  "cachedHistoryClaimsComplete": {
+    "historyComplete": true,
+    "refreshedAt": "2026-10-14T10:00:00.000Z",
+    "visibleCount": 1
+  }
+}

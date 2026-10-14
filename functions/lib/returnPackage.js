@@ -171,7 +171,7 @@ async function resolveReturnedPackageHandler(data, context, { db, requireActiveC
             returnDisposition: redeliver ? 'REDELIVERY_READY' : 'SENDER_RETURNED',
             currentHubId: redeliver ? hubId : null, returnDecision: { decision: data.decision, by: caller.id, at: now, notes: String(data.notes).trim() },
             ...(redeliver ? { requestedDeliveryDate: data.requestedDeliveryDate || null } : { senderReturnProof: { ...data.proof, receivedAt: now, recordedBy: caller.id } }),
-            movements: [...(pkg.movements || []), { timestamp: now, receivedAt: now, action: redeliver ? 'REDELIVERY_REQUESTED' : 'RETURNED',
+            movements: [...(pkg.movements || []), { timestamp: now, receivedAt: now, action: redeliver ? 'REDELIVERY_REQUESTED' : 'RETURNED', outcome: data.decision,
                     recordedBy: caller.id, hubId, notes: String(data.notes).trim() }], updatedAt: now,
         });
         tx.create(receiptRef, { packageId: snap.id, performedBy: caller.id, decision: data.decision, receivedAt: now });

@@ -33,7 +33,12 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.reconcileDeliveryProofs = exports.replanPickup = exports.publishDeliveryProof = exports.receiveTransferredPackageAtHub = exports.indexPackageScanCodes = exports.prepareDeliveryStop = exports.createAdHocPackage = exports.interpretAnalytics = exports.acceptQuote = exports.getTeamDirectory = exports.notifyPackageStatus = exports.setParcelSorting = exports.correctDeliveryPlan = exports.commitDeliveryOutcome = exports.finalizePickup = exports.resolveReturnedPackage = exports.returnPackage = exports.deleteAbsence = exports.deleteVehicle = exports.importPackages = exports.assignVehicle = exports.askFleetGenius = exports.sendBusinessNotification = exports.transferPackages = exports.scanPackage = exports.dispatchMissions = exports.finishMission = exports.receivePackagesAtHub = exports.saveAbsence = exports.revokeOwnSessions = exports.linkAuthToProfile = exports.recordUserPresence = exports.getOwnProfile = exports.createInvitation = exports.activateAccount = exports.validateInvitationToken = exports.forcePasswordReset = exports.toggleUserStatus = exports.cleanupExpiredInvitations = exports.deleteUserCompletely = exports.optimizeTours = exports.employeeVoting = exports.recordClientErrors = exports.associateCarrierBarcode = void 0;
+exports.updateClientRequest = exports.createClientRequest = exports.inviteClientTeamMember = exports.updateClientAddress = exports.saveClientAddress = exports.reconcileDeliveryProofs = exports.replanPickup = exports.publishDeliveryProof = exports.receiveTransferredPackageAtHub = exports.indexPackageScanCodes = exports.prepareDeliveryStop = exports.createAdHocPackage = exports.interpretAnalytics = exports.acceptQuote = exports.getTeamDirectory = exports.notifyPackageStatus = exports.setParcelSorting = exports.correctDeliveryPlan = exports.commitDeliveryOutcome = exports.finalizePickup = exports.resolveReturnedPackage = exports.returnPackage = exports.deleteAbsence = exports.deleteVehicle = exports.importPackages = exports.assignVehicle = exports.askFleetGenius = exports.sendBusinessNotification = exports.transferPackages = exports.scanPackage = exports.dispatchMissions = exports.finishMission = exports.receivePackagesAtHub = exports.saveAbsence = exports.revokeOwnSessions = exports.linkAuthToProfile = exports.recordUserPresence = exports.getOwnProfile = exports.createInvitation = exports.activateAccount = exports.validateInvitationToken = exports.forcePasswordReset = exports.toggleUserStatus = exports.cleanupExpiredInvitations = exports.deleteUserCompletely = exports.optimizeTours = exports.employeeVoting = exports.recordClientErrors = exports.associateCarrierBarcode = void 0;
+const clientAddressBook_1 = require("./clientAddressBook");
+const clientTeam_1 = require("./clientTeam");
+const clientRequests_1 = require("./clientRequests");
+const shipmentContract_1 = require("./shipmentContract");
+const quoteOffer_1 = require("./quoteOffer");
 const prepareDeliveryStop_1 = require("./prepareDeliveryStop");
 const appVersion_1 = require("./appVersion");
 const adhocPackage_1 = require("./adhocPackage");
@@ -844,68 +849,7 @@ const requireCurrentScanCaller = (data) => async (context) => {
     (0, appVersion_1.requireDriverScanVersion)(normalizeRole(caller.role), data?.clientVersion);
     return caller;
 };
-exports.createInvitation = functions
-    .region('europe-west1')
-    .https.onCall(async (data, context) => {
-    const caller = await requireActiveCaller(context);
-    if (!isAdminCaller(caller.role) && normalizeRole(caller.role) !== 'client')
-        throw new functions.https.HttpsError('permission-denied', 'Invitation non autorisée.');
-    const email = String(data?.email || '')
-        .toLowerCase()
-        .trim();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-        throw new functions.https.HttpsError('invalid-argument', 'Email invalide.');
-    const matches = await db
-        .collection('users')
-        .where('email', '==', email)
-        .get();
-    const target = data.userId
-        ? matches.docs.find((d) => d.id === data.userId)
-        : matches.docs.length === 1
-            ? matches.docs[0]
-            : undefined;
-    if (!target)
-        throw new functions.https.HttpsError('not-found', 'Profil unique introuvable.');
-    const user = target.data();
-    if (!isAdminCaller(caller.role) &&
-        (normalizeRole(user.role) !== 'client' ||
-            !caller.companyName ||
-            user.companyName !== caller.companyName))
-        throw new functions.https.HttpsError('permission-denied', 'Vous ne pouvez inviter que votre équipe cliente.');
-    if (user.activatedAt)
-        throw new functions.https.HttpsError('already-exists', 'Compte déjà activé. Utilisez Mot de passe oublié.');
-    const token = (0, crypto_1.randomBytes)(32).toString('hex'), expiresAt = new Date(Date.now() + 7 * 86400000).toISOString();
-    await db
-        .collection('invitations')
-        .doc(target.id)
-        .set({
-        schemaVersion: 2,
-        token,
-        email,
-        userId: target.id,
-        role: user.role,
-        firstName: user.firstName || '',
-        lastName: user.lastName || '',
-        companyName: user.companyName || '',
-        invitedBy: caller.id,
-        invitedByName: `${caller.firstName || ''} ${caller.lastName || ''}`,
-        createdAt: new Date().toISOString(),
-        expiresAt,
-        used: false,
-    });
-    await db
-        .collection('mail')
-        .add({
-        to: email,
-        message: {
-            subject: 'Votre invitation FleetGenius',
-            text: `Vous êtes invité à rejoindre FleetGenius. Activez votre compte : ${APP_URL}/activate?token=${token}\nCe lien expire le ${expiresAt}.`,
-        },
-        type: 'user_invitation',
-        createdAt: new Date().toISOString(),
-    });
-    return { token, expiresAt };
-});
+exports.createInvitation = functions.region('europe-west1').https.onCall((data, context) => (0, clientTeam_1.createInvitationHandler)(data, context, { db, requireActiveCaller, isAdminCaller, appUrl: APP_URL }));
 // Read-only bootstrap fallback when the browser Firestore cache/channel fails.
 // It never creates a profile, changes a role, or exposes another account.
 exports.getOwnProfile = functions.region('europe-west1').https.onCall(async (data, context) => {
@@ -1607,18 +1551,7 @@ exports.importPackages = functions
         }
         if (p.carrierBarcodeFormat && !['generic', 'boiron'].includes(p.carrierBarcodeFormat))
             throw new functions.https.HttpsError('invalid-argument', 'Format du code transporteur invalide.');
-        if (p.requestedDeliveryDate) {
-            const day = p.requestedDeliveryDate;
-            if (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day) || !Number.isFinite(Date.parse(`${day}T00:00:00Z`)) || new Date(`${day}T00:00:00Z`).toISOString().slice(0, 10) !== day)
-                throw new functions.https.HttpsError('invalid-argument', 'Date de livraison souhaitée invalide.');
-        }
-        for (const field of ['timeWindowStart', 'timeWindowEnd'])
-            if (p[field] && (typeof p[field] !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(p[field])))
-                throw new functions.https.HttpsError('invalid-argument', 'Créneau invalide : utilisez le format HH:MM.');
-        if (!(0, deliveryAddress_1.intersectDeliveryWindows)([p]))
-            throw new functions.https.HttpsError('invalid-argument', 'La fin du créneau doit suivre son début.');
-        if (p.serviceTime != null && (typeof p.serviceTime !== 'number' || !Number.isFinite(p.serviceTime) || p.serviceTime <= 0 || p.serviceTime > 480))
-            throw new functions.https.HttpsError('invalid-argument', 'La durée de service doit être comprise entre 1 et 480 minutes.');
+        const contractErrors = (0, shipmentContract_1.shipmentFieldErrors)(p);
         p.scanCodes = (0, scanCode_1.parcelScanCodes)(p);
         p.movements = [
             {
@@ -1649,7 +1582,7 @@ exports.importPackages = functions
             (0, crypto_1.createHash)('sha256')
                 .update(p.clientId + '\0' + code + '\0' + String(p.packageIndex || ''))
                 .digest('hex');
-        return { id, code, p };
+        return { id, code, p, contractErrors };
     });
     let manifest;
     try {
@@ -1676,6 +1609,10 @@ exports.importPackages = functions
             const docs = [...new Map(matches.flatMap(result => result.docs).filter(doc => (0, scanCode_1.normalizeScanCode)(String(doc.data()[field] || '')) === (0, scanCode_1.normalizeScanCode)(r.code)).map(doc => [doc.id, doc])).values()];
             return { docs, size: docs.length };
         }));
+        const invalidRows = rows.flatMap((row, index) => !snapshots[index].exists && !legacy[index]?.docs[0] && Object.keys(row.contractErrors).length
+            ? [{ index, reference: row.code, fields: row.contractErrors }] : []);
+        if (invalidRows.length)
+            throw new functions.https.HttpsError('invalid-argument', invalidRows.map((row) => `${row.reference} : ${Object.values(row.fields).join(' ')}`).join('\n'), { rows: invalidRows });
         if (legacy.some((result) => result && result.size > 1))
             throw new functions.https.HttpsError('failed-precondition', 'Des doublons existent déjà pour cette référence. Faites-les contrôler avant de reprendre l’import.');
         const ids = [];
@@ -1929,11 +1866,19 @@ exports.acceptQuote = functions
         }
         if (!manager && quote.status !== 'Offre envoyée')
             throw new functions.https.HttpsError('failed-precondition', 'Attendez une offre avant d’accepter ce devis.');
-        const destination = [quote.destinationAddress, quote.destination]
-            .filter(Boolean)
-            .join(', '), postalCode = destination.match(/\b974\d{2}\b/)?.[0];
-        if (!postalCode)
-            throw new functions.https.HttpsError('failed-precondition', 'Complétez le code postal de destination avant acceptation.');
+        let acceptedOffer, shipment;
+        try {
+            if (!data?.expectedOffer)
+                throw new Error('Actualisez l’application, puis rouvrez cette offre pour confirmer son montant, son trajet et ses conditions. Le transport n’a pas encore été accepté.');
+            if (!(0, quoteOffer_1.matchesQuoteOffer)(quote, data?.expectedOffer))
+                throw new Error('L’offre a changé ou n’a pas été confirmée. Rouvrez-la pour vérifier le montant, le trajet et les conditions.');
+            acceptedOffer = (0, quoteOffer_1.quoteOfferSnapshot)(quote);
+            shipment = (0, shipmentContract_1.quoteShipmentFields)(quote);
+        }
+        catch (error) {
+            throw new functions.https.HttpsError('failed-precondition', error.message, { reason: 'quote-review-required' });
+        }
+        const postalCode = shipment.postalCode;
         const mapping = await tx.get(db.collection('postal_code_mappings').doc(postalCode));
         const defaults = {};
         for (const [zone, codes] of Object.entries({
@@ -1987,7 +1932,7 @@ exports.acceptQuote = functions
         const packageRef = db
             .collection('packages')
             .doc('quote-' + (0, crypto_1.createHash)('sha256').update(id).digest('hex'));
-        const existing = await tx.get(packageRef), now = new Date().toISOString(), parts = destination.split(',').map((s) => s.trim());
+        const existing = await tx.get(packageRef), now = new Date().toISOString();
         const quoteCodes = { externalId: id, orderNumber: 'Q' + id.slice(-10), barcode: 'Q' + id.slice(-10) };
         const quoteReservations = !existing.exists ? await (0, parcelReferenceIndex_1.readIndividualReferenceReservations)(tx, db, [{ id: packageRef.id, parcel: quoteCodes }]) : [];
         (0, parcelReferenceIndex_1.writeIndividualReferenceReservations)(tx, quoteReservations, caller.id, now);
@@ -2000,17 +1945,11 @@ exports.acceptQuote = functions
                 orderNumber: 'Q' + id.slice(-10),
                 barcode: 'Q' + id.slice(-10),
                 importBatchId: 'QUOTE-' + id,
-                address: parts[0] || destination,
-                city: parts[parts.length - 1] || '',
-                postalCode,
+                ...shipment,
                 zone,
-                contactName: quote.destinationContact?.name || quote.clientName || '',
                 contactPhone: quote.destinationContact?.phone || '',
-                requestedDeliveryDate: quote.deliveryDate || quote.requestedDeliveryDate || null,
-                timeWindowStart: quote.deliveryTimeWindow?.start || null,
-                timeWindowEnd: quote.deliveryTimeWindow?.end || null,
                 serviceTime: 10,
-                comment: [quote.goodsDescription, quote.clientNotes]
+                comment: [quote.goodsDescription, quote.clientNotes, shipment.requestedDeliveryTime ? `Heure de livraison souhaitée : ${shipment.requestedDeliveryTime} (La Réunion)` : '']
                     .filter(Boolean)
                     .join(' | '),
                 volume: quote.volume || null,
@@ -2030,6 +1969,9 @@ exports.acceptQuote = functions
         tx.update(ref, {
             status: 'Accepté (Commande)',
             convertedToPackageId: packageRef.id,
+            acceptedOffer,
+            acceptedBy: caller.id,
+            acceptedAt: now,
             convertedAt: now,
             updatedAt: now,
         });
@@ -2129,4 +2071,10 @@ exports.receiveTransferredPackageAtHub = functions.region('europe-west1').https.
 exports.publishDeliveryProof = functions.region('europe-west1').https.onCall((data, context) => (0, publishDeliveryProof_1.publishDeliveryProofHandler)(data, context, { db, requireActiveCaller }));
 exports.replanPickup = functions.region('europe-west1').https.onCall((data, context) => (0, finalizePickup_1.replanPickupHandler)(data, context, { db, requireActiveCaller, isAdminCaller }));
 exports.reconcileDeliveryProofs = functions.region('europe-west1').runWith({ timeoutSeconds: 540 }).https.onCall((data, context) => (0, reconcileDeliveryProofs_1.reconcileDeliveryProofsHandler)(data, context, { db, requireActiveCaller, isAdminCaller }));
+// Client actions: server-authoritative persistence and replay receipts.
+exports.saveClientAddress = functions.region('europe-west1').https.onCall((data, context) => (0, clientAddressBook_1.saveClientAddressHandler)(data, context, { db, requireActiveCaller, isAdminCaller }));
+exports.updateClientAddress = functions.region('europe-west1').https.onCall((data, context) => (0, clientAddressBook_1.updateClientAddressHandler)(data, context, { db, requireActiveCaller, isAdminCaller }));
+exports.inviteClientTeamMember = functions.region('europe-west1').https.onCall((data, context) => (0, clientTeam_1.inviteClientTeamMemberHandler)(data, context, { db, requireActiveCaller, isAdminCaller, appUrl: APP_URL }));
+exports.createClientRequest = functions.region('europe-west1').https.onCall((data, context) => (0, clientRequests_1.createClientRequestHandler)(data, context, { db, requireActiveCaller, isAdminCaller }));
+exports.updateClientRequest = functions.region('europe-west1').https.onCall((data, context) => (0, clientRequests_1.updateClientRequestHandler)(data, context, { db, requireActiveCaller, isAdminCaller }));
 //# sourceMappingURL=index.js.map

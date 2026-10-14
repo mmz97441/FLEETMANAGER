@@ -3,11 +3,12 @@ import { shipmentImportCounts, validateClientShipment, type ClientShipmentFields
 
 const valid: ClientShipmentFields = { contactName: 'Pharmacie', address: '12 rue des Lilas', postalCode: '97400', city: 'Saint-Denis', contactPhone: '0262123456', contactEmail: '', packageCount: 1, weight: '' };
 describe('client shipment validation', () => {
-  it('accepts city-only legacy addresses and optional email/weight', () => {
-    expect(validateClientShipment({ ...valid, postalCode: '' })).toEqual({});
+  it('requires a structured address while accepting optional email/weight', () => {
+    expect(validateClientShipment({ ...valid, postalCode: '' })).toHaveProperty('postalCode');
+    expect(validateClientShipment(valid)).toEqual({});
   });
   it('explains missing required fields', () => {
-    expect(Object.keys(validateClientShipment({ ...valid, contactName: '', address: '', postalCode: '', city: '', contactPhone: '' }))).toEqual(['contactName', 'address', 'city', 'contactPhone']);
+    expect(Object.keys(validateClientShipment({ ...valid, contactName: '', address: '', postalCode: '', city: '', contactPhone: '' }))).toEqual(['contactName', 'address', 'postalCode', 'city', 'contactPhone']);
   });
   it.each([0, 51, 1.5, NaN])('rejects invalid quantity %s instead of silently clamping', packageCount => {
     expect(validateClientShipment({ ...valid, packageCount }).packageCount).toBeTruthy();
