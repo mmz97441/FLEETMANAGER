@@ -72,9 +72,10 @@ const dispatch = (id, suffix, extra = {}) => service.dispatchMissions.run({ requ
   record('LOG-05', { returnedParcel: 'Au hub / décision attendue', scan: returnedScan.outcome, hubReception: 'already-at-hub / still awaiting decision', redispatch: 'refused' });
 
   // Original spelling is retained while the derived index recognizes uppercase scans.
-  const lower = await parcel('lowercase', { externalId: 'br-audit-lowercase', barcode: 'gfl-audit-lowercase', scanCodes: ['BR-AUDIT-LOWERCASE', 'GFL-AUDIT-LOWERCASE'] });
-  const upperScan = await scan('BR-AUDIT-LOWERCASE');
-  const literalScan = await scan('br-audit-lowercase');
+  const lowerReference = 'br-' + prefix, barcode = 'gfl-' + prefix;
+  await parcel('lowercase', { externalId: lowerReference, barcode, scanCodes: [lowerReference.toUpperCase(), barcode.toUpperCase()] });
+  const upperScan = await scan(lowerReference.toUpperCase());
+  const literalScan = await scan(lowerReference);
   assert.equal(upperScan.accepted, true); assert.equal(literalScan.accepted, true);
   record('LOG-08', { stored: 'br-audit-lowercase', uppercaseScan: upperScan.outcome, exactCaseScan: literalScan.outcome });
 
@@ -86,6 +87,6 @@ const dispatch = (id, suffix, extra = {}) => service.dispatchMissions.run({ requ
   assert.equal((await db.collection('packages').doc(missing).get()).data().missionId, null);
   record('LOG-11', { missingPickupRemainsAssignedToClosedMission: false, hubReception: 'refused' });
 
-  writeFileSync('/private/tmp/fleet-logistics-server-regressions.json', JSON.stringify({ demoProject: process.env.GCLOUD_PROJECT, findings }, null, 2));
+  writeFileSync(require('node:path').join(require('node:os').tmpdir(), 'fleet-logistics-server-regressions.json'), JSON.stringify({ demoProject: process.env.GCLOUD_PROJECT, findings }, null, 2));
   await db.terminate();
 })().catch(error => { console.error(error); process.exitCode = 1; });

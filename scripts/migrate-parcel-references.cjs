@@ -27,6 +27,21 @@ if (argv.includes('--gcloud')) {
   db.settings({ authClient });
 }
 const refId = code => createHash('sha256').update(normalizeScanCode(code)).digest('hex');
+/** Finish every in-flight operation before failing or moving to the next phase. */
+async function runBounded(phase, items, task) {
+  let cursor = 0, completed = 0, failure;
+  await Promise.all(Array.from({ length: Math.min(8, items.length) }, async () => {
+    while (!failure && cursor < items.length) {
+      const item = items[cursor++];
+      try {
+        await task(item); completed++;
+        if (completed % 100 === 0 || completed === items.length)
+          console.log(JSON.stringify({ phase, completed, total: items.length }));
+      } catch (error) { failure ||= error; }
+    }
+  }));
+  if (failure) throw failure;
+}
 (async () => {
   const parcels = [], codes = new Map(), individualCodes = new Set(); let cursor;
   for (;;) {
@@ -49,13 +64,12 @@ const refId = code => createHash('sha256').update(normalizeScanCode(code)).diges
   report.individualCollisions = report.collisions.filter(item => item.kind === 'individual-collision').length;
   report.sharedOrderReferences = report.collisions.filter(item => item.kind === 'shared-order').length;
   if (argv.includes('--apply')) {
-    for (const { doc, canonical, needsUpdate } of parcels) {
-      if (!needsUpdate) continue;
+    await runBounded('package-indexes', parcels.filter(parcel => parcel.needsUpdate), async ({ doc, canonical }) => {
       try { await doc.ref.update({ scanCodes: canonical }, { lastUpdateTime: doc.updateTime }); report.updatedPackages++; }
       catch (error) { if ([5, 9].includes(error.code)) report.skippedConcurrent.push(doc.id); else throw error; }
-    }
+    });
     if (!report.skippedConcurrent.length) {
-      for (const code of codes.keys()) {
+      await runBounded('reference-reservations', [...codes.keys()], async code => {
         await db.runTransaction(async tx => {
           const reservation = db.collection('parcel_reference_index').doc(refId(code));
           await tx.get(reservation); // serialize against imports and association writes
@@ -67,7 +81,7 @@ const refId = code => createHash('sha256').update(normalizeScanCode(code)).diges
             ambiguous: packageIds.length > 1, updatedAt: new Date().toISOString(), updatedBy: 'reference-index-migration' });
         });
         report.updatedReservations++;
-      }
+      });
     }
   }
   if (argv.includes('--report')) fs.writeFileSync(arg('--report'), JSON.stringify(report, null, 2));
