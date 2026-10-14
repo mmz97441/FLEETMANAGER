@@ -1,0 +1,73 @@
+{
+  "checks": [
+    {
+      "name": "Wrong pickup carton stays red and does not count",
+      "pass": true
+    },
+    {
+      "name": "Pickup draft restores the unique scan and signature after reload",
+      "pass": true
+    },
+    {
+      "name": "Offline partial pickup queues complete intent and does not send",
+      "pass": true
+    },
+    {
+      "name": "Pickup replay sends exactly scanned and missing partition once with signature",
+      "pass": true
+    },
+    {
+      "name": "Return draft restores selected physical hub, photo and signature after reload",
+      "pass": true
+    },
+    {
+      "name": "Switching account never copies the previous return photos or signature",
+      "pass": true
+    },
+    {
+      "name": "A later attempt of the same carton starts with a fresh return draft",
+      "pass": true
+    },
+    {
+      "name": "A late camera callback cannot attach a previous account photo to the new account",
+      "pass": true
+    },
+    {
+      "name": "Offline return sends no upload and remains explicitly pending",
+      "pass": true
+    },
+    {
+      "name": "Return replay targets chosen active hub and immutable original mission",
+      "pass": true
+    },
+    {
+      "name": "Office queue exposes failed, legacy returned and missed collection",
+      "pass": true
+    },
+    {
+      "name": "Legacy return cannot be reopened without physical hub, code and explicit decision",
+      "pass": true
+    },
+    {
+      "name": "Office recollection creates a fresh scheduled pickup instead of marking collected",
+      "pass": true
+    },
+    {
+      "name": "Recovery queue has no horizontal overflow at 320",
+      "pass": true
+    },
+    {
+      "name": "Recovery queue has no horizontal overflow at 390",
+      "pass": true
+    },
+    {
+      "name": "Recovery queue has no horizontal overflow at 1365",
+      "pass": true
+    },
+    {
+      "name": "No uncaught browser exception",
+      "pass": true
+    }
+  ],
+  "errors": []
+}

@@ -1,3 +1,5 @@
+import RecoveryPanel from './RecoveryPanel';
+import ReturnHubModal from './ReturnHubModal';
 import ImportReadiness from './ImportReadiness';
 import { scanPackage, scanReceiptLabel } from '../services/scanService';
 import { useOperationalDay } from '../hooks/useOperationalDay';
@@ -40,7 +42,7 @@ import {
 } from '../services/missionService';
 
 import Modal from './shared/Modal';
-import { receivePackagesAtHubCF } from '../services/cloudFunctions';
+import { receivePackagesAtHubCF, receiveTransferredPackageAtHubCF } from '../services/cloudFunctions';
 
 import BarcodeScanner from './Scanner';
 
@@ -81,6 +83,11 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
   const notificationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // UI
+  const [returningPackage, setReturningPackage] = useState<Package | null>(null);
+  const [showRecovery, setShowRecovery] = useState(false);
+  const [hubTransfer, setHubTransfer] = useState<{pkg: Package; code: string} | null>(null);
+  const [hubTransferReason, setHubTransferReason] = useState('');
+  const [hubTransferConfirmed, setHubTransferConfirmed] = useState(false);
   const [activeTab, setActiveTab] = useState<HubOpsTab>('reception');
   const [selectedHubId, setSelectedHubId] = useState<string>('');
   const [showScanner, setShowScanner] = useState(false);
@@ -157,7 +164,8 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
   const receptionPackages = useMemo(() =>
     packages.filter(p => (
       p.status === PackageStatus.COLLECTED || p.status === PackageStatus.PENDING ||
-      (p.status === PackageStatus.AT_HUB && (p.missionId || p.stopId || p.currentDriverId || p.currentVehicleId))
+      (p.status === PackageStatus.AT_HUB && (!p.currentHubId || p.missionId || p.stopId || p.currentDriverId || p.currentVehicleId)) ||
+      (p.status === PackageStatus.SORTED && !p.currentHubId && !p.missionId && !p.currentDriverId)
     ) && (!isDriver || p.currentDriverId === currentUser.id)),
     [packages, isDriver, currentUser.id]
   );
@@ -224,7 +232,10 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
     try {
       const pkg = await findPackageByCode(barcode);
       if (!pkg) { showNotif('warning', `Code ${barcode} — colis non trouvé`); return; }
-      if (![PackageStatus.COLLECTED, PackageStatus.PENDING, PackageStatus.AT_HUB].includes(pkg.status)) {
+      if (canAssociateCarrier && [PackageStatus.AT_HUB, PackageStatus.SORTED].includes(pkg.status) && pkg.currentHubId && pkg.currentHubId !== selectedHubId && !pkg.missionId && !pkg.currentDriverId) {
+        setHubTransfer({ pkg, code: barcode }); setHubTransferReason(''); setHubTransferConfirmed(false); setShowScanner(false); return;
+      }
+      if (![PackageStatus.COLLECTED, PackageStatus.PENDING, PackageStatus.AT_HUB].includes(pkg.status) && !(pkg.status === PackageStatus.SORTED && !pkg.currentHubId && !pkg.missionId && !pkg.currentDriverId)) {
         showNotif('warning', `${barcode} — statut ${pkg.status}, réception non applicable`); return;
       }
       const result = await receivePackagesAtHubCF(selectedHubId, [pkg.id]);
@@ -331,7 +342,7 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
     <div className="space-y-4">
       {showCarrierAssociation && <CarrierBarcodeModal initialBr={associationCode} onClose={() => setShowCarrierAssociation(false)} />}
       {canAssociateCarrier && <ImportReadiness packages={packages} onAssociate={code => { setAssociationCode(code); setShowCarrierAssociation(true); }} />}
-      {canAssociateCarrier && <button type="button" onClick={() => { setAssociationCode(''); setShowCarrierAssociation(true); }} className="min-h-11 px-3 border rounded-lg font-semibold">Associer une étiquette Boiron</button>}
+      {canAssociateCarrier && <button type="button" onClick={() => { setAssociationCode(''); setShowCarrierAssociation(true); }} className="min-h-11 px-3 border rounded-lg font-semibold">Associer une étiquette transporteur</button>}
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
@@ -756,6 +767,24 @@ const HubOperations: React.FC<HubOperationsProps> = ({ currentUser, vehicles, us
           </div>
         </Modal>
       )}
+      <details open={showRecovery} onToggle={event => setShowRecovery(event.currentTarget.open)} className="rounded-xl border border-amber-200 p-3">
+        <summary className="cursor-pointer min-h-11 font-semibold">Échecs, retours et reprises en attente</summary>
+        {showRecovery && <RecoveryPanel currentUser={currentUser} onReturn={setReturningPackage} />}
+      </details>
+      {returningPackage && <ReturnHubModal pkg={returningPackage} currentUser={currentUser} onClose={() => setReturningPackage(null)} />}
+      <Modal isOpen={!!hubTransfer} onClose={() => { if (!processing) setHubTransfer(null); }} title="Réception d’un transfert entre hubs" preventClose={processing}>
+        <p>{hubTransfer?.pkg.externalId || hubTransfer?.pkg.orderNumber} · {hubTransfer?.pkg.contactName}</p>
+        <p className="mt-2">Hub enregistré : {hubs.find(h => h.id === hubTransfer?.pkg.currentHubId)?.name || 'Autre hub'} → arrivée à {selectedHub?.name}.</p>
+        <label className="block mt-3">Motif du transfert<input aria-label="Motif du transfert entre hubs" value={hubTransferReason} onChange={e => setHubTransferReason(e.target.value)} className="mt-1 border rounded-lg p-2 min-h-11 w-full" /></label>
+        <label className="flex gap-2 items-start mt-3"><input type="checkbox" checked={hubTransferConfirmed} onChange={e => setHubTransferConfirmed(e.target.checked)} />Je confirme que le colis scanné est physiquement présent à {selectedHub?.name}.</label>
+        <button disabled={processing || !hubTransferConfirmed || hubTransferReason.trim().length < 5} onClick={async () => {
+          if (!hubTransfer || !selectedHubId) return;
+          setProcessing(true);
+          try { await receiveTransferredPackageAtHubCF({ packageId: hubTransfer.pkg.id, code: hubTransfer.code, hubId: selectedHubId, reason: hubTransferReason, confirmedPhysicalReception: true }); showNotif('success', 'Transfert réceptionné : le colis est disponible dans ce hub.'); setHubTransfer(null); }
+          catch (error) { showNotif('error', error instanceof Error ? error.message : 'La réception du transfert a échoué.'); }
+          finally { setProcessing(false); }
+        }} className="mt-4 ui-button ui-button-primary w-full disabled:opacity-50">Confirmer l’arrivée physique</button>
+      </Modal>
       <Modal isOpen={confirmReceptionAll} onClose={() => setConfirmReceptionAll(false)} title="Confirmer la réception au hub" preventClose={processing}>
         <p className="text-base text-slate-800">Confirmez que les <b>{receptionPackages.length} colis</b> en attente sont physiquement présents à <b>{selectedHub?.name || 'ce hub'}</b>. La recherche ne réduit pas ce lot.</p>
         <p className="mt-3 text-sm text-slate-600">Pour une réception partielle, fermez cette fenêtre puis scannez uniquement les colis présents.</p>

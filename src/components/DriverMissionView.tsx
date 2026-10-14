@@ -1,3 +1,7 @@
+import SignaturePad from './DeliverySignaturePad';
+import ReturnHubModal from './ReturnHubModal';
+import RecoveryPanel from './RecoveryPanel';
+import { readFieldDraft, saveFieldDraft, fieldOperations, submitFieldOperation } from '../services/fieldOperationsOutbox';
 import DeliveryParcelList from './DeliveryParcelList';
 import type { ScanFeedbackValue } from './ScanFeedback';
 import { deliveryStopGroup } from '../utils/deliveryGroup';
@@ -150,194 +154,6 @@ interface DriverMissionViewProps {
 // SIGNATURE PAD (Composant interne léger)
 // ============================================================================
 
-const SignaturePad: React.FC<{
-  onSave: (dataUrl: string) => void;
-  onCancel: () => void;
-  driverName?: string;
-}> = ({ onSave, onCancel, driverName }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [hasContent, setHasContent] = useState(false);
-  const strokesRef = useRef<{ x: number; y: number }[][]>([]);
-  const currentStrokeRef = useRef<{ x: number; y: number }[]>([]);
-
-  const getPos = (e: React.TouchEvent | React.MouseEvent) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
-    const rect = canvas.getBoundingClientRect();
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-    return {
-      x: (clientX - rect.left) * (canvas.width / rect.width),
-      y: (clientY - rect.top) * (canvas.height / rect.height)
-    };
-  };
-
-  const redraw = () => {
-    const ctx = canvasRef.current?.getContext('2d');
-    if (!ctx || !canvasRef.current) return;
-    ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-    ctx.strokeStyle = '#1e293b';
-    ctx.lineWidth = 2.5;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-
-    for (const stroke of strokesRef.current) {
-      if (stroke.length < 2) continue;
-      ctx.beginPath();
-      ctx.moveTo(stroke[0].x, stroke[0].y);
-      for (let i = 1; i < stroke.length - 1; i++) {
-        const mx = (stroke[i].x + stroke[i + 1].x) / 2;
-        const my = (stroke[i].y + stroke[i + 1].y) / 2;
-        ctx.quadraticCurveTo(stroke[i].x, stroke[i].y, mx, my);
-      }
-      ctx.lineTo(stroke[stroke.length - 1].x, stroke[stroke.length - 1].y);
-      ctx.stroke();
-    }
-  };
-
-  const startDrawing = (e: React.TouchEvent | React.MouseEvent) => {
-    e.preventDefault();
-    const pos = getPos(e);
-    currentStrokeRef.current = [pos];
-    setIsDrawing(true);
-  };
-
-  const draw = (e: React.TouchEvent | React.MouseEvent) => {
-    e.preventDefault();
-    if (!isDrawing) return;
-    const ctx = canvasRef.current?.getContext('2d');
-    if (!ctx) return;
-    const pos = getPos(e);
-    currentStrokeRef.current.push(pos);
-
-    // Live drawing du trait courant
-    const pts = currentStrokeRef.current;
-    if (pts.length < 2) return;
-    ctx.beginPath();
-    ctx.strokeStyle = '#1e293b';
-    ctx.lineWidth = 2.5;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    const prev = pts[pts.length - 2];
-    ctx.moveTo(prev.x, prev.y);
-    ctx.lineTo(pos.x, pos.y);
-    ctx.stroke();
-    setHasContent(true);
-  };
-
-  const stopDrawing = () => {
-    if (isDrawing && currentStrokeRef.current.length > 1) {
-      strokesRef.current.push([...currentStrokeRef.current]);
-      currentStrokeRef.current = [];
-      redraw(); // Redessine avec Bézier pour lisser
-    }
-    setIsDrawing(false);
-  };
-
-  const undo = () => {
-    if (strokesRef.current.length === 0) return;
-    strokesRef.current.pop();
-    redraw();
-    setHasContent(strokesRef.current.length > 0);
-  };
-
-  const clear = () => {
-    const ctx = canvasRef.current?.getContext('2d');
-    if (!ctx || !canvasRef.current) return;
-    ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-    strokesRef.current = [];
-    currentStrokeRef.current = [];
-    setHasContent(false);
-  };
-
-  const save = () => {
-    if (!canvasRef.current || !hasContent) return;
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) { onSave(canvas.toDataURL('image/png')); return; }
-
-    // Watermark en bas : date + heure + chauffeur
-    const now = new Date();
-    const dateStr = now.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    const timeStr = now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-    const watermark = `${dateStr} ${timeStr}${driverName ? ` — ${driverName}` : ''}`;
-
-    ctx.fillStyle = 'rgba(0,0,0,0.08)';
-    ctx.fillRect(0, canvas.height - 22, canvas.width, 22);
-    ctx.font = '11px Arial, sans-serif';
-    ctx.fillStyle = 'rgba(0,0,0,0.35)';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(watermark, 6, canvas.height - 11);
-
-    onSave(canvas.toDataURL('image/png'));
-  };
-
-  return (
-    <div className="min-w-0 max-w-full bg-white rounded-xl border-2 border-amber-300 overflow-hidden shadow-lg">
-      <div className="px-3 py-2.5 bg-amber-50 border-b border-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-        <span className="text-sm font-bold text-amber-800">
-          <PenTool
-            size={18}
-            className="inline shrink-0 align-text-bottom"
-            aria-hidden="true"
-          />{" "}
-          Signature du destinataire
-        </span>
-        <div className="flex gap-2">
-          <button
-            onClick={undo}
-            disabled={strokesRef.current.length === 0}
-            className="ui-button ui-button-secondary disabled:opacity-30"
-          >
-            <Undo2 size={18} aria-hidden="true" />
-            Annuler
-          </button>
-          <button onClick={clear} className="ui-button ui-button-secondary">
-            Effacer tout
-          </button>
-        </div>
-      </div>
-      <div className="relative">
-        <canvas
-          ref={canvasRef}
-          width={800}
-          height={280}
-          aria-label="Zone de signature manuscrite du destinataire" className="block max-w-full w-full h-[160px] touch-none bg-white cursor-crosshair"
-          onTouchStart={startDrawing}
-          onTouchMove={draw}
-          onTouchEnd={stopDrawing}
-          onMouseDown={startDrawing}
-          onMouseMove={draw}
-          onMouseUp={stopDrawing}
-          onMouseLeave={stopDrawing}
-        />
-        {!hasContent && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <p className="text-slate-600 text-sm">Signez ici avec le doigt</p>
-          </div>
-        )}
-      </div>
-      <div className="p-3 bg-slate-50 border-t border-slate-200 flex gap-2">
-        <button
-          onClick={onCancel}
-          className="ui-button ui-button-secondary flex-1"
-        >
-          Annuler
-        </button>
-        <button
-          onClick={save}
-          disabled={!hasContent}
-          className="ui-button ui-button-primary flex-1"
-        >
-          <CheckCircle size={18} aria-hidden="true" />
-          Valider signature
-        </button>
-      </div>
-    </div>
-  );
-};
-
 // ============================================================================
 // COMPOSANT PRINCIPAL
 // ============================================================================
@@ -388,6 +204,13 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   const stopScanQueue = useRef(Promise.resolve());
   const scanContextRef = useRef('');
   const [scannedBarcodes, setScannedBarcodes] = useState<string[]>([]);
+  const [pickupSignature, setPickupSignature] = useState<string | null>(null);
+  const [pickupDraftReady, setPickupDraftReady] = useState('');
+  const [pickupStorageError, setPickupStorageError] = useState('');
+  const pickupLock = useRef(false);
+  const pickupDraft = useRef({ scans: [] as string[], signature: null as string | null });
+  const [pickupDraftSaving, setPickupDraftSaving] = useState(false);
+  const pickupWrites = useRef<Promise<void>>(Promise.resolve());
   const [scanBypass, setScanBypass] = useState(false); // validation sans scan complet (tracée)
   const [showScanGate, setShowScanGate] = useState(false); // garde-fou "colis manquants"
   // D'où le garde-fou scan est ouvert : à l'ÉTAPE SCAN (on résout puis on avance) ou à
@@ -452,16 +275,12 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   const [returnPackages, setReturnPackages] = useState<Package[]>([]);
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [returningPackage, setReturningPackage] = useState<Package | null>(null);
-  const [returnPhotos, setReturnPhotos] = useState<string[]>([]);
-  const [returnSignature, setReturnSignature] = useState<string | null>(null);
-  const [showReturnSignature, setShowReturnSignature] = useState(false);
-  const returnPhotoInputRef = useRef<HTMLInputElement>(null);
+
 
   const closeManual = useUnsavedChanges(showManualStop && !pendingManualStop && Object.values(manualStop).some(Boolean), isProcessing);
   const closeIssue = useUnsavedChanges(showIssue && (!!issueForm.description.trim() || issueForm.category !== 'Véhicule / panne' || issueForm.priority !== 'Medium'), issueSubmitting);
   const closeFailure = useUnsavedChanges(showFailureModal && (!!failureNotes || failurePhotos.length > 0 || failureReason !== FailureReason.ABSENT), isProcessing);
-  const closeReturn = useUnsavedChanges(showReturnModal && (returnPhotos.length > 0 || !!returnSignature), isProcessing);
-  const changeStop = useUnsavedChanges(!!signatureData || capturedPhotos.length > 0 || !!recipientName || !!reservesNote || scannedBarcodes.length > 0, isProcessing || scanPending > 0 || !!preparingStopId);
+  const changeStop = useUnsavedChanges(!!signatureData || capturedPhotos.length > 0 || !!recipientName || !!reservesNote || scannedBarcodes.length > 0, isProcessing || pickupDraftSaving || scanPending > 0 || !!preparingStopId);
   useEffect(() => () => clearTimeout(notificationTimer.current), []);
   useEffect(() => {
     let active = true;
@@ -632,6 +451,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   // la preuve du précédent (faux POD). On repart donc de zéro à chaque arrêt.
   useEffect(() => {
     setScannedBarcodes([]);
+    setPickupSignature(null);
     setShowScanner(false);
     setScanBypass(false);
     setDeliveryStep(0);
@@ -645,7 +465,35 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
     setRecipientName('');
     setDeliveryLocation(DeliveryLocation.HAND_DELIVERY);
     setScanFeedback(null);
-  }, [activeMission?.id, currentStop?.id]);
+  }, [activeMission?.id, currentStop?.id, currentUser.id]);
+
+  const pickupDraftKey = isPickupStop && activeMission && currentStop ? `pickup/${activeMission.id}/${currentStop.id}` : '';
+  const pickupDraftScope = `${currentUser.id}/${pickupDraftKey}`;
+  const activePickupScope = useRef(pickupDraftScope); activePickupScope.current = pickupDraftScope;
+  useEffect(() => {
+    let active = true; setPickupDraftReady(''); setPickupStorageError('');
+    if (pickupDraftKey) readFieldDraft<{ scans: string[]; signature: string | null }>(pickupDraftKey, currentUser.id).then(saved => {
+      if (!active) return;
+      const restored = saved || { scans: [], signature: null };
+      pickupDraft.current = restored; setScannedBarcodes(restored.scans); setPickupSignature(restored.signature);
+      setPickupDraftReady(pickupDraftScope);
+    }).catch(() => { if (active) setPickupStorageError('Impossible de restaurer les scans locaux. Gardez cet écran ouvert et contactez le bureau.'); });
+    return () => { active = false; };
+  }, [pickupDraftKey, pickupDraftScope, currentUser.id]);
+  const persistPickupDraft = async (change: Partial<{ scans: string[]; signature: string | null }>) => {
+    if (!pickupDraftKey || pickupDraftReady !== pickupDraftScope || activePickupScope.current !== pickupDraftScope) throw new Error('Le brouillon de cet enlèvement n’est pas encore disponible.');
+    const next = { ...pickupDraft.current, ...change };
+    pickupDraft.current = next; setPickupDraftSaving(true);
+    const saved = pickupWrites.current.catch(() => {}).then(() => saveFieldDraft(pickupDraftKey, currentUser.id, next));
+    pickupWrites.current = saved;
+    try {
+      await saved;
+      if (activePickupScope.current === pickupDraftScope) { setScannedBarcodes(next.scans); setPickupSignature(next.signature); setPickupStorageError(''); }
+    } catch (error) {
+      if (activePickupScope.current === pickupDraftScope) setPickupStorageError('Scans et signature non sauvegardés sur ce téléphone. Ne fermez pas cet écran.');
+      throw error;
+    } finally { if (activePickupScope.current === pickupDraftScope && pickupWrites.current === saved) setPickupDraftSaving(false); }
+  };
 
   // Scan de contrôle à la livraison : chaque colis du stop doit être scanné
   // (étiquette client BR… ou tracking GFL…) avant de pouvoir valider.
@@ -669,11 +517,11 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   useEffect(() => {
     const unsub = subscribeToPackages((pkgs) => {
       const toReturn = pkgs.filter(p => 
-        p.status === PackageStatus.RETURN_REQUESTED &&
+        [PackageStatus.RETURN_REQUESTED, PackageStatus.FAILED].includes(p.status) &&
         p.currentDriverId === currentUser.id
       );
       setReturnPackages(toReturn);
-    }, {driverId: currentUser.id, status: PackageStatus.RETURN_REQUESTED});
+    }, {driverId: currentUser.id});
     return unsub;
   }, [currentUser.id]);
 
@@ -907,102 +755,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   // === WORKFLOW RETOUR HUB ===
 
   // Ouvrir le modal de retour pour un colis
-  const openReturnModal = (pkg: Package) => {
-    setReturningPackage(pkg);
-    setReturnPhotos([]);
-    setReturnSignature(null);
-    setShowReturnModal(true);
-  };
-
-  // Prendre photo retour
-  const handleReturnPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (returnPhotos.length < 5) {
-        setReturnPhotos(prev => [...prev, reader.result as string]);
-      }
-    };
-    reader.readAsDataURL(file);
-    e.target.value = '';
-  };
-
-  // Valider le retour au hub
-  const handleConfirmReturn = async () => {
-    if (!returningPackage) return;
-    if (returnPhotos.length === 0) {
-      showNotif('❌ Photo obligatoire pour le retour');
-      return;
-    }
-
-    setIsProcessing(true);
-    try {
-      let coords: { lat: number; lng: number } | undefined;
-      try { coords = await getCurrentPosition(); } catch {}
-
-      // Uploader les photos
-      const photoUrls: string[] = [];
-      for (const photoBase64 of returnPhotos) {
-        try {
-          const { uploadProofPhoto } = await import('../services/podService');
-          const url = await uploadProofPhoto(photoBase64, returningPackage.id, 'return');
-          photoUrls.push(url);
-        } catch (e) { throw new Error('La photo du retour n’a pas été envoyée. Réessayez avant de confirmer.'); }
-      }
-
-      // Uploader la signature si présente
-      let signatureUrl: string | undefined;
-      if (returnSignature) {
-        try {
-          const { uploadProofPhoto } = await import('../services/podService');
-          signatureUrl = await uploadProofPhoto(returnSignature, returningPackage.id, 'return-signature');
-        } catch (e) { throw new Error('La signature du retour n’a pas été envoyée. Réessayez avant de confirmer.'); }
-      }
-
-      // Créer la preuve de retour
-      const returnProof = {
-        packageId: returningPackage.id,
-        missionId: returningPackage.missionId,
-        driverId: currentUser.id,
-        driverName: `${currentUser.firstName} ${currentUser.lastName}`,
-        vehicleId: activeMission?.vehicleId,
-        vehiclePlate: activeMission?.vehiclePlate,
-        hubId: activeMission?.hubId || '',
-        hubName: activeMission?.hubName || 'Hub',
-        reason: 'STOP_DELETED' as const,
-        reasonLabel: returningPackage.returnReason || 'Stop supprimé',
-        photoUrls,
-        signatureUrl,
-        coordinates:coords ?? null,
-        locationStatus: coords
-          ? ('captured' as const)
-          : ('unavailable' as const),
-        timestamp: new Date().toISOString(),
-        notes: `Retourné par ${currentUser.firstName} ${currentUser.lastName}`,
-      };
-
-      // Sauvegarder la preuve de retour dans le colis
-      const { detachPackageFromTour } = await import('../services/missionService');
-      // Détache VRAIMENT le colis (écrit null, pas undefined) → il quitte la
-      // tournée et n'est plus une cible du resync « arrêt terminé ».
-      await detachPackageFromTour(returningPackage.id, {
-        returnProof,
-        currentHubId: activeMission?.hubId,
-      });
-
-      showNotif('✅ Retour hub confirmé !');
-      setShowReturnModal(false);
-      setReturningPackage(null);
-      setReturnPhotos([]);
-      setReturnSignature(null);
-    } catch (err) {
-      reportError('driver.confirmReturn', err, { silent: true });
-      showNotif(`❌ Erreur — Réessayez${err instanceof Error ? ` (${err.message})` : ''}`);
-    }
-    setIsProcessing(false);
-  };
+  const openReturnModal = (pkg: Package) => { setReturningPackage(pkg); setShowReturnModal(true); };
+  const returnDialog = showReturnModal && returningPackage ? <ReturnHubModal key={returningPackage.id} pkg={returningPackage} currentUser={currentUser} onClose={() => { setShowReturnModal(false); setReturningPackage(null); }} /> : null;
+  const recoveryPanel = <RecoveryPanel currentUser={currentUser} onResume={() => setShowClaimModal(true)} onReturn={openReturnModal} />;
 
   const prepareCurrentDelivery = async (arrive = false, packageIds?: string[]) => {
     if (!activeMission || !currentStop) throw new Error('Arrêt introuvable.');
@@ -1074,6 +829,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
     setFinishError('');
     setIsProcessing(true);
     try {
+      if ((await fieldOperations(currentUser.id)).some(row => row.missionId === activeMission.id)) throw new Error('Des enlèvements ou retours restent à synchroniser sur ce téléphone.');
       await assertMissionReadyToClose(currentUser.id, activeMission.id, activeMission.stops);
       await updateMissionStatus(activeMission.id, MissionStatus.COMPLETED);
       // JOURNAL — fin de tournée (avec bilan livrés/échecs pour le président).
@@ -1204,6 +960,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
         },
           packageOutcomes: stopIds.map(packageId => ({
             packageId, status: deliverIds.includes(packageId) ? PackageStatus.DELIVERED : PackageStatus.FAILED,
+            ...(deliverIds.includes(packageId) ? {} : { failureReason: FailureReason.OTHER, failureNotes: 'Colis déclaré non remis' }),
             movement: { action: deliverIds.includes(packageId) ? 'DELIVERED' : 'FAILED',
               driverId: currentUser.id, driverName:driverFullName,
               notes: deliverIds.includes(packageId) ? scanTrace : 'Colis déclaré non remis' }
@@ -1279,7 +1036,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
         id:`${currentUser.id}/${activeMission.id}/${currentStop.id}`,userId:currentUser.id,kind:'failure',createdAt:now,
         action:{missionId: activeMission.id,stopId: currentStop.id,
           stopPatch:{status:StopStatus.FAILED,completionTime: now,arrivalCoordinates: coords},
-          packageOutcomes:currentStop.packageIds.map(packageId=>({packageId,status:PackageStatus.FAILED,
+          packageOutcomes:currentStop.packageIds.map(packageId=>({packageId,status:PackageStatus.FAILED, failureReason, failureNotes,
             movement:{action:'FAILED',driverId: currentUser.id,driverName: `${currentUser.firstName} ${currentUser.lastName}`,notes:`${failureReason} ${failureNotes}`}}))},
         proof:{missionId: activeMission.id,stopId: currentStop.id,packageIds:currentStop.packageIds,
           driverId: currentUser.id,driverName: `${currentUser.firstName} ${currentUser.lastName}`,vehicleId: activeMission.vehicleId || '',vehiclePlate: activeMission.vehiclePlate || '',
@@ -1346,7 +1103,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   // SCAN / ENLÈVEMENT
   // ============================================================================
 
-  scanContextRef.current = `${activeMissionId}/${currentStop?.id}`;
+  scanContextRef.current = `${currentUser.id}/${activeMissionId}/${currentStop?.id}`;
   const handleBarcodeScan = (barcode: string) => {
     if (!activeMission || !currentStop) return;
     if (scannedBarcodes.includes(barcode)) {
@@ -1354,7 +1111,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
       return;
     }
     const expected = stopPackages.filter(p => packageMatchesCode(p, barcode));
-    const context = `${activeMission.id}/${currentStop.id}`;
+    const context = `${currentUser.id}/${activeMission.id}/${currentStop.id}`;
     const missionId = activeMission.id, stopId = currentStop.id;
     const source = isPickupStop ? 'driver-pickup' : 'driver-delivery';
     setScanFeedback(previous => previous?.type === 'ok' || previous?.type === 'error' ? previous : { type: 'pending', text: `${barcode} — vérification en cours…` });
@@ -1364,6 +1121,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
         setScanFeedback(previous => previous?.type === 'ok' || previous?.type === 'error' ? previous : { type: 'pending', text: `${barcode} — vérification en cours…` });
         const receipt = await scanPackage({ code: barcode, ...(expected.length === 1 ? { packageId: expected[0].id } : {}),
           driverId: currentUser.id, targetMissionId: missionId, stopId, source });
+        if (scanContextRef.current !== context) return;
         const here = receipt.missionId === missionId && receipt.stopId === stopId;
         const accepted = receipt.accepted && here;
         const wrongStop = receipt.outcome === 'wrong_stop' || (receipt.accepted && !here);
@@ -1372,14 +1130,16 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
           : wrongStop
             ? `${receipt.packageCode || barcode} — Mauvais colis pour cet arrêt. Ne pas remettre à ${currentStop.contactName || 'ce client'}.${receipt.contactName && receipt.contactName !== currentStop.contactName ? ` Destiné à ${receipt.contactName}.` : ''}`
             : scanReceiptLabel(receipt);
-        setScanFeedback({ type: accepted ? 'ok' : 'error', text });
-        showNotif(text);
         if (receipt.accepted && here && scanContextRef.current === context) {
-          setScannedBarcodes(prev => prev.includes(barcode) ? prev : [...prev, barcode]);
+          if (isPickupStop) await persistPickupDraft({ scans: [...new Set([...pickupDraft.current.scans, barcode])] });
+          else setScannedBarcodes(prev => prev.includes(barcode) ? prev : [...prev, barcode]);
           setStopPackages(prev => prev.map(p => p.id === receipt.packageId ? { ...p, lastScannedAt: receipt.scannedAt,
             lastScannedMissionId: receipt.missionId!, missionDate: receipt.missionDate! } : p));
         }
+        if (scanContextRef.current !== context) return;
+        setScanFeedback({ type: accepted ? 'ok' : 'error', text }); showNotif(text);
       } catch (error) {
+        if (scanContextRef.current !== context) return;
         const reason = error instanceof Error ? error.message : 'Vérifiez la connexion puis scannez à nouveau.';
         const text = `${barcode} — scan non confirmé. ${reason}`;
         setScanFeedback({ type: 'error', text }); showNotif(text);
@@ -1499,67 +1259,25 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   };
 
   const handlePickupComplete = async (scannedIds: string[], missingIds: string[], signatureBase64?: string) => {
-    if (!activeMission || !currentStop) return;
-    setIsProcessing(true);
+    if (!activeMission || !currentStop || pickupLock.current || pickupDraftReady !== pickupDraftScope || pickupDraftSaving) return;
+    pickupLock.current = true; setIsProcessing(true);
     try {
-      let coords: { lat: number; lng: number } | undefined;
-      try { coords = await getCurrentPosition(); } catch {}
-
       const now = new Date().toISOString();
-
-      // 1. Finaliser l'enlèvement (MAJ colis → COLLECTED + manifeste)
-      const manifest = await finalizePickup({
-        missionId: activeMission.id,
-        stopId: currentStop.id,
-        clientId: activeMission.clientId || '',
-        clientName: currentStop.contactName,
-        driverId: currentUser.id,
-        driverName: `${currentUser.firstName} ${currentUser.lastName}`,
-        vehicleId: activeMission.vehicleId || '',
-        vehiclePlate: activeMission.vehiclePlate || '',
-        address: `${currentStop.address}, ${currentStop.postalCode} ${currentStop.city}`,
-        coordinates: coords,
-        expectedPackageIds: currentStop.packageIds,
-        scannedPackageIds: scannedIds,
-        missingPackageIds: missingIds,
-        unknownBarcodes: scannedBarcodes.filter(b => !stopPackages.some(p => packageMatchesCode(p, b))),
-        signatureBase64
-      });
-
-      if (!manifest) throw new Error('Enlèvement non enregistré : vos scans sont conservés.');
-      // 2. MAJ du stop — patch ATOMIQUE (relecture fraîche + compteurs).
-      const { allDone, stops: updatedStops } = await commitStopOutcome({
-        missionId: activeMission.id,
-        stopId: currentStop.id,
-        stopPatch: {
-          status: StopStatus.COMPLETED,
-          completionTime: now,
-          arrivalCoordinates: coords
-        },
-        deliveredDelta: scannedIds.length
-      });
-
-      // 3. Prochain arrêt
-      const updatedSorted = [...updatedStops].sort((a, b) => a.sequence - b.sequence);
-      const nextIdx = updatedSorted.findIndex(s =>
-                      s.status === StopStatus.PENDING || s.status === StopStatus.ARRIVED
-      );
-      if (nextIdx >= 0) setActiveStopIndex(nextIdx);
-
-      // Reset
-      setScannedBarcodes([]);
-      setShowScanner(false);
-
-      showNotif(
-        allDone 
-          ? '✅ Dernier enlèvement traité — terminez votre tournée'
-          : `✅ Enlèvement terminé — ${scannedIds.length}/${currentStop.packageIds.length} colis collectés`
-      );
-    } catch (err) {
-      reportError('driver.pickup', err, { silent: true });
-      showNotif(`❌ Erreur enlèvement${err instanceof Error ? ` — ${err.message}` : ''}`);
-    }
-    setIsProcessing(false);
+      await submitFieldOperation({ id: `${currentUser.id}/pickup/${activeMission.id}/${currentStop.id}`, userId: currentUser.id,
+        missionId: activeMission.id, kind: 'pickup', createdAt: now, payload: {
+          missionId: activeMission.id, stopId: currentStop.id, clientId: activeMission.clientId || '', clientName: currentStop.contactName,
+          driverId: currentUser.id, driverName: `${currentUser.firstName} ${currentUser.lastName}`,
+          vehicleId: activeMission.vehicleId || '', vehiclePlate: activeMission.vehiclePlate || '',
+          address: `${currentStop.address}, ${currentStop.postalCode} ${currentStop.city}`,
+          expectedPackageIds: currentStop.packageIds, scannedPackageIds: scannedIds, missingPackageIds: missingIds,
+          unknownBarcodes: scannedBarcodes.filter(b => !stopPackages.some(p => packageMatchesCode(p, b))), signatureBase64,
+        } });
+      setShowScanner(false); setScannedBarcodes([]); setPickupSignature(null);
+      const next = sortedStops.findIndex(s => s.id !== currentStop.id && [StopStatus.PENDING, StopStatus.ARRIVED].includes(s.status));
+      if (next >= 0) setActiveStopIndex(next);
+      showNotif(`✅ Enlèvement enregistré — ${scannedIds.length} collectés, ${missingIds.length} manquants à replanifier`);
+    } catch (error) { showNotif(`⚠️ ${error instanceof Error ? error.message : 'Enlèvement à synchroniser'}`); }
+    finally { pickupLock.current = false; setIsProcessing(false); }
   };
 
   // Navigation externe
@@ -1685,6 +1403,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   if (missions.length === 0) {
     return (
       <div className="max-w-lg mx-auto px-6 pt-10 pb-6 text-center space-y-5">
+        {returnDialog}
+        {recoveryPanel}
         {manualStopRecovery}
         {manualStopDialog}
         {notification && (
@@ -1747,6 +1467,8 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   if (activeMission && activeMission.status === MissionStatus.IN_PROGRESS) {
     return (
       <div className="max-w-lg mx-auto pb-6 space-y-3 animate-fade-in">
+        {returnDialog}
+        {recoveryPanel}
         {manualStopRecovery}
         {manualStopDialog}
         {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
@@ -2071,12 +1793,15 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
                       comment: p.comment,
                       weight: p.weight
                     }))}
+                    signatureData={pickupSignature}
+                    onSignatureChange={signature => persistPickupDraft({ signature })}
+                    storageError={pickupStorageError}
                     clientName={currentStop.contactName}
                     stopAddress={`${currentStop.address}, ${currentStop.postalCode} ${currentStop.city}`}
                     onComplete={handlePickupComplete}
                     onOpenScanner={() => setShowScanner(true)}
                     scannedBarcodes={scannedBarcodes}
-                    isProcessing={isProcessing}
+                    isProcessing={isProcessing || pickupDraftSaving || pickupDraftReady !== pickupDraftScope}
                   />
                 )}
 
@@ -3363,205 +3088,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
         {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
                       Alerte si le colis est sur une autre tournée (passation) ;
                       ajoute les colis non affectés (prise en charge directe). */}
-        {showReturnModal && returningPackage && (
-          <Modal
-            mobileFullscreen
-            isOpen
-            onClose={() => { void closeReturn(() => setShowReturnModal(false)); }}
-            title="Confirmer un retour au hub"
-            size="lg"
-            preventClose={isProcessing}
-            bodyClassName="!p-0"
-            footer={
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={handleConfirmReturn}
-                  disabled={isProcessing || returnPhotos.length === 0}
-                  className="ui-button ui-button-primary flex-1 gap-2"
-                >
-                  {isProcessing ? (
-                    <>
-                      <Loader2 size={18} className="animate-spin" />
-                      Envoi en cours...
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle size={18} />
-                      Confirmer retour au hub
-                    </>
-                  )}
-                </button>
-                <button
-                  onClick={() => { void closeReturn(() => setShowReturnModal(false)); }}
-                  disabled={isProcessing}
-                  className="ui-button ui-button-secondary"
-                >
-                  Annuler
-                </button>
-              </div>
-            }
-          >
-            <div className="bg-white rounded-t-3xl w-full max-w-lg animate-slide-up">
-              <p className="p-4 text-base font-semibold text-slate-800 break-words">
-                {returningPackage.orderNumber} · {returningPackage.contactName}
-              </p>
 
-              {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
-                      Alerte si le colis est sur une autre tournée (passation) ;
-                      ajoute les colis non affectés (prise en charge directe). */}
-              <div className="p-4 bg-amber-50 border-b border-amber-200">
-                <p className="text-sm text-amber-800 font-medium">
-                  <AlertTriangle
-                    size={18}
-                    className="inline shrink-0 align-text-bottom"
-                    aria-hidden="true"
-                  />{" "}
-                  {returningPackage.returnReason || 'Ce colis a été retiré de votre tournée'}
-                </p>
-              </div>
-
-              {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
-                      Alerte si le colis est sur une autre tournée (passation) ;
-                      ajoute les colis non affectés (prise en charge directe). */}
-              <div className="p-4 space-y-4">
-                {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
-                      Alerte si le colis est sur une autre tournée (passation) ;
-                      ajoute les colis non affectés (prise en charge directe). */}
-                <div>
-                  <label className="text-sm font-bold text-slate-700 flex items-center gap-1 mb-2">
-                    <Camera
-                      size={18}
-                      className="inline shrink-0 align-text-bottom"
-                      aria-hidden="true"
-                    />{" "}
-                    Photo du colis <span className="text-red-700">*</span>
-                  </label>
-                  <input
-                    ref={returnPhotoInputRef}
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    onChange={handleReturnPhoto}
-                    className="hidden"
-                  />
-                  <div className="flex flex-wrap gap-2">
-                    {returnPhotos.map((photo, idx) => (
-                      <div key={idx} className="relative w-16 h-16 rounded-lg overflow-hidden border border-slate-200">
-                        <img src={photo} alt="" className="w-full h-full object-cover" />
-                        <button
-                          aria-label={`Supprimer la photo de retour ${idx + 1}`}
-                          onClick={() => setReturnPhotos(prev => prev.filter((_, i) => i !== idx))}
-                          className="ui-button ui-button-danger absolute top-0.5 right-0.5 w-11 h-11"
-                        >
-                          <X
-                            size={18}
-                            className="inline shrink-0 align-text-bottom"
-                            aria-hidden="true"
-                          />
-                        </button>
-                      </div>
-                    ))}
-                    {returnPhotos.length < 5 && (
-                      <button
-                        aria-label="Prendre une photo du colis retourné"
-                        onClick={() => returnPhotoInputRef.current?.click()}
-                        className="ui-button ui-button-secondary w-16 h-16 border-dashed"
-                      >
-                        <Camera size={24} />
-                      </button>
-                    )}
-                  </div>
-                  {returnPhotos.length === 0 && (
-                    <p className="text-sm text-red-700 mt-1">
-                      <AlertTriangle
-                        size={18}
-                        className="inline shrink-0 align-text-bottom"
-                        aria-hidden="true"
-                      />{" "}
-                      Au moins 1 photo obligatoire
-                    </p>
-                  )}
-                </div>
-
-                {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
-                      Alerte si le colis est sur une autre tournée (passation) ;
-                      ajoute les colis non affectés (prise en charge directe). */}
-                <div>
-                  <label className="text-sm font-bold text-slate-700 flex items-center gap-1 mb-2">
-                    <PenTool
-                      size={18}
-                      className="inline shrink-0 align-text-bottom"
-                      aria-hidden="true"
-                    />{" "}
-                    Signature réception hub{" "}
-                    <span className="text-slate-600">(optionnel)</span>
-                  </label>
-                  {returnSignature ? (
-                    <div className="relative">
-                      <img src={returnSignature} alt="Signature" className="w-full h-20 object-contain border border-slate-200 rounded-lg bg-white" />
-                      <button
-                        aria-label="Supprimer la signature de réception au hub"
-                        onClick={() => setReturnSignature(null)}
-                        className="ui-button ui-button-danger absolute top-1 right-1 w-11 h-11"
-                      >
-                        <X
-                          size={18}
-                          className="inline shrink-0 align-text-bottom"
-                          aria-hidden="true"
-                        />
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => setShowReturnSignature(true)}
-                      className="ui-button ui-button-secondary w-full border-dashed gap-2"
-                    >
-                      <PenTool size={16} />
-                      Ajouter signature
-                    </button>
-                  )}
-                </div>
-
-                {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
-                      Alerte si le colis est sur une autre tournée (passation) ;
-                      ajoute les colis non affectés (prise en charge directe). */}
-                <div className="bg-slate-50 rounded-lg p-3">
-                  <p className="text-sm text-slate-500">
-                    <MapPin
-                      size={18}
-                      className="inline shrink-0 align-text-bottom"
-                      aria-hidden="true"
-                    />{" "}
-                    Votre position GPS sera enregistrée automatiquement pour
-                    confirmer la remise au hub.
-                  </p>
-                </div>
-              </div>
-
-              {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
-                      Alerte si le colis est sur une autre tournée (passation) ;
-                      ajoute les colis non affectés (prise en charge directe). */}
-            </div>
-          </Modal>
-        )}
-
-        {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
-                      Alerte si le colis est sur une autre tournée (passation) ;
-                      ajoute les colis non affectés (prise en charge directe). */}
-        {showReturnSignature && (
-          <Modal isOpen onClose={() => setShowReturnSignature(false)} title="Signature de réception au hub" size="lg" closeOnOverlay={false} bodyClassName="!p-0">
-            <div className="flex-1 bg-white relative">
-              <SignaturePad
-                onSave={(data) => {
-                  setReturnSignature(data);
-                  setShowReturnSignature(false);
-                }}
-                onCancel={() => setShowReturnSignature(false)}
-                driverName={`${currentUser.firstName} ${currentUser.lastName}`}
-              />
-            </div>
-          </Modal>
-        )}
       </div>
     );
   }
@@ -3572,7 +3099,9 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
 
   return (
     <div className="max-w-lg mx-auto pb-6 space-y-4 animate-fade-in">
-      {manualStopRecovery}
+      {returnDialog}
+        {recoveryPanel}
+        {manualStopRecovery}
       {manualStopDialog}
       {/* Scan à l'embarquement (rafale) — vérifie chaque colis chargé.
                       Alerte si le colis est sur une autre tournée (passation) ;

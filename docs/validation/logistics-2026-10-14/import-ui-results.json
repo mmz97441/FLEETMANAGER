@@ -1,0 +1,23 @@
+{
+  "checks": [
+    {
+      "code": "BR-AUDIT-001",
+      "rejected": false,
+      "productionWrites": 0,
+      "horizontalOverflow": false
+    },
+    {
+      "code": "EXP-A/0042",
+      "rejected": true,
+      "productionWrites": 0,
+      "horizontalOverflow": false
+    },
+    {
+      "code": "000012345678",
+      "rejected": true,
+      "productionWrites": 0,
+      "horizontalOverflow": false
+    }
+  ],
+  "errors": []
+}

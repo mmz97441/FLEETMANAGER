@@ -22,9 +22,9 @@ describe('a shared delivery for one recipient', () => {
     for (const change of [{ status: 'Arrivé' }, { status: 'Terminé' }, { proofSyncPending: true }, { type: 'PICKUP' }])
       expect(deliveryStopGroup([stop, { ...stop, id: 'two', ...change }], stop)).toEqual([stop]);
   });
-  it('can add pending parcels to the selected arrived stop', () => {
+  it('never adds pending parcels to the selected arrived stop', () => {
     const arrived = { ...stop, status: 'Arrivé' }, pending = { ...stop, id: 'two' };
-    expect(deliveryStopGroup([arrived, pending], arrived)).toEqual([arrived, pending]);
+    expect(deliveryStopGroup([arrived, pending], arrived)).toEqual([arrived]);
   });
   it('prefers the physical BR to an internal tracking reference while keeping other clients readable', () => {
     expect(packageDisplayCode({ barcode: 'GFL-123', orderNumber: ' br1001 ' })).toBe('BR1001');

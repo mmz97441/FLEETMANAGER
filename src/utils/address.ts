@@ -1,3 +1,3 @@
-// Même règle compilée côté serveur et côté navigateur.
-export { normAddr, normPhone, placeKey, phoneSignal, sameDeliveryPoint } from '../../functions/src/deliveryAddress';
+// One shared rule for browser and server; placeKey is only for geocoding.
+export { normAddr, normPhone, placeKey, phoneSignal, sameDeliveryPoint, sameDeliveryRecipient, sameDeliveryVisit, recipientKey, intersectDeliveryWindows, visitContainsParcelWindow } from '../../functions/src/deliveryAddress';
 export type { PlaceLike } from '../../functions/src/deliveryAddress';

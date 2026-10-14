@@ -1,49 +1,59 @@
-# Test terrain — Flux scan (enlèvement · dispatch · livraison)
+# Validation terrain du flux logistique — 4.36.0
 
-Version cible : **v4.6.0** (visible en bas de l'écran / dans l'en-tête).
-À faire par un chauffeur sur un **vrai téléphone**, avec de **vraies étiquettes**.
-Coche le résultat attendu à chaque étape. Note tout écart (capture d'écran).
-
----
+Ce protocole complète les tests automatisés et les essais navigateur. Il reste à exécuter sur les téléphones réellement utilisés, avec leurs caméras, leurs étiquettes et leur connexion. Les tests automatisés ne prouvent pas la lisibilité physique de chaque étiquette.
 
 ## Préparation
-- [ ] L'en-tête affiche bien `v4.6.0`.
-- [ ] Préparer 4 colis pour **une même pharmacie** (même adresse), dont :
-  - au moins 2 avec une étiquette **BR… distincte** (code DELIVREX / DataMatrix),
-  - si possible 1 dont l'étiquette ne porte **que le n° de commande** (partagé),
-  - si possible 1 **sans aucun code** lisible.
 
----
+- Vérifier la version 4.36.0 dans l’application et, au bureau, la version signalée par chaque appareil.
+- Préparer trois arrêts : un colis ; trois colis ; au moins dix colis. Ajouter un colis destiné à une autre pharmacie.
+- Prévoir plusieurs expéditeurs, des références BR et des références génériques, dont une avec zéro initial.
+- Chaque carton doit avoir une référence individuelle. Un numéro de commande commun à plusieurs cartons ne suffit pas à identifier l’un d’eux.
 
-## 1) Enlèvement (PICKUP)
-- [ ] Arriver à l'enlèvement → « Je suis arrivé ».
-- [ ] **Scanner les colis un par un.** Chaque colis passe à `SCANNÉ` (vert). Le compteur monte `1/4 → 4/4`.
-- [ ] **Colis « sans code »** : il affiche le badge amber **« SANS CODE »** et ne passe jamais au vert. ✅ attendu.
-- [ ] **1 seul colis, étiquette abîmée qui ne scanne pas** : le bouton **« Valider (0/1…) »** reste **cliquable** → il ouvre le garde-fou → **« Forcer l'enlèvement »**. ✅ (avant : bouton bloqué).
-- [ ] **Code de commande partagé** scanné une fois : il ne valide **qu'UN** colis (le compteur monte de +1, pas de +N). ✅
-- [ ] Signer → « Valider l'enlèvement ».
+## Création et import
 
-## 2) Dispatch / réception au hub (si applicable)
-- [ ] En réception, scanner un colis : il est reconnu (message ✅), même s'il a été **importé un jour précédent** ou s'il y a **beaucoup de colis** dans le système.
-- [ ] Scanner un **DataMatrix** / un code avec **rang -002** : reconnu (le n° BR est extrait).
+- Importer les références sous forme de texte ; vérifier que les zéros initiaux sont conservés.
+- Vérifier destinataire, adresse, étage, date demandée, créneau et durée de service.
+- Deux destinataires différents, deux étages différents ou des créneaux incompatibles ne doivent pas être fusionnés.
+- Un doublon de référence individuelle doit être expliqué et refusé ; plusieurs cartons d’une commande restent possibles.
 
-## 3) Livraison (DELIVERY)
-- [ ] Ouvrir l'arrêt de la pharmacie. L'écran affiche **« Colis à remettre »** avec le **bon nombre** (ex. **4**), PAS « 0 » ni « Aucun colis ». ✅ (point corrigé le plus important)
-- [ ] Étape 1 · Vérifier les colis : `Colis scannés 0/4`.
-- [ ] Scanner les 4 → chaque puce passe `✓` verte, compteur `4/4`.
-- [ ] **Colis sans code** : puce amber **« sans code »** → ne passe pas au vert → à la validation, le garde-fou s'affiche → **« Forcer la livraison »** possible. ✅
-- [ ] **Code de commande partagé** : un scan ne valide **qu'un** colis (il faut scanner chaque carton distinct). ✅
-- [ ] Aller au bout : état marchandise → réception → **signature** → **Valider**.
-- [ ] **GPS** : si la localisation est coupée, une modale bloque la validation (« Localisation obligatoire »). ✅ **voulu** — réactiver le GPS puis « Réessayer ».
-- [ ] Après validation : le stop passe **Terminé**, le compteur de la tournée avance.
+## Prise en charge
 
----
+- Scanner chaque carton : seul le bon carton passe au vert ; un code inconnu ou ambigu affiche une explication.
+- Fermer puis rouvrir la page : retrouver les scans et la signature déjà enregistrés.
+- Faire un enlèvement partiel : les cartons absents ne doivent pas être déclarés collectés. Le bureau doit pouvoir organiser une nouvelle collecte.
+- Couper le réseau pendant la validation : retrouver l’opération en attente, puis vérifier qu’elle se synchronise une seule fois.
 
-## Points de vigilance (ce qui DOIT être vrai)
-- Le **nombre de colis à l'arrêt** est toujours **complet** (jamais 0 si l'arrêt a des colis).
-- **1 scan = 1 colis** (jamais « tout scanné » d'un seul scan sur un n° partagé).
-- On peut **toujours forcer** (livraison ET enlèvement) si un colis ne scanne pas.
-- Un colis **sans code** est signalé et se valide en **Forcer**.
+## Hub et dispatch
 
-## Si ça coince — à noter
-Pour chaque blocage : quel écran, combien de colis, quel type de code (BR / DataMatrix / n° commande / sans code), le message affiché, et une capture. → me le remonter pour correction.
+- Réceptionner physiquement les colis au bon hub avant de les affecter.
+- Un colis d’un autre hub exige une réception physique explicite et tracée.
+- Vérifier que la date demandée reste visible ; une autre date ou une modification des créneaux exige un motif conservé.
+- Corriger une adresse avant départ : vérifier le colis et l’arrêt. Une correction individuelle ne doit pas déplacer les autres destinataires.
+
+## Livraison
+
+- Avant l’arrivée, retrouver les références et le nombre de colis à remettre à cet arrêt.
+- Scanner un, trois puis dix colis : le compteur augmente une fois par carton, sans recommencer le formulaire pour chacun.
+- Scanner le colis d’une autre pharmacie : croix rouge et explication ; aucun ajout au compteur.
+- Scanner un bon colis : confirmation verte. Le rescanner ne double pas le compteur.
+- Vérifier qu’un numéro de commande partagé est refusé comme ambigu, sans sélection automatique d’un carton.
+- Compléter une seule preuve pour les colis réellement remis à l’arrêt. Les colis absents ou refusés doivent rester distingués.
+- Vérifier le GPS requis pour une remise, la photo et les informations demandées, puis la signature selon le parcours affiché.
+- Couper le réseau, recharger, puis rétablir la connexion : conserver la preuve et éviter les doubles validations.
+
+## Échecs, retours et reprise
+
+- Déclarer un échec avec son motif : retrouver cet échec et sa preuve côté bureau et client concerné.
+- Rapporter physiquement le colis au hub, avec la preuve et le hub de retour.
+- Il reste en attente de décision jusqu’à une décision explicite : relivraison ou retour à l’expéditeur.
+- Une nouvelle tentative doit avoir sa propre preuve. La photo ou la signature d’un autre compte ou d’une ancienne tentative ne doit pas être préremplie.
+- La file de reprise doit montrer aussi les dossiers des jours précédents et les preuves en attente.
+
+## Consultation et analyse
+
+- Vérifier les mêmes résultats dans les indicateurs, les détails et les exports pour une même période.
+- Une synchronisation tardive conserve la date de l’événement terrain ; elle ne devient pas une livraison du jour de réception serveur.
+- Attendre le chargement complet de l’historique avant une analyse ou un export intégral.
+- Une preuve absente reste signalée. Ne jamais confirmer une livraison uniquement pour faire disparaître une alerte.
+
+Pour tout écart : noter appareil, version, écran, référence du colis, heure et message exact. Transmettre les informations opérationnelles par le canal de support habituel.

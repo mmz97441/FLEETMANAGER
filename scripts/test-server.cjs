@@ -1,4 +1,4 @@
-process.env.GCLOUD_PROJECT = 'demo-fleet-production-audit';
+process.env.GCLOUD_PROJECT = process.env.GCLOUD_PROJECT || 'demo-fleet-production-audit';
 process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8189';
 const assert = require('node:assert/strict');
 const { createRequire } = require('node:module');
@@ -362,11 +362,15 @@ const check = async (name, fn) => {
         status: 'À retourner',
         movements: [],
       });
+      await db.collection('hubs').doc('return-hub').set({ name: 'Test Hub', isActive: true });
       const input = {
         packageId: 'returned-package',
+        requestId: 'server-return-package',
+        expectedMissionId: 'return-tour',
         extra: {
           returnProof: {
-            photoUrls: ['https://example.invalid/synthetic-photo'],
+            hubId: 'return-hub',
+            photoUrls: [`https://firebasestorage.googleapis.com/v0/b/${process.env.GCLOUD_PROJECT}.appspot.com/o/pod%2Freturns%2Freturned-package%2Fphoto.jpg?alt=media`],
             driverId: 'forged',
           },
         },
@@ -376,7 +380,8 @@ const check = async (name, fn) => {
       const p = (
         await db.collection('packages').doc('returned-package').get()
       ).data();
-      assert.equal(p.status, 'Retourné');
+      assert.equal(p.status, 'Au hub');
+      assert.equal(p.returnDisposition, 'AWAITING_DECISION');
       assert.equal(p.missionId, null);
       assert.equal(p.returnProof.driverId, 'employee');
       assert.equal(p.movements.length, 1);

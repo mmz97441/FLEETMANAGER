@@ -6,9 +6,10 @@
  */
 
 import { useState, useEffect } from 'react';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, documentId } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
-import { todayISO, localDatePart } from '../utils/date';
+import { logisticsDay, summarizeLogistics } from '../services/logisticsMetrics';
+const todayISO = () => logisticsDay(new Date());
 import { buildOperationalQueue, OperationalTask } from '../utils/operationalQueue';
 import { Mission, MissionStatus, Package, PackageStatus, Zone } from '../types';
 
@@ -30,7 +31,7 @@ export interface MissionDayStats {
   pendingPackages: number;
 
   // Taux
-  deliveryRate: number; // % livrés / total assignés
+  deliveryRate: number; // % successful / decided attempts in the selected day/tour scope
   failureRate: number;  // % échoués / total traités
 
   // Par zone
@@ -84,6 +85,7 @@ export const useMissionStats = (date?: string, { enabled = true, driverId, inclu
   const [packageError, setPackageError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   const missionKey = JSON.stringify(missions.map(mission => mission.id).sort());
+  const parcelKey = JSON.stringify([...new Set(missions.flatMap(mission => (mission.stops || []).flatMap(stop => [...(stop.packageIds || []), ...((stop as typeof stop & { outcomePackageIds?: string[] }).outcomePackageIds || [])])))].sort());
 
   useEffect(() => {
     setMissions([]); setMissionsReady(false); setMissionError(null);
@@ -105,12 +107,14 @@ export const useMissionStats = (date?: string, { enabled = true, driverId, inclu
     if (!ids.length) { setPackagesReady(true); return; }
     // Query packages by their actual mission, including parcels imported long ago.
     // Groups of ten keep each Firestore `in` query bounded without truncating records.
-    const groups: string[][] = [];
-    for (let index = 0; index < ids.length; index += 10) groups.push(ids.slice(index, index + 10));
+    const groups: { field: 'missionId' | ReturnType<typeof documentId>; ids: string[] }[] = [];
+    for (let index = 0; index < ids.length; index += 10) groups.push({ field: 'missionId', ids: ids.slice(index, index + 10) });
+    const historicalIds: string[] = JSON.parse(parcelKey);
+    for (let index = 0; index < historicalIds.length; index += 10) groups.push({ field: documentId(), ids: historicalIds.slice(index, index + 10) });
     const snapshots = new Map<number, Package[]>();
     const failed = new Set<number>();
     return (() => {
-      const unsubscribers = groups.map((group, index) => onSnapshot(query(collection(db, 'packages'), where('missionId', 'in', group)), snapshot => {
+      const unsubscribers = groups.map((group, index) => onSnapshot(query(collection(db, 'packages'), where(group.field, 'in', group.ids)), snapshot => {
         snapshots.set(index, snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Package)));
         failed.delete(index);
         setPackages([...new Map([...snapshots.values()].flat().map(pkg => [pkg.id, pkg])).values()]);
@@ -119,7 +123,7 @@ export const useMissionStats = (date?: string, { enabled = true, driverId, inclu
       }, () => { failed.add(index); setPackagesReady(groups.every((_, groupIndex) => snapshots.has(groupIndex) || failed.has(groupIndex))); setPackageError('Les colis ne peuvent pas être chargés. Les indicateurs de livraison sont indisponibles.'); }));
       return () => unsubscribers.forEach(unsubscribe => unsubscribe());
     })();
-  }, [enabled, includePackages, missionKey, missionsReady, missionError, revision]);
+  }, [enabled, includePackages, missionKey, parcelKey, missionsReady, missionError, revision]);
 
   const loading = enabled && (!missionsReady || (!missionError && !packagesReady));
   return {
@@ -139,12 +143,10 @@ function computeStats(
   today: string,
   loading: boolean
 ): Omit<MissionDayStats, 'error' | 'tasks' | 'retry' | 'packagesAvailable'> {
-  // Filtrer les colis qui ont un missionId dans les missions du jour
-  const missionIds = new Set(missions.map(m => m.id));
-  const todayPackages = allPackages.filter(p => 
-    (p.missionId && missionIds.has(p.missionId)) ||
-    localDatePart(p.createdAt || '') === today
-  );
+  // The widget explicitly covers tours scheduled for this day. Historical
+  // parcel IDs remain watched after physical returns detach their assignment.
+  const todayPackages = allPackages;
+  const activity = summarizeLogistics(todayPackages, { start: today, end: today });
 
   // Stats missions
   const missionsInProgress = missions.filter(m => m.status === MissionStatus.IN_PROGRESS).length;
@@ -153,8 +155,8 @@ function computeStats(
   const missionsDraft = missions.filter(m => m.status === MissionStatus.DRAFT || m.status === MissionStatus.OPTIMIZED).length;
 
   // Stats colis
-  const deliveredPackages = todayPackages.filter(p => p.status === PackageStatus.DELIVERED).length;
-  const failedPackages = todayPackages.filter(p => p.status === PackageStatus.FAILED).length;
+  const deliveredPackages = activity.delivered;
+  const failedPackages = activity.failed;
   const inDeliveryPackages = todayPackages.filter(p => p.status === PackageStatus.IN_DELIVERY).length;
   const pendingPackages = todayPackages.filter(p => 
     [PackageStatus.PENDING, PackageStatus.AT_HUB, PackageStatus.SORTED, PackageStatus.LOADED].includes(p.status)
@@ -162,7 +164,7 @@ function computeStats(
 
   // Taux
   const totalProcessed = deliveredPackages + failedPackages;
-  const deliveryRate = todayPackages.length > 0 ? (deliveredPackages / todayPackages.length) * 100 : 0;
+  const deliveryRate = activity.deliveryRate;
   const failureRate = totalProcessed > 0 ? (failedPackages / totalProcessed) * 100 : 0;
 
   // Par zone
@@ -170,9 +172,10 @@ function computeStats(
   const zoneStats: ZoneStat[] = zones.map(zone => {
     const zoneMissions = missions.filter(m => m.zone === zone);
     const zoneMissionIds = new Set(zoneMissions.map(m => m.id));
-    const zonePackages = todayPackages.filter(p => p.missionId && zoneMissionIds.has(p.missionId));
-    const delivered = zonePackages.filter(p => p.status === PackageStatus.DELIVERED).length;
-    const failed = zonePackages.filter(p => p.status === PackageStatus.FAILED).length;
+    const zonePackages = todayPackages.filter(p => p.zone === zone || (p.missionId && zoneMissionIds.has(p.missionId)));
+    const zoneActivity = summarizeLogistics(zonePackages, { start: today, end: today });
+    const delivered = zoneActivity.delivered;
+    const failed = zoneActivity.failed;
     const inProgress = zonePackages.filter(p => p.status === PackageStatus.IN_DELIVERY).length;
 
     return {
@@ -181,7 +184,7 @@ function computeStats(
       delivered,
       failed,
       inProgress,
-      rate: zonePackages.length > 0 ? (delivered / zonePackages.length) * 100 : 0
+      rate: zoneActivity.deliveryRate
     };
   });
 

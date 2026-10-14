@@ -1,7 +1,7 @@
 import type { Firestore, DocumentSnapshot } from 'firebase-admin/firestore';
 import * as functions from 'firebase-functions/v1';
 import { createHash } from 'crypto';
-import { placeKey } from './deliveryAddress';
+import { sameDeliveryRecipient, sameDeliveryVisit, intersectDeliveryWindows, visitContainsParcelWindow } from './deliveryAddress';
 import { containsIndividualCode, exactScanCandidates, individualScanCandidates, matchesParcelScanCode, normalizeScanCode, parcelCodeFields, parcelDisplayCode, orderReferenceHint, orderReferenceMessage } from './scanCode';
 
 interface Dependencies {
@@ -65,8 +65,9 @@ export async function scanPackageHandler(data: any, context: functions.https.Cal
         const candidates = [...new Set(values.filter(Boolean))];
         if (!candidates.length) return [];
         if (candidates.length > 30) throw new functions.https.HttpsError('invalid-argument', 'Étiquette complexe : scannez ou saisissez la référence individuelle du carton.');
-        const snapshots = await Promise.all(parcelCodeFields.map(field =>
-          tx.get(db.collection('packages').where(field, 'in', candidates).limit(2))));
+        const canonical = [...new Set(candidates.map(normalizeScanCode))];
+        const snapshots = await Promise.all([tx.get(db.collection('packages').where('scanCodes', 'array-contains-any', canonical).limit(2)),
+          ...parcelCodeFields.map(field => tx.get(db.collection('packages').where(field, 'in', candidates).limit(2)))]);
         return [...new Map(snapshots.flatMap(snap => snap.docs).map(doc => [doc.id, doc])).values()];
       };
       const knownCodes = selected?.exists ? parcelCodeFields.map(field => selected.data()![field]).filter((v): v is string => typeof v === 'string') : [];
@@ -110,6 +111,11 @@ export async function scanPackageHandler(data: any, context: functions.https.Cal
     if (matchedOrderReference) return refused('ambiguous', orderReferenceHint(code) === matchedOrderReference ? orderReferenceMessage(matchedOrderReference) : `La référence ${matchedOrderReference} correspond à une commande. Scannez la référence individuelle du carton ou son code DELIVREX. Aucun colis validé.`, { matchedOrderReference });
     if (ambiguous) return refused('ambiguous', 'Cette référence correspond à plusieurs colis ou expéditeurs. Scannez un autre identifiant unique du carton, par exemple son code DELIVREX. Aucun colis validé.', { packageId: null, packageCode: code, contactName: '' });
     if (!pkg) return refused('not_found', 'Référence de colis non retrouvée. Vérifiez le numéro imprimé sur le carton et son import avec le bureau. Le refus est enregistré dans le suivi des scans.');
+    if (pkg.pickupMissing && data.source !== 'driver-pickup') return refused('blocked', 'Ce colis a été déclaré manquant à l’enlèvement. Planifiez puis confirmez sa collecte avant la livraison.');
+    if (pkg.returnDisposition === 'AWAITING_DECISION' || pkg.returnDisposition === 'SENDER_RETURNED')
+      return refused('blocked', 'Ce retour attend une décision du bureau ou a été rendu à l’expéditeur. Une nouvelle livraison doit être replanifiée.');
+    if (pkg.status === 'Échec')
+      return refused('blocked', 'Ce colis est en échec de livraison. Confirmez son retour physique au dépôt, puis faites valider la relivraison par le bureau avant de le reprendre.');
     if (['Livré', 'Retourné', 'À retourner'].includes(pkg.status))
       return refused('terminal', terminalScanMessage(pkg), { missionId: pkg.missionId || null, missionDate: pkg.missionDate || null });
     if (pkg.missionId && !validId(pkg.missionId)) return refused('blocked', 'Affectation invalide : faites vérifier ce colis par le bureau.');
@@ -142,9 +148,16 @@ export async function scanPackageHandler(data: any, context: functions.https.Cal
         return refused('blocked', 'La tournée ou l’arrêt a changé. Rouvrez l’arrêt du jour avant de scanner.');
       if (finalStops.has(stop.status)) return refused('blocked', 'Cet arrêt est déjà terminé. Consultez la livraison ou contactez le bureau.');
       if (stop.type !== (pickup ? 'PICKUP' : 'DELIVERY') || pkg.missionId !== target.id || pkg.stopId !== stop.id ||
-          !stop.packageIds?.includes(pkg.id) || (pkg.currentDriverId && pkg.currentDriverId !== driverId))
+          !stop.packageIds?.includes(pkg.id) || (!pickup && (!sameDeliveryRecipient(stop, pkg) || !visitContainsParcelWindow(stop, pkg))) || (pkg.currentDriverId && pkg.currentDriverId !== driverId))
         return refused('wrong_stop', 'Ce colis ne correspond pas à cet arrêt. Ouvrez le bon arrêt ou utilisez la prise en charge pour un transfert.',
           { missionId: pkg.missionId || null, missionDate: pkg.missionDate || null, stopId: pkg.stopId || null });
+      if (!pickup) {
+        if (!Array.isArray(stop.packageIds) || stop.packageIds.length > 400) return refused('blocked', 'La liste des colis de cet arrêt doit être vérifiée par le bureau.');
+        const expected = await Promise.all(stop.packageIds.map((id: string) => tx.get(db.collection('packages').doc(id))));
+        if (expected.some(doc => !doc.exists || !sameDeliveryRecipient(stop, doc.data()!) || !visitContainsParcelWindow(stop, doc.data()!) ||
+            doc.data()!.missionId !== target.id || doc.data()!.stopId !== stop.id || (doc.data()!.currentDriverId && doc.data()!.currentDriverId !== driverId)))
+          return refused('wrong_stop', 'Cet arrêt contient un colis d’un autre destinataire, étage ou créneau. Ne remettez aucun colis avant correction par le bureau.');
+      }
       tx.update(packageSnap!.ref, {
         lastVerifiedAt: timestamp, lastVerifiedMissionId: target.id, lastVerifiedStopId: stop.id,
         lastVerifiedBy: driverId, updatedAt: timestamp,
@@ -176,6 +189,8 @@ export async function scanPackageHandler(data: any, context: functions.https.Cal
     }
     const stops: any[] = (mission.stops || []).map((s: any) => ({ ...s, packageIds: [...(s.packageIds || [])] }));
     let stop = stops.find(s => s.packageIds.includes(pkg.id) && !finalStops.has(s.status));
+    if (stop?.type === 'DELIVERY' && (!sameDeliveryRecipient(stop, pkg) || !visitContainsParcelWindow(stop, pkg)))
+      return refused('blocked', 'Le destinataire, l’étage ou le créneau de cet arrêt ne correspond plus au colis. Faites corriger la tournée par le bureau.');
     const sameAssignment = pkg.missionId === mission.id && pkg.currentDriverId === driverId && stop?.id === pkg.stopId;
     if (!sameAssignment && sourceStops.some(s => s.proofSyncPending))
       return refused('blocked', 'Synchronisez la preuve en attente avant de reprendre ce colis.');
@@ -187,14 +202,23 @@ export async function scanPackageHandler(data: any, context: functions.https.Cal
     if (!sameAssignment && !pickupVerification) {
       // Remove a stale reference from this tour before attaching to an actionable delivery stop.
       for (const s of stops) { s.packageIds = s.packageIds.filter((id: string) => id !== pkg.id); s.packageCount = s.packageIds.length; }
-      stop = stops.find(s => s.type === 'DELIVERY' && !finalStops.has(s.status) && placeKey(s) === placeKey(pkg));
+      stop = stops.find(s => s.type === 'DELIVERY' && s.status === 'En attente' && !s.proofSyncPending && sameDeliveryVisit(s, pkg));
+      if (stop) {
+        const expected = await Promise.all(stop.packageIds.map((id: string) => tx.get(db.collection('packages').doc(id))));
+        if (expected.some(doc => !doc.exists || !sameDeliveryRecipient(stop, doc.data()!) || !visitContainsParcelWindow(stop, doc.data()!)))
+          return refused('blocked', 'Cet arrêt contient des destinataires ou créneaux incohérents. Faites corriger la tournée par le bureau.');
+      }
       if (!stop) {
         stop = { id: `scan-${requestKey.slice(0, 20)}`, sequence: Math.max(0, ...stops.map(s => s.sequence || 0)) + 1,
           type: 'DELIVERY', status: 'En attente', address: pkg.address || '', postalCode: pkg.postalCode || '', city: pkg.city || '',
-          contactName: pkg.contactName || '', contactPhone: pkg.contactPhone || '', packageIds: [], packageCount: 0, serviceTime: pkg.serviceTime || 5,
+          contactName: pkg.contactName || '', contactPhone: pkg.contactPhone || '', ...(pkg.floor != null ? { floor: pkg.floor } : {}), ...(pkg.hasElevator != null ? { hasElevator: pkg.hasElevator } : {}), packageIds: [], packageCount: 0, serviceTime: pkg.serviceTime || 5,
           ...(pkg.coordinates ? { coordinates: pkg.coordinates } : {}), ...(pkg.timeWindowStart ? { timeWindowStart: pkg.timeWindowStart } : {}),
           ...(pkg.timeWindowEnd ? { timeWindowEnd: pkg.timeWindowEnd } : {}) };
         stops.push(stop);
+      }
+      if (stop.packageIds.length) {
+        Object.assign(stop, intersectDeliveryWindows([stop, pkg]));
+        stop.serviceTime = (stop.serviceTime || 5) + (pkg.serviceTime || 5);
       }
       stop.packageIds.push(pkg.id); stop.packageCount = stop.packageIds.length;
     }

@@ -1,4 +1,4 @@
-process.env.GCLOUD_PROJECT = 'demo-fleet-production-audit';
+process.env.GCLOUD_PROJECT = process.env.SCAN_TEST_PROJECT || 'demo-fleet-production-audit';
 process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8189';
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
@@ -8,16 +8,17 @@ const service = require('../functions/lib/index.js');
 const { scanPackageHandler, scanBusinessDay } = require('../functions/lib/scanPackage.js');
 const db = req('firebase-admin/firestore').getFirestore();
 const context = uid => ({ auth: { uid, token: { email_verified: true } } });
+const runId = randomUUID();
 let number = 0;
 async function check(name, test) {
-  const id = `scan-test-${++number}`;
+  const id = `scan-test-${runId}-${++number}`;
   const driverId = `${id}-driver`, parcelId = `${id}-parcel`, oldId = `${id}-yesterday`;
   await db.collection('users').doc(driverId).set({ role: 'Chauffeur', firstName: 'Fictif', lastName: 'Test' });
   const pkgRef = db.collection('packages').doc(parcelId), oldRef = db.collection('missions').doc(oldId);
   await pkgRef.set({ externalId: id, barcode: `label-${id}`, status: 'En livraison', missionId: oldId, stopId: 'old-stop',
     currentDriverId: driverId, address: '1 rue Fictive', postalCode: '97400', city: 'Saint-Denis', contactName: 'Destinataire fictif', movements: [] });
   await oldRef.set({ driverId, date: '2026-09-16', type: 'Livraison', status: 'En cours', totalPackages: 1,
-    stops: [{ id: 'old-stop', type: 'DELIVERY', status: 'En attente', packageIds: [parcelId], packageCount: 1 }] });
+    stops: [{ address: '1 rue Fictive', postalCode: '97400', city: 'Saint-Denis', contactName: 'Destinataire fictif', id: 'old-stop', type: 'DELIVERY', status: 'En attente', packageIds: [parcelId], packageCount: 1 }] });
   let instant = '2026-09-17T05:00:00Z';
   const deps = { db, now: () => new Date(instant), isAdminCaller: r => r === 'Admin',
     requireActiveCaller: async c => ({ ...(await db.collection('users').doc(c.auth.uid).get()).data(), id: c.auth.uid }) };
@@ -58,9 +59,16 @@ async function check(name, test) {
     await db.collection('missions').doc(`${t.id}-current`).set({ driverId: t.driverId, date: '2026-09-17', status: 'Dispatché', type: 'Livraison', stops: [] });
     const r = await t.scan(); assert.equal(r.missionId, `${t.id}-current`); assert.equal((await t.state()).status, 'Chargé');
   });
-  await check('closed yesterday tour and failed parcel can be rescanned without reopening history', async t => {
-    await t.oldRef.update({ status: 'Terminé' }); await t.pkgRef.update({ status: 'Échec' });
-    assert.equal((await t.scan()).accepted, true); assert.equal((await t.oldRef.get()).data().status, 'Terminé');
+  await check('every scan entry point refuses a failed parcel and preserves its closed history', async t => {
+    await t.oldRef.update({ status: 'Terminé' });
+    await t.pkgRef.update({ status: 'Échec', failureReason: 'Destinataire absent', deliveryAttempts: [{ id: 'failed-attempt', outcome: 'FAILURE' }] });
+    const parcelBefore = await t.state(), missionBefore = (await t.oldRef.get()).data();
+    for (const source of ['driver-claim', 'driver-delivery', 'driver-pickup', 'hub-loading', 'quick-scan', 'transfer', 'manual-create']) {
+      const result = await t.scan({ source, targetMissionId: t.oldId, stopId: 'old-stop' });
+      assert.equal(result.accepted, false); assert.equal(result.outcome, 'blocked'); assert.match(result.message, /retour physique au dépôt/);
+    }
+    assert.deepEqual(await t.state(), parcelBefore); assert.deepEqual((await t.oldRef.get()).data(), missionBefore);
+    assert.equal((await db.collection('missions').where('driverId', '==', t.driverId).where('date', '==', '2026-09-17').get()).size, 0);
   });
   await check('closed today tour is never reused', async t => {
     const first = await t.scan(); await db.collection('missions').doc(first.missionId).update({ status: 'Terminé' });
@@ -220,6 +228,23 @@ async function check(name, test) {
     await assert.rejects(service.scanPackage.run({}, {}), e => e.code === 'unauthenticated');
     await db.collection('users').doc(t.driverId).update({ isDisabled: true });
     await assert.rejects(service.scanPackage.run({ driverId: t.driverId, packageId: t.parcelId, requestId: randomUUID(), source: 'driver-claim' }, context(t.driverId)), e => e.code === 'permission-denied');
+  });
+  await check('failed parcel becomes scannable only after physical hub return and an office redelivery decision', async t => {
+    const hubId = t.id + '-hub', managerId = t.id + '-office';
+    await db.collection('hubs').doc(hubId).set({ isActive: true, name: 'Dépôt fictif' });
+    await db.collection('users').doc(managerId).set({ role: 'Admin' });
+    await t.oldRef.update({ status: 'Terminé' });
+    await t.pkgRef.update({ status: 'Échec', deliveryAttempts: [{ id: 'preserved-failure', outcome: 'FAILURE' }] });
+    assert.equal((await t.scan()).accepted, false);
+    const photo = `https://firebasestorage.googleapis.com/v0/b/${process.env.GCLOUD_PROJECT}.appspot.com/o/` + encodeURIComponent(`pod/returns/${t.parcelId}/photo.jpg`) + '?alt=media';
+    await service.returnPackage.run({ packageId: t.parcelId, expectedMissionId: t.oldId, requestId: randomUUID(),
+      extra: { returnProof: { hubId, timestamp: '2026-09-17T05:00:00Z', photoUrls: [photo], coordinates: null } } }, context(t.driverId));
+    assert.equal((await t.state()).status, 'Au hub'); assert.equal((await t.state()).returnDisposition, 'AWAITING_DECISION');
+    assert.equal((await t.scan()).accepted, false);
+    await service.resolveReturnedPackage.run({ packageId: t.parcelId, requestId: randomUUID(), decision: 'REDELIVER', notes: 'Destinataire disponible pour une nouvelle tentative' }, context(managerId));
+    const ready = await t.state(); assert.equal(ready.status, 'Au hub'); assert.equal(ready.returnDisposition, 'REDELIVERY_READY');
+    const result = await t.scan({ source: 'hub-loading' }); assert.equal(result.accepted, true); assert.notEqual(result.missionId, t.oldId);
+    assert.deepEqual((await t.state()).deliveryAttempts, ready.deliveryAttempts); assert.equal((await t.oldRef.get()).data().status, 'Terminé');
   });
   console.log(`${number} scan business checks passed`);
   await db.terminate();

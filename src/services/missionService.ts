@@ -37,7 +37,7 @@ import {
   PostalCodeMapping, User, UserRole
 } from '../types';
 import { orderReferenceHint, orderReferenceMessage, ScanIdentificationError } from '../utils/barcode';
-import { exactScanCandidates, individualScanCandidates, parcelCodeFields } from '../../functions/src/scanCode';
+import { exactScanCandidates, individualScanCandidates, parcelCodeFields, normalizeScanCode } from '../../functions/src/scanCode';
 import { placeKey } from '../utils/address';
 import { localDatePart } from '../utils/date';
 import { cleanUndefined } from '../utils/firestore';
@@ -410,30 +410,8 @@ export const updatePackageStatus = async (
   movement: Omit<PackageMovement, 'timestamp'>,
   extraFields?: Partial<Pick<Package, 'missionId' | 'stopId' | 'currentDriverId' | 'currentVehicleId' | 'currentHubId' | 'estimatedDeliveryAt'>>
 ): Promise<void> => {
-  const pkg = await runTransaction(db, async tx => {
-    const ref = doc(db, PACKAGES_COLLECTION, packageId);
-    const snap = await tx.get(ref);
-    if (!snap.exists()) throw new Error('Colis introuvable');
-    const current = snap.data() as Package;
-    const fields = cleanUndefined(extraFields || {});
-    const unchanged = Object.entries(fields).every(([key, value]) =>
-      current[key as keyof Package] === value
-    );
-    // Same status can still carry a new hub, assignment or ETA. Only an exact
-    // replay is a no-op; dropping its fields left sorted parcels unassigned.
-    if (current.status === status && unchanged) return null;
-    if ([PackageStatus.DELIVERED, PackageStatus.RETURNED].includes(current.status) && current.status !== status) {
-      throw new Error('Ce colis est déjà livré ou retourné. Son statut ne peut pas être réouvert.');
-    }
-    const now = new Date().toISOString();
-    tx.update(ref, cleanUndefined({
-      status, movements: [...(current.movements || []), { ...movement, timestamp: now }],
-      ...fields, updatedAt: now
-    }));
-    return current;
-  });
-  if (!pkg) return;
-
+  if (extraFields && Object.keys(extraFields).length) throw new Error('Utilisez le parcours de réception ou d’affectation pour déplacer un colis.');
+  await httpsCallable(getFunctions(app, 'europe-west1'), 'setParcelSorting')({ packageId, status });
 
 };
 
@@ -454,127 +432,21 @@ export interface StatusResyncResult {
 }
 
 export const resyncPackageStatusesFromStops = async (): Promise<StatusResyncResult> => {
-  const result: StatusResyncResult = {
-    completedStopPackages: 0, fixedDelivered: 0, skippedUnproven: 0,
-    skippedReassigned: 0, failed: 0, details: [],
-  };
-  const activeStatuses = new Set<PackageStatus>([
-    PackageStatus.PENDING, PackageStatus.COLLECTED, PackageStatus.AT_HUB,
-    PackageStatus.SORTED, PackageStatus.IN_TRANSIT, PackageStatus.LOADED,
-    PackageStatus.IN_DELIVERY,
-  ]);
-  const completedIds = new Set<string>();
-  const unprovenIds = new Set<string>();
-  const reassignedIds = new Set<string>();
-  const fixedIds = new Set<string>();
-  const missions = await getDocs(collection(db, MISSIONS_COLLECTION));
-  for (const candidate of missions.docs) {
-    if (!(candidate.data().stops || []).some((s: MissionStop) => s.type === 'DELIVERY' && s.status === StopStatus.COMPLETED)) continue;
-    try {
-      const checked = await runTransaction(db, async tx => {
-        const missionRef = doc(db, MISSIONS_COLLECTION, candidate.id);
-        const snapshot = await tx.get(missionRef);
-        const outcome = { seen: [] as string[], unproven: [] as string[], reassigned: [] as string[], details: [] as StatusResyncResult['details'] };
-        if (!snapshot.exists()) return outcome;
-        const mission = snapshot.data() as Mission;
-        const stops = (mission.stops || []).filter(s => s.type === 'DELIVERY' && s.status === StopStatus.COMPLETED);
-        if (!stops.length) return outcome;
-        const ids = [...new Set(mission.stops.flatMap(s => s.packageIds || []))];
-        // Leave oversized/inconsistent historical tours for an explicit audit.
-        if (ids.length > 450 || ids.some(id => !id || id.includes('/')) || stops.some(s => !s.id || s.id.includes('/'))) {
-          throw new Error('Cette ancienne tournée doit être vérifiée individuellement par le bureau.');
-        }
-        const packages = await Promise.all(ids.map(id => tx.get(doc(db, PACKAGES_COLLECTION, id))));
-        const proofs = await Promise.all(stops.map(stop => tx.get(doc(db, 'proofs_of_delivery', `${candidate.id}_${stop.id}`))));
-        const byId = new Map(packages.filter(p => p.exists()).map(p => [p.id, p]));
-        const repairs = new Map<string, { parcel: typeof packages[number]; pkg: Package; proof: Record<string, any> }>();
-        const https = (value: unknown) => typeof value === 'string' && value.startsWith('https://');
-        for (let index = 0; index < stops.length; index++) {
-          const stop = stops[index];
-          const proof = proofs[index].data();
-          const validProof = proof?.type === 'SUCCESS' && proof.missionId === candidate.id && proof.stopId === stop.id &&
-            !!mission.driverId && proof.driverId === mission.driverId && Array.isArray(proof.packageIds) &&
-            Array.isArray(proof.photoUrls) && proof.photoUrls.length > 0 && proof.photoUrls.every(https) && https(proof.signatureUrl) &&
-            typeof proof.recipientName === 'string' && !!proof.recipientName.trim() &&
-            Number.isFinite(proof.coordinates?.lat) && Math.abs(proof.coordinates.lat) <= 90 &&
-            Number.isFinite(proof.coordinates?.lng) && Math.abs(proof.coordinates.lng) <= 180 &&
-            typeof proof.timestamp === 'string' && Number.isFinite(Date.parse(proof.timestamp));
-          for (const id of stop.packageIds || []) {
-            const parcel = byId.get(id);
-            if (!parcel) continue;
-            outcome.seen.push(id);
-            const pkg = parcel.data() as Package;
-            // Delivered, failed and return decisions are never rewritten.
-            if (!activeStatuses.has(pkg.status)) continue;
-            if (pkg.missionId !== candidate.id || pkg.stopId !== stop.id || pkg.currentDriverId !== mission.driverId ||
-              (pkg.pod && (pkg.pod.missionId !== candidate.id || pkg.pod.stopId !== stop.id || pkg.pod.packageId !== id))) {
-              outcome.reassigned.push(id);
-              continue;
-            }
-            if (!validProof || !proof!.packageIds.includes(id)) {
-              outcome.unproven.push(id);
-              continue;
-            }
-            repairs.set(id, { parcel, pkg, proof: proof! });
-          }
-        }
-        if (!repairs.size) return outcome;
-        const now = new Date().toISOString();
-        for (const [id, { parcel, pkg, proof }] of repairs) {
-          tx.update(parcel.ref, cleanUndefined({
-            status: PackageStatus.DELIVERED,
-            ...(!pkg.pod ? { pod: { ...proof, packageId: id } } : {}),
-            movements: [...(pkg.movements || []), {
-              timestamp: now, action: 'DELIVERED', driverId: proof.driverId,
-              driverName: proof.driverName || mission.driverName || '',
-              notes: `Statut rétabli à partir de la preuve de remise du ${proof.timestamp}`,
-            }], updatedAt: now,
-          }));
-          outcome.details.push({ packageId: id, orderNumber: pkg.orderNumber || pkg.externalId || id, from: String(pkg.status) });
-        }
-        // Count the latest parcels for this mission; a concurrent transaction
-        // changes the read mission/parcels and triggers a complete retry.
-        const deliveredStopIds = new Set(stops.flatMap(stop => stop.packageIds || []));
-        const deliveredPackages = packages.filter(parcel => {
-          if (!parcel.exists()) return false;
-          const pkg = parcel.data() as Package;
-          const belongs = deliveredStopIds.has(parcel.id) && (!pkg.missionId || pkg.missionId === candidate.id) &&
-            (!pkg.currentDriverId || pkg.currentDriverId === mission.driverId);
-          return belongs && (pkg.status === PackageStatus.DELIVERED || repairs.has(parcel.id));
-        }).length;
-        tx.update(missionRef, { deliveredPackages, updatedAt: now });
-        return outcome;
-      });
-      checked.seen.forEach(id => completedIds.add(id));
-      checked.unproven.forEach(id => unprovenIds.add(id));
-      checked.reassigned.forEach(id => reassignedIds.add(id));
-      for (const detail of checked.details) {
-        if (!fixedIds.has(detail.packageId)) result.details.push(detail);
-        fixedIds.add(detail.packageId);
-      }
-    } catch (error) {
-      result.failed++;
-      reportError('resync.mission', error, { silent: true, extra: { missionId: candidate.id } });
-    }
-  }
-  result.completedStopPackages = completedIds.size;
-  result.fixedDelivered = fixedIds.size;
-  result.skippedUnproven = [...unprovenIds].filter(id => !fixedIds.has(id)).length;
-  result.skippedReassigned = [...reassignedIds].filter(id => !fixedIds.has(id)).length;
-  return result;
+  return (await httpsCallable<any, StatusResyncResult>(getFunctions(app, 'europe-west1'), 'reconcileDeliveryProofs', { timeout: 540000 })({})).data;
+
 };
 
 /**
- * Imports par lots de 150, identifiés côté serveur pour permettre une reprise sans doublon.
+ * Imports par lots de 75, identifiés côté serveur pour permettre une reprise sans doublon.
  */
 export const addPackagesBatch = async (packages: Omit<Package, 'id' | 'createdAt' | 'updatedAt'>[], manifest?: ImportManifest): Promise<string[]> => {
   if (!packages.length) return [];
   const expected = manifest || { clientId: packages[0].clientId, references: packages.map(importReference) };
   const call=httpsCallable<any,{ids:string[]}>(getFunctions(app,'europe-west1'),'importPackages');
   const ids:string[]=[];
-  for(let offset=0;offset<packages.length;offset+=150){
+  for(let offset=0;offset<packages.length;offset+=75){
     try {
-      const batch = packages.slice(offset, offset + 150);
+      const batch = packages.slice(offset, offset + 75);
       const result = await call({ packages: cleanUndefined(batch), manifest: expected });
       if (!Array.isArray(result.data.ids) || result.data.ids.length !== batch.length || result.data.ids.some(id => typeof id !== 'string' || !id))
         throw new Error('La confirmation du serveur est incomplète.');
@@ -608,6 +480,9 @@ export const createClientShipment = async (params: {
   volume?: number;
   comment?: string;
   clientReference?: string;
+  requestedDeliveryDate?: string;
+  timeWindowStart?: string;
+  timeWindowEnd?: string;
   /** Keep the same UUID when retrying an uncertain creation. */
   requestId?: string;
 }): Promise<Package[]> => {
@@ -638,6 +513,9 @@ export const createClientShipment = async (params: {
       weight: params.weight,
       volume: params.volume,
       clientReference: params.clientReference,
+      requestedDeliveryDate: params.requestedDeliveryDate,
+      timeWindowStart: params.timeWindowStart,
+      timeWindowEnd: params.timeWindowEnd,
       createdByClient: true,
       packageIndex: i,
       packageTotal: total,
@@ -667,6 +545,7 @@ export const createClientShipmentsBatch = async (params: {
   rows: Array<{
     colisNumber: string;   // ex. BR-000123
     carrierBarcode?: string;
+    carrierBarcodeFormat?: 'generic' | 'boiron';
     contactName: string;
     address: string;
     postalCode: string;
@@ -695,7 +574,7 @@ export const createClientShipmentsBatch = async (params: {
       externalId: code,
       orderNumber: code,
       barcode: code,
-      ...(r.carrierBarcode ? { carrierBarcode: r.carrierBarcode } : {}),
+      ...(r.carrierBarcode ? { carrierBarcode: r.carrierBarcode, carrierBarcodeFormat: r.carrierBarcodeFormat || 'generic' } : {}),
       address: r.address,
       city: r.city,
       postalCode: cp,
@@ -882,8 +761,12 @@ export const commitStopOutcome = async (params: {
   stopPatch: Partial<MissionStop>;
   deliveredDelta?: number;
   failedDelta?: number;
-  packageOutcomes?: Array<{ packageId: string; status: PackageStatus; movement: Omit<PackageMovement, 'timestamp'> }>;
+  recordedAt?: string;
+  packageOutcomes?: Array<{ packageId: string; status: PackageStatus; movement: Omit<PackageMovement, 'timestamp'>; failureReason?: string; failureNotes?: string }>;
 }): Promise<{ allDone: boolean; stops: MissionStop[] }> => {
+  if (params.packageOutcomes?.length) {
+    return (await httpsCallable<any, { allDone: boolean; stops: MissionStop[] }>(getFunctions(app, 'europe-west1'), 'commitDeliveryOutcome')(cleanUndefined(params))).data;
+  }
   const ref = doc(db, MISSIONS_COLLECTION, params.missionId);
   const now = new Date().toISOString();
   const terminal = (s: StopStatus) => [StopStatus.COMPLETED, StopStatus.FAILED, StopStatus.SKIPPED].includes(s);
@@ -903,6 +786,7 @@ export const commitStopOutcome = async (params: {
     if ([MissionStatus.COMPLETED, MissionStatus.CANCELLED].includes(m.status)) {
       throw new Error('Cette tournée est clôturée.');
     }
+    if (prev.type === 'DELIVERY' && params.stopPatch.status && terminal(params.stopPatch.status)) throw new Error('Scannez les colis et enregistrez une décision pour chacun avant de terminer la livraison.');
     const outcomes = params.packageOutcomes || [];
     if (new Set(outcomes.map(o => o.packageId)).size !== outcomes.length || outcomes.length > 450) {
       throw new Error('Liste de colis invalide ou trop volumineuse.');
@@ -1194,9 +1078,9 @@ const queryPackagesByCandidates = async (values: string[]): Promise<Package[]> =
   const lookup = async (candidates: string[]) => {
     if (!candidates.length) return [];
     if (candidates.length > 30) throw new ScanIdentificationError('Étiquette complexe : saisissez la référence individuelle du carton.');
-    const snapshots = await Promise.all(parcelCodeFields.map(field => getDocs(query(
+    const snapshots = await Promise.all([getDocs(query(collection(db, PACKAGES_COLLECTION), where('scanCodes', 'array-contains-any', [...new Set(candidates.map(normalizeScanCode))]), limit(2))), ...parcelCodeFields.map(field => getDocs(query(
       collection(db, PACKAGES_COLLECTION), where(field, 'in', candidates), limit(2)
-    ))));
+    )))]);
     const matches = [...new Map(snapshots.flatMap(snap => snap.docs).map(d => [d.id, { ...d.data(), id: d.id } as Package])).values()];
     if (matches.length > 1) throw new ScanIdentificationError('Cette référence correspond à plusieurs colis ou expéditeurs. Scannez un autre identifiant unique du carton, par exemple son code DELIVREX.');
     return matches;
@@ -1684,10 +1568,8 @@ export const updatePackageFields = async (
   packageId: string,
   fields: Partial<Package>
 ): Promise<void> => {
-  await updateDoc(doc(db, PACKAGES_COLLECTION, packageId), cleanUndefined({
-    ...fields,
-    updatedAt: new Date().toISOString()
-  }));
+  await httpsCallable(getFunctions(app, 'europe-west1'), 'correctDeliveryPlan')({ packageId, fields: cleanUndefined(fields) });
+
 };
 
 /**

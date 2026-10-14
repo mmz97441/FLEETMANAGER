@@ -1,0 +1,141 @@
+{
+  "readAt": "2026-10-14T03:35:53.640838+00:00",
+  "scope": {
+    "packageCreatedSince": "2026-09-14",
+    "missionDateSince": "2026-09-14",
+    "errorsSince": "2026-10-07",
+    "scanActivitySince": "2026-10-13",
+    "packageCount": 349,
+    "missionCount": 91,
+    "errorCount": 131,
+    "activityCount": 137,
+    "queryCap": 20000,
+    "activityCap": 10000
+  },
+  "packageStatuses": {
+    "Livré": 188,
+    "En attente": 41,
+    "En livraison": 116,
+    "Échec": 2,
+    "Au hub": 2
+  },
+  "missionStatuses": {
+    "Terminé": 51,
+    "En cours": 40
+  },
+  "parcelIndicators": {
+    "nonterminal_on_closed_mission": 2
+  },
+  "stopIndicators": {
+    "proof_pending": 1
+  },
+  "identityValuesSharedByMultipleParcels": 0,
+  "errorContexts": [
+    [
+      "window.error",
+      74
+    ],
+    [
+      "scanner.camera.interrupted",
+      15
+    ],
+    [
+      "auth.presence",
+      10
+    ],
+    [
+      "page.module.load",
+      8
+    ],
+    [
+      "window.unhandledrejection",
+      8
+    ],
+    [
+      "directory.load",
+      7
+    ],
+    [
+      "auth.profile.fallback",
+      3
+    ],
+    [
+      "auth.profile.load",
+      2
+    ],
+    [
+      "resource.load",
+      2
+    ],
+    [
+      "react.render",
+      1
+    ],
+    [
+      "scanner.module.load",
+      1
+    ]
+  ],
+  "errorVersions": {
+    "4.32.0": 125,
+    "4.31.2": 4,
+    "4.30.0": 2
+  },
+  "scanOutcomes": {
+    "confirmed": 24,
+    "not_found": 15,
+    "already_scanned": 26,
+    "reassigned": 22,
+    "ambiguous": 4,
+    "terminal": 2
+  },
+  "lastErrorAt": "2026-10-14T03:00:56.771Z",
+  "lastScanAuditAt": "2026-10-13T13:42:54.540Z",
+  "openMissionDates": {
+    "2026-09-15": 4,
+    "2026-09-16": 1,
+    "2026-09-17": 1,
+    "2026-09-18": 1,
+    "2026-09-21": 4,
+    "2026-09-22": 1,
+    "2026-09-24": 1,
+    "2026-09-25": 1,
+    "2026-09-28": 2,
+    "2026-09-29": 1,
+    "2026-09-30": 3,
+    "2026-10-01": 2,
+    "2026-10-02": 4,
+    "2026-10-05": 1,
+    "2026-10-06": 2,
+    "2026-10-07": 4,
+    "2026-10-08": 2,
+    "2026-10-09": 4,
+    "2026-10-13": 1
+  },
+  "inDeliveryMissionDates": {
+    "2026-09-15": 10,
+    "2026-09-16": 1,
+    "2026-09-18": 7,
+    "2026-09-22": 4,
+    "2026-09-24": 22,
+    "2026-09-25": 4,
+    "2026-09-28": 3,
+    "2026-09-30": 12,
+    "2026-10-02": 5,
+    "2026-10-05": 16,
+    "2026-10-07": 9,
+    "2026-10-08": 1,
+    "2026-10-09": 21,
+    "2026-10-13": 1
+  },
+  "pendingProofStopTimes": [
+    {
+      "missionDate": "2026-10-09",
+      "completionTime": "2026-10-09T07:43:47.235Z",
+      "status": "Terminé"
+    }
+  ],
+  "recentDriverVersions": {
+    "4.32.0": 12
+  }
+}

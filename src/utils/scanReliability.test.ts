@@ -7,10 +7,10 @@ import { validateImportManifest, importReference } from './importManifest';
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 it('preserves Boiron leading zeroes and rejects rounded numeric cells or a different order', () => {
   const code = '0014085834301322930101';
-  expect(carrierBarcodeError(code, '14085834')).toBeNull();
-  expect(carrierBarcodeError(Number(code), '14085834')).toMatch(/numérique/);
-  expect(carrierBarcodeError(code, '14085837')).toMatch(/commande/);
-  expect(carrierBarcodeError('14085834301322930101', '14085834')).toMatch(/22 chiffres/);
+  expect(carrierBarcodeError(code, '14085834', 'boiron')).toBeNull();
+  expect(carrierBarcodeError(Number(code), '14085834', 'boiron')).toMatch(/numérique/);
+  expect(carrierBarcodeError(code, '14085837', 'boiron')).toMatch(/commande/);
+  expect(carrierBarcodeError('14085834301322930101', '14085834', 'boiron')).toMatch(/22 chiffres/);
 });
 it('tracks the whole import while accepting only chunks belonging to that client and file', () => {
   const manifest = { clientId: 'c', references: ['BR1\t1', 'BR2\t1'] };

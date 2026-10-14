@@ -11,14 +11,14 @@ module.exports = async ({ service, db, context, check }) => {
   const parcel = async (name, extra = {}) => {
     const id = run + '-' + name;
     await db.collection('packages').doc(id).set({
-      status: 'Trié', address: '28 RUE JOSEPH BÉDIER', postalCode: '97400', city: 'Saint-Denis', movements: [], ...extra,
+      status: 'Trié', currentHubId: hubId, contactName: 'Pharmacie Test', address: '28 RUE JOSEPH BÉDIER', postalCode: '97400', city: 'Saint-Denis', movements: [], ...extra,
     });
     return id;
   };
   const mission = (ids, driverId = driverA, extra = {}) => ({
     date: '2026-09-12', zone: 'Nord', hubId, plannedDepartureTime: '08:00', driverId,
     stops: [{ id: 's-' + driverId, type: 'DELIVERY', status: 'En attente',
-      address: '28 rue Joseph Bedier', postalCode: '97400', city: 'SAINT DENIS',
+      contactName: 'Pharmacie Test', address: '28 rue Joseph Bedier', postalCode: '97400', city: 'SAINT DENIS',
       packageIds: ids, serviceTime: ids.length * 5, estimatedArrival: '2026-09-12T04:30:00Z', durationFromPrevious: 30 }],
     totalDistance: 10, estimatedDuration: 60, ...extra,
   });
@@ -96,6 +96,26 @@ module.exports = async ({ service, db, context, check }) => {
     assert.equal(assigned.currentVehicleId, vehicleId);
     assert.equal((await db.collection('missions').doc(assigned.missionId).get()).data().vehiclePlate, 'TEST-974');
   });
+  await check('dispatch checks physical hub and requested date, with explicit audited date override', async () => {
+    const id = await parcel('physical', { currentHubId: 'another-hub', requestedDeliveryDate: '2026-09-14' });
+    const data = request('physical', [mission([id])]);
+    await reject(data);
+    await db.collection('packages').doc(id).update({ currentHubId: hubId });
+    await reject(data);
+    await call({ ...data, planningChanges: { reason: 'Accord du destinataire', allowDifferentDate: true, parcels: [] } });
+    assert.equal((await db.collection('packages').doc(id).get()).data().planningHistory[0].requestedDeliveryDate, '2026-09-14');
+  });
+  await check('dispatch refuses a wrong recipient, floor and window and keeps agreed corrections traceable', async () => {
+    for (const [label, fields] of Object.entries({ recipient: { contactName: 'Autre pharmacie' }, floor: { floor: 2 }, window: { timeWindowStart: '10:00', timeWindowEnd: '11:00' } })) {
+      const id = await parcel('strict-' + label, fields);
+      const m = mission([id]);
+      await reject(request('strict-' + label, [m]));
+    }
+    const id = await parcel('corrected-window', { timeWindowStart: '10:00', timeWindowEnd: '11:00' });
+    const data = request('corrected-window', [mission([id])]);
+    await call({ ...data, planningChanges: { reason: 'Ouverture confirmée sans contrainte', allowDifferentDate: false, parcels: [{packageId: id, timeWindowStart: null, timeWindowEnd: null}] } });
+    assert.equal((await db.collection('packages').doc(id).get()).data().planningHistory[0].previousTimeWindowStart, '10:00');
+  });
   await check('dispatch bounds writes before touching package documents', async () => {
     await reject(request('oversized', [mission(Array.from({ length: 451 }, (_, i) => run + '-missing-' + i))]), 'invalid-argument');
   });
@@ -104,8 +124,9 @@ module.exports = async ({ service, db, context, check }) => {
     const target = run + '-target';
     await db.collection('missions').doc(target).set({ driverId: driverA, status: 'En cours', stops: [{
       id: 'existing', type: 'DELIVERY', status: 'En attente', sequence: 1,
-      address: '  28, RUE   JOSEPH BEDIER ', postalCode: '97400 ', city: 'Saint Denis', packageIds: ['already-there'], packageCount: 1,
+      contactName: 'Pharmacie Test', address: '  28, RUE   JOSEPH BEDIER ', postalCode: '97400 ', city: 'Saint Denis', packageIds: ['already-there'], packageCount: 1,
     }] });
+    await db.collection('packages').doc('already-there').set({ status: 'En livraison', missionId: target, stopId: 'existing', currentDriverId: driverA, contactName: 'Pharmacie Test', address: '28 rue Joseph Bedier', postalCode: '97400', city: 'Saint Denis' });
     await service.transferPackages.run({ packageIds: [id], missionId: target, claimMode: true }, context(driverA));
     const m = (await db.collection('missions').doc(target).get()).data();
     assert.equal(m.stops.length, 1); assert.deepEqual(m.stops[0].packageIds, ['already-there', id]);
@@ -120,12 +141,13 @@ module.exports = async ({ service, db, context, check }) => {
     await db.collection('missions').doc(target).set({ driverId: driverB, status: 'En cours', stops: [] });
     const transfer = () => service.transferPackages.run({ packageIds: [id], missionId: target, claimMode: true }, context(driverB));
     await assert.rejects(transfer(), error => error.code === 'failed-precondition');
-    await assert.rejects(service.returnPackage.run({ packageId: id, extra: { returnProof: { photoUrls: ['https://example.invalid/proof'] } } }, context(driverA)), error => error.code === 'failed-precondition');
+    await assert.rejects(service.returnPackage.run({ packageId: id, requestId: run + '-return-proof', expectedMissionId: source, extra: { returnProof: { hubId, photoUrls: [`https://firebasestorage.googleapis.com/v0/b/${process.env.GCLOUD_PROJECT}.appspot.com/o/` + encodeURIComponent('pod/returns/' + id + '/photo.jpg') + '?alt=media'] } } }, context(driverA)), error => error.code === 'failed-precondition');
     await db.collection('missions').doc(source).update({ stops: [{ id: 'failed', type: 'DELIVERY', status: 'Échec', proofSyncPending: false, sequence: 1, packageIds: [id], packageCount: 1 }] });
-    await transfer();
+    await assert.rejects(transfer(), error => error.code === 'failed-precondition');
+    await service.returnPackage.run({ packageId: id, requestId: run + '-return-proof', expectedMissionId: source, extra: { returnProof: { hubId, photoUrls: [`https://firebasestorage.googleapis.com/v0/b/${process.env.GCLOUD_PROJECT}.appspot.com/o/` + encodeURIComponent('pod/returns/' + id + '/photo.jpg') + '?alt=media'] } } }, context(driverA));
     const origin = (await db.collection('missions').doc(source).get()).data();
     assert.equal(origin.stops.length, 1); assert.deepEqual(origin.stops[0].packageIds, []);
-    assert.equal(origin.stops[0].status, 'Échec'); assert.equal(origin.failedStops, 1);
+    assert.equal(origin.stops[0].status, 'Échec'); assert.equal(origin.stops.filter(s => s.status === 'Échec').length, 1);
     assert.equal(origin.failedPackages, 1); assert.equal(origin.totalPackages, 1);
   });
 };

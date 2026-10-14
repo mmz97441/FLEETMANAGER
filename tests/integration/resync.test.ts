@@ -3,36 +3,46 @@ const race = vi.hoisted(() => ({
   afterMissionList: null as null | (() => Promise<void>),
   afterMissionRead: null as null | (() => Promise<void>),
 }));
-vi.mock('firebase/firestore', async (original) => {
-  const real = await original<any>();
-  return {
-    ...real,
-    getDocs: async (reference: any) => {
-      const snapshot = await real.getDocs(reference);
-      if (reference.path === 'missions' && race.afterMissionList) {
-        const mutation = race.afterMissionList;
-        race.afterMissionList = null;
-        await mutation();
-      }
-      return snapshot;
-    },
-    runTransaction: (db: any, callback: any, options: any) => real.runTransaction(db, (transaction: any) => callback(new Proxy(transaction, {
-      get(target, key) {
-        if (key === 'get') return async (reference: any) => {
-          const snapshot = await target.get(reference);
-          if (reference.path === 'missions/resync-audit-mission' && race.afterMissionRead) {
-            const mutation = race.afterMissionRead;
-            race.afterMissionRead = null;
-            await mutation();
-          }
-          return snapshot;
-        };
-        const value = Reflect.get(target, key);
-        return typeof value === 'function' ? value.bind(target) : value;
+vi.mock('firebase/functions', () => ({
+  getFunctions: () => ({}),
+  httpsCallable: () => async () => {
+    process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8189';
+    const { createRequire } = await import('node:module');
+    const require = createRequire(import.meta.url);
+    const functionsRequire = createRequire(new URL('../../functions/package.json', import.meta.url));
+    const adminApp = functionsRequire('firebase-admin/app');
+    let app;
+    try { app = adminApp.getApp('resync-audit-server'); }
+    catch { app = adminApp.initializeApp({ projectId: 'demo-fleet-resync-audit' }, 'resync-audit-server'); }
+    const realDb = functionsRequire('firebase-admin/firestore').getFirestore(app);
+    const serverDb = {
+      collection: (name: string) => {
+        const ref = realDb.collection(name);
+        if (name !== 'missions') return ref;
+        return new Proxy(ref, { get(target, key) {
+          if (key === 'get') return async () => {
+            const snapshot = await target.get();
+            const mutation = race.afterMissionList; race.afterMissionList = null;
+            if (mutation) await mutation();
+            return snapshot;
+          };
+          const value = Reflect.get(target, key);
+          return typeof value === 'function' ? value.bind(target) : value;
+        } });
       },
-    })), options),
-  };
-});
+      runTransaction: async (callback: any) => {
+        // Admin transactions lock their reads: simulate a concurrent completed
+        // commit before the fresh transaction read, rather than deadlock a writer.
+        const mutation = race.afterMissionRead; race.afterMissionRead = null;
+        if (mutation) await mutation();
+        return realDb.runTransaction(callback);
+      },
+    };
+    const { reconcileDeliveryProofsHandler } = require('../../functions/lib/reconcileDeliveryProofs.js');
+    return { data: await reconcileDeliveryProofsHandler({}, {} as any, { db: serverDb,
+      requireActiveCaller: async () => ({ id: 'resync-admin', role: 'Admin' }), isAdminCaller: (role: string) => role === 'Admin' }) };
+  },
+}));
 vi.mock('../../src/firebaseConfig', async () => {
   const { initializeApp } = await import('firebase/app');
   const { initializeFirestore, connectFirestoreEmulator } = await import('firebase/firestore');
@@ -51,6 +61,7 @@ import { deleteDoc, doc, getDoc, setDoc, terminate, writeBatch } from 'firebase/
 import { resyncPackageStatusesFromStops } from '../../src/services/missionService';
 import { PackageStatus, StopStatus } from '../../src/types';
 
+const point = { address: '1 rue Fictive', city: 'Saint-Denis', postalCode: '97400', contactName: 'Pharmacie' };
 const missionId = 'resync-audit-mission';
 const stopId = 'resync-stop';
 const driverId = 'resync-audit-driver';
@@ -63,10 +74,10 @@ const seed = async (statuses: PackageStatus[] = [PackageStatus.IN_DELIVERY], pro
   const selected = ids.slice(0, statuses.length);
   await setDoc(missionRef, {
     driverId, status: 'En cours', deliveredPackages: 0, failedPackages: 0,
-    stops: [{ id: stopId, type: 'DELIVERY', status: StopStatus.COMPLETED, packageIds: selected }],
+    stops: [{ ...point, id: stopId, type: 'DELIVERY', status: StopStatus.COMPLETED, packageIds: selected }],
   });
   await Promise.all(selected.map((id, index) => setDoc(packageRef(id), {
-    missionId, stopId, currentDriverId: driverId, status: statuses[index], movements: [],
+    ...point, missionId, stopId, currentDriverId: driverId, status: statuses[index], movements: [],
   })));
   if (proofPatch !== null) await setDoc(proofRef, {
     missionId, stopId, driverId, type: 'SUCCESS', packageIds: selected,
@@ -92,6 +103,10 @@ it('restores a proven active parcel and its proof exactly once with consistent c
   const first = (await getDoc(packageRef(ids[0]))).data()!;
   expect(first).toMatchObject({ status: PackageStatus.DELIVERED, pod: { packageId: ids[0], missionId, stopId } });
   expect(first.movements).toHaveLength(1);
+  expect(first.movements[0].timestamp).toBe('2026-09-10T08:00:00Z');
+  expect(first.movements[0].receivedAt).toBeTruthy();
+  expect(first.pod.packageIds).toBeUndefined();
+  expect(first.deliveryAttempts[0]).toMatchObject({ outcome: 'SUCCESS', recordedAt: '2026-09-10T08:00:00Z' });
   expect((await getDoc(missionRef)).data()?.deliveredPackages).toBe(1);
   expect((await resyncPackageStatusesFromStops()).fixedDelivered).toBe(0);
   expect((await getDoc(packageRef(ids[0]))).data()?.movements).toHaveLength(1);
@@ -106,6 +121,24 @@ it('requires explicit proof coverage for every parcel of a partial delivery', as
   expect((await getDoc(missionRef)).data()?.deliveredPackages).toBe(1);
 });
 
+it('keeps the synchronization guard when an existing delivered decision lacks its client proof projection', async () => {
+  await seed([PackageStatus.DELIVERED]);
+  const mission = (await getDoc(missionRef)).data()!;
+  await setDoc(missionRef, { ...mission, stops: [{ ...mission.stops[0], proofSyncPending: true }] });
+  expect((await resyncPackageStatusesFromStops()).fixedDelivered).toBe(0);
+  expect((await getDoc(missionRef)).data()?.stops[0].proofSyncPending).toBe(true);
+  expect((await getDoc(packageRef(ids[0]))).data()?.pod).toBeUndefined();
+});
+
+it('releases a stale synchronization guard only when every decision has a matching published projection', async () => {
+  await seed();
+  await resyncPackageStatusesFromStops();
+  const mission = (await getDoc(missionRef)).data()!;
+  await setDoc(missionRef, { ...mission, stops: [{ ...mission.stops[0], proofSyncPending: true }] });
+  expect((await resyncPackageStatusesFromStops()).fixedDelivered).toBe(0);
+  expect((await getDoc(missionRef)).data()?.stops[0].proofSyncPending).toBe(false);
+});
+
 it('never applies an old stop proof to a parcel now assigned to another tour', async () => {
   await seed();
   await setDoc(packageRef(ids[0]), { missionId: 'new-mission', stopId: 'new-stop', currentDriverId: 'new-driver', status: PackageStatus.IN_DELIVERY });
@@ -113,6 +146,21 @@ it('never applies an old stop proof to a parcel now assigned to another tour', a
   expect(result.fixedDelivered).toBe(0);
   expect(result.skippedReassigned).toBeGreaterThanOrEqual(1);
   expect((await getDoc(packageRef(ids[0]))).data()).toEqual({ missionId: 'new-mission', stopId: 'new-stop', currentDriverId: 'new-driver', status: PackageStatus.IN_DELIVERY });
+});
+
+it.each(['parcel', 'proof'] as const)('never reconciles a different recipient recorded on the %s', async source => {
+  await seed();
+  if (source === 'parcel') {
+    const pkg = (await getDoc(packageRef(ids[0]))).data()!;
+    await setDoc(packageRef(ids[0]), { ...pkg, contactName: 'Cabinet B', floor: 2 });
+  } else {
+    const proof = (await getDoc(proofRef)).data()!;
+    await setDoc(proofRef, { ...proof, destination: { ...point, contactName: 'Cabinet B', floor: 2 } });
+  }
+  const result = await resyncPackageStatusesFromStops();
+  expect(result.fixedDelivered).toBe(0);
+  expect(result.skippedReassigned).toBe(1);
+  expect((await getDoc(packageRef(ids[0]))).data()?.status).toBe(PackageStatus.IN_DELIVERY);
 });
 
 it('preserves failed, requested-return, returned and already-delivered decisions', async () => {

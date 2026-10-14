@@ -4,6 +4,7 @@ import { pendingDeliveries, submitDelivery, outboxChangeEvent, PendingDelivery }
 import { getMissionById } from '../services/missionService';
 import { Mission } from '../types';
 import Modal from './shared/Modal';
+import FieldOperationsSyncBanner from './FieldOperationsSyncBanner';
 
 type DeliverySummary = Pick<PendingDelivery, 'id' | 'createdAt' | 'committed' | 'kind'> & {
   action: { missionId: string; stopId: string };
@@ -109,10 +110,11 @@ export default function PendingSyncBanner({ userId }: { userId: string }) {
     return { tour: mission ? `Tournée ${mission.zone || ''} · ${mission.date}` : `Tournée ${row.action.missionId}`, stop: stop ? `Arrêt ${stop.sequence} · ${stop.contactName || stop.address}` : `Arrêt ${row.action.stopId}` };
   };
   const retry = () => window.dispatchEvent(new Event('fleet-sync-now'));
-  if (!rows.length && !error && !open && !received.length) return null;
+  if (!rows.length && !error && !open && !received.length) return <FieldOperationsSyncBanner userId={userId} />;
 
   return (
     <>
+      <FieldOperationsSyncBanner userId={userId} />
       <section
         aria-label="Synchronisation des livraisons"
         className={`ui-notice ${rows.length || error ? "ui-notice-warning" : "ui-notice-success"}`}

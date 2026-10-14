@@ -18,10 +18,11 @@ import { cleanUndefined } from '../utils/firestore';
  *   proofs_of_delivery/{missionId}_{stopId} = document complet
  */
 
-import { storage, db } from '../firebaseConfig';
+import app, { storage, db } from '../firebaseConfig';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { ref, uploadString, getDownloadURL } from 'firebase/storage';
-import { doc, collection, query, where, getDocs, getDoc, runTransaction } from 'firebase/firestore';
-import { ProofOfDelivery, Package, PackageStatus, DeliveryLocation, MissionStop } from '../types';
+import { doc, collection, query, where, getDocs, getDoc } from 'firebase/firestore';
+import { ProofOfDelivery, Package, PackageStatus, DeliveryLocation, MissionStop, DeliveryAttempt } from '../types';
 
 const POD_COLLECTION = 'proofs_of_delivery';
 const PACKAGES_COLLECTION = 'packages';
@@ -50,49 +51,10 @@ function assertSameProof(
   ) throw new Error('Une autre preuve existe pour cet arrêt.');
 }
 
-/** Publish the immutable proof and release the closure guard in one transaction. */
+/** Server atomically publishes the immutable proof and client-scoped projections. */
 async function saveProofAndFinishSync(payload: ProofDocument): Promise<ProofDocument> {
-  return runTransaction(db, async (tx) => {
-    const proofRef = doc(db, POD_COLLECTION, `${payload.missionId}_${payload.stopId}`);
-    const missionRef = doc(db, 'missions', payload.missionId);
-    const [existing, mission] = await Promise.all([tx.get(proofRef), tx.get(missionRef)]);
-    if (!mission.exists()) throw new Error('Tournée introuvable : les preuves restent conservées sur cet appareil.');
-    const saved = existing.exists() ? existing.data() as ProofDocument : payload;
-    if (existing.exists()) assertSameProof(saved, payload);
-    const stops = (mission.data().stops || []) as MissionStop[];
-    const stop = stops.find((candidate) => candidate.id === payload.stopId);
-    if (!stop) throw new Error('Cet arrêt a changé. Les preuves restent conservées sur cet appareil ; contactez le bureau.');
-
-    // Read before any write. A transfer or reassignment racing with an upload
-    // must never receive the former mission's proof on its parcel document.
-    const packageRefs = !existing.exists() && payload.type === 'SUCCESS'
-      ? payload.packageIds.map((id) => doc(db, PACKAGES_COLLECTION, id)) : [];
-    const packages = await Promise.all(packageRefs.map((reference) => tx.get(reference)));
-    for (const snapshot of packages) {
-      const pkg = snapshot.data();
-      if (!pkg || pkg.missionId !== payload.missionId || pkg.stopId !== payload.stopId || pkg.status !== PackageStatus.DELIVERED) {
-        throw new Error('Un colis de cet arrêt a changé. Les preuves restent conservées ; contactez le bureau.');
-      }
-    }
-
-    if (!existing.exists()) {
-      tx.set(proofRef, cleanUndefined(payload));
-      packageRefs.forEach((reference, index) => {
-        tx.update(reference, {
-          pod: cleanUndefined({ ...payload, packageId: payload.packageIds[index] }),
-          updatedAt: payload.createdAt,
-        });
-      });
-    }
-    if (stop.proofSyncPending) {
-      tx.update(missionRef, {
-        stops: stops.map((candidate) => candidate.id === stop.id
-          ? { ...candidate, proofSyncPending: false } : candidate),
-        updatedAt: new Date().toISOString(),
-      });
-    }
-    return saved;
-  });
+  const call = httpsCallable<ProofDocument, { proof: ProofDocument }>(getFunctions(app, 'europe-west1'), 'publishDeliveryProof');
+  return (await call(payload)).data.proof;
 }
 
 // ============================================================================
@@ -432,7 +394,10 @@ export const getPODsByMission = async (missionId: string): Promise<any[]> => {
 export const getPODByPackage = async (packageId: string): Promise<ProofOfDelivery | null> => {
   try {
     const pkgDoc = await getDoc(doc(db, PACKAGES_COLLECTION, packageId));
-    if (pkgDoc.exists()) return (pkgDoc.data() as Package).pod || null;
+    if (pkgDoc.exists()) {
+      const pkg = pkgDoc.data() as Package;
+      return pkg.status === PackageStatus.DELIVERED ? pkg.pod || null : pkg.failurePod || pkg.pod || null;
+    }
     return null;
   } catch (err) {
     console.error('[getPODByPackage]', err);
@@ -455,16 +420,16 @@ export const getPODsByClient = async (clientId: string): Promise<ClientPODResult
   try {
     const q = query(
       collection(db, PACKAGES_COLLECTION),
-      where('clientId', '==', clientId),
-      where('status', '==', PackageStatus.DELIVERED)
+      where('clientId', '==', clientId)
     );
     const snap = await getDocs(q);
     const results: ClientPODResult[] = [];
     snap.docs.forEach(d => {
       const pkg = d.data() as Package;
-      if (pkg.pod) {
+      const proofs = getPackageProofs(pkg);
+      for (const proof of proofs) {
         results.push({
-          ...pkg.pod,
+          ...proof,
           orderNumber: pkg.orderNumber,
           contactName: pkg.contactName,
           address: pkg.address,
@@ -478,3 +443,12 @@ export const getPODsByClient = async (clientId: string): Promise<ClientPODResult
     return [];
   }
 };
+
+/** Only projections already authorized by the parcel's client scope are read. */
+export function getPackageProofs(pkg: Package): ProofOfDelivery[] {
+  const proofs = [...(pkg.deliveryAttempts || []).flatMap(attempt => attempt.proof ? [attempt.proof] : []), pkg.pod, pkg.failurePod]
+    .filter((proof): proof is ProofOfDelivery => !!proof);
+  const unique = new Map<string, ProofOfDelivery>();
+  proofs.forEach(proof => unique.set(`${proof.missionId}_${proof.stopId}`, proof));
+  return [...unique.values()].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+}

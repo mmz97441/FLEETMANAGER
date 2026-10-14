@@ -1,0 +1,201 @@
+{
+  "checks": [
+    {
+      "name": "All three BRs visible before arrival at 320",
+      "pass": true
+    },
+    {
+      "name": "No horizontal overflow at 320",
+      "pass": true
+    },
+    {
+      "name": "All three BRs visible before arrival at 390",
+      "pass": true
+    },
+    {
+      "name": "No horizontal overflow at 390",
+      "pass": true
+    },
+    {
+      "name": "All three BRs visible before arrival at 1365",
+      "pass": true
+    },
+    {
+      "name": "No horizontal overflow at 1365",
+      "pass": true
+    },
+    {
+      "name": "1 parcels prepared as one visit",
+      "pass": true
+    },
+    {
+      "name": "1: red cross identifies wrong client, no parcel counted",
+      "pass": true
+    },
+    {
+      "name": "1: scanner fits mobile viewport",
+      "pass": true
+    },
+    {
+      "name": "1: no green before server confirmation",
+      "pass": true
+    },
+    {
+      "name": "1: correct parcel has green check and recipient",
+      "pass": true
+    },
+    {
+      "name": "1: last green confirmation is visible before auto advance",
+      "pass": true
+    },
+    {
+      "name": "1: one submission with one photo, recipient and signature",
+      "pass": true
+    },
+    {
+      "name": "1: next client has no inherited proof",
+      "pass": true
+    },
+    {
+      "name": "3 parcels prepared as one visit",
+      "pass": true
+    },
+    {
+      "name": "3: red cross identifies wrong client, no parcel counted",
+      "pass": true
+    },
+    {
+      "name": "3: scanner fits mobile viewport",
+      "pass": true
+    },
+    {
+      "name": "3: no green before server confirmation",
+      "pass": true
+    },
+    {
+      "name": "3: correct parcel has green check and recipient",
+      "pass": true
+    },
+    {
+      "name": "3: repeat stays uncounted in one camera session",
+      "pass": true
+    },
+    {
+      "name": "3: last green confirmation is visible before auto advance",
+      "pass": true
+    },
+    {
+      "name": "3: one submission with one photo, recipient and signature",
+      "pass": true
+    },
+    {
+      "name": "3: next client has no inherited proof",
+      "pass": true
+    },
+    {
+      "name": "10 parcels prepared as one visit",
+      "pass": true
+    },
+    {
+      "name": "10: red cross identifies wrong client, no parcel counted",
+      "pass": true
+    },
+    {
+      "name": "10: scanner fits mobile viewport",
+      "pass": true
+    },
+    {
+      "name": "10: no green before server confirmation",
+      "pass": true
+    },
+    {
+      "name": "10: correct parcel has green check and recipient",
+      "pass": true
+    },
+    {
+      "name": "10: repeat stays uncounted in one camera session",
+      "pass": true
+    },
+    {
+      "name": "10: last green confirmation is visible before auto advance",
+      "pass": true
+    },
+    {
+      "name": "10: one submission with one photo, recipient and signature",
+      "pass": true
+    },
+    {
+      "name": "10: next client has no inherited proof",
+      "pass": true
+    },
+    {
+      "name": "Mixed sender references and names visible before arrival",
+      "pass": true
+    },
+    {
+      "name": "3 parcels prepared as one visit",
+      "pass": true
+    },
+    {
+      "name": "3: red cross identifies wrong client, no parcel counted",
+      "pass": true
+    },
+    {
+      "name": "3: scanner fits mobile viewport",
+      "pass": true
+    },
+    {
+      "name": "3: no green before server confirmation",
+      "pass": true
+    },
+    {
+      "name": "3: correct parcel has green check and recipient",
+      "pass": true
+    },
+    {
+      "name": "3: repeat stays uncounted in one camera session",
+      "pass": true
+    },
+    {
+      "name": "3: last green confirmation is visible before auto advance",
+      "pass": true
+    },
+    {
+      "name": "3: one submission with one photo, recipient and signature",
+      "pass": true
+    },
+    {
+      "name": "3: next client has no inherited proof",
+      "pass": true
+    },
+    {
+      "name": "Failed load preserves expected parcel count",
+      "pass": true
+    },
+    {
+      "name": "References can be reloaded without a refresh or duplicate preparation",
+      "pass": true
+    },
+    {
+      "name": "Failed request never confirms the parcel",
+      "pass": true
+    },
+    {
+      "name": "A wrong parcel after the last good one keeps its red warning visible",
+      "pass": true
+    },
+    {
+      "name": "Manual entry keeps the same red cross and explanation",
+      "pass": true
+    },
+    {
+      "name": "Rescanning a confirmed parcel clears red without recounting or another request",
+      "pass": true
+    },
+    {
+      "name": "No uncaught browser exception",
+      "pass": true
+    }
+  ],
+  "errors": []
+}

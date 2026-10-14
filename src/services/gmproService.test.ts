@@ -38,8 +38,8 @@ describe('customer time windows', () => {
 
   it('intersects every parcel window at the same address', async () => {
     const result = await run([
-      parcel('a', { address: 'Même adresse', timeWindowStart: '09:00', timeWindowEnd: '10:00' }),
-      parcel('b', { address: 'Même adresse', timeWindowStart: '09:30', timeWindowEnd: '10:30' }),
+      parcel('a', { contactName: 'Pharmacie', address: 'Même adresse', timeWindowStart: '09:00', timeWindowEnd: '10:00' }),
+      parcel('b', { contactName: 'Pharmacie', address: 'Même adresse', timeWindowStart: '09:30', timeWindowEnd: '10:30' }),
     ]);
     expect(mocked.optimize.mock.calls[0][0].shipments).toHaveLength(1);
     expect(mocked.optimize.mock.calls[0][0].shipments[0].deliveries[0].timeWindows).toEqual([
@@ -48,14 +48,15 @@ describe('customer time windows', () => {
     expect(result.tours[0].stops[0]).toMatchObject({ timeWindowStart: '09:30', timeWindowEnd: '10:00', packageCount: 2 });
   });
 
-  it('refuses incompatible grouped windows with an actionable error before calling Google', async () => {
+  it('creates two distinct visits for incompatible windows at one recipient', async () => {
+    mocked.optimize.mockResolvedValue(response({ visits: [{ shipmentIndex: 0 }, { shipmentIndex: 1 }] }));
     const result = await run([
-      parcel('a', { address: 'Même adresse', timeWindowStart: '09:00', timeWindowEnd: '10:00' }),
-      parcel('b', { address: 'Même adresse', timeWindowStart: '11:00', timeWindowEnd: '12:00' }),
+      parcel('a', { contactName: 'Pharmacie', address: 'Même adresse', timeWindowStart: '09:00', timeWindowEnd: '10:00' }),
+      parcel('b', { contactName: 'Pharmacie', address: 'Même adresse', timeWindowStart: '11:00', timeWindowEnd: '12:00' }),
     ]);
-    expect(result.success).toBe(false);
-    expect(result.error).toMatch(/Créneaux incompatibles.*Même adresse/);
-    expect(mocked.optimize).not.toHaveBeenCalled();
+    expect(result.success).toBe(true);
+    expect(mocked.optimize.mock.calls[0][0].shipments).toHaveLength(2);
+    expect(result.tours[0].stops.map(s => s.packageIds)).toEqual([['a'], ['b']]);
   });
 
   it('refuses an expired window instead of silently promising an unconstrained delivery', async () => {
@@ -168,7 +169,7 @@ describe('unrouted parcels and geocoding failures', () => {
   });
 
   it('uses valid coordinates from another parcel at the same address', async () => {
-    const result = await run([parcel('a', { address: 'Même adresse', coordinates: undefined }), parcel('b', { address: 'Même adresse' })]);
+    const result = await run([parcel('a', { contactName: 'Pharmacie', address: 'Même adresse', coordinates: undefined }), parcel('b', { contactName: 'Pharmacie', address: 'Même adresse' })]);
     expect(result.success).toBe(true);
     expect(result.totalPackages).toBe(2);
     expect(result.skippedShipments).toBe(0);
@@ -186,5 +187,25 @@ describe('unrouted parcels and geocoding failures', () => {
     mocked.optimize.mockRejectedValue(new Error('API indisponible'));
     const result = await run([parcel('a')]);
     expect(result).toMatchObject({ success: false, method: 'gmpro', error: 'API indisponible' });
+  });
+});
+
+describe('secure recipient grouping and imported service', () => {
+  it('separates two names and floors sharing an address', async () => {
+    mocked.optimize.mockResolvedValue(response({ visits: [{ shipmentIndex: 0 }, { shipmentIndex: 1 }, { shipmentIndex: 2 }] }));
+    const result = await run([
+      parcel('a', { address: '1 rue Commune', contactName: 'Pharmacie A', floor: 0 }),
+      parcel('b', { address: '1 rue Commune', contactName: 'Cabinet B', floor: 2 }),
+      parcel('c', { address: '1 rue Commune', contactName: 'Pharmacie A', floor: 1 }),
+    ]);
+    expect(result.tours[0].stops.map(s => s.packageIds)).toEqual([['a'], ['b'], ['c']]);
+  });
+  it('keeps mixed senders for the same recipient and adds actual service durations', async () => {
+    const result = await run([
+      parcel('a', { address: '1 rue Commune', contactName: 'Pharmacie A', clientId: 'boiron', serviceTime: 30 }),
+      parcel('b', { address: '1 rue Commune', contactName: 'Pharmacie A', clientId: 'other', serviceTime: 10 }),
+    ]);
+    expect(mocked.optimize.mock.calls[0][0].shipments[0].deliveries[0].duration).toBe('2400s');
+    expect(result.tours[0].stops[0]).toMatchObject({ serviceTime: 40, packageIds: ['a', 'b'], estimatedDeparture: '2026-09-10T05:10:00.000Z' });
   });
 });

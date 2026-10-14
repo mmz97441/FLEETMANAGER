@@ -1,0 +1,26 @@
+{
+  "checks": [
+    {
+      "name": "Successful server commit removes every package from the available zone",
+      "pass": true
+    },
+    {
+      "name": "Retry sends exactly the original request ID and complete payload",
+      "pass": true
+    },
+    {
+      "name": "A single optimized route is created and confirmed once",
+      "pass": true
+    },
+    {
+      "name": "Successful confirmation clears the pending preparation",
+      "pass": true
+    },
+    {
+      "name": "Mobile confirmation has no horizontal overflow",
+      "pass": true
+    }
+  ],
+  "errors": [],
+  "externalRequests": []
+}

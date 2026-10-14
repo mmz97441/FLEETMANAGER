@@ -61,6 +61,13 @@ const denied = (operation, code) => assert.rejects(operation, error => error.cod
     assert.equal(user.lastLoginAt, (await ref.get()).data().lastLoginAt); assert.ok(user.lastSeenAt);
     assert.equal(user.socialSecurityNumber, undefined);
   });
+  await check('two device heartbeats retain both versions and accept an upgrade immediately', async () => {
+    await service.recordUserPresence.run({uid, login:false, deviceId:'device-one',deviceLabel:'Android',appVersion:'4.32.0',buildId:'1'},ctx);
+    await service.recordUserPresence.run({uid, login:false, deviceId:'device-two',deviceLabel:'iPhone',appVersion:'4.36.0',buildId:'2'},ctx);
+    let profile=(await ref.get()).data(); assert.equal(profile.appDevices.length,2); assert.equal(profile.appDevices.find(d=>d.id==='device-one').appVersion,'4.32.0');
+    await service.recordUserPresence.run({uid, login:false,deviceId:'device-one',deviceLabel:'Android',appVersion:'4.36.0',buildId:'2'},ctx);
+    profile=(await ref.get()).data(); assert.equal(profile.appDevices.length,2); assert.ok(profile.appDevices.every(d=>d.appVersion==='4.36.0'));
+  });
   await check('profile recovery rejects a stale request for another identity', async () => {
     await denied(service.linkAuthToProfile.run({ uid: 'other-account' }, ctx), 'permission-denied');
     assert.equal((await ref.get()).data().role, 'Chauffeur');

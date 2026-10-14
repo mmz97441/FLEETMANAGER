@@ -11,7 +11,7 @@ const context = uid => ({ auth: { uid, token: { email_verified: true } } });
 const driver = 'reliability-driver', client = 'reliability-client', office = 'reliability-office';
 let checks = 0;
 const check = async (name, fn) => { await fn(); checks++; console.log('PASS', name); };
-const parcel = code => ({ externalId: code, barcode: code, clientId: client, clientName: 'Boiron fictif', status: 'En attente', address: 'Adresse fictive', contactName: 'Test', zone: 'Nord' });
+const parcel = code => ({ externalId: code, barcode: code, clientId: client, clientName: 'Boiron fictif', status: 'En attente', address: 'Adresse fictive', postalCode: '97400', city: 'Saint-Denis', contactName: 'Test', zone: 'Nord' });
 const imports = (packages, manifest) => service.importPackages.run({ packages, manifest }, context(client));
 const read = async (collection, id) => (await db.collection(collection).doc(id).get()).data();
 (async () => {
@@ -35,7 +35,7 @@ const read = async (collection, id) => (await db.collection(collection).doc(id).
     assert.equal((await read('import_runs', r.importRunId)).status, 'Incomplet');
   });
   const missionId = 'reliability-tour', otherId = 'reliability-other-tour', packageId = 'reliability-parcel';
-  const stop = { id: 'stop-a', type: 'DELIVERY', status: 'En attente', packageIds: [packageId] };
+  const stop = { address: 'Adresse fictive', postalCode: '97400', city: 'Saint-Denis', contactName: 'Test', id: 'stop-a', type: 'DELIVERY', status: 'En attente', packageIds: [packageId] };
   await db.collection('missions').doc(missionId).set({ driverId: driver, date: '2026-10-13', status: 'En cours', type: 'Livraison', stops: [stop, { ...stop, id: 'stop-b', packageIds: [] }], totalPackages: 1 });
   await db.collection('missions').doc(otherId).set({ driverId: driver, date: '2026-10-13', status: 'En cours', type: 'Livraison', stops: [{ ...stop, id: 'other-stop' }] });
   await db.collection('packages').doc(packageId).set({ ...parcel('BR-CONTROL'), missionId, missionDate: '2026-10-13', stopId: 'stop-a', currentDriverId: driver, status: 'En livraison', movements: [], lastScannedMissionId: missionId });

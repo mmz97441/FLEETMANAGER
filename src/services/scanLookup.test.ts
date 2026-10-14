@@ -27,7 +27,7 @@ describe.each([findPackageByCode, findDispatchedPackageByCode])('parcel lookup %
   it('returns an exact individual label before an order fallback', async () => {
     getDocs.mockResolvedValue(snapshot([{ externalId: 'BR9010' }]));
     await expect(lookup('BR9010')).resolves.toMatchObject({ externalId: 'BR9010' });
-    expect(getDocs).toHaveBeenCalledTimes(4);
+    expect(getDocs).toHaveBeenCalledTimes(5);
   });
   it('does not invent a parcel for an unknown label', async () => {
     getDocs.mockResolvedValue(snapshot([]));

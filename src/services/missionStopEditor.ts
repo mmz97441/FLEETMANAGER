@@ -1,3 +1,5 @@
+import { getFunctions, httpsCallable } from 'firebase/functions';
+import app from '../firebaseConfig';
 import { doc, runTransaction, type Transaction } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { Mission, MissionStatus, MissionStop, Package, PackageStatus, StopStatus } from '../types';
@@ -23,7 +25,7 @@ function validPatch(patch: StopEditorPatch) {
   const start = String(patch.timeWindowStart ?? '').trim();
   const end = String(patch.timeWindowEnd ?? '').trim();
   const time = /^([01]\d|2[0-3]):[0-5]\d$/;
-  if (!!start !== !!end || (start && !time.test(start)) || (end && !time.test(end)) || (start && end && start >= end)) throw new Error('Renseignez un créneau complet, dont la fin suit le début.');
+  if ((start && !time.test(start)) || (end && !time.test(end)) || (start && end && start >= end)) throw new Error('Vérifiez le format et l’ordre des bornes du créneau.');
   return { contactName: text('contactName'), address: text('address'), city: text('city'), postalCode: text('postalCode'), serviceTime: duration,
     contactPhone: String(patch.contactPhone ?? '').trim() || null, notes: String(patch.notes ?? '').trim() || null,
     timeWindowStart: start || null, timeWindowEnd: end || null };
@@ -47,26 +49,7 @@ async function planningParcels(tx: Transaction, missionId: string, mission: Miss
 
 export async function editMissionStop(missionId: string, stopId: string, patch: StopEditorPatch): Promise<void> {
   const validated = validPatch(patch);
-  const ref = doc(db, 'missions', missionId);
-  await runTransaction(db, async tx => {
-    const snap = await tx.get(ref);
-    if (!snap.exists()) throw new Error('Tournée introuvable.');
-    const mission = snap.data() as Mission;
-    editable(mission);
-    const original = stopAt(mission, stopId);
-    const moved = original.address !== validated.address || original.city !== validated.city || original.postalCode !== validated.postalCode;
-    const changedPlan = moved || original.serviceTime !== validated.serviceTime || (original.timeWindowStart || null) !== validated.timeWindowStart || (original.timeWindowEnd || null) !== validated.timeWindowEnd;
-    const parcels = changedPlan ? await planningParcels(tx, missionId, mission) : [];
-    const now = new Date().toISOString();
-    const stops = mission.stops.map(s => {
-      const next = changedPlan && s.status === StopStatus.PENDING ? withoutEstimate(s) : { ...s };
-      if (s.id !== stopId) return next;
-      if (moved) delete next.coordinates;
-      return { ...next, ...validated };
-    });
-    parcels.forEach(parcel => tx.update(parcel.ref, { estimatedDeliveryAt: null, updatedAt: now }));
-    tx.update(ref, cleanUndefined({ stops, ...(changedPlan ? { totalDistance: null, estimatedDuration: null } : {}), updatedAt: now }));
-  });
+  await httpsCallable(getFunctions(app, 'europe-west1'), 'correctDeliveryPlan')({ mode: 'STOP', missionId, stopId, fields: validated });
 }
 
 export async function reorderStops(missionId: string, orderedStopIds: string[]): Promise<void> {

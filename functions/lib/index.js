@@ -33,11 +33,13 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.prepareDeliveryStop = exports.createAdHocPackage = exports.interpretAnalytics = exports.acceptQuote = exports.getTeamDirectory = exports.notifyPackageStatus = exports.returnPackage = exports.deleteAbsence = exports.deleteVehicle = exports.importPackages = exports.assignVehicle = exports.askFleetGenius = exports.sendBusinessNotification = exports.transferPackages = exports.scanPackage = exports.dispatchMissions = exports.finishMission = exports.receivePackagesAtHub = exports.saveAbsence = exports.revokeOwnSessions = exports.linkAuthToProfile = exports.recordUserPresence = exports.getOwnProfile = exports.createInvitation = exports.activateAccount = exports.validateInvitationToken = exports.forcePasswordReset = exports.toggleUserStatus = exports.cleanupExpiredInvitations = exports.deleteUserCompletely = exports.optimizeTours = exports.employeeVoting = exports.recordClientErrors = exports.associateCarrierBarcode = void 0;
+exports.reconcileDeliveryProofs = exports.replanPickup = exports.publishDeliveryProof = exports.receiveTransferredPackageAtHub = exports.indexPackageScanCodes = exports.prepareDeliveryStop = exports.createAdHocPackage = exports.interpretAnalytics = exports.acceptQuote = exports.getTeamDirectory = exports.notifyPackageStatus = exports.setParcelSorting = exports.correctDeliveryPlan = exports.commitDeliveryOutcome = exports.finalizePickup = exports.resolveReturnedPackage = exports.returnPackage = exports.deleteAbsence = exports.deleteVehicle = exports.importPackages = exports.assignVehicle = exports.askFleetGenius = exports.sendBusinessNotification = exports.transferPackages = exports.scanPackage = exports.dispatchMissions = exports.finishMission = exports.receivePackagesAtHub = exports.saveAbsence = exports.revokeOwnSessions = exports.linkAuthToProfile = exports.recordUserPresence = exports.getOwnProfile = exports.createInvitation = exports.activateAccount = exports.validateInvitationToken = exports.forcePasswordReset = exports.toggleUserStatus = exports.cleanupExpiredInvitations = exports.deleteUserCompletely = exports.optimizeTours = exports.employeeVoting = exports.recordClientErrors = exports.associateCarrierBarcode = void 0;
 const prepareDeliveryStop_1 = require("./prepareDeliveryStop");
 const adhocPackage_1 = require("./adhocPackage");
 const importManifest_1 = require("./importManifest");
 const hubReception_1 = require("./hubReception");
+const publishDeliveryProof_1 = require("./publishDeliveryProof");
+const reconcileDeliveryProofs_1 = require("./reconcileDeliveryProofs");
 const carrierBarcode_1 = require("./carrierBarcode");
 const clientErrors_1 = require("./clientErrors");
 const voting_1 = require("./voting");
@@ -45,7 +47,13 @@ const storage_1 = require("firebase-admin/storage");
 const scanPackage_1 = require("./scanPackage");
 const missionLifecycle_1 = require("./missionLifecycle");
 const deliveryAddress_1 = require("./deliveryAddress");
+const scanCode_1 = require("./scanCode");
+const parcelReferenceIndex_1 = require("./parcelReferenceIndex");
 const dispatchMissions_1 = require("./dispatchMissions");
+const deliveryPlan_1 = require("./deliveryPlan");
+const returnPackage_1 = require("./returnPackage");
+const finalizePickup_1 = require("./finalizePickup");
+const commitStopOutcome_1 = require("./commitStopOutcome");
 const firestore_1 = require("firebase-admin/firestore");
 const auth_1 = require("firebase-admin/auth");
 const crypto_1 = require("crypto");
@@ -912,10 +920,18 @@ exports.recordUserPresence = functions.region('europe-west1').https.onCall(async
         if (!user || user.isDisabled || (user.sessionsRevokedAt && authTime <= user.sessionsRevokedAt))
             throw new functions.https.HttpsError('permission-denied', 'Session inactive.');
         const now = Date.now(), iso = new Date(now).toISOString();
-        if (data.login || !user.lastSeenAt || now - Date.parse(user.lastSeenAt) >= 45000) {
-            const appVersion = typeof data.appVersion === 'string' && /^\d+\.\d+\.\d+$/.test(data.appVersion) ? data.appVersion : null;
-            const buildId = typeof data.buildId === 'string' && /^\d{1,20}$/.test(data.buildId) ? data.buildId : null;
-            tx.update(ref, { lastSeenAt: iso, ...(data.login ? { lastLoginAt: iso } : {}), ...(appVersion && buildId ? { appVersion, appBuildId: buildId } : {}) });
+        const appVersion = typeof data.appVersion === 'string' && /^\d+\.\d+\.\d+$/.test(data.appVersion) ? data.appVersion : null;
+        const buildId = typeof data.buildId === 'string' && /^\d{1,20}$/.test(data.buildId) ? data.buildId : null;
+        const deviceId = typeof data.deviceId === 'string' && /^[a-zA-Z0-9-]{8,80}$/.test(data.deviceId) ? data.deviceId : null;
+        const devices = Array.isArray(user.appDevices) ? user.appDevices : [];
+        const device = deviceId ? devices.find((entry) => entry.id === deviceId) : null;
+        if (data.login || !user.lastSeenAt || now - Date.parse(user.lastSeenAt) >= 45000 ||
+            (appVersion && buildId && (user.appVersion !== appVersion || user.appBuildId !== buildId)) ||
+            (deviceId && (!device || now - Date.parse(device.lastSeenAt) >= 45000 || device.buildId !== buildId))) {
+            const appDevices = deviceId && appVersion && buildId ? [{ id: deviceId, appVersion, buildId, lastSeenAt: iso,
+                    label: String(data.deviceLabel || 'Appareil').slice(0, 80) }, ...devices.filter((entry) => entry.id !== deviceId)].slice(0, 12) : null;
+            tx.update(ref, { lastSeenAt: iso, ...(data.login ? { lastLoginAt: iso } : {}),
+                ...(appVersion && buildId ? { appVersion, appBuildId: buildId } : {}), ...(appDevices ? { appDevices } : {}) });
         }
         return { success: true };
     });
@@ -1209,6 +1225,8 @@ exports.transferPackages = functions
             ['Terminé', 'Annulé'].includes(to.status))
             throw new functions.https.HttpsError('permission-denied', 'Tournée indisponible.');
         const snaps = await Promise.all(ids.map((id) => tx.get(db.collection('packages').doc(id))));
+        if (snaps.some(p => !p.exists || ['Livré', 'Retourné', 'Échec', 'À retourner'].includes(p.data()?.status) || p.data()?.returnDisposition === 'AWAITING_DECISION' || p.data()?.pickupMissing))
+            throw new functions.https.HttpsError('failed-precondition', 'Un colis est indisponible ou nécessite un retour et une décision du bureau. Aucun transfert effectué.');
         const packages = snaps
             .filter((p) => p.exists && !['Livré', 'Retourné'].includes(p.data()?.status))
             .map((p) => ({ id: p.id, ...p.data() }));
@@ -1229,6 +1247,19 @@ exports.transferPackages = functions
             packageIds: [...s.packageIds],
         }));
         const inTour = new Set(toStops.flatMap((s) => s.packageIds));
+        const pendingDestinations = toStops.filter((stop) => stop.type === 'DELIVERY' && stop.status === 'En attente');
+        const existingIds = [...new Set(pendingDestinations.flatMap((stop) => stop.packageIds))];
+        if (existingIds.length > 400 || inTour.size !== toStops.flatMap((stop) => stop.packageIds).length)
+            throw new functions.https.HttpsError('failed-precondition', 'La liste des colis de destination doit être corrigée par le bureau.');
+        const existingParcels = await Promise.all(existingIds.map(id => tx.get(db.collection('packages').doc(id))));
+        const existingById = new Map(existingParcels.map(doc => [doc.id, doc.data()]));
+        if (pendingDestinations.some((stop) => stop.packageIds.some((id) => {
+            const parcel = existingById.get(id);
+            return !parcel || parcel.missionId !== toRef.id || parcel.stopId !== stop.id ||
+                (parcel.currentDriverId && parcel.currentDriverId !== to.driverId) ||
+                !(0, deliveryAddress_1.sameDeliveryRecipient)(stop, parcel) || !(0, deliveryAddress_1.visitContainsParcelWindow)(stop, parcel);
+        })))
+            throw new functions.https.HttpsError('failed-precondition', 'Un arrêt de destination contient un destinataire, étage ou créneau incohérent. Faites corriger la tournée avant le transfert.');
         const add = packages.filter((p) => !inTour.has(p.id));
         const added = new Set(add.map((p) => p.id));
         const counts = (stops, previous) => ({
@@ -1241,10 +1272,9 @@ exports.transferPackages = functions
         const now = new Date().toISOString();
         let seq = Math.max(0, ...toStops.map((s) => s.sequence || 0));
         for (const p of add) {
-            const key = (0, deliveryAddress_1.placeKey)(p);
             let stop = toStops.find((s) => s.type === 'DELIVERY' &&
-                !['Terminé', 'Échec', 'Passé'].includes(s.status) &&
-                (0, deliveryAddress_1.placeKey)(s) === key);
+                s.status === 'En attente' && !s.proofSyncPending &&
+                (0, deliveryAddress_1.sameDeliveryVisit)(s, p));
             if (!stop) {
                 stop = {
                     id: 'transfer-' + (0, crypto_1.randomBytes)(10).toString('hex'),
@@ -1259,10 +1289,19 @@ exports.transferPackages = functions
                     packageIds: [],
                     packageCount: 0,
                     serviceTime: p.serviceTime || 5,
+                    ...(p.floor !== undefined ? { floor: p.floor } : {}),
+                    ...(p.hasElevator !== undefined ? { hasElevator: p.hasElevator } : {}),
+                    ...(p.timeWindowStart ? { timeWindowStart: p.timeWindowStart } : {}),
+                    ...(p.timeWindowEnd ? { timeWindowEnd: p.timeWindowEnd } : {}),
                     ...(p.coordinates ? { coordinates: p.coordinates } : {}),
                 };
                 toStops.push(stop);
             }
+            const window = (0, deliveryAddress_1.intersectDeliveryWindows)([stop, p]);
+            if (window)
+                Object.assign(stop, window);
+            if (stop.packageIds.length)
+                stop.serviceTime = Number(stop.serviceTime || 5) + Number(p.serviceTime || 5);
             stop.packageIds.push(p.id);
             stop.packageCount = stop.packageIds.length;
             tx.update(db.collection('packages').doc(p.id), {
@@ -1523,6 +1562,7 @@ exports.importPackages = functions
             'orderNumber',
             'barcode',
             'carrierBarcode',
+            'carrierBarcodeFormat',
             'address',
             'city',
             'postalCode',
@@ -1552,7 +1592,26 @@ exports.importPackages = functions
             if (raw[key] !== undefined)
                 p[key] = raw[key];
         if (p.carrierBarcode)
-            p.carrierBarcode = (0, carrierBarcode_1.validatedCarrierBarcode)(p.carrierBarcode, p.clientReference);
+            p.carrierBarcode = (0, carrierBarcode_1.validatedCarrierBarcode)(p.carrierBarcode, p.clientReference, p.carrierBarcodeFormat || 'generic');
+        for (const field of ['externalId', 'barcode', 'carrierBarcode', 'orderNumber']) {
+            if (p[field] && (0, scanCode_1.individualReferenceError)(p[field]))
+                throw new functions.https.HttpsError('invalid-argument', (0, scanCode_1.individualReferenceError)(p[field]));
+        }
+        if (p.carrierBarcodeFormat && !['generic', 'boiron'].includes(p.carrierBarcodeFormat))
+            throw new functions.https.HttpsError('invalid-argument', 'Format du code transporteur invalide.');
+        if (p.requestedDeliveryDate) {
+            const day = p.requestedDeliveryDate;
+            if (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day) || !Number.isFinite(Date.parse(`${day}T00:00:00Z`)) || new Date(`${day}T00:00:00Z`).toISOString().slice(0, 10) !== day)
+                throw new functions.https.HttpsError('invalid-argument', 'Date de livraison souhaitée invalide.');
+        }
+        for (const field of ['timeWindowStart', 'timeWindowEnd'])
+            if (p[field] && (typeof p[field] !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(p[field])))
+                throw new functions.https.HttpsError('invalid-argument', 'Créneau invalide : utilisez le format HH:MM.');
+        if (!(0, deliveryAddress_1.intersectDeliveryWindows)([p]))
+            throw new functions.https.HttpsError('invalid-argument', 'La fin du créneau doit suivre son début.');
+        if (p.serviceTime != null && (typeof p.serviceTime !== 'number' || !Number.isFinite(p.serviceTime) || p.serviceTime <= 0 || p.serviceTime > 480))
+            throw new functions.https.HttpsError('invalid-argument', 'La durée de service doit être comprise entre 1 et 480 minutes.');
+        p.scanCodes = (0, scanCode_1.parcelScanCodes)(p);
         p.movements = [
             {
                 action: 'IMPORTED',
@@ -1597,13 +1656,18 @@ exports.importPackages = functions
         const run = await tx.get(runRef);
         const snapshots = await Promise.all(rows.map((r) => tx.get(db.collection('packages').doc(r.id))));
         // Recognize historical documents whose IDs predate deterministic imports.
-        const legacy = await Promise.all(rows.map((r, i) => snapshots[i].exists
-            ? Promise.resolve(null)
-            : tx.get(db
-                .collection('packages')
-                .where('clientId', '==', r.p.clientId)
-                .where(r.p.externalId ? 'externalId' : 'orderNumber', '==', r.p.externalId || r.p.orderNumber || r.code)
-                .limit(2))));
+        const legacy = await Promise.all(rows.map(async (r, i) => {
+            if (snapshots[i].exists)
+                return null;
+            const field = r.p.externalId ? 'externalId' : r.p.orderNumber ? 'orderNumber' : 'barcode';
+            const base = db.collection('packages').where('clientId', '==', r.p.clientId);
+            const matches = await Promise.all([
+                tx.get(base.where(field, '==', r.p[field] || r.code).limit(2)),
+                tx.get(base.where('scanCodes', 'array-contains', (0, scanCode_1.normalizeScanCode)(r.code)).limit(2)),
+            ]);
+            const docs = [...new Map(matches.flatMap(result => result.docs).filter(doc => (0, scanCode_1.normalizeScanCode)(String(doc.data()[field] || '')) === (0, scanCode_1.normalizeScanCode)(r.code)).map(doc => [doc.id, doc])).values()];
+            return { docs, size: docs.length };
+        }));
         if (legacy.some((result) => result && result.size > 1))
             throw new functions.https.HttpsError('failed-precondition', 'Des doublons existent déjà pour cette référence. Faites-les contrôler avant de reprendre l’import.');
         const ids = [];
@@ -1616,13 +1680,13 @@ exports.importPackages = functions
                 continue;
             const target = legacy[i]?.docs[0] || snapshots[i], id = target.exists ? target.id : row.id;
             if (codes.has(code) && codes.get(code) !== id)
-                throw new functions.https.HttpsError('already-exists', 'Deux colis du fichier portent le même code Boiron.');
+                throw new functions.https.HttpsError('already-exists', 'Deux colis du fichier portent le même code transporteur.');
             if (codesByPackage.has(id) && codesByPackage.get(id) !== code)
-                throw new functions.https.HttpsError('already-exists', 'Un colis ne peut pas recevoir deux codes Boiron dans le même import.');
+                throw new functions.https.HttpsError('already-exists', 'Un colis ne peut pas recevoir deux codes transporteur dans le même import.');
             for (let j = 0; j < rows.length; j++) {
                 const other = legacy[j]?.docs[0] || snapshots[j], otherId = other.exists ? other.id : rows[j].id;
                 if (otherId !== id && ['barcode', 'externalId', 'orderNumber'].some(field => rows[j].p[field] === code))
-                    throw new functions.https.HttpsError('already-exists', 'Un code Boiron correspond aussi à un autre colis du fichier.');
+                    throw new functions.https.HttpsError('already-exists', 'Un code transporteur correspond aussi à un autre colis du fichier.');
             }
             if (codes.has(code))
                 continue;
@@ -1632,6 +1696,10 @@ exports.importPackages = functions
                 throw new functions.https.HttpsError('failed-precondition', 'Ce colis existe déjà. Vérifiez et associez son code depuis les opérations du hub.');
             carrierReservations.push(await (0, carrierBarcode_1.checkCarrierBarcode)(tx, db, code, id));
         }
+        const reservations = await (0, parcelReferenceIndex_1.readIndividualReferenceReservations)(tx, db, rows.filter((_row, i) => !snapshots[i].exists && !legacy[i]?.docs[0]).map((row) => ({ id: row.id, parcel: row.p })));
+        if (reservations.length + codes.size + rows.length + 1 > 490)
+            throw new functions.https.HttpsError('invalid-argument', 'Lot trop volumineux. Mettez à jour l’application et relancez l’import par lots de 75.');
+        (0, parcelReferenceIndex_1.writeIndividualReferenceReservations)(tx, reservations, caller.id, new Date().toISOString());
         for (const [code, id] of codes) {
             const reservation = carrierReservations.shift();
             if (!reservation.exists)
@@ -1726,81 +1794,12 @@ exports.deleteAbsence = functions
         return { success: true };
     });
 });
-exports.returnPackage = functions
-    .region('europe-west1')
-    .https.onCall(async (data, context) => {
-    const caller = await requireActiveCaller(context), manager = isAdminCaller(caller.role);
-    const id = String(data?.packageId || ''), proof = data?.extra?.returnProof;
-    if (!id ||
-        id.includes('/') ||
-        !proof ||
-        !Array.isArray(proof.photoUrls) ||
-        !proof.photoUrls.length ||
-        proof.photoUrls.some((url) => typeof url !== 'string' || !url.startsWith('https://')))
-        throw new functions.https.HttpsError('invalid-argument', 'Une preuve photographique du retour est obligatoire.');
-    return db.runTransaction(async (tx) => {
-        const ref = db.collection('packages').doc(id), snap = await tx.get(ref);
-        if (!snap.exists)
-            throw new functions.https.HttpsError('not-found', 'Colis introuvable.');
-        const pkg = snap.data();
-        if (pkg.status === 'Retourné' &&
-            !pkg.missionId &&
-            pkg.returnProof?.driverId === caller.id)
-            return { success: true };
-        if (!manager &&
-            (!['chauffeur', 'chauffeuse'].includes(normalizeRole(caller.role)) ||
-                pkg.currentDriverId !== caller.id))
-            throw new functions.https.HttpsError('permission-denied', 'Ce colis ne vous est pas affecté.');
-        if (!['À retourner', 'Échec', 'Retourné'].includes(pkg.status))
-            throw new functions.https.HttpsError('failed-precondition', 'Ce colis n’est pas en attente de retour.');
-        const missionRef = pkg.missionId
-            ? db.collection('missions').doc(pkg.missionId)
-            : null;
-        const mission = missionRef ? await tx.get(missionRef) : null;
-        const now = new Date().toISOString();
-        if (mission?.exists) {
-            if (mission.data()?.stops?.some((stop) => stop.proofSyncPending === true && (stop.id === pkg.stopId || stop.packageIds?.includes(id))))
-                throw new functions.https.HttpsError('failed-precondition', 'Synchronisez la preuve de cet arrêt avant de déplacer ce colis.');
-            const stops = (mission.data()?.stops || [])
-                .map((s) => {
-                const packageIds = s.packageIds.filter((pid) => pid !== id);
-                return { ...s, packageIds, packageCount: packageIds.length };
-            })
-                .filter((s) => s.packageIds.length ||
-                ['Terminé', 'Échec', 'Passé'].includes(s.status));
-            const totalPackages = Math.max(stops.reduce((sum, stop) => sum + stop.packageIds.length, 0), (mission.data()?.deliveredPackages || 0) + (mission.data()?.failedPackages || 0) +
-                new Set(stops.filter((stop) => !['Terminé', 'Échec', 'Passé'].includes(stop.status)).flatMap((stop) => stop.packageIds)).size);
-            tx.update(mission.ref, { stops, totalPackages, updatedAt: now });
-        }
-        tx.update(ref, {
-            status: 'Retourné',
-            missionId: null,
-            stopId: null,
-            currentDriverId: null,
-            currentVehicleId: null,
-            currentHubId: mission?.data()?.hubId || pkg.currentHubId || null,
-            returnProof: {
-                ...proof,
-                packageId: id,
-                driverId: caller.id,
-                timestamp: now,
-            },
-            movements: [
-                ...(pkg.movements || []),
-                {
-                    timestamp: now,
-                    action: 'RETURNED',
-                    driverId: caller.id,
-                    driverName: `${caller.firstName || ''} ${caller.lastName || ''}`.trim(),
-                    notes: 'Retour au hub confirmé',
-                },
-            ],
-            updatedAt: now,
-        });
-        return { success: true };
-    });
-});
-// A deterministic event ID makes retries of the Firestore trigger harmless.
+exports.returnPackage = functions.region('europe-west1').https.onCall((data, context) => (0, returnPackage_1.returnPackageHandler)(data, context, { db, requireActiveCaller, isAdminCaller }));
+exports.resolveReturnedPackage = functions.region('europe-west1').https.onCall((data, context) => (0, returnPackage_1.resolveReturnedPackageHandler)(data, context, { db, requireActiveCaller, isAdminCaller }));
+exports.finalizePickup = functions.region('europe-west1').https.onCall((data, context) => (0, finalizePickup_1.finalizePickupHandler)(data, context, { db, requireActiveCaller, isAdminCaller }));
+exports.commitDeliveryOutcome = functions.region('europe-west1').https.onCall((data, context) => (0, commitStopOutcome_1.commitDeliveryOutcomeHandler)(data, context, { db, requireActiveCaller }));
+exports.correctDeliveryPlan = functions.region('europe-west1').https.onCall((data, context) => (0, deliveryPlan_1.correctDeliveryPlanHandler)(data, context, { db, requireActiveCaller, isAdminCaller }));
+exports.setParcelSorting = functions.region('europe-west1').https.onCall((data, context) => (0, deliveryPlan_1.setParcelSortingHandler)(data, context, { db, requireActiveCaller, isAdminCaller }));
 exports.notifyPackageStatus = functions
     .region('europe-west1')
     .firestore.document('packages/{packageId}')
@@ -1893,6 +1892,7 @@ exports.getTeamDirectory = functions
                 lastSeenAt: u.lastSeenAt || null,
                 appVersion: u.appVersion || null,
                 appBuildId: u.appBuildId || null,
+                appDevices: isAdminCaller(caller.role) ? u.appDevices || [] : [],
             };
         }),
     };
@@ -1980,8 +1980,12 @@ exports.acceptQuote = functions
             .collection('packages')
             .doc('quote-' + (0, crypto_1.createHash)('sha256').update(id).digest('hex'));
         const existing = await tx.get(packageRef), now = new Date().toISOString(), parts = destination.split(',').map((s) => s.trim());
+        const quoteCodes = { externalId: id, orderNumber: 'Q' + id.slice(-10), barcode: 'Q' + id.slice(-10) };
+        const quoteReservations = !existing.exists ? await (0, parcelReferenceIndex_1.readIndividualReferenceReservations)(tx, db, [{ id: packageRef.id, parcel: quoteCodes }]) : [];
+        (0, parcelReferenceIndex_1.writeIndividualReferenceReservations)(tx, quoteReservations, caller.id, now);
         if (!existing.exists)
             tx.create(packageRef, {
+                scanCodes: (0, scanCode_1.parcelScanCodes)(quoteCodes),
                 clientId: quote.clientId,
                 clientName: quote.clientName || '',
                 externalId: id,
@@ -2112,4 +2116,9 @@ Exemple : {"metric":"deliveryRate","dimension":"zone","period":"month","chart":"
 });
 exports.createAdHocPackage = functions.region('europe-west1').https.onCall((data, context) => (0, adhocPackage_1.createAdHocPackageHandler)(data, context, { db, requireActiveCaller, isAdminCaller }));
 exports.prepareDeliveryStop = functions.region('europe-west1').https.onCall((data, context) => (0, prepareDeliveryStop_1.prepareDeliveryStopHandler)(data, context, { db, requireActiveCaller }));
+exports.indexPackageScanCodes = functions.region('europe-west1').firestore.document('packages/{packageId}').onWrite(async (_change, context) => (0, parcelReferenceIndex_1.repairParcelScanCodes)(db, context.params.packageId));
+exports.receiveTransferredPackageAtHub = functions.region('europe-west1').https.onCall((data, context) => (0, hubReception_1.receiveTransferredPackageAtHubHandler)(data, context, { db, requireActiveCaller, isAdminCaller }));
+exports.publishDeliveryProof = functions.region('europe-west1').https.onCall((data, context) => (0, publishDeliveryProof_1.publishDeliveryProofHandler)(data, context, { db, requireActiveCaller }));
+exports.replanPickup = functions.region('europe-west1').https.onCall((data, context) => (0, finalizePickup_1.replanPickupHandler)(data, context, { db, requireActiveCaller, isAdminCaller }));
+exports.reconcileDeliveryProofs = functions.region('europe-west1').runWith({ timeoutSeconds: 540 }).https.onCall((data, context) => (0, reconcileDeliveryProofs_1.reconcileDeliveryProofsHandler)(data, context, { db, requireActiveCaller, isAdminCaller }));
 //# sourceMappingURL=index.js.map

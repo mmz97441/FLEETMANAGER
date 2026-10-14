@@ -1,3 +1,5 @@
+import { readIndividualReferenceReservations, writeIndividualReferenceReservations } from './parcelReferenceIndex';
+import { parcelScanCodes } from './scanCode';
 import type { Firestore } from 'firebase-admin/firestore';
 import * as functions from 'firebase-functions/v1';
 import { createHash } from 'crypto';
@@ -30,6 +32,7 @@ export async function createAdHocPackageHandler(data: any, context: functions.ht
     if (others.size || (existing.exists && existing.data()!.clientId !== data.clientId))
       throw new functions.https.HttpsError('already-exists', 'Ce code existe déjà. Reprenez le scan ou faites vérifier l’étiquette par le bureau. Aucun nouveau colis créé.');
     if (existing.exists) return { package: { ...existing.data(), id } };
+    const references = await readIndividualReferenceReservations(tx, db, [{ id, parcel: { externalId: code } }]);
     const now = new Date().toISOString(), name = `${caller.firstName || ''} ${caller.lastName || ''}`.trim();
     const pkg = { clientId: data.clientId, clientName: client.companyName || '', externalId: code, barcode: code, orderNumber: code,
       importBatchId: `MANUEL-${scanBusinessDay(new Date(now))}`, contactName: data.contactName.trim(), address: data.address.trim(),
@@ -39,7 +42,8 @@ export async function createAdHocPackageHandler(data: any, context: functions.ht
       comment: 'Créé après vérification déclarée avec le bureau — à réconcilier avec l’import.',
       movements: [{ action: 'IMPORTED', timestamp: now, driverId: caller.id, driverName: name, notes: 'Absence dans l’import vérifiée avec le bureau, selon le chauffeur.' }],
       createdAt: now, updatedAt: now };
-    tx.create(db.collection('packages').doc(id), pkg);
+    writeIndividualReferenceReservations(tx, references, caller.id, now);
+    tx.create(db.collection('packages').doc(id), { ...pkg, scanCodes: parcelScanCodes(pkg) });
     tx.create(db.collection('activity_logs').doc(), { userId: caller.id, userName: name, userRole: caller.role,
       action: 'PACKAGE_CREATED_ADHOC', category: 'Livraison', targetType: 'package', targetId: id, targetName: code,
       description: `${name} a créé ${code} après vérification déclarée avec le bureau. Réconciliation nécessaire.`, outcome: 'success',

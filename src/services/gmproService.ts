@@ -10,7 +10,7 @@
 import { Package, Hub, User, Vehicle, MissionStop, StopStatus } from '../types';
 import { optimizeToursCF, GMPROModel, GMPROResult } from './cloudFunctions';
 // Source de vérité UNIQUE du regroupement par point de livraison (cf. address.ts).
-import { placeKey } from '../utils/address';
+import { placeKey, recipientKey, sameDeliveryRecipient, intersectDeliveryWindows } from '../utils/address';
 // Source de vérité UNIQUE des distances (cf. geo.ts).
 import { haversineKm } from '../utils/geo';
 
@@ -109,41 +109,35 @@ const geocodePackages = async (
 // GROUPEMENT DES COLIS PAR STOP
 // ============================================================================
 
-interface StopGroup {
+export interface StopGroup {
   key: string;
   packages: Package[];
   coords?: { lat: number; lng: number };
   contactName: string;
 }
 
-const groupPackagesByStop = (
+const serviceMinutes = (packages: Package[]): number => packages.reduce((total, pkg) =>
+  total + (Number.isFinite(pkg.serviceTime) && pkg.serviceTime > 0 ? pkg.serviceTime : 5), 0);
+
+export const groupPackagesByStop = (
   packages: Package[],
-  geocodedAddresses: Map<string, { lat: number; lng: number }>
+  geocodedAddresses: Map<string, { lat: number; lng: number }> = new Map()
 ): StopGroup[] => {
-  const groups = new Map<string, Package[]>();
-
+  const groups: Package[][] = [];
   for (const pkg of packages) {
-    const key = placeKey(pkg);
-    if (!groups.has(key)) {
-      groups.set(key, []);
-    }
-    groups.get(key)?.push(pkg);
+    const group = groups.find(items => sameDeliveryRecipient(items[0], pkg) && intersectDeliveryWindows([...items, pkg]) !== null);
+    if (group) group.push(pkg); else groups.push([pkg]);
   }
-
-  const stopGroups: StopGroup[] = [];
-
-  for (const [key, pkgs] of groups) {
+  const stopGroups = groups.map((pkgs, index) => {
     const firstPkg = pkgs[0];
-    const coords = geocodedAddresses.get(key) || pkgs.find(pkg => hasValidCoordinates(pkg.coordinates))?.coordinates;
-    
-    stopGroups.push({
-      key,
+    return {
+      key: `${recipientKey(firstPkg)}|${index}`,
       packages: pkgs,
-      coords,
-      contactName: firstPkg.contactName
-    });
-  }
-  
+      coords: geocodedAddresses.get(placeKey(firstPkg)) || pkgs.find(pkg => hasValidCoordinates(pkg.coordinates))?.coordinates,
+      contactName: firstPkg.contactName,
+    };
+  });
+
   return stopGroups;
 };
 
@@ -313,7 +307,7 @@ export const optimizeMultiVehicle = async (
         return {
           deliveries: [{
             arrivalLocation: { latitude: stop.coords!.lat, longitude: stop.coords!.lng },
-            duration: `${Math.max(5, stop.packages.length * 5) * 60}s`,
+            duration: `${serviceMinutes(stop.packages) * 60}s`,
             ...(window ? { timeWindows: [{
               startTime: timeToISO(minutesToTime(window.start), date),
               endTime: timeToISO(minutesToTime(window.end), date),
@@ -353,7 +347,7 @@ export const optimizeMultiVehicle = async (
         const window = windows.get(group.key);
         const durationFromPrevious = transitionMinutes(route, index, stops[index - 1]?.serviceTime ?? 0, globalStartTime);
         const distance = route.transitions?.[index]?.travelDistanceMeters;
-        const serviceTime = Math.max(5, group.packages.length * 5);
+        const serviceTime = serviceMinutes(group.packages);
         const arrival = visit.startTime && Number.isFinite(Date.parse(visit.startTime)) ? visit.startTime : undefined;
         stops.push({
           id: `stop-${Date.now()}-${vehicleIndex}-${index}`,

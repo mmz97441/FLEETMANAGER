@@ -1,0 +1,35 @@
+if (!process.env.FIRESTORE_EMULATOR_HOST || !/^127\.0\.0\.1:|^localhost:/.test(process.env.FIRESTORE_EMULATOR_HOST)) throw new Error('Local emulator required.');
+const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
+const { readFileSync, mkdtempSync, rmSync } = require('node:fs');
+const { tmpdir } = require('node:os');
+const path = require('node:path');
+const { createRequire } = require('node:module');
+const req = createRequire(process.cwd() + '/functions/package.json');
+const { initializeApp, deleteApp } = req('firebase-admin/app');
+const { getFirestore, FieldPath } = req('firebase-admin/firestore');
+const projectId = 'demo-fleet-reference-migration';
+const app = initializeApp({ projectId });
+const db = getFirestore(app), directory = mkdtempSync(path.join(tmpdir(), 'fleet-reference-migration-'));
+(async () => {
+  const first = { externalId: 'lower/00042', barcode: 'TRACK-0001', orderNumber: 'ORDER-SHARED', status: 'En livraison' };
+  const other = { externalId: 'LOWER/00042', barcode: 'TRACK-0002', orderNumber: 'ORDER-SHARED', status: 'Livré' };
+  await db.collection('packages').doc('one').set(first); await db.collection('packages').doc('two').set(other);
+  const report = path.join(directory, 'report.json');
+  const run = apply => {
+    const result = spawnSync(process.execPath, ['scripts/migrate-parcel-references.cjs', '--project', projectId, '--report', report, ...(apply ? ['--apply'] : [])], { env: process.env, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr); return JSON.parse(readFileSync(report, 'utf8'));
+  };
+  const dry = run(false); assert.equal(dry.packages, 2); assert.equal(dry.collisions.length, 2); assert.equal(dry.updatedPackages, 0);
+  assert.equal(dry.individualCollisions, 1); assert.equal(dry.sharedOrderReferences, 1);
+  assert.deepEqual((await db.collection('packages').doc('one').get()).data(), first);
+  const applied = run(true); assert.equal(applied.updatedPackages, 2); assert.equal(applied.collisions.length, 2);
+  assert.deepEqual((await db.collection('packages').doc('one').get()).data(), { ...first, scanCodes: ['LOWER/00042', 'ORDER-SHARED', 'TRACK-0001'] });
+  const references = await db.collection('parcel_reference_index').where('ambiguous', '==', true).get();
+  assert.equal(references.size, 2);
+  const collision = references.docs.find(doc => doc.data().code === 'LOWER/00042').data();
+  assert.deepEqual(collision.packageIds, ['one', 'two']); assert.equal(collision.referenceKind, 'collision');
+  assert.equal(references.docs.find(doc => doc.data().code === 'ORDER-SHARED').data().referenceKind, 'order');
+  const replay = run(true); assert.equal(replay.updatedPackages, 0); assert.equal(replay.collisions.length, 2);
+  console.log('PASS derived reference migration dry-run, preserved originals/statuses, collision registry and idempotent replay');
+})().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => { rmSync(directory, { recursive: true, force: true }); await deleteApp(app); });

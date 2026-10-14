@@ -79,6 +79,18 @@ async function finishMissionHandler(data, context, { db, requireActiveCaller, is
             throw new functions.https.HttpsError('failed-precondition', 'La tournée doit être vérifiée par le bureau.');
         }
         const packages = await Promise.all(ids.map(pid => tx.get(db.collection('packages').doc(pid))));
+        // Stops can be removed by an older browser or a concurrent office action.
+        // The operational parcel assignment is an independent source of truth.
+        const linked = await tx.get(db.collection('packages').where('missionId', '==', id));
+        for (const parcel of linked.docs) {
+            const p = parcel.data();
+            if (['À retourner', 'Échec'].includes(p.status)) {
+                throw new functions.https.HttpsError('failed-precondition', 'Des colis en échec ou à retourner restent à remettre au dépôt avant la clôture.');
+            }
+            if (!ids.includes(parcel.id)) {
+                throw new functions.https.HttpsError('failed-precondition', 'Un colis est encore lié à cette tournée sans arrêt. Faites vérifier son affectation par le bureau avant de clôturer.');
+            }
+        }
         const byId = new Map(packages.map(p => [p.id, p]));
         const proofStops = stops.filter(s => (s.packageIds || []).length && ['DELIVERY', 'PICKUP'].includes(s.type));
         const proofs = await Promise.all(proofStops.map(s => tx.get(db.collection(s.type === 'PICKUP' ? 'pickups' : 'proofs_of_delivery').doc(`${id}_${s.id}`))));
@@ -116,6 +128,10 @@ async function finishMissionHandler(data, context, { db, requireActiveCaller, is
                 if (!parcel?.exists)
                     throw new functions.https.HttpsError('failed-precondition', 'Un colis de la tournée est introuvable.');
                 const p = parcel.data();
+                // A missing pickup parcel may legitimately have a new assignment. Its
+                // immutable manifest closes the historical attempt, never the new one.
+                if (stop.type === 'PICKUP' && proof?.missingPackageIds?.includes(pid))
+                    continue;
                 if (p.status === 'À retourner') {
                     throw new functions.https.HttpsError('failed-precondition', 'Des retours au hub restent à confirmer avant de clôturer la tournée.');
                 }

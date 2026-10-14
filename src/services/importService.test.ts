@@ -44,3 +44,25 @@ it('office import cannot report success when a returned parcel cannot be read ba
   await expect(confirmReviewedImport(rows, { id: 'c' } as User, { id: 'office' } as User, 'test.xlsx')).rejects.toThrow('relus');
   expect(batch).not.toHaveBeenCalled();
 });
+it('accepts generic sender carrier labels without applying the explicit Boiron format', async () => {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet([
+    { Id: 'exp-a/0042', Address: '1 RUE FICTIVE,97400,SAINT DENIS', Order_Number: 'other-order', Contact: 'Pharmacie', 'Code transporteur': '000012345678' },
+    { Id: 'exp-b/0043', Address: '1 RUE FICTIVE,97400,SAINT DENIS', Order_Number: 'other-order', Contact: 'Cabinet' },
+  ]), 'Colis');
+  const result = await parseExcelForReview({ name: 'generic.xlsx', data: XLSX.write(workbook, { type: 'binary', bookType: 'xlsx' }) } as unknown as File);
+  expect(result.errorCount).toBe(0);
+  expect(result.rows[0]).toMatchObject({ externalId: 'exp-a/0042', carrierBarcode: '000012345678', carrierBarcodeFormat: 'generic' });
+  expect(result.rows.every(row => !row._multiColis)).toBe(true);
+});
+it('imports a CSV with zero-prefixed individual labels and no order column', async () => {
+  const result = await parseExcelForReview({ name: 'generic.csv', data: 'Id;Address;Contact;Carrier_Barcode\n000012345678;1 RUE FICTIVE,97400,SAINT DENIS;Pharmacie;000098765432' } as unknown as File);
+  expect(result.errorCount).toBe(0);
+  expect(result.rows[0]).toMatchObject({ externalId: '000012345678', orderNumber: '000012345678', carrierBarcode: '000098765432' });
+});
+it('rejects a numeric individual XLSX cell before its leading zeroes can be guessed', async () => {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet([{ Id: 12345678, Address: '1 RUE FICTIVE,97400,SAINT DENIS', Contact: 'Pharmacie' }]), 'Colis');
+  const result = await parseExcelForReview({ name: 'numeric.xlsx', data: XLSX.write(workbook, { type: 'binary', bookType: 'xlsx' }) } as unknown as File);
+  expect(result.errorCount).toBe(1); expect(result.rows[0]._errors.join(' ')).toMatch(/cellule texte/);
+});

@@ -29,8 +29,19 @@ vi.mock('../../src/firebaseConfig', async () => {
   );
   const db = initializeFirestore(app, {});
   connectFirestoreEmulator(db, '127.0.0.1', 8189, { mockUserToken: 'owner' });
-  return { db, storage: {}, auth: {}, default: app };
+  return { db, storage: {}, auth: { currentUser: { uid: 'driverA' } }, default: app };
 });
+vi.mock('firebase/functions', () => ({
+  getFunctions: () => ({}),
+  httpsCallable: (_functions: unknown, name: string) => async (data: unknown) => {
+    process.env.GCLOUD_PROJECT = 'demo-fleet-production-audit';
+    process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8189';
+    const { createRequire } = await import('node:module');
+    const require = createRequire(import.meta.url);
+    const service = require('../../functions/lib/index.js');
+    return { data: await service[name].run(data, { auth: { uid: name === 'setParcelSorting' ? 'business-admin' : 'driverA', token: { email_verified: true } } }) };
+  },
+}));
 vi.mock('../../src/services/gmproService', () => ({
   geocodeAddress: vi.fn(),
   getGoogleMapsApiKey: () => '',
@@ -74,26 +85,30 @@ const mission = (extra = {}) => ({
 beforeEach(async () => {
   gate.barrier = null;
   gate.reads = 0;
+  await setDoc(doc(db, 'users', 'business-admin'), { role: 'Admin' });
+  await setDoc(doc(db, 'hubs', 'business-hub'), { isActive: true });
+  await setDoc(doc(db, 'users', 'driverA'), { role: 'Chauffeur', firstName: 'Audit' });
   await setDoc(doc(db, 'missions', 'test'), mission());
 });
 afterAll(() => terminate(db));
 describe('Production invariants against real services and isolated Firestore', () => {
   it('rejects a stale validation after a parcel was added to the stop', async () => {
     await setDoc(doc(db, 'packages', 'p1'), {status: PackageStatus.IN_DELIVERY, missionId: 'test', stopId: 's', currentDriverId: 'driverA'});
-    await expect(commitStopOutcome({missionId: 'test', stopId: 's', stopPatch: {status: StopStatus.COMPLETED},
+    await expect(commitStopOutcome({missionId: 'test', stopId: 's', recordedAt: '2026-09-10T08:00:00Z', stopPatch: {status: StopStatus.COMPLETED},
       packageOutcomes: [{packageId: 'p1', status: PackageStatus.DELIVERED, movement: {action: 'DELIVERED'}}]
     })).rejects.toThrow('La liste des colis');
     expect((await getDoc(doc(db, 'missions', 'test'))).data()?.stops[0].status).toBe(StopStatus.PENDING);
     expect((await getDoc(doc(db, 'packages', 'p1'))).data()?.status).toBe(PackageStatus.IN_DELIVERY);
   });
-  it('persists assignment fields for an already sorted parcel and deduplicates the exact retry', async () => {
+  it('rejects assignment through generic status edits and deduplicates a legitimate sorting retry', async () => {
     const ref = doc(db, 'packages', 'already-sorted');
-    await setDoc(ref, {status: PackageStatus.SORTED, movements: []});
-    const fields = {missionId: 'test', stopId: 's', currentDriverId: 'driverA'};
-    await updatePackageStatus('already-sorted', PackageStatus.SORTED, {action: 'SORTED'}, fields);
-    await updatePackageStatus('already-sorted', PackageStatus.SORTED, {action: 'SORTED'}, fields);
+    await setDoc(ref, {status: PackageStatus.AT_HUB, currentHubId: 'business-hub', movements: []});
+    await expect(updatePackageStatus('already-sorted', PackageStatus.SORTED, {action: 'SORTED'}, {missionId: 'test'})).rejects.toThrow('parcours');
+    await updatePackageStatus('already-sorted', PackageStatus.SORTED, {action: 'SORTED'});
+    await updatePackageStatus('already-sorted', PackageStatus.SORTED, {action: 'SORTED'});
     const saved = (await getDoc(ref)).data()!;
-    expect(saved).toMatchObject(fields);
+    expect(saved).toMatchObject({ status: PackageStatus.SORTED, currentHubId: 'business-hub' });
+    expect(saved.missionId).toBeUndefined();
     expect(saved.movements).toHaveLength(1);
   });
   it('does not reopen a delivered parcel on a late loading request', async () => {
@@ -166,21 +181,19 @@ describe('Production invariants against real services and isolated Firestore', (
     );
   });
   it('must retain consistent total after one delivered and one missing package', async () => {
-    await commitStopOutcome({
-      missionId: 'test',
-      stopId: 's',
-      stopPatch: {
-        status: StopStatus.COMPLETED,
-        packageIds: ['p1'],
-        packageCount: 1,
-      },
-      deliveredDelta: 1,
-      failedDelta: 1,
+    const point = { address: '1 rue Fictive', city: 'Saint-Denis', postalCode: '97400', contactName: 'Pharmacie' };
+    await setDoc(doc(db, 'missions', 'test'), mission({ stops: [stop(point)] }));
+    for (const id of ['p1', 'p2']) await setDoc(doc(db, 'packages', id), { ...point, status: PackageStatus.IN_DELIVERY, missionId: 'test', stopId: 's', currentDriverId: 'driverA', movements: [] });
+    await commitStopOutcome({ missionId: 'test', stopId: 's', recordedAt: '2026-09-10T08:00:00Z',
+      stopPatch: { status: StopStatus.COMPLETED, completionTime: '2026-09-10T08:00:00Z' },
+      packageOutcomes: [
+        { packageId: 'p1', status: PackageStatus.DELIVERED, movement: { action: 'DELIVERED' } },
+        { packageId: 'p2', status: PackageStatus.FAILED, failureReason: 'Destinataire absent', movement: { action: 'FAILED' } },
+      ],
     });
     const m = (await getDoc(doc(db, 'missions', 'test'))).data()!;
-    expect(m.deliveredPackages + m.failedPackages).toBeLessThanOrEqual(
-      m.totalPackages,
-    );
+    expect(m).toMatchObject({ deliveredPackages: 1, failedPackages: 1, totalPackages: 2 });
+    expect((await getDoc(doc(db, 'packages', 'p2'))).data()?.deliveryAttempts[0]).toMatchObject({ outcome: 'FAILURE', failureReason: 'Destinataire absent', recordedAt: '2026-09-10T08:00:00Z' });
   });
   it('must not change a terminal outcome while retaining incompatible counters', async () => {
     await setDoc(
@@ -217,6 +230,7 @@ describe('Production invariants against real services and isolated Firestore', (
       }),
     );
     await setDoc(doc(db, 'packages', 'pickup-package'), {
+      missionId: 'pickup', stopId: 's', currentDriverId: 'driverA',
       status: PackageStatus.PENDING,
       movements: [],
     });
@@ -236,39 +250,19 @@ describe('Production invariants against real services and isolated Firestore', (
       missingPackageIds: [],
       unknownBarcodes: [],
     });
-    console.log(
-      'PICKUP_STATE',
-      JSON.stringify({
-        result,
-        packageStatus: (
-          await getDoc(doc(db, 'packages', 'pickup-package'))
-        ).data()?.status,
-        manifestExists: (await getDoc(doc(db, 'pickups', 'pickup_s'))).exists(),
-      }),
-    );
+    expect((await getDoc(doc(db, 'packages', 'pickup-package'))).data()?.status).toBe(PackageStatus.COLLECTED);
+    expect((await getDoc(doc(db, 'pickups', 'pickup_s'))).exists()).toBe(true);
     expect(result).not.toBeNull();
   });
-  it('must preserve two movements written concurrently', async () => {
-    await setDoc(doc(db, 'packages', 'race'), {
-      status: PackageStatus.PENDING,
-      movements: [],
-    });
-    gate.barrier = new Promise<void>((resolve) => {
-      gate.release = resolve;
-    });
+  it('serializes simultaneous sorting requests without duplicate movement or assignment', async () => {
+    await setDoc(doc(db, 'packages', 'race'), { status: PackageStatus.AT_HUB, currentHubId: 'business-hub', movements: [] });
     await Promise.all([
-      updatePackageStatus('race', PackageStatus.COLLECTED, {
-        action: 'COLLECTED',
-        driverId: 'driverA',
-      }),
-      updatePackageStatus('race', PackageStatus.IN_DELIVERY, {
-        action: 'TRANSFERRED',
-        driverId: 'driverB',
-      }),
+      updatePackageStatus('race', PackageStatus.SORTED, { action: 'SORTED' }),
+      updatePackageStatus('race', PackageStatus.SORTED, { action: 'SORTED' }),
     ]);
-    gate.barrier = null;
     const p = (await getDoc(doc(db, 'packages', 'race'))).data()!;
-    expect(p.movements).toHaveLength(2);
+    expect(p.movements).toHaveLength(1);
+    expect(p.status).toBe(PackageStatus.SORTED);
   });
   it('must not leave packages assigned to a deleted mission', async () => {
     await setDoc(doc(db, 'packages', 'orphan'), {

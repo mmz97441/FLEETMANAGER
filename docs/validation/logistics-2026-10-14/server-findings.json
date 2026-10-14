@@ -1,0 +1,67 @@
+{
+  "demoProject": "demo-fleet-production-audit",
+  "findings": [
+    {
+      "id": "LOG-02",
+      "observation": {
+        "recipients": [
+          "Pharmacie A",
+          "Cabinet B"
+        ],
+        "stopCount": 1,
+        "displayedRecipient": "Pharmacie A",
+        "secondParcelVerified": true,
+        "retainedWindow": [
+          "08:00",
+          "09:00"
+        ]
+      }
+    },
+    {
+      "id": "LOG-02-arrived",
+      "observation": {
+        "parcelAddedToAlreadyArrivedStop": true
+      }
+    },
+    {
+      "id": "LOG-03",
+      "observation": {
+        "parcelHub": "B",
+        "departureHub": "A",
+        "desiredDate": "2026-10-16",
+        "dispatchedDate": "2026-10-14",
+        "accepted": true
+      }
+    },
+    {
+      "id": "LOG-06",
+      "observation": {
+        "missionClosedWithOutstandingReturnOutsideStops": true
+      }
+    },
+    {
+      "id": "LOG-05",
+      "observation": {
+        "returnedParcel": "Retourné",
+        "scan": "terminal",
+        "hubReception": "refused",
+        "redispatch": "refused"
+      }
+    },
+    {
+      "id": "LOG-08",
+      "observation": {
+        "stored": "br-audit-lowercase",
+        "uppercaseScan": "not_found",
+        "exactCaseScan": "confirmed"
+      }
+    },
+    {
+      "id": "LOG-11",
+      "observation": {
+        "missingPickupRemainsAssignedToClosedMission": true,
+        "hubReception": "refused"
+      }
+    }
+  ]
+}

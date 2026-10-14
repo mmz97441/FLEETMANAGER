@@ -1,20 +1,15 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.sameDeliveryRecipient = sameDeliveryRecipient;
+exports.sameDeliveryRecipient = void 0;
 exports.deliveryStopGroup = deliveryStopGroup;
 const deliveryAddress_1 = require("./deliveryAddress");
-/** Automatic consolidation needs the same named recipient and full address.
- * A shared phone number alone cannot authorize a shared proof of delivery. */
-function sameDeliveryRecipient(a, b) {
-    return !!(0, deliveryAddress_1.normAddr)(a.address) && !!a.postalCode?.trim() && !!(0, deliveryAddress_1.normAddr)(a.city) && !!(0, deliveryAddress_1.normAddr)(a.contactName) &&
-        (0, deliveryAddress_1.placeKey)(a) === (0, deliveryAddress_1.placeKey)(b) && (0, deliveryAddress_1.normAddr)(a.contactName) === (0, deliveryAddress_1.normAddr)(b.contactName) &&
-        String(a.floor ?? '') === String(b.floor ?? '');
-}
+var deliveryAddress_2 = require("./deliveryAddress");
+Object.defineProperty(exports, "sameDeliveryRecipient", { enumerable: true, get: function () { return deliveryAddress_2.sameDeliveryRecipient; } });
 function deliveryStopGroup(stops, target) {
-    if (target.type !== 'DELIVERY' || !['En attente', 'Arrivé'].includes(target.status) || target.proofSyncPending)
+    if (target.type !== 'DELIVERY' || target.status !== 'En attente' || target.proofSyncPending)
         return [target];
     return [target, ...stops.filter(stop => stop.id !== target.id && stop.type === 'DELIVERY' &&
-            stop.status === 'En attente' && !stop.proofSyncPending && sameDeliveryRecipient(target, stop) &&
+            stop.status === 'En attente' && !stop.proofSyncPending && (0, deliveryAddress_1.sameDeliveryRecipient)(target, stop) &&
             // Stops have planned windows; parcel windows may be wider than the planned visit.
             (target.timeWindowStart || '') === (stop.timeWindowStart || '') &&
             (target.timeWindowEnd || '') === (stop.timeWindowEnd || ''))];

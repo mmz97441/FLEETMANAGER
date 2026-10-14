@@ -1,59 +1,40 @@
 "use strict";
-/**
- * POINT DE LIVRAISON — source de vérité UNIQUE
- *
- * « Deux colis vont-ils au même endroit ? » est une règle métier critique
- * (elle sécurise le nombre exact de colis à déposer chez le client). Elle doit
- * être définie ICI, une seule fois, et importée partout : dispatch (gmproService),
- * transfert en route (missionService), import client (importService) et filet de
- * sécurité chauffeur (DriverMissionView).
- *
- * ⚠️ Ne JAMAIS réécrire une variante locale de ces fonctions. Toute duplication
- * finit par diverger (cf. bug Boiron v4.2.1 : une copie non normalisée du
- * dispatch splittait 4 colis d'une même adresse en 4 arrêts). Si la règle doit
- * changer, elle change ICI et nulle part ailleurs.
- *
- * Règle : on regroupe par ADRESSE + CP + VILLE (normalisés), avec un renfort
- * TÉLÉPHONE (même tél + même CP = même client, rattrape les fautes de frappe).
- * JAMAIS par n° de commande ni par nom de contact (trop variables entre imports).
- */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.sameDeliveryPoint = exports.phoneSignal = exports.placeKey = exports.normPhone = exports.normAddr = void 0;
-/**
- * Normalise un libellé d'adresse pour comparer deux écritures « à l'œil »
- * identiques : minuscules, accents retirés, ponctuation/espaces multiples
- * réduits à un seul espace. Ex. "28  RUE JOSEPH BÉDIER " → "28 rue joseph bedier".
- */
-const normAddr = (s) => (s || '')
-    .toLowerCase()
-    .normalize('NFD').replace(/[̀-ͯ]/g, '') // accents
-    .replace(/[^a-z0-9]+/g, ' ') // ponctuation → espace
-    .trim();
+exports.sameDeliveryVisit = exports.sameDeliveryPoint = exports.sameDeliveryRecipient = exports.recipientKey = exports.phoneSignal = exports.placeKey = exports.normPhone = exports.normAddr = void 0;
+exports.intersectDeliveryWindows = intersectDeliveryWindows;
+exports.visitContainsParcelWindow = visitContainsParcelWindow;
+const normAddr = (s) => (s || '').toLowerCase().normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
 exports.normAddr = normAddr;
-/** Téléphone → chiffres uniquement (retire espaces, +, points, tirets…). */
 const normPhone = (s) => (s || '').replace(/\D/g, '');
 exports.normPhone = normPhone;
-/**
- * Clé de regroupement d'un point de livraison : adresse + CP + ville normalisés.
- * Deux colis avec la même clé = même arrêt. JAMAIS le nom ni le n° de commande.
- */
+/** Address-only key is suitable for geocoding, never for recipient grouping. */
 const placeKey = (p) => `${(0, exports.normAddr)(p.address)}|${(p.postalCode || '').trim()}|${(0, exports.normAddr)(p.city)}`;
 exports.placeKey = placeKey;
-/** Téléphone exploitable comme signal de regroupement (≥ 6 chiffres), sinon ''. */
-const phoneSignal = (p) => {
-    const s = (0, exports.normPhone)(p.contactPhone);
-    return s.length >= 6 ? s : '';
-};
+const phoneSignal = (p) => { const s = (0, exports.normPhone)(p.contactPhone); return s.length >= 6 ? s : ''; };
 exports.phoneSignal = phoneSignal;
-/**
- * Deux points = même livraison ? Adresse identique OU (même téléphone + même CP).
- * Le repli téléphone rattrape les adresses mal saisies pour un même client.
- */
-const sameDeliveryPoint = (a, b) => {
-    if ((0, exports.placeKey)(a) === (0, exports.placeKey)(b))
-        return true;
-    const pa = (0, exports.phoneSignal)(a), pb = (0, exports.phoneSignal)(b);
-    return !!pa && pa === pb && (a.postalCode || '').trim() === (b.postalCode || '').trim();
-};
-exports.sameDeliveryPoint = sameDeliveryPoint;
+const recipientKey = (p) => `${(0, exports.placeKey)(p)}|${(0, exports.normAddr)(p.contactName)}|${String(p.floor ?? '')}`;
+exports.recipientKey = recipientKey;
+const sameDeliveryRecipient = (a, b) => !!(0, exports.normAddr)(a.address) && !!a.postalCode?.trim() && !!(0, exports.normAddr)(a.city) && !!(0, exports.normAddr)(a.contactName) && (0, exports.recipientKey)(a) === (0, exports.recipientKey)(b);
+exports.sameDeliveryRecipient = sameDeliveryRecipient;
+/** Legacy callers now use the same strict recipient identity. */
+exports.sameDeliveryPoint = exports.sameDeliveryRecipient;
+const minute = (value, fallback) => !value ? fallback :
+    /^([01]?\d|2[0-3]):[0-5]\d$/.test(value) ? Number(value.split(':')[0]) * 60 + Number(value.split(':')[1]) : NaN;
+const clock = (value) => `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`;
+function intersectDeliveryWindows(points) {
+    const start = Math.max(0, ...points.map(p => minute(p.timeWindowStart, 0)));
+    const end = Math.min(1440, ...points.map(p => minute(p.timeWindowEnd, 1440)));
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end)
+        return null;
+    return { ...(points.some(p => p.timeWindowStart) ? { timeWindowStart: clock(start) } : {}),
+        ...(points.some(p => p.timeWindowEnd) ? { timeWindowEnd: clock(end) } : {}) };
+}
+const sameDeliveryVisit = (a, b) => (0, exports.sameDeliveryRecipient)(a, b) && intersectDeliveryWindows([a, b]) !== null;
+exports.sameDeliveryVisit = sameDeliveryVisit;
+/** A planned visit must fit inside every parcel's promised window. */
+function visitContainsParcelWindow(visit, parcel) {
+    const start = minute(visit.timeWindowStart, 0), end = minute(visit.timeWindowEnd, 1440);
+    return start < end && start >= minute(parcel.timeWindowStart, 0) && end <= minute(parcel.timeWindowEnd, 1440);
+}
 //# sourceMappingURL=deliveryAddress.js.map
