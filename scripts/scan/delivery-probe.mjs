@@ -92,6 +92,9 @@ try {
   await check('A wrong parcel after the last good one keeps its red warning visible', "window.cameras.some(c=>c.active)&&!!document.querySelector('[data-scan-feedback=error]')&&document.body.innerText.includes('1/1')&&!document.body.innerText.includes('Oui, bon état')&&!document.body.innerText.includes('Retour à la livraison…')");
   await click('Saisie manuelle');await wait("!!document.querySelector('#manual-barcode')");
   await check('Manual entry keeps the same red cross and explanation', "!!document.querySelector('[data-scan-feedback=error] .lucide-xcircle')&&document.body.innerText.includes('Ne pas remettre à Pharmacie du Centre')");
+  await ev("document.querySelector('#manual-barcode').focus()");await call('Input.insertText',{text:'BR1000'});await click('OK');
+  await wait("document.querySelector('[data-scan-feedback=ok]')?.innerText.includes('Déjà vérifié')");
+  await check('Rescanning a confirmed parcel clears red without recounting or another request', "!document.querySelector('[data-scan-feedback=error]')&&window.calls.filter(c=>c.name==='scan'&&c.code==='BR1000').length===2&&document.body.innerText.includes('Colis vérifiés : 1/1')");
   checks.push({name:'No uncaught browser exception',pass:errors.length===0});
 } catch(error) { await shot('failure');await writeFile(output+'/failure.txt',await ev('document.body.innerText'));throw error;
 } finally {await writeFile(output+'/results.json',JSON.stringify({checks,errors},null,2));console.log(JSON.stringify({checks,errors},null,2));await call('Page.close');ws.close();}

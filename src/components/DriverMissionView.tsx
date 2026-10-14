@@ -1349,6 +1349,10 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
   scanContextRef.current = `${activeMissionId}/${currentStop?.id}`;
   const handleBarcodeScan = (barcode: string) => {
     if (!activeMission || !currentStop) return;
+    if (scannedBarcodes.includes(barcode)) {
+      setScanFeedback({ type: 'ok', text: `${barcode} — Déjà vérifié pour ${currentStop.contactName || 'ce client'}.` });
+      return;
+    }
     const expected = stopPackages.filter(p => packageMatchesCode(p, barcode));
     const context = `${activeMission.id}/${currentStop.id}`;
     const missionId = activeMission.id, stopId = currentStop.id;
@@ -3341,6 +3345,7 @@ const DriverMissionView: React.FC<DriverMissionViewProps> = ({ currentUser, clie
           >
             <BarcodeScanner
               onScan={handleBarcodeScan}
+              forwardDuplicates
               busy={scanPending > 0}
               flashMessage={scanFeedback}
               onClose={() => setShowScanner(false)}
