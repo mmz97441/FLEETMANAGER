@@ -83,7 +83,7 @@ const ClientAnalytics: React.FC<ClientAnalyticsProps> = ({ packages }) => {
       {/* En-tête */}
       <div>
         <h1 className="text-2xl font-extrabold text-slate-900 flex items-center gap-2"><BarChart3 size={24} className="text-indigo-600" /> Statistiques</h1>
-        <p className="text-sm text-slate-500">Vos indicateurs, calculés en direct — rien à configurer.</p>
+        <p className="text-sm text-slate-500">Créations et tentatives sur la période · heures terrain à La Réunion.</p>
       </div>
 
       {/* Ce qui compte (insights automatiques) */}
@@ -117,9 +117,9 @@ const ClientAnalytics: React.FC<ClientAnalyticsProps> = ({ packages }) => {
 
       {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <KpiTile label="Colis" value={m.total} deltaPct={pctDelta(m.total, m.previous.total)} hint="Sur la période sélectionnée" />
+        <KpiTile label="Colis créés" value={m.total} deltaPct={pctDelta(m.total, m.previous.total)} hint="Sur la période sélectionnée" />
         <KpiTile
-          label="Taux de livraison" value={`${Math.round(m.deliveryRate)}%`}
+          label="Succès des tentatives" value={m.resolved ? `${Math.round(m.deliveryRate)}%` : '—'} hint="Livrés ÷ (livrés + échecs décidés), hors colis en cours"
           deltaPct={m.previous.deliveryRate != null ? m.deliveryRate - m.previous.deliveryRate : null}
           objective={{ target: 95, direction: 'up' }}
         />
@@ -127,20 +127,23 @@ const ClientAnalytics: React.FC<ClientAnalyticsProps> = ({ packages }) => {
           label="Ponctualité" value={m.punctualityRate == null ? '—' : `${Math.round(m.punctualityRate)}%`}
           deltaPct={m.punctualityRate != null && m.previous.punctualityRate != null ? m.punctualityRate - m.previous.punctualityRate : null}
           objective={{ target: 90, direction: 'up' }}
-          hint="Livrés à l'heure prévue"
+          hint="Heure terrain ≤ jour/créneau promis, hors estimation de tournée"
         />
         <KpiTile
           label="Délai moyen" value={fmtDelay(m.avgDelayHours)}
           deltaPct={pctDelta(m.avgDelayHours ?? 0, m.previous.avgDelayHours)}
           objective={{ target: 24, direction: 'down' }}
-          hint="Prise en charge → livraison"
+          hint="Collecte → remise (création si collecte historique inconnue)"
         />
       </div>
 
+      <p className="text-xs text-slate-500">{m.workInProgress} colis à traiter, toutes dates. Respect de l’estimation de tournée : {m.etaAdherenceRate === null ? 'non mesurable' : `${Math.round(m.etaAdherenceRate)}%`} (distinct de la promesse client).</p>
+      {m.undatedOutcomes > 0 && <p className="text-xs text-amber-700">{m.undatedOutcomes} résultat(s) historique(s) sans date fiable : inclus uniquement dans « Tout ».</p>}
       {/* Graphiques */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <TrendChart label="Colis par jour" data={trendData} />
-        <DonutStatuses label="Répartition par statut" data={donutData} />
+        <TrendChart label="Colis créés par jour" data={trendData} />
+        <TrendChart label="Colis remis par jour de livraison" data={m.byDay.map(day => ({ date: day.date.slice(5), value: day.delivered }))} color="#16a34a" />
+        <DonutStatuses label="Statut actuel des colis créés sur la période" data={donutData} />
         <BarByDimension label="Colis par pharmacie (top 10)" data={pharmaBar} />
         <BarByDimension label="Colis par zone" data={zoneBar} color="#0ea5e9" />
       </div>

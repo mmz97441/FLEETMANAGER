@@ -43,6 +43,9 @@ interface PickupScanViewProps {
   onOpenScanner: () => void;
   scannedBarcodes: string[];   // Gérés par le parent (DriverMissionView)
   isProcessing: boolean;
+  signatureData: string | null;
+  onSignatureChange: (signature: string | null) => void | Promise<void>;
+  storageError?: string;
 }
 
 const PickupScanView: React.FC<PickupScanViewProps> = ({
@@ -52,11 +55,13 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
   onComplete,
   onOpenScanner,
   scannedBarcodes,
-  isProcessing
+  isProcessing,
+  signatureData,
+  onSignatureChange: setSignatureData,
+  storageError
 }) => {
   const [showManifest, setShowManifest] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [signatureData, setSignatureData] = useState<string | null>(null);
   const [showSignature, setShowSignature] = useState(false);
   const [showGate, setShowGate] = useState(false);
 
@@ -107,6 +112,7 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
 
   return (
     <div className="space-y-3">
+      {storageError && <p role="alert" className="ui-notice ui-notice-warning">{storageError}</p>}
 
       {/* En-tête enlèvement */}
       <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
@@ -147,6 +153,7 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
       {/* Bouton Scanner */}
       <button
         onClick={onOpenScanner}
+        disabled={isProcessing}
         className={`w-full flex items-center justify-center gap-3 py-4 rounded-xl font-bold text-base active:scale-95 transition-transform ${
           allScanned
             ? 'bg-green-100 border-2 border-green-300 text-green-700'
@@ -276,7 +283,7 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
 
         {showSignature && (
           <SignaturePadMini
-            onSave={(data) => { setSignatureData(data); setShowSignature(false); }}
+            onSave={(data) => { void Promise.resolve(setSignatureData(data)).then(() => setShowSignature(false)).catch(() => {}); }}
             onCancel={() => setShowSignature(false)}
           />
         )}
@@ -286,7 +293,7 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
             <CheckCircle size={16} className="text-green-600" />
             <span className="text-sm text-green-700 font-bold flex-1">Signature client enregistrée ✓</span>
             <button
-              onClick={() => { setSignatureData(null); setShowSignature(true); }}
+              onClick={() => { void Promise.resolve(setSignatureData(null)).then(() => setShowSignature(true)).catch(() => {}); }}
               className="min-h-11 text-sm text-green-600 underline font-medium"
             >
               Refaire
@@ -331,7 +338,7 @@ const PickupScanView: React.FC<PickupScanViewProps> = ({
           clientName={clientName || 'ce client'}
           missingCodes={missing.map(packageDisplayCode)}
           total={total}
-          actionLabel="Forcer l'enlèvement (colis manquants)"
+          actionLabel="Confirmer l’enlèvement partiel et les colis manquants"
           onCancel={() => setShowGate(false)}
           onForce={() => { setShowGate(false); doFinalize(); }}
         />

@@ -229,7 +229,7 @@ await check('Driver can acknowledge own document', 'allowed', () =>
     status: 'SIGNED',
   }),
 );
-await check('Assigned driver can update own package', 'allowed', () =>
+await check('Assigned driver cannot forge delivery without the server decision', 'denied', () =>
   updateDoc(doc(db('driverB'), 'packages', 'pB'), { status: 'Livré' }),
 );
 await check('Driver cannot alter package customer', 'denied', () =>
@@ -253,8 +253,8 @@ await env.withSecurityRulesDisabled(async (ctx) => {
   });
 });
 await check(
-  'Assigned pickup driver can collect unowned package',
-  'allowed',
+  'Assigned pickup driver cannot bypass the immutable pickup manifest',
+  'denied',
   () =>
     updateDoc(doc(db('driverA'), 'packages', 'pickup'), {
       currentDriverId: 'driverA',
@@ -323,6 +323,15 @@ await env.withSecurityRulesDisabled(async ctx => {
 await check('Client can read its own import confirmations', 'allowed', () => getDoc(doc(db('clientA'), 'import_runs', 'run-a')));
 await check('Client cannot read another sender import', 'denied', () => getDoc(doc(db('clientB'), 'import_runs', 'run-a')));
 await check('Driver cannot read private import manifests', 'denied', () => getDoc(doc(db('driverA'), 'import_runs', 'run-a')));
+for (const [field, value] of Object.entries({ scanCodes: ['FAKE'], contactName: 'Wrong recipient', address: 'Wrong address', timeWindowStart: '08:00', pod: {type:'SUCCESS'}, failurePod:{type:'FAILURE'}, deliveryAttempts:[], returnDisposition:'REDELIVERY_READY', pickupMissing:null })) {
+  await check(`Office cannot bypass authoritative parcel field ${field}`, 'denied', () => updateDoc(doc(db('admin'), 'packages', 'pB'), {[field]:value}));
+  await check(`Driver cannot bypass authoritative parcel field ${field}`, 'denied', () => updateDoc(doc(db('driverB'), 'packages', 'pB'), {[field]:value}));
+}
+for (const role of ['admin','driverB']) {
+  await check(`${role} cannot fabricate a proof document`, 'denied', () => setDoc(doc(db(role),'proofs_of_delivery','forged-'+role),{missionId:'mB',stopId:'s',driverId:'driverB',type:'SUCCESS'}));
+  await check(`${role} cannot fabricate a pickup manifest`, 'denied', () => setDoc(doc(db(role),'pickups','forged-'+role),{missionId:'mB',stopId:'s',driverId:'driverB'}));
+}
+await check('Presence devices cannot be forged directly', 'denied', () => updateDoc(doc(db('driverA'),'users','driverA'),{appDevices:[{id:'forged',appVersion:'99.0.0'}]}));
 if (process.env.TEST_RESULTS_PATH)
   await writeFile(
     process.env.TEST_RESULTS_PATH,

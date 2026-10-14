@@ -25,3 +25,11 @@ describe('import outcome counts', () => {
     expect(result.confirmed + result.pending + result.invalid + result.duplicates).toBe(result.total);
   });
 });
+
+it('preserves optional windows and rejects invalid dates or inverted windows', () => {
+  expect(validateClientShipment({ ...valid, requestedDeliveryDate: '2026-02-30' }).requestedDeliveryDate).toBeTruthy();
+  expect(validateClientShipment({ ...valid, requestedDeliveryDate: '2026-10-13' }, '2026-10-14').requestedDeliveryDate).toBeTruthy();
+  expect(validateClientShipment({ ...valid, requestedDeliveryDate: '2026-10-13' })).toEqual({}); // unchanged retry
+  expect(validateClientShipment({ ...valid, timeWindowStart: '15:00', timeWindowEnd: '09:00' }).timeWindowEnd).toBeTruthy();
+  expect(validateClientShipment({ ...valid, requestedDeliveryDate: '2026-10-15', timeWindowEnd: '09:00' }, '2026-10-14')).toEqual({});
+});

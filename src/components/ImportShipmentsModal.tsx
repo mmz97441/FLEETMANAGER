@@ -1,3 +1,4 @@
+import { carrierBarcodeError, individualReferenceError, type CarrierBarcodeFormat } from '../utils/carrierBarcodeValidation';
 import { importReference } from '../utils/importManifest';
 import { useClientAccess } from './client/ClientAccessContext';
 /**
@@ -44,6 +45,7 @@ interface ParsedRow {
   line: number;               // numéro de ligne dans le fichier (1 = entêtes)
   colisNumber: string;
   carrierBarcode: string;
+  carrierBarcodeFormat: CarrierBarcodeFormat;
   contactName: string;
   address: string;
   postalCode: string;
@@ -66,8 +68,9 @@ const normalize = (s: string): string =>
 // exports courants (ex. fichier tournée : « Numéro colis », « Contact », « Adress »,
 // « Order Number », « Comment », « Weight »…).
 const HEADER_ALIASES: Record<keyof Omit<ParsedRow, 'line' | 'errors'>, string[]> = {
-  carrierBarcode: ['code boiron', 'code transporteur', 'carrierbarcode', 'carrier barcode', 'barcode boiron'],
-  colisNumber: ['numero de colis', 'numero colis', 'n° colis', 'n colis', 'colis', 'code colis', 'br', 'barcode', 'code barre'],
+  carrierBarcodeFormat: ['format transporteur'],
+  carrierBarcode: ['code boiron', 'code transporteur', 'carrierbarcode', 'carrier_barcode', 'carrier barcode', 'barcode boiron'],
+  colisNumber: ['id', 'numero de colis', 'numero colis', 'n° colis', 'n colis', 'colis', 'code colis', 'br', 'barcode', 'code barre'],
   contactName: ['nom du destinataire', 'destinataire', 'nom', 'pharmacie', 'contact', 'client', 'raison sociale'],
   address: ['adresse', 'adress', 'address'],
   postalCode: ['code postal', 'cp', 'postal code', 'zip'],
@@ -75,7 +78,7 @@ const HEADER_ALIASES: Record<keyof Omit<ParsedRow, 'line' | 'errors'>, string[]>
   contactPhone: ['telephone', 'tel', 'phone', 'gsm', 'mobile', 'portable'],
   contactEmail: ['email', 'e-mail', 'mail', 'courriel'],
   weight: ['poids (kg)', 'poids', 'weight'],
-  clientReference: ['reference', 'ref', 'order number', 'numero de commande', 'n° commande', 'commande', 'order'],
+  clientReference: ['reference', 'ref', 'order number', 'order_number', 'numero de commande', 'n° commande', 'commande', 'order'],
   comment: ['remarque', 'consignes', 'note', 'comment', 'commentaire', 'instructions'],
 };
 
@@ -174,6 +177,7 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
           line: Number.isInteger(r.__rowNum__) ? r.__rowNum__ + 1 : i + 2,               // ligne 1 = entêtes
           colisNumber: getField(r, 'colisNumber'),
           carrierBarcode: getField(r, 'carrierBarcode'),
+          carrierBarcodeFormat: getField(r, 'carrierBarcodeFormat').toLowerCase() === 'boiron' || Object.keys(r).some(key => ['code boiron', 'barcode boiron'].includes(normalize(key)) && String(r[key] || '').trim()) ? 'boiron' : 'generic',
           contactName: getField(r, 'contactName'),
           address: street,
           postalCode,
@@ -184,7 +188,7 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
           clientReference: getField(r, 'clientReference'),
           comment: getField(r, 'comment'),
           errors: Object.entries(originalCells[i] || {}).some(([key, value]) => HEADER_ALIASES.carrierBarcode.includes(normalize(key)) && typeof value === 'number')
-            ? ['Code Boiron numérique : reformatez la cellule en texte et recopiez les 22 chiffres depuis l’étiquette.'] : [],
+            ? ['Code transporteur numérique : utilisez une cellule texte et recopiez le code complet depuis l’étiquette.'] : Object.entries(originalCells[i] || {}).some(([key, value]) => HEADER_ALIASES.colisNumber.includes(normalize(key)) && typeof value === 'number') ? ['Numéro de colis numérique : utilisez une cellule texte pour préserver les zéros initiaux.'] : [],
         };
       });
 
@@ -194,20 +198,20 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
       for (const p of parsed) {
         const key = p.colisNumber.trim().toUpperCase();
         if (key) counts.set(key, (counts.get(key) || 0) + 1);
-        if (p.carrierBarcode) carrierCounts.set(p.carrierBarcode, (carrierCounts.get(p.carrierBarcode) || 0) + 1);
+        if (p.carrierBarcode) carrierCounts.set(p.carrierBarcode.toUpperCase(), (carrierCounts.get(p.carrierBarcode.toUpperCase()) || 0) + 1);
       }
 
       // 2e passage : contrôle qualité, une liste d'erreurs par ligne
       for (const p of parsed) {
-        if (p.carrierBarcode && (!/^00\d{20}$/.test(p.carrierBarcode) || p.carrierBarcode.slice(2, 10) !== p.clientReference.trim())) p.errors.push('Code Boiron invalide ou différent de la référence de commande');
-        if (p.carrierBarcode && (carrierCounts.get(p.carrierBarcode) || 0) > 1) p.errors.push('Code Boiron attribué à plusieurs lignes');
+        const carrierError = carrierBarcodeError(p.carrierBarcode, p.clientReference, p.carrierBarcodeFormat);
+        if (carrierError) p.errors.push(carrierError);
+        if (p.carrierBarcode && (carrierCounts.get(p.carrierBarcode.toUpperCase()) || 0) > 1) p.errors.push('Code transporteur attribué à plusieurs lignes');
         const num = p.colisNumber.trim();
         if (!num) {
           p.errors.push('Numéro de colis manquant');
         } else {
-          if (!num.toUpperCase().startsWith('BR')) {
-            p.errors.push('Numéro de colis invalide (doit commencer par BR)');
-          }
+          const referenceError = individualReferenceError(num);
+          if (referenceError) p.errors.push(referenceError);
           if ((counts.get(num.toUpperCase()) || 0) > 1) {
             p.errors.push('Numéro de colis en double dans le fichier');
           }
@@ -274,7 +278,7 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
     const worksheet = XLSX.utils.json_to_sheet(rejected.map(row => ({
       'Numéro de colis': row.colisNumber, Destinataire: row.contactName, Adresse: row.address,
       'Code postal': row.postalCode, Ville: row.city, Téléphone: row.contactPhone, Email: row.contactEmail,
-      'Poids (kg)': row.weight, Référence: row.clientReference, 'Code Boiron': row.carrierBarcode, Remarque: row.comment,
+      'Poids (kg)': row.weight, Référence: row.clientReference, 'Code transporteur': row.carrierBarcode, 'Format transporteur': row.carrierBarcodeFormat, Remarque: row.comment,
       'Ligne source': row.line, Motif: row.errors.join(' ; ') || 'Import non confirmé : reprendre la même référence pour vérifier sans doublon',
     })));
     const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, worksheet, 'Lignes à vérifier');
@@ -363,7 +367,7 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
           <>
             <p className="text-sm text-slate-600 mb-3">
               Importez votre fichier (Excel/CSV). Une ligne = un colis. Les colonnes sont{' '}
-              <b>détectées automatiquement</b> : numéro de colis (BR…), destinataire, adresse
+              <b>détectées automatiquement</b> : numéro individuel du colis, destinataire, adresse
               (le code postal et la ville sont reconnus même s'ils sont dans la même case),
               téléphone, et si présents e-mail, poids, référence, remarque. Pas besoin de reformater
               votre fichier habituel.
@@ -389,7 +393,7 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
               <Download size={16} /> Télécharger le fichier modèle
             </button>
             <p className="text-sm text-slate-600 text-center mt-1">
-              Remplissez le modèle avec vos expéditions, puis importez-le. Chaque numéro de colis doit commencer par BR.
+              Remplissez le modèle avec vos expéditions, puis importez-le. Chaque carton doit avoir un numéro individuel unique, conservé dans une cellule texte (ex. BR1148, EXP-A/0042 ou 000012345678).
               Pour Boiron, ajoutez le code de chaque carton dans la colonne « Code Boiron », au format texte pour conserver les 22 chiffres.
             </p>
           </>
@@ -443,7 +447,7 @@ const ImportShipmentsModal: React.FC<ImportShipmentsModalProps> = ({ currentUser
             <div className="sm:max-h-72 sm:overflow-y-auto border-t border-slate-200 divide-y mb-3">
               {visibleRows.map(row => <div key={row.line} className={`p-3 text-sm ${row.errors.length ? 'bg-red-50 text-red-900' : 'text-slate-700'}`}>
                 <p className="font-semibold break-words">Ligne {row.line} · {row.colisNumber || '(sans numéro)'} · {row.contactName || '(sans destinataire)'}</p>
-                {row.carrierBarcode && <p className="break-all">Code Boiron : {row.carrierBarcode} · Commande : {row.clientReference}</p>}
+                {row.carrierBarcode && <p className="break-all">Code transporteur : {row.carrierBarcode} · Commande : {row.clientReference}</p>}
                 {row.errors.length ? <ul className="mt-1 list-disc pl-5">{row.errors.map(message => <li key={message}>{message}</li>)}</ul> : <p>{confirmed.has(row.line) ? 'Confirmé : enregistré' : attempted ? 'Non confirmé' : 'Prêt à importer'} · {row.city}</p>}
               </div>)}
               {visibleRows.length === 0 && <p className="p-3 text-sm text-slate-600">Aucune ligne en erreur.</p>}

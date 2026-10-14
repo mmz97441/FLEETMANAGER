@@ -48,6 +48,9 @@ const CreateShipmentModal: React.FC<CreateShipmentModalProps> = ({ currentUser, 
   const [weight, setWeight] = useState(initialRequest?.weight == null ? '' : String(initialRequest.weight));
   const [comment, setComment] = useState(initialRequest?.comment || '');
   const [clientReference, setClientReference] = useState(initialRequest?.clientReference || '');
+  const [requestedDeliveryDate, setRequestedDeliveryDate] = useState(initialRequest?.requestedDeliveryDate || '');
+  const [timeWindowStart, setTimeWindowStart] = useState(initialRequest?.timeWindowStart || '');
+  const [timeWindowEnd, setTimeWindowEnd] = useState(initialRequest?.timeWindowEnd || '');
   const [format, setFormat] = useState<LabelFormat>('A6');
   const [linkedId, setLinkedId] = useState<string | null>(null);
   const [showBook, setShowBook] = useState(false);
@@ -76,7 +79,7 @@ const CreateShipmentModal: React.FC<CreateShipmentModalProps> = ({ currentUser, 
     const q = contactName.trim().toLocaleLowerCase('fr');
     return deliveryBook.filter(a => !q || [a.contactName, a.label, a.address, a.city].some(value => value?.toLocaleLowerCase('fr').includes(q))).slice(0, showBook ? 100 : 5);
   }, [contactName, deliveryBook, showBook]);
-  const dirty = !created && Boolean(contactName || address || postalCode || city || contactPhone || contactEmail || weight || comment || clientReference || packageCount !== 1);
+  const dirty = !created && Boolean(contactName || address || postalCode || city || contactPhone || contactEmail || weight || comment || clientReference || requestedDeliveryDate || timeWindowStart || timeWindowEnd || packageCount !== 1);
 
   const pickAddress = (a: SavedAddress) => {
     const split = splitCity(a.city);
@@ -100,7 +103,7 @@ const CreateShipmentModal: React.FC<CreateShipmentModalProps> = ({ currentUser, 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (submitting.current || created || access.readOnly) return;
-    const errors = validateClientShipment({ contactName, address, postalCode, city, contactPhone, contactEmail, packageCount, weight });
+    const errors = validateClientShipment({ contactName, address, postalCode, city, contactPhone, contactEmail, packageCount, weight, requestedDeliveryDate, timeWindowStart, timeWindowEnd }, requestLocked ? undefined : new Intl.DateTimeFormat('en-CA', { timeZone: 'Indian/Reunion', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()));
     setFieldErrors(errors); setError('');
     const first = Object.keys(errors)[0];
     if (first) {
@@ -124,6 +127,7 @@ const CreateShipmentModal: React.FC<CreateShipmentModalProps> = ({ currentUser, 
         requestId: requestId.current,
         client: { id: currentUser.id, companyName: currentUser.companyName || `${currentUser.firstName} ${currentUser.lastName}` },
         recipient: { contactName: contactName.trim(), address: address.trim(), city: city.trim(), postalCode: cp, contactPhone: contactPhone.trim(), contactEmail: contactEmail.trim() || undefined },
+        requestedDeliveryDate: requestedDeliveryDate || undefined, timeWindowStart: timeWindowStart || undefined, timeWindowEnd: timeWindowEnd || undefined,
         zone, packageCount, weight: weight ? Number(weight) : undefined, comment: comment.trim() || undefined, clientReference: clientReference.trim() || undefined,
       };
       setRequestLocked(true);
@@ -191,6 +195,7 @@ const CreateShipmentModal: React.FC<CreateShipmentModalProps> = ({ currentUser, 
             <p className="text-lg font-semibold text-slate-900 flex items-center gap-2"><Check size={22} aria-hidden="true" className="text-emerald-700 shrink-0" />{created.length} colis enregistré{created.length > 1 ? 's' : ''}</p>
             <p className="text-base font-medium text-slate-800 break-words">{contactName}</p>
             <p className="text-sm text-slate-600 break-words">{address}, {postalCode} {city}</p>
+            {requestedDeliveryDate && <p className="text-sm text-slate-700">Livraison souhaitée : {requestedDeliveryDate} {timeWindowStart}{timeWindowEnd ? ` – ${timeWindowEnd}` : ''}</p>}
             <p className="text-sm text-slate-700">En attente de collecte. Préparez vos étiquettes maintenant ou retrouvez-les dans Mes colis.</p>
           </div>
           {busy && <p role="status" className="text-sm text-slate-700">Enregistrement du destinataire dans le carnet…</p>}
@@ -238,6 +243,14 @@ const CreateShipmentModal: React.FC<CreateShipmentModalProps> = ({ currentUser, 
           <fieldset disabled={busy || requestLocked || access.readOnly} className="border-t border-slate-200 pt-3">
             <legend className="pr-2 font-semibold text-base text-slate-900">2. Colis</legend>
             <FormInput id="shipment-packageCount" label="Nombre de colis" required type="number" min={1} max={50} step={1} inputMode="numeric" value={packageCount || ''} onChange={e => setPackageCount(Number(e.target.value))} error={fieldErrors.packageCount} />
+          </fieldset>
+          <fieldset disabled={busy || requestLocked || access.readOnly} className="border-t border-slate-200 pt-3 space-y-3">
+            <legend className="pr-2 font-semibold text-base text-slate-900">Livraison souhaitée</legend>
+            <FormInput id="shipment-requestedDeliveryDate" label="Jour de livraison (facultatif)" type="date" value={requestedDeliveryDate} onChange={e => setRequestedDeliveryDate(e.target.value)} error={fieldErrors.requestedDeliveryDate} />
+            <div className="grid sm:grid-cols-2 gap-3">
+              <FormInput id="shipment-timeWindowStart" label="À partir de (heure de La Réunion)" type="time" value={timeWindowStart} onChange={e => setTimeWindowStart(e.target.value)} error={fieldErrors.timeWindowStart} />
+              <FormInput id="shipment-timeWindowEnd" label="Avant (heure de La Réunion)" type="time" value={timeWindowEnd} onChange={e => setTimeWindowEnd(e.target.value)} error={fieldErrors.timeWindowEnd} />
+            </div>
           </fieldset>
           <details open={optionsOpen} onToggle={event => setOptionsOpen(event.currentTarget.open)} className="border-t border-slate-200 pt-3">
             <summary className="min-h-11 cursor-pointer font-bold text-base text-slate-900">3. Options (facultatif)</summary>

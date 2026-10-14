@@ -13,12 +13,12 @@ const p1 = prefix + '-one', p2 = prefix + '-two';
 let passed = 0;
 const check = async (name, f) => { await f(); passed++; console.log('PASS', name); };
 const denied = (p, code) => assert.rejects(p, e => e.code === code);
-const associate = (packageId, value = code, who = manager) => service.associateCarrierBarcode.run({ packageId, code: value, verified: true }, ctx(who));
+const associate = (packageId, value = code, who = manager) => service.associateCarrierBarcode.run({ packageId, code: value, verified: true, carrierBarcodeFormat: 'boiron' }, ctx(who));
 (async () => {
   await db.collection('users').doc(manager).set({ role: 'Secrétaire', firstName: 'Test' });
   await db.collection('users').doc(driver).set({ role: 'Chauffeur', firstName: 'Test' });
   await db.collection('users').doc(client).set({ role: 'Client', companyName: 'Fictif' });
-  for (const [id, br] of [[p1, 'BR-TEST-A'], [p2, 'BR-TEST-B']]) await db.collection('packages').doc(id).set({ externalId: br + prefix, barcode: br + prefix, clientId: client, clientReference: order, contactName: 'Fictif', address: 'Adresse fictive', status: 'En attente', movements: [] });
+  for (const [id, br] of [[p1, 'BR-TEST-A'], [p2, 'BR-TEST-B']]) await db.collection('packages').doc(id).set({ externalId: br + prefix, barcode: br + prefix, clientId: client, clientReference: order, contactName: 'Fictif', address: 'Adresse fictive', city: 'Saint-Denis', postalCode: '97400', status: 'En attente', movements: [] });
   await check('only office can associate labels and both labels must be physically verified', async () => {
     await denied(associate(p1, code, driver), 'permission-denied');
     await denied(service.associateCarrierBarcode.run({ packageId: p1, code }, ctx(manager)), 'invalid-argument');
@@ -49,7 +49,7 @@ const associate = (packageId, value = code, who = manager) => service.associateC
     assert.equal(outcomes.filter(x => x.status === 'rejected' && x.reason.code === 'already-exists').length, 1);
   });
   const importedCode = '0099887765300123450101';
-  const row = n => ({ clientId: client, externalId: prefix + '-import-' + n, orderNumber: prefix + '-import-' + n, barcode: prefix + '-import-' + n, contactName: 'Fictif', address: 'Adresse fictive', status: 'En attente', packageIndex: 1, clientReference: '99887765', carrierBarcode: importedCode });
+  const row = n => ({ clientId: client, externalId: prefix + '-import-' + n, orderNumber: prefix + '-import-' + n, barcode: prefix + '-import-' + n, contactName: 'Fictif', address: 'Adresse fictive', city: 'Saint-Denis', postalCode: '97400', status: 'En attente', packageIndex: 1, clientReference: '99887765', carrierBarcode: importedCode, carrierBarcodeFormat: 'boiron' });
   await check('import keeps a native label as text and replay preserves the same association', async () => {
     const one = await service.importPackages.run({ packages: [row(1)] }, ctx(client));
     const two = await service.importPackages.run({ packages: [row(1)] }, ctx(client));

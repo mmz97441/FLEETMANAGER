@@ -9,8 +9,9 @@ import { Package, PackageStatus } from '../types';
 import {
   computeClientMetrics,
   filterPackages,
-  ClientMetricsWithTrend,
+  ClientMetricsWithTrend, metricsRange,
 } from './clientMetrics';
+import { outcomeEventsInRange } from './logisticsMetrics';
 
 // ----------------------------------------------------------------------------
 // Types exportés
@@ -112,7 +113,7 @@ export function getClientInsights(packages: Package[]): Insight[] {
   const { previous } = metrics;
 
   // Cas: aucune donnée exploitable sur la période.
-  if (metrics.total === 0) {
+  if (metrics.total === 0 && metrics.resolved === 0) {
     return [
       {
         id: 'no-data',
@@ -125,7 +126,7 @@ export function getClientInsights(packages: Package[]): Insight[] {
 
   // Liste filtrée (même fenêtre que les métriques) pour les analyses
   // par dimension que le moteur de métriques n'expose pas.
-  const filtered = filterPackages(list, { period: '30d' });
+  const filtered = outcomeEventsInRange(list, metricsRange('30d')).map(event => ({ ...event.package, status: event.outcome === 'SUCCESS' ? PackageStatus.DELIVERED : PackageStatus.FAILED }));
 
   const insights: Insight[] = [];
 
@@ -152,11 +153,11 @@ export function getClientInsights(packages: Package[]): Insight[] {
   }
 
   // --- Règle 2 : Taux de livraison sous l'objectif ---
-  if (metrics.deliveryRate < 90) {
+  if (metrics.resolved > 0 && metrics.deliveryRate < 90) {
     insights.push({
       id: 'delivery-rate-low',
       kind: 'warning',
-      title: "Taux de livraison sous l'objectif",
+      title: "Succès des tentatives sous l'objectif",
       detail: `${round0(metrics.deliveryRate)}% (objectif 95%)`,
     });
   }

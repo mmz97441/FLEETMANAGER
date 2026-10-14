@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 const fixture = vi.hoisted(() => {
   process.env.GCLOUD_PROJECT = 'demo-fleet-production-audit';
   process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8189';
+  process.env.FIREBASE_STORAGE_EMULATOR_HOST = '127.0.0.1:9199';
   const prefix = `e2e-delivery-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   return { prefix, driver: `${prefix}-driver`, admin: `${prefix}-admin`, hub: `${prefix}-hub`,
     delivered: `${prefix}-delivered`, failed: `${prefix}-failed` };
@@ -17,18 +18,18 @@ vi.mock('../../src/firebaseConfig', async () => {
     storage: { host: '127.0.0.1', port: 9199 },
   });
   const context = testEnv.authenticatedContext(fixture.driver);
-  return { db: context.firestore(), storage: context.storage(), testEnv,
+  return { db: context.firestore(), storage: context.storage('gs://demo-fleet-production-audit.appspot.com'), testEnv,
     auth: { currentUser: { uid: fixture.driver } }, default: {} };
 });
 
 vi.mock('firebase/functions', () => ({
   getFunctions: () => ({}),
   httpsCallable: (_functions: unknown, name: string) => async (data: unknown) => {
-    if (name !== 'finishMission') throw new Error(`Unexpected callable in this lifecycle test: ${name}`);
+    if (!['finishMission', 'commitDeliveryOutcome', 'publishDeliveryProof'].includes(name)) throw new Error(`Unexpected callable in this lifecycle test: ${name}`);
     const { createRequire } = await import('node:module');
     const require = createRequire(import.meta.url);
     const service = require('../../functions/lib/index.js');
-    return { data: await service.finishMission.run(data, {
+    return { data: await service[name].run(data, {
       auth: { uid: fixture.driver, token: { email_verified: true } },
     }) };
   },
@@ -72,6 +73,7 @@ afterEach(() => vi.unstubAllGlobals());
 afterAll(async () => {
   const paths = [`users/${fixture.admin}`, `users/${fixture.driver}`, `hubs/${fixture.hub}`,
     ...parcelIds.map(id => `packages/${id}`)];
+  paths.push(`logistics_operations/return_${fixture.prefix}-return`);
   if (missionId) paths.push(`missions/${missionId}`, `proofs_of_delivery/${missionId}_stop`, `notifications/dispatch-${missionId}`);
   await Promise.all(paths.map(path => adminDb.doc(path).delete()));
   await env.cleanup();
@@ -84,7 +86,7 @@ it('dispatches sorted parcels, starts under driver rules, blocks closure until p
     adminDb.collection('users').doc(fixture.driver).set({ id: fixture.driver, role: 'Chauffeur', status: 'active', firstName: 'Test', lastName: 'Chauffeur' }),
     adminDb.collection('hubs').doc(fixture.hub).set({ name: 'Hub fictif', isActive: true }),
     ...parcelIds.map(id => adminDb.collection('packages').doc(id).set({
-      status: 'Trié', address: '28 rue Joseph Bédier', city: 'Saint-Denis', postalCode: '97400',
+      status: 'Trié', currentHubId: fixture.hub, contactName: 'Destinataire fictif', address: '28 rue Joseph Bédier', city: 'Saint-Denis', postalCode: '97400',
       clientId: `${fixture.prefix}-client`, movements: [],
     })),
   ]);
@@ -119,7 +121,7 @@ it('dispatches sorted parcels, starts under driver rules, blocks closure until p
     stopPatch: { status: StopStatus.COMPLETED, completionTime: '2026-09-12T04:35:00Z', arrivalCoordinates: location },
     packageOutcomes: [
       { packageId: fixture.delivered, status: PackageStatus.DELIVERED, movement: { action: 'DELIVERED' as const, driverId: fixture.driver } },
-      { packageId: fixture.failed, status: PackageStatus.FAILED, movement: { action: 'FAILED' as const, driverId: fixture.driver, notes: 'Colis déclaré non remis' } },
+      { packageId: fixture.failed, status: PackageStatus.FAILED, failureReason: 'Autre', failureNotes: 'Colis déclaré non remis', movement: { action: 'FAILED' as const, driverId: fixture.driver, notes: 'Colis déclaré non remis' } },
     ],
   };
   await commitStopOutcome(outcome);
@@ -141,13 +143,20 @@ it('dispatches sorted parcels, starts under driver rules, blocks closure until p
   expect(proof).not.toBeNull();
   expect(proof?.signatureUrl).toMatch(/^https:/);
   expect((await getDoc(missionRef)).data()?.stops[0].proofSyncPending).toBe(false);
-  expect((await getDoc(doc(config.db, 'packages', fixture.delivered))).data()?.pod.packageIds).toEqual([fixture.delivered]);
+  expect((await getDoc(doc(config.db, 'packages', fixture.delivered))).data()?.pod.packageIds).toBeUndefined();
   expect((await getDoc(doc(config.db, 'packages', fixture.failed))).data()?.pod).toBeUndefined();
+  expect((await getDoc(doc(config.db, 'packages', fixture.failed))).data()?.failurePod).toMatchObject({ type: 'FAILURE', failureReason: 'Autre' });
+  expect((await getDoc(doc(config.db, 'packages', fixture.failed))).data()?.deliveryAttempts[0]).toMatchObject({ outcome: 'FAILURE', recordedAt: '2026-09-12T04:35:00Z' });
 
+  await expect(updateMissionStatus(missionId!, MissionStatus.COMPLETED)).rejects.toMatchObject({ code: 'failed-precondition' });
+  const returnRequest = `${fixture.prefix}-return`;
+  await server.returnPackage.run({ packageId: fixture.failed, requestId: returnRequest, expectedMissionId: missionId,
+    extra: { returnProof: { hubId: fixture.hub, timestamp: '2026-09-12T06:00:00Z', photoUrls: [`https://firebasestorage.googleapis.com/v0/b/demo-fleet-production-audit.appspot.com/o/${encodeURIComponent(`pod/returns/${fixture.failed}/return.jpg`)}?token=test`] } },
+  }, context(fixture.driver));
   await updateMissionStatus(missionId!, MissionStatus.COMPLETED);
   const closed = (await getDoc(missionRef)).data()!;
   expect(closed).toMatchObject({ status: MissionStatus.COMPLETED, deliveredPackages: 1, failedPackages: 1, totalPackages: 2 });
-  expect((await getDoc(doc(config.db, 'packages', fixture.failed))).data()?.status).toBe(PackageStatus.FAILED);
+  expect((await getDoc(doc(config.db, 'packages', fixture.failed))).data()?.status).toBe(PackageStatus.AT_HUB);
   await commitStopOutcome(outcome);
   await updateMissionStatus(missionId!, MissionStatus.COMPLETED);
   expect((await getDoc(missionRef)).data()).toMatchObject({ completedAt: closed.completedAt, deliveredPackages: 1, failedPackages: 1 });

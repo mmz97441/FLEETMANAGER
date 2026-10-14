@@ -17,7 +17,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line
 } from 'recharts';
-import { localDatePart } from '../utils/date';
+import { logisticsDay as localDatePart, summarizeLogistics, successRate, logisticsDateRange } from '../services/logisticsMetrics';
 import { formatDistance } from '../utils/format';
 import {
   TrendingUp, Package as PackageIcon, Truck,
@@ -52,33 +52,7 @@ interface MissionKPIsProps {
 // HELPERS
 // ============================================================================
 
-const getDateRange = (selectedDate: string, period: Period): { start: string; end: string } => {
-  const date = new Date(selectedDate);
-
-  if (period === 'today') {
-    return { start: selectedDate, end: selectedDate };
-  }
-
-  if (period === 'week') {
-    const dayOfWeek = date.getDay();
-    const monday = new Date(date);
-    monday.setDate(date.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
-    const sunday = new Date(monday);
-    sunday.setDate(monday.getDate() + 6);
-    return {
-      start: localDatePart(monday),
-      end: localDatePart(sunday)
-    };
-  }
-
-  // month
-  const firstDay = new Date(date.getFullYear(), date.getMonth(), 1);
-  const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0);
-  return {
-    start: localDatePart(firstDay),
-    end: localDatePart(lastDay)
-  };
-};
+const getDateRange = (selectedDate: string, period: Period) => logisticsDateRange(selectedDate, period);
 
 const isInRange = (dateStr: string, start: string, end: string) =>
   dateStr >= start && dateStr <= end;
@@ -105,14 +79,8 @@ const MissionKPIs: React.FC<MissionKPIsProps> = ({
     [missions, dateRange]
   );
 
-  // Packages de la période (via createdAt ou updatedAt)
-  const periodPackages = useMemo(() =>
-    packages.filter(p =>
-      isInRange(localDatePart(p.createdAt), dateRange.start, dateRange.end) ||
-      (p.updatedAt && isInRange(localDatePart(p.updatedAt), dateRange.start, dateRange.end))
-    ),
-    [packages, dateRange]
-  );
+  const activity = useMemo(() => summarizeLogistics(packages, dateRange), [packages, dateRange]);
+  const periodPackages = activity.created;
 
   // ============================================================================
   // KPIs PRINCIPAUX
@@ -127,10 +95,10 @@ const MissionKPIs: React.FC<MissionKPIsProps> = ({
     // pas seulement ceux rattachés à une mission → le tableau reflète l'activité
     // même sans tournée créée (ex : colis importés du jour, en attente).
     const totalPkgs = periodPackages.length;
-    const deliveredPkgs = periodPackages.filter(p => p.status === PackageStatus.DELIVERED).length;
-    const failedPkgs = periodPackages.filter(p => p.status === PackageStatus.FAILED || p.status === PackageStatus.RETURNED).length;
+    const deliveredPkgs = activity.delivered;
+    const failedPkgs = activity.failed;
 
-    const deliveryRate = totalPkgs > 0 ? Math.round((deliveredPkgs / totalPkgs) * 100) : 0;
+    const deliveryRate = Math.round(activity.deliveryRate);
 
     const totalDistance = periodMissions.reduce((acc, m) => acc + (m.totalDistance || 0), 0);
     const totalDuration = periodMissions.reduce((acc, m) => acc + (m.estimatedDuration || 0), 0);
@@ -143,13 +111,8 @@ const MissionKPIs: React.FC<MissionKPIsProps> = ({
     const yesterday = new Date(selectedDate);
     yesterday.setDate(yesterday.getDate() - 1);
     const yesterdayStr = localDatePart(yesterday);
-    const yesterdayPackages = packages.filter(p =>
-      isInRange(localDatePart(p.createdAt), yesterdayStr, yesterdayStr) ||
-      (p.updatedAt && isInRange(localDatePart(p.updatedAt), yesterdayStr, yesterdayStr))
-    );
-    const yesterdayPkgs = yesterdayPackages.length;
-    const yesterdayDelivered = yesterdayPackages.filter(p => p.status === PackageStatus.DELIVERED).length;
-    const yesterdayRate = yesterdayPkgs > 0 ? Math.round((yesterdayDelivered / yesterdayPkgs) * 100) : 0;
+    const yesterdayActivity = summarizeLogistics(packages, { start: yesterdayStr, end: yesterdayStr });
+    const yesterdayRate = Math.round(yesterdayActivity.deliveryRate);
 
     const rateDelta = period === 'today' ? deliveryRate - yesterdayRate : 0;
 
@@ -160,14 +123,14 @@ const MissionKPIs: React.FC<MissionKPIsProps> = ({
       totalDistance: Math.round(totalDistance),
       avgTimePerDelivery
     };
-  }, [periodMissions, periodPackages, packages, selectedDate, period]);
+  }, [periodMissions, periodPackages, activity, packages, selectedDate, period]);
 
   // ============================================================================
   // PIPELINE COLIS (funnel opérationnel)
   // ============================================================================
 
   const pipeline = useMemo(() => {
-    const count = (s: PackageStatus) => periodPackages.filter(p => p.status === s).length;
+    const count = (s: PackageStatus) => packages.filter(p => p.status === s).length;
     const pending = count(PackageStatus.PENDING);
     const atHub = count(PackageStatus.AT_HUB);
     const sorted = count(PackageStatus.SORTED);
@@ -175,9 +138,9 @@ const MissionKPIs: React.FC<MissionKPIsProps> = ({
     const delivered = count(PackageStatus.DELIVERED);
     return {
       pending, atHub, sorted, inDelivery, delivered,
-      remaining: pending + atHub + sorted + inDelivery
+      remaining: activity.workInProgress
     };
-  }, [periodPackages]);
+  }, [packages, activity]);
 
   // ============================================================================
   // PERFORMANCE PAR CHAUFFEUR
@@ -214,12 +177,12 @@ const MissionKPIs: React.FC<MissionKPIsProps> = ({
 
     // Agrégation par CHAUFFEUR à partir des VRAIS colis de la période
     // (source de vérité unique = statuts colis, via currentDriverId).
-    for (const p of periodPackages) {
-      if (!p.currentDriverId) continue;
-      const entry = ensure(p.currentDriverId, resolveDriverName(p.currentDriverId, p));
+    for (const event of activity.events) {
+      if (!event.driverId) continue;
+      const entry = ensure(event.driverId, resolveDriverName(event.driverId, event.package));
       entry.total++;
-      if (p.status === PackageStatus.DELIVERED) entry.delivered++;
-      else if (p.status === PackageStatus.FAILED || p.status === PackageStatus.RETURNED) entry.failed++;
+      if (event.outcome === 'SUCCESS') entry.delivered++;
+      else entry.failed++;
     }
 
     // Nombre de missions et km : basés sur periodMissions (compteur de tournées,
@@ -236,11 +199,11 @@ const MissionKPIs: React.FC<MissionKPIsProps> = ({
     return Array.from(driverMap.values())
       .map(d => ({
         ...d,
-        rate: d.total > 0 ? Math.round((d.delivered / d.total) * 100) : 0,
+        rate: Math.round(successRate(d.delivered, d.failed)),
         distance: Math.round(d.distance)
       }))
       .sort((a, b) => b.delivered - a.delivered);
-  }, [periodPackages, periodMissions, users]);
+  }, [activity, periodMissions, users]);
 
   // ============================================================================
   // PERFORMANCE PAR ZONE
@@ -249,16 +212,16 @@ const MissionKPIs: React.FC<MissionKPIsProps> = ({
   const zonePerformance = useMemo(() =>
     [Zone.NORD, Zone.SUD, Zone.EST, Zone.OUEST].map(zone => {
       // Source de vérité unique = statuts colis (p.zone / p.status)
-      const zonePkgs = periodPackages.filter(p => p.zone === zone);
+      const zonePkgs = activity.events.filter(event => event.package.zone === zone);
       const total = zonePkgs.length;
-      const delivered = zonePkgs.filter(p => p.status === PackageStatus.DELIVERED).length;
-      const failed = zonePkgs.filter(p => p.status === PackageStatus.FAILED || p.status === PackageStatus.RETURNED).length;
-      const rate = total > 0 ? Math.round((delivered / total) * 100) : 0;
+      const delivered = zonePkgs.filter(event => event.outcome === 'SUCCESS').length;
+      const failed = zonePkgs.length - delivered;
+      const rate = Math.round(successRate(delivered, failed));
       const missions = periodMissions.filter(m => m.zone === zone).length;
 
       return { zone, missions, delivered, failed, total, rate };
     }).filter(z => z.total > 0),
-    [periodPackages, periodMissions]
+    [activity, periodMissions]
   );
 
   // ============================================================================
@@ -268,16 +231,17 @@ const MissionKPIs: React.FC<MissionKPIsProps> = ({
   const failureReasons = useMemo(() => {
     const reasons: Record<string, number> = {};
 
-    for (const pkg of periodPackages) {
-      if (pkg.status === PackageStatus.FAILED && pkg.failureReason) {
-        reasons[pkg.failureReason] = (reasons[pkg.failureReason] || 0) + 1;
+    for (const event of activity.events) {
+      if (event.outcome === 'FAILURE') {
+        const reason = event.reason || 'Motif historique non renseigné';
+        reasons[reason] = (reasons[reason] || 0) + 1;
       }
     }
 
     return Object.entries(reasons)
       .map(([reason, count]) => ({ reason, count }))
       .sort((a, b) => b.count - a.count);
-  }, [periodPackages]);
+  }, [activity]);
 
   // ============================================================================
   // GRAPHE HISTORIQUE 14 JOURS
@@ -285,6 +249,7 @@ const MissionKPIs: React.FC<MissionKPIsProps> = ({
 
   const dailyTrend = useMemo(() => {
     const days: { date: string; label: string; delivered: number; failed: number; total: number; rate: number }[] = [];
+    const byDay = new Map(summarizeLogistics(packages).byDay.map(day => [day.date, day]));
 
     // Basé sur les COLIS (disponibles sur toutes les dates), pas sur les missions
     // (qui ne sont chargées que pour le jour sélectionné). Par jour :
@@ -293,17 +258,12 @@ const MissionKPIs: React.FC<MissionKPIsProps> = ({
       (p.movements || []).some(m => actions.includes(m.action) && localDatePart(m.timestamp || '') === day);
 
     for (let i = 13; i >= 0; i--) {
-      const d = new Date(selectedDate);
-      d.setDate(d.getDate() - i);
+      const d = new Date(Date.parse(`${selectedDate}T12:00:00+04:00`) - i * 86400000);
       const dateStr = localDatePart(d);
       const dayLabel = d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
 
-      const total = packages.filter(p => localDatePart(p.createdAt || '') === dateStr).length;
-      const delivered = packages.filter(p => movedOn(p, dateStr, ['DELIVERED'])).length;
-      const failed = packages.filter(p => movedOn(p, dateStr, ['FAILED', 'RETURNED'])).length;
-      // delivered (mouvement DELIVERED ce jour) et total (colis créés ce jour)
-      // ne coïncident pas → on borne le taux affiché à 100 %.
-      const rate = total > 0 ? Math.min(100, Math.round((delivered / total) * 100)) : 0;
+      const { total, delivered, failed } = byDay.get(dateStr) || { total: 0, delivered: 0, failed: 0 };
+      const rate = Math.round(successRate(delivered, failed));
 
       days.push({ date: dateStr, label: dayLabel, delivered, failed, total, rate });
     }
@@ -438,6 +398,8 @@ const MissionKPIs: React.FC<MissionKPIsProps> = ({
       {/* ================= VUE D'ENSEMBLE ================= */}
       <section className="space-y-3">
         <SectionTitle>Vue d'ensemble — {periodLabel}</SectionTitle>
+        <p className="text-xs text-slate-500">Résultats par heure terrain à La Réunion. Succès ÷ (succès + échecs décidés), hors colis encore en cours.</p>
+        {activity.undatedOutcomes > 0 && <p className="text-xs text-amber-700">{activity.undatedOutcomes} résultat(s) historique(s) sans date fiable, exclus des périodes datées.</p>}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {/* Taux de livraison (hero, non filtrable) */}
           <div className="bg-gradient-to-br from-indigo-600 to-violet-600 rounded-xl p-4 text-white shadow-lg shadow-indigo-200">
@@ -452,7 +414,7 @@ const MissionKPIs: React.FC<MissionKPIsProps> = ({
               )}
             </div>
             <p className="text-3xl font-black">{mainKPIs.deliveryRate}%</p>
-            <p className="text-xs text-white/80 mt-0.5">Taux de livraison</p>
+            <p className="text-xs text-white/80 mt-0.5">Succès des tentatives</p>
           </div>
 
           {/* Livrés → drill DELIVERED */}
@@ -463,7 +425,7 @@ const MissionKPIs: React.FC<MissionKPIsProps> = ({
             value={formatNumber(mainKPIs.deliveredPkgs)}
             valueColor="text-green-600"
             label="Colis livrés"
-            hint={`sur ${formatNumber(mainKPIs.totalPkgs)} au total`}
+            hint={`${formatNumber(mainKPIs.deliveredPkgs + mainKPIs.failedPkgs)} tentatives décidées`}
             onClick={onDrillDown ? () => drill(PackageStatus.DELIVERED) : undefined}
           />
 
@@ -494,7 +456,7 @@ const MissionKPIs: React.FC<MissionKPIsProps> = ({
       {/* ================= PIPELINE COLIS ================= */}
       <section className="space-y-3">
         <div className="flex items-center justify-between">
-          <SectionTitle>Pipeline colis</SectionTitle>
+          <SectionTitle>Situation actuelle · toutes dates</SectionTitle>
           <span className="text-xs text-slate-400">
             {formatNumber(pipeline.remaining)} colis restant à livrer
           </span>
@@ -574,7 +536,7 @@ const MissionKPIs: React.FC<MissionKPIsProps> = ({
           {/* Taux */}
           <div className="bg-white rounded-xl border border-slate-200 p-6">
             <div className="flex items-baseline justify-between mb-4">
-              <h4 className="text-sm font-bold text-slate-800">Taux de livraison</h4>
+              <h4 className="text-sm font-bold text-slate-800">Succès des tentatives</h4>
               <span className="text-xs text-slate-400">Objectif : 95 %</span>
             </div>
             <ResponsiveContainer width="100%" height={240}>

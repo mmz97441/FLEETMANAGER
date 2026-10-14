@@ -16,6 +16,7 @@ async function seed() {
   await db.collection('users').doc('lifecycle-driver').set({ id: 'lifecycle-driver', role: 'Chauffeur' });
   await db.collection('users').doc('lifecycle-other').set({ id: 'lifecycle-other', role: 'Chauffeur' });
   await db.collection('users').doc('lifecycle-admin').set({ id: 'lifecycle-admin', role: 'Admin' });
+  await db.collection('packages').doc('lifecycle-missing').delete();
   await ref.set({ driverId: 'lifecycle-driver', status: 'En cours', totalPackages: 1,
     stops: [{ id: 'stop', type: 'DELIVERY', status: 'Terminé', packageIds: ['lifecycle-p'], proofSyncPending: false }] });
   await parcelRef.set({ status: 'Livré', missionId, currentDriverId: 'lifecycle-driver' });
@@ -67,18 +68,19 @@ const refused = async () => {
     await parcelRef.update({status: 'À retourner'});
     await proofRef.update({type: 'FAILURE'}); await refused();
   });
-  await check('failure with photo and explicitly unavailable GPS can close', async () => {
+  await check('failure with synchronized photo still requires physical return before closure', async () => {
     const m = (await ref.get()).data(); m.stops[0].status = 'Échec'; await ref.set(m);
     await parcelRef.update({ status: 'Échec' });
     await proofRef.set({ missionId, stopId: 'stop', driverId: 'lifecycle-driver', type: 'FAILURE',
       packageIds: ['lifecycle-p'], photoUrls: ['https://example.invalid/failure'], coordinates: null, locationStatus: 'unavailable' });
-    await close(); assert.equal((await ref.get()).data().status, 'Terminé');
+    await refused();
   });
-  await check('partial delivery closes without converting the failed parcel into delivered', async () => {
+  await check('partial delivery preserves the failed parcel and requires its physical return', async () => {
     const m = (await ref.get()).data(); m.stops[0].packageIds.push('lifecycle-missing'); await ref.set(m);
     const missing = db.collection('packages').doc('lifecycle-missing');
     await missing.set({ status: 'Échec', missionId, currentDriverId: 'lifecycle-driver' });
-    await close(); assert.equal((await missing.get()).data().status, 'Échec');
+    await refused(); assert.equal((await missing.get()).data().status, 'Échec');
+    await missing.delete();
   });
   await check('missing pickup parcels remain missing after valid manifest and closure', async () => {
     const m = (await ref.get()).data(); m.stops[0].type = 'PICKUP'; await ref.set(m);
@@ -86,6 +88,11 @@ const refused = async () => {
     await db.collection('pickups').doc(`${missionId}_stop`).set({ missionId, stopId: 'stop', driverId: 'lifecycle-driver',
       scannedPackageIds: [], missingPackageIds: ['lifecycle-p'] });
     await close(); assert.equal((await parcelRef.get()).data().status, 'En attente');
+  });
+  await check('a return whose stop was removed still prevents closure', async () => {
+    await ref.update({ stops: [] });
+    await parcelRef.update({ status: 'À retourner' });
+    await refused();
   });
   console.log(`${passed} mission lifecycle checks passed`);
   await db.terminate();

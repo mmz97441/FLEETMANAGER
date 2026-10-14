@@ -14,7 +14,8 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line, AreaChart, Area
 } from 'recharts';
-import { todayISO, localDatePart } from '../utils/date';
+import { logisticsDay as localDatePart, summarizeLogistics, successRate, outcomeEventsInRange, logisticsDateRange } from '../services/logisticsMetrics';
+const todayISO = () => localDatePart(new Date());
 import {
   TrendingUp, Package as PackageIcon, CheckCircle, XCircle,
   Clock, MapPin, AlertTriangle, ArrowUp, ArrowDown, Minus,
@@ -41,33 +42,7 @@ interface ClientKPIsProps {
 // HELPERS
 // ============================================================================
 
-const getDateRange = (period: Period): { start: string; end: string } => {
-  const now = new Date();
-  const today = localDatePart(now);
-  
-  if (period === 'today') {
-    return { start: today, end: today };
-  }
-  
-  if (period === 'week') {
-    const dayOfWeek = now.getDay();
-    const monday = new Date(now);
-    monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
-    const sunday = new Date(monday);
-    sunday.setDate(monday.getDate() + 6);
-    return {
-      start: localDatePart(monday),
-      end: localDatePart(sunday)
-    };
-  }
-  
-  const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-  return {
-    start: localDatePart(firstDay),
-    end: localDatePart(lastDay)
-  };
-};
+const getDateRange = (period: Period) => logisticsDateRange(localDatePart(new Date()), period);
 
 const isInRange = (dateStr: string, start: string, end: string) => 
   dateStr >= start && dateStr <= end;
@@ -116,22 +91,12 @@ const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages, clientName = 'Client'
   // PIPELINE — Statut actuel de TOUS les colis actifs
   // ============================================================================
 
-  const pipeline = useMemo(() => {
-    // Tout est calculé sur la période sélectionnée (défaut : aujourd'hui)
-    const pending = periodPackages.filter(p => p.status === PackageStatus.PENDING).length;
-    const inTransit = periodPackages.filter(p =>
-      [PackageStatus.COLLECTED, PackageStatus.AT_HUB, PackageStatus.SORTED,
-       PackageStatus.LOADED, PackageStatus.IN_TRANSIT, PackageStatus.IN_DELIVERY
-      ].includes(p.status)
-    ).length;
-    const delivered = periodPackages.filter(p => p.status === PackageStatus.DELIVERED).length;
-    const failed = periodPackages.filter(p =>
-      p.status === PackageStatus.FAILED || p.status === PackageStatus.RETURNED
-    ).length;
-    const total = periodPackages.length;
-
-    return { pending, inTransit, delivered, failed, total };
-  }, [periodPackages]);
+  const metrics = useMemo(() => summarizeLogistics(packages, dateRange), [packages, dateRange]);
+  const pipeline = useMemo(() => ({
+    pending: metrics.pending,
+    inTransit: Math.max(0, metrics.workInProgress - metrics.pending),
+    delivered: metrics.delivered, failed: metrics.failed, total: metrics.total,
+  }), [metrics]);
 
   // ============================================================================
   // TAUX DE LIVRAISON
@@ -145,15 +110,12 @@ const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages, clientName = 'Client'
   // Comparaison veille
   const yesterdayRate = useMemo(() => {
     if (preset !== 'today') return null;
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yStr = localDatePart(yesterday);
-    const yPkgs = packages.filter(p => localDatePart(p.createdAt) === yStr);
-    const yDelivered = yPkgs.filter(p => p.status === PackageStatus.DELIVERED).length;
-    const yFailed = yPkgs.filter(p => p.status === PackageStatus.FAILED || p.status === PackageStatus.RETURNED).length;
-    const yResolved = yDelivered + yFailed;
-    return yResolved > 0 ? Math.round((yDelivered / yResolved) * 100) : null;
-  }, [packages, preset]);
+    const yesterday = new Date(`${today}T00:00:00+04:00`);
+    yesterday.setTime(yesterday.getTime() - 86400000);
+    const day = localDatePart(yesterday);
+    const previous = summarizeLogistics(packages, { start: day, end: day });
+    return previous.resolved ? Math.round(previous.deliveryRate) : null;
+  }, [packages, preset, today]);
 
   const rateDelta = yesterdayRate !== null ? deliveryRate - yesterdayRate : 0;
 
@@ -163,20 +125,20 @@ const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages, clientName = 'Client'
 
   const dailyTrend = useMemo(() => {
     const days: { label: string; envoyés: number; livrés: number; échecs: number }[] = [];
+    const byDay = new Map(summarizeLogistics(packages).byDay.map(day => [day.date, day]));
     
     for (let i = 13; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
+      const d = new Date(Date.parse(`${today}T12:00:00+04:00`) - i * 86400000);
       const dateStr = localDatePart(d);
       const dayLabel = d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
       
-      const dayPkgs = packages.filter(p => localDatePart(p.createdAt) === dateStr);
+      const dayMetrics = byDay.get(dateStr) || { total: 0, delivered: 0, failed: 0 };
       
       days.push({
         label: dayLabel,
-        envoyés: dayPkgs.length,
-        livrés: dayPkgs.filter(p => p.status === PackageStatus.DELIVERED).length,
-        échecs: dayPkgs.filter(p => p.status === PackageStatus.FAILED || p.status === PackageStatus.RETURNED).length
+        envoyés: dayMetrics.total,
+        livrés: dayMetrics.delivered,
+        échecs: dayMetrics.failed
       });
     }
     
@@ -190,16 +152,17 @@ const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages, clientName = 'Client'
   const failureReasons = useMemo(() => {
     const reasons: Record<string, number> = {};
     
-    for (const pkg of periodPackages) {
-      if ((pkg.status === PackageStatus.FAILED || pkg.status === PackageStatus.RETURNED) && pkg.failureReason) {
-        reasons[pkg.failureReason] = (reasons[pkg.failureReason] || 0) + 1;
+    for (const event of metrics.events) {
+      if (event.outcome === 'FAILURE') {
+        const reason = event.reason || 'Motif historique non renseigné';
+        reasons[reason] = (reasons[reason] || 0) + 1;
       }
     }
 
     return Object.entries(reasons)
       .map(([reason, count]) => ({ reason, count }))
       .sort((a, b) => b.count - a.count);
-  }, [periodPackages]);
+  }, [metrics]);
 
   // ============================================================================
   // TOP DESTINATIONS
@@ -208,19 +171,19 @@ const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages, clientName = 'Client'
   const topDestinations = useMemo(() => {
     const cities: Record<string, { total: number; delivered: number; failed: number }> = {};
     
-    for (const pkg of periodPackages) {
-      const city = pkg.city || 'Inconnu';
+    for (const event of metrics.events) {
+      const city = event.package.city || 'Inconnu';
       if (!cities[city]) cities[city] = { total: 0, delivered: 0, failed: 0 };
       cities[city].total++;
-      if (pkg.status === PackageStatus.DELIVERED) cities[city].delivered++;
-      if (pkg.status === PackageStatus.FAILED || pkg.status === PackageStatus.RETURNED) cities[city].failed++;
+      if (event.outcome === 'SUCCESS') cities[city].delivered++;
+      else cities[city].failed++;
     }
 
     return Object.entries(cities)
-      .map(([city, data]) => ({ city, ...data, rate: data.total > 0 ? Math.round((data.delivered / data.total) * 100) : 0 }))
+      .map(([city, data]) => ({ city, ...data, rate: Math.round(successRate(data.delivered, data.failed)) }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 8);
-  }, [periodPackages]);
+  }, [metrics]);
 
   // ============================================================================
   // PAR ZONE
@@ -228,12 +191,12 @@ const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages, clientName = 'Client'
 
   const zoneData = useMemo(() => 
     [Zone.NORD, Zone.SUD, Zone.EST, Zone.OUEST].map(zone => {
-      const zonePkgs = periodPackages.filter(p => p.zone === zone);
-      const delivered = zonePkgs.filter(p => p.status === PackageStatus.DELIVERED).length;
-      const failed = zonePkgs.filter(p => p.status === PackageStatus.FAILED || p.status === PackageStatus.RETURNED).length;
+      const zonePkgs = metrics.events.filter(event => event.package.zone === zone);
+      const delivered = zonePkgs.filter(event => event.outcome === 'SUCCESS').length;
+      const failed = zonePkgs.length - delivered;
       return { zone, total: zonePkgs.length, delivered, failed };
     }).filter(z => z.total > 0),
-    [periodPackages]
+    [metrics]
   );
 
   // ============================================================================
@@ -306,16 +269,16 @@ const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages, clientName = 'Client'
         {/* Boutons d'export — rapport de la période sélectionnée */}
         <div className="ml-auto flex items-center gap-2">
           <button
-            onClick={() => exportReportExcel(periodPackages, clientName, periodLabel)}
-            disabled={periodPackages.length === 0}
+            onClick={() => exportReportExcel(packages, clientName, periodLabel, dateRange)}
+            disabled={metrics.total + metrics.resolved === 0}
             title="Exporter le rapport en Excel"
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-bold bg-green-600 text-white hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             <FileSpreadsheet size={16} /> Excel
           </button>
           <button
-            onClick={() => printReportPDF(periodPackages, clientName, periodLabel)}
-            disabled={periodPackages.length === 0}
+            onClick={() => printReportPDF(packages, clientName, periodLabel, dateRange)}
+            disabled={metrics.total + metrics.resolved === 0}
             title="Rapport imprimable / PDF"
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-bold bg-slate-800 text-white hover:bg-slate-900 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
@@ -324,6 +287,8 @@ const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages, clientName = 'Client'
         </div>
       </div>
 
+      <p className="text-xs text-slate-500">Créations et tentatives sur la période, datées à La Réunion. Les colis à traiter incluent les jours précédents.</p>
+      {metrics.undatedOutcomes > 0 && <p className="text-xs text-amber-700">{metrics.undatedOutcomes} résultat(s) historique(s) sans date fiable, exclus des périodes datées.</p>}
       {/* === PIPELINE === */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {/* Total */}
@@ -332,7 +297,7 @@ const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages, clientName = 'Client'
             <PackageIcon size={20} className="text-indigo-600" />
           </div>
           <p className="text-2xl font-black text-slate-800">{pipeline.total}</p>
-          <p className="text-[10px] text-slate-500 font-medium uppercase">Total</p>
+          <p className="text-[10px] text-slate-500 font-medium uppercase">Créés sur la période</p>
         </div>
 
         {/* En attente */}
@@ -341,7 +306,7 @@ const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages, clientName = 'Client'
             <Clock size={20} className="text-slate-600" />
           </div>
           <p className="text-2xl font-black text-slate-600">{pipeline.pending}</p>
-          <p className="text-[10px] text-slate-500 font-medium uppercase">En attente</p>
+          <p className="text-[10px] text-slate-500 font-medium uppercase">En attente · toutes dates</p>
         </div>
 
         {/* En transit */}
@@ -350,7 +315,7 @@ const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages, clientName = 'Client'
             <Truck size={20} className="text-blue-600" />
           </div>
           <p className="text-2xl font-black text-blue-600">{pipeline.inTransit}</p>
-          <p className="text-[10px] text-slate-500 font-medium uppercase">En transit</p>
+          <p className="text-[10px] text-slate-500 font-medium uppercase">À traiter · toutes dates</p>
         </div>
 
         {/* Livrés */}
@@ -381,7 +346,7 @@ const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages, clientName = 'Client'
         'bg-red-50 border-2 border-red-200'
       }`}>
         <div>
-          <p className="text-sm font-bold text-slate-700">Taux de livraison</p>
+          <p className="text-sm font-bold text-slate-700">Succès des tentatives</p>
           <p className={`text-4xl font-black mt-1 ${
             deliveryRate >= 95 ? 'text-green-600' :
             deliveryRate >= 80 ? 'text-amber-600' : 'text-red-600'
@@ -389,7 +354,7 @@ const ClientKPIs: React.FC<ClientKPIsProps> = ({ packages, clientName = 'Client'
             {deliveryRate}%
           </p>
           <p className="text-xs text-slate-500 mt-1">
-            {pipeline.delivered} livrés sur {pipeline.delivered + pipeline.failed} traités
+            {pipeline.delivered} livrés sur {pipeline.delivered + pipeline.failed} tentatives décidées
           </p>
         </div>
         <div className="text-right">

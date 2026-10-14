@@ -1,0 +1,30 @@
+{
+  "version": "4.36.0",
+  "date": "2026-10-14",
+  "unit": 398,
+  "integration": 39,
+  "firestoreRules": 70,
+  "storageRules": 10,
+  "votingRules": 42,
+  "auditUnit": 6,
+  "auditServer": 7,
+  "browser": {
+    "delivery": 49,
+    "recovery": 17,
+    "imports": 3,
+    "dispatch": 5
+  },
+  "typecheck": "passed",
+  "frontendBuild": "passed",
+  "functionsBuild": "passed",
+  "uiContracts": {
+    "files": 54,
+    "commands": 378,
+    "tables": 7,
+    "windows": 46,
+    "errors": 0
+  },
+  "emulatedSuite": "passed",
+  "productionBusinessTestWrites": 0,
+  "physicalDeviceTest": "not-performed"
+}

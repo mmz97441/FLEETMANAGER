@@ -836,7 +836,7 @@ export enum PackageStatus {
   DELIVERED = 'Livré',             // POD enregistré
   FAILED = 'Échec',                // Tentative échouée
   RETURN_REQUESTED = 'À retourner', // Stop supprimé — colis doit revenir au hub
-  RETURNED = 'Retourné'            // Retour hub confirmé (photo + signature)
+  RETURNED = 'Retourné'            // Retour définitif expéditeur, ou ancien retour à qualifier
 }
 
 export const PACKAGE_STATUS_COLORS: Record<PackageStatus, { bg: string; text: string }> = {
@@ -864,7 +864,10 @@ export interface PackageMovement {
   requestId?: string;
   recordedBy?: string;
   timestamp: string;
-  action: 'SCANNED' | 'IMPORTED' | 'COLLECTED' | 'HUB_ARRIVAL' | 'SORTED' | 'LOADED' | 'TRANSFERRED' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'FAILED' | 'RETURN_REQUESTED' | 'RETURNED' | 'STOP_DELETED' | 'MANUAL_STATUS_CHANGE' | 'LOADING_COMPLETE';
+  receivedAt?: string;
+  proofId?: string;
+  failureReason?: FailureReason | string;
+  action: 'SCANNED' | 'IMPORTED' | 'COLLECTED' | 'HUB_ARRIVAL' | 'SORTED' | 'LOADED' | 'TRANSFERRED' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'FAILED' | 'RETURN_REQUESTED' | 'RETURNED' | 'STOP_DELETED' | 'MANUAL_STATUS_CHANGE' | 'LOADING_COMPLETE' | 'PICKUP_MISSING' | 'REDELIVERY_REQUESTED' | 'HUB_TRANSFER' | 'ADDRESS_CORRECTED' | 'PICKUP_REPLANNED';
   vehicleId?: string;
   vehiclePlate?: string;
   driverId?: string;
@@ -952,10 +955,16 @@ export interface Package {
   // POD
   pod?: ProofOfDelivery;
   failureReason?: FailureReason;
+  failurePod?: ProofOfDelivery;
+  deliveryAttempts?: DeliveryAttempt[];
   failureNotes?: string;
   
   // Retour hub (si stop supprimé ou annulation)
   returnProof?: ReturnProof;
+  returnProofs?: ReturnProof[];
+  returnDisposition?: 'AWAITING_DECISION' | 'REDELIVERY_READY' | 'SENDER_RETURNED';
+  returnDecision?: { decision: string; by: string; at: string; notes?: string };
+  pickupMissing?: { missionId: string; stopId: string; recordedAt: string; driverId: string };
   returnReason?: string;           // Raison du retour (visible chauffeur)
   
   // Timestamps
@@ -1022,6 +1031,7 @@ export const STOP_STATUS_COLORS: Record<StopStatus, { bg: string; text: string }
 };
 
 export interface MissionStop {
+  outcomePackageIds?: string[];
   id: string;
   sequence: number;                // Ordre dans la tournée (défini par GMPRO)
   
@@ -1122,7 +1132,30 @@ export interface Mission {
 // POD (Preuve de livraison)
 // ============================================================================
 
+export interface DeliveryAttempt {
+  destination?: { contactName: string; address: string; city: string; postalCode: string; floor?: number; timeWindowStart?: string; timeWindowEnd?: string };
+  promisedDeliveryAt?: string | null;
+  estimatedDeliveryAt?: string | null;
+  id: string;
+  missionId: string;
+  stopId: string;
+  driverId: string;
+  outcome: 'SUCCESS' | 'FAILURE';
+  recordedAt: string;
+  receivedAt?: string;
+  failureReason?: string;
+  failureNotes?: string;
+  proofId?: string;
+  proof?: ProofOfDelivery;
+}
+
 export interface ProofOfDelivery {
+  destination?: { contactName: string; address: string; city: string; postalCode: string; floor?: number; timeWindowStart?: string; timeWindowEnd?: string };
+  type?: 'SUCCESS' | 'FAILURE';
+  failureReason?: string;
+  failureNotes?: string | null;
+  receivedAt?: string;
+  proofId?: string;
   packageId: string;
   missionId: string;
   stopId: string;
@@ -1142,7 +1175,7 @@ export interface ProofOfDelivery {
   photoUrls: string[];             // URLs des photos
   
   // Localisation
-  coordinates: { lat: number; lng: number };
+  coordinates: { lat: number; lng: number } | null;
   
   // Horodatage
   timestamp: string;
@@ -1157,6 +1190,8 @@ export interface ProofOfDelivery {
 
 // Preuve de retour au hub (quand un colis est annulé/retourné)
 export interface ReturnProof {
+  requestId?: string;
+  receivedAt?: string;
   packageId: string;
   missionId?: string;
   

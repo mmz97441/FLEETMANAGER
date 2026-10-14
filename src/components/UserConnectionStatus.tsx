@@ -11,6 +11,7 @@ export default function UserConnectionStatus({ user }: { user: User }) {
     return () => window.clearInterval(timer);
   }, []);
   const status = connectionStatus(user, now);
+  const devices = (user as User & { appDevices?: { id: string; label: string; appVersion: string; lastSeenAt: string }[] }).appDevices || [];
   return <div className="space-y-1 text-sm">
     <div className={status === 'online' ? 'font-semibold text-green-800' : 'text-slate-600'}>
       <span aria-hidden="true">{status === 'online' ? '●' : '○'} </span>{labels[status]}
@@ -18,6 +19,7 @@ export default function UserConnectionStatus({ user }: { user: User }) {
     <div className="text-slate-600">Dernière connexion : <span title={formatDateTimeFr(user.lastLoginAt)}>{timeAgo(user.lastLoginAt)}</span></div>
     {user.lastLoginAt && <div className="text-slate-500">{formatDateTimeFr(user.lastLoginAt)}</div>}
     {status === 'offline' && user.lastSeenAt && <div className="text-slate-500" title={formatDateTimeFr(user.lastSeenAt)}>Dernière activité : {timeAgo(user.lastSeenAt)}</div>}
+    {devices.length > 0 && <details className="text-slate-600"><summary className="cursor-pointer min-h-8">Versions par appareil ({devices.length})</summary>{devices.map(device => <div key={device.id} className="mt-1">{device.label} · {device.appVersion} · <span title={formatDateTimeFr(device.lastSeenAt)}>{timeAgo(device.lastSeenAt)}</span>{device.appVersion !== __APP_VERSION__ && <span className="text-amber-800"> — ouvrir puis mettre à jour</span>}</div>)}</details>}
     {user.appVersion && <div className="text-slate-500">Dernière version signalée : {user.appVersion}{user.appVersion !== __APP_VERSION__ ? ' — mise à jour à vérifier' : ''}</div>}
   </div>;
 }

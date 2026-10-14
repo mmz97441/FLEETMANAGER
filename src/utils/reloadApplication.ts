@@ -8,6 +8,7 @@ export async function reloadApplication() {
     await confirmAction({ title: 'Opération en cours', message: 'Attendez la confirmation avant de recharger.', confirmLabel: 'Rester ici', cancelLabel: 'Continuer ici' });
     return;
   }
+  if (!state.dirty) { window.location.reload(); return; }
   if (await confirmAction({ title: 'Recharger l’application ?', message: state.dirty
     ? 'Une saisie n’est pas enregistrée. Enregistrez-la avant de recharger, sinon elle sera perdue.'
     : 'Vos enregistrements et preuves en attente restent conservés sur ce téléphone. Vérifiez que vos saisies sont enregistrées.', confirmLabel: 'Recharger', cancelLabel: 'Rester ici' })) {

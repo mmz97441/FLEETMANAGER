@@ -8,6 +8,7 @@
  *
  * N'écrit rien : agrège les colis et missions abonnés en direct.
  */
+import { summarizeLogistics, logisticsDay } from '../services/logisticsMetrics';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Package, Mission, PackageStatus, MissionStatus, StopStatus } from '../types';
 import { subscribeToPackages, subscribeToMissions } from '../services/missionService';
@@ -45,11 +46,12 @@ const PresidentOverview: React.FC = () => {
   }, []);
 
   const kpi = useMemo(() => {
-    const deliveredToday = packages.filter(p => p.status === PackageStatus.DELIVERED && isToday(lastMovement(p)?.timestamp));
+    const today = logisticsDay(new Date());
+    const activity = summarizeLogistics(packages, { start: today, end: today });
+    const deliveredToday = activity.events.filter(event => event.outcome === 'SUCCESS');
+    const failedToday = activity.events.filter(event => event.outcome === 'FAILURE');
     const inDelivery = packages.filter(p => p.status === PackageStatus.IN_DELIVERY);
-    const failedToday = packages.filter(p => (p.status === PackageStatus.FAILED || p.status === PackageStatus.RETURNED) && isToday(lastMovement(p)?.timestamp));
-    const denom = deliveredToday.length + inDelivery.length + failedToday.length;
-    const rate = denom > 0 ? Math.round((deliveredToday.length / denom) * 100) : 0;
+    const rate = Math.round(activity.deliveryRate);
     // Colis « En livraison » depuis > 3 h = potentiellement bloqués
     const stuck = inDelivery
       .filter(p => hoursSince(p.updatedAt) > 3)
@@ -82,7 +84,7 @@ const PresidentOverview: React.FC = () => {
         <StatCard icon={PackageCheck} label="Livrés aujourd'hui" value={kpi.deliveredToday.length} tone="text-green-600" />
         <StatCard icon={Truck} label="En livraison" value={kpi.inDelivery.length} tone="text-orange-600" />
         <StatCard icon={AlertTriangle} label="Échecs du jour" value={kpi.failedToday.length} tone="text-red-600" />
-        <StatCard icon={TrendingUp} label="Taux du jour" value={`${kpi.rate}%`} tone={kpi.rate >= 90 ? 'text-green-600' : kpi.rate >= 70 ? 'text-amber-600' : 'text-red-600'} />
+        <StatCard icon={TrendingUp} label="Succès des tentatives du jour" value={`${kpi.rate}%`} tone={kpi.rate >= 90 ? 'text-green-600' : kpi.rate >= 70 ? 'text-amber-600' : 'text-red-600'} />
         <StatCard icon={Users} label="Chauffeurs en tournée" value={activeDrivers} tone="text-indigo-600" sub={`${activeTours.length} tournée(s) active(s)`} />
       </div>
 

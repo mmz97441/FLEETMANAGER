@@ -1,9 +1,9 @@
 // Real import UI with the repository's synthetic reliability fixture (port 5250).
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import * as XLSX from 'xlsx';
-const output = '/private/tmp/fleet-logistics-ui';
+const output = process.env.LOGISTICS_IMPORT_OUTPUT || '/private/tmp/fleet-logistics-fixed-import-ui';
 await mkdir(output, { recursive: true });
-const [port] = (await readFile('/private/tmp/fleet-logistics-browser/DevToolsActivePort', 'utf8')).trim().split('\n');
+const [port] = (await readFile((process.env.LOGISTICS_BROWSER_DIR || '/private/tmp/fleet-import-fixed-browser') + '/DevToolsActivePort', 'utf8')).trim().split('\n');
 const tab = await (await fetch(`http://127.0.0.1:${port}/json/new?about:blank`, { method: 'PUT' })).json();
 const ws = new WebSocket(tab.webSocketDebuggerUrl);
 await new Promise(resolve => ws.addEventListener('open', resolve, { once: true }));
@@ -35,10 +35,10 @@ try {
     await wait("document.body.innerText.includes('Ligne 2')");
     const state = await ev("({text:document.body.innerText,overflow:document.documentElement.scrollWidth>innerWidth+1,calls:window.calls.length})");
     const rejected = state.text.includes('doit commencer par BR');
-    if (code.startsWith('BR') ? rejected || !state.text.includes('Prêt à importer') : !rejected) throw Error('Unexpected import result for ' + code);
+    if (rejected || !state.text.includes('Prêt à importer') || state.overflow) throw Error('Import should accept complete individual references for ' + code);
     checks.push({ code, rejected, productionWrites: state.calls, horizontalOverflow: state.overflow });
     const shot = await call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
-    await writeFile(output + '/' + (code.startsWith('BR') ? 'br-accepted' : code.startsWith('EXP') ? 'other-sender-rejected' : 'numeric-rejected') + '.png', Buffer.from(shot.data, 'base64'));
+    await writeFile(output + '/' + (code.startsWith('BR') ? 'br-accepted' : code.startsWith('EXP') ? 'other-sender-accepted' : 'numeric-accepted') + '.png', Buffer.from(shot.data, 'base64'));
   }
   await writeFile(output + '/results.json', JSON.stringify({ checks, errors }, null, 2));
   console.log(JSON.stringify({ checks, errors }, null, 2));

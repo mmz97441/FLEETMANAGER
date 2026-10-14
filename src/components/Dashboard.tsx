@@ -1698,7 +1698,7 @@ const Dashboard: React.FC<DashboardProps> = ({
           <div className="px-4 pb-3">
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-sm font-medium text-slate-600">
-                Taux de livraison
+                Succès des tentatives décidées · tournées du jour
               </span>
               <span className="text-sm font-bold text-slate-800">
                 {formatNumberFr(missionStats.deliveryRate, 0)}%
@@ -1766,7 +1766,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                   <div key={z.zone} className="bg-white/60 rounded-lg p-2 text-center">
                     <p className="text-sm font-bold text-slate-700">{z.zone}</p>
                     <p className="text-sm font-extrabold text-slate-800">{z.delivered}/{z.totalPackages}</p>
-                    <p className="text-sm text-slate-500">{formatNumberFr(z.rate, 0)}% livré</p>
+                    <p className="text-sm text-slate-500">{formatNumberFr(z.rate, 0)}% des tentatives réussies</p>
                   </div>
                 ))}
               </div>

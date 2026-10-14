@@ -66,7 +66,7 @@ service cloud.firestore {
     // Champs sensibles d'un profil utilisateur qu'un user ne doit JAMAIS modifier sur lui-même
     // (escalade de privilèges sinon : un chauffeur ferait updateDoc({ role: 'Admin' }))
     function userImmutableFields() {
-      return ['role', 'customPermissions', 'id', 'createdAt', 'originalUserId', 'email', 'companyName', 'companyId', 'leaveBalance', 'isDisabled', 'disabledAt', 'disabledBy', 'status', 'activatedAt', 'assignedVehicleId', 'codePrefix', 'sessionsRevokedAt', 'lastSeenAt', 'appVersion', 'appBuildId'];
+      return ['role', 'customPermissions', 'id', 'createdAt', 'originalUserId', 'email', 'companyName', 'companyId', 'leaveBalance', 'isDisabled', 'disabledAt', 'disabledBy', 'status', 'activatedAt', 'assignedVehicleId', 'codePrefix', 'sessionsRevokedAt', 'lastSeenAt', 'appVersion', 'appBuildId', 'appDevices'];
     }
 
     // Vérifie que l'utilisateur est authentifié
@@ -341,8 +341,15 @@ service cloud.firestore {
         || resource.data.clientId == request.auth.uid
         || (getUserData().get('companyName','') != '' && resource.data.clientName == getUserData().companyName)
       );
-      allow create: if isAdminRole() && !request.resource.data.keys().hasAny(['carrierBarcode']); // Créations terrain : createAdHocPackage contrôle les doublons côté serveur.
-      allow update: if !request.resource.data.diff(resource.data).affectedKeys().hasAny(['carrierBarcode']) && (isAdminRole() || (isDriver()
+      allow create: if false; // Créations terrain : createAdHocPackage contrôle les doublons côté serveur.
+      allow update: if !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+        'carrierBarcode','carrierBarcodeFormat','scanCodes','externalId','barcode','orderNumber',
+        'contactName','address','postalCode','city','floor','hasElevator','timeWindowStart','timeWindowEnd',
+        'pod','failurePod','deliveryAttempts','failureReason','failureNotes','outcomeRecordedAt','outcomeReceivedAt',
+        'returnDisposition','returnProof','returnProofs','pickupMissing','pickupMissingManifestId','planningHistory'
+      ])
+        && !(request.resource.data.status in ['Livré','Échec','Retourné','Collecté'] && resource.data.status != request.resource.data.status)
+        && (isAdminRole() || (isDriver()
         && (resource.data.get('currentDriverId','') == request.auth.uid || (resource.data.get('currentDriverId',null) == null && resource.data.get('missionId','') != '' && get(/databases/$(database)/documents/missions/$(resource.data.missionId)).data.driverId == request.auth.uid))
         && request.resource.data.currentDriverId == request.auth.uid
         && (!(resource.data.status in ['Livré','Retourné']) || request.resource.data.status == resource.data.status)
@@ -401,8 +408,7 @@ service cloud.firestore {
     match /proofs_of_delivery/{podId} {
       allow get: if isInternalUser() && !exists(/databases/$(database)/documents/proofs_of_delivery/$(podId));
       allow read: if isAdminRole() || (isDriver() && resource.data.driverId == request.auth.uid) || (isClient() && resource.data.get('clientId','') == request.auth.uid);
-      allow create: if isAdminRole() || (isDriver() && request.resource.data.driverId == request.auth.uid
-        && get(/databases/$(database)/documents/missions/$(request.resource.data.missionId)).data.driverId == request.auth.uid);
+      allow create: if false; // Publication transactionnelle contrôlée côté serveur.
       allow update, delete: if false;
     }
 
@@ -413,8 +419,7 @@ service cloud.firestore {
     match /pickups/{pickupId} {
       allow get: if isInternalUser() && !exists(/databases/$(database)/documents/pickups/$(pickupId));
       allow read: if isAdminRole() || (isDriver() && resource.data.driverId == request.auth.uid) || (isClient() && resource.data.get('clientId','') == request.auth.uid);
-      allow create: if isAdminRole() || (isDriver() && request.resource.data.driverId == request.auth.uid
-        && get(/databases/$(database)/documents/missions/$(request.resource.data.missionId)).data.driverId == request.auth.uid);
+      allow create: if false; // Publication transactionnelle contrôlée côté serveur.
       allow update, delete: if false;
     }
 

@@ -1,3 +1,5 @@
+import { subscribeClientParcelFeed } from '../services/clientPackageSubscription';
+import type { ParcelCoverage, ParcelFeedController } from '../services/parcelFeed';
 
 import React, { useState, useMemo, useEffect, useRef, useId } from 'react';
 import { QuoteRequest, QuoteStatus, User, UserRole, ViewState, SavedAddress, DeliveryTimeSlot, Zone, ProofOfDelivery, Package as PackageType, PackageStatus, PACKAGE_STATUS_COLORS } from '../types';
@@ -14,7 +16,7 @@ import { sendUserInvitationEmail } from '../services/emailService';
 import { createInvitation, getActivationUrl, resendInvitation } from '../services/invitationService';
 import { subscribeToSavedAddresses, addSavedAddress, incrementAddressUsage, updateUserProfile, updateSavedAddress, deleteSavedAddress } from '../services/firestore';
 import { getDeliveryScheduleConfig, getAvailableSlotsForZone, estimateZoneFromAddress } from '../services/deliveryService';
-import { getPODByPackage } from '../services/podService';
+import { getPODByPackage, getPackageProofs } from '../services/podService';
 import { subscribeToClientPackages } from '../services/missionService';
 import { generateBatchLabelsHTML } from '../services/pickupService';
 import ShippingLabel, { quoteToLabelData, ShippingLabelData } from './ShippingLabel';
@@ -371,6 +373,9 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
   };
 
   // === MES EXPÉDITIONS (colis du client) ===
+  const clientParcelFeed = useRef<ParcelFeedController | null>(null);
+  const [parcelCoverage, setParcelCoverage] = useState<ParcelCoverage | null>(null);
+  const [analyticsReady, setAnalyticsReady] = useState(false);
   const [clientPackages, setClientPackages] = useState<PackageType[]>([]);
   const [isLoadingPackages, setIsLoadingPackages] = useState(true);
   const [packagesError, setPackagesError] = useState('');
@@ -475,9 +480,11 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
     setIsLoadingPackages(true);
     setPackagesError('');
     setClientPackages([]);
-    const unsub = subscribeToClientPackages(
+    setParcelCoverage(null);
+    const feed = subscribeClientParcelFeed(
       { id: currentUser.id, companyName: currentUser.companyName },
-      (pkgs) => {
+      (pkgs, coverage) => {
+        setParcelCoverage(coverage);
         setClientPackages(pkgs);
         setIsLoadingPackages(false);
         setPackagesError('');
@@ -485,10 +492,22 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
       () => {
         setIsLoadingPackages(false);
         setPackagesError('Vos colis n’ont pas pu être chargés complètement. Vérifiez votre connexion et réessayez. Les éventuelles données déjà affichées ne sont plus à jour.');
-      }
+      }, setParcelCoverage
     );
-    return unsub;
+    clientParcelFeed.current = feed;
+    return () => { feed.unsubscribe(); if (clientParcelFeed.current === feed) clientParcelFeed.current = null; };
   }, [currentUser.id, currentUser.companyName, packagesRetry]);
+
+  useEffect(() => {
+    let active = true;
+    setAnalyticsReady(false);
+    if (isLoadingPackages || !clientParcelFeed.current) return;
+    if (activeView !== 'client_analytics' && activeView !== 'client_recipients' && !expandedShipmentId && !shipmentSearch) return;
+    void clientParcelFeed.current.loadAll().then(items => { if (active) { setClientPackages(items); setAnalyticsReady(true); } }).catch(error => {
+      if (active) setPackagesError(error instanceof Error ? error.message : 'Historique incomplet.');
+    });
+    return () => { active = false; };
+  }, [activeView, isLoadingPackages, packagesRetry, expandedShipmentId, shipmentSearch]);
 
   // Détecter la zone quand l'adresse destination change
   useEffect(() => {
@@ -1446,7 +1465,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
 
         {/* --- VIEW: STATISTIQUES (Studio Analytique) --- */}
         {activeView === 'client_analytics' && !isLoadingPackages && !packagesError && (
-            <ClientAnalytics packages={clientPackages} />
+            <>{analyticsReady ? <ClientAnalytics packages={clientPackages} /> : <p role="status">Chargement de l’historique complet pour calculer vos indicateurs…</p>}</>
         )}
 
         {/* --- VIEW: SUIVI LIVE (livreurs de mes colis en cours) --- */}
@@ -1458,6 +1477,12 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
         {activeView === 'client_help' && (
             <ClientHelp embedded onNavigate={handleHelpNavigate} onClose={() => onNavigate?.('client_dashboard')} />
         )}
+
+        {activeView === 'client_shipments' && !isLoadingPackages && !packagesError && !parcelCoverage?.historyComplete && <div className="rounded-lg bg-blue-50 p-3 mb-3 text-sm text-blue-950">
+          <p>Tous vos colis actifs sont affichés. L’historique des colis terminés se charge par pages ; les compteurs portent sur les colis chargés.</p>
+          <div className="flex flex-wrap gap-2 mt-2"><button disabled={parcelCoverage?.historyLoading} className="ui-button ui-button-secondary" onClick={() => void clientParcelFeed.current?.loadMore().catch(error => setPackagesError(error.message))}>{parcelCoverage?.historyLoading ? 'Chargement…' : 'Charger la suite de l’historique'}</button>
+          <button disabled={parcelCoverage?.historyLoading} className="ui-button ui-button-secondary" onClick={() => void clientParcelFeed.current?.loadAll().catch(error => setPackagesError(error.message))}>Charger tout l’historique</button></div>
+        </div>}
 
         {/* --- VIEW: MES DESTINATAIRES (carnet, CRUD) --- */}
         {activeView === 'client_recipients' && (
@@ -1474,7 +1499,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
         {/* --- VIEW: MES EXPÉDITIONS (Tracking + Étiquettes) --- */}
         {activeView === 'client_shipments' && (
             <div className="space-y-4 animate-fade-in">
-                <PageHeader title="Mes expéditions" description={isLoadingPackages ? 'Chargement du nombre de colis…' : packagesError ? 'Nombre de colis indisponible' : `${clientPackages.length} colis au total`} actions={
+                <PageHeader title="Mes expéditions" description={isLoadingPackages ? 'Chargement du nombre de colis…' : packagesError ? 'Nombre de colis indisponible' : `${clientPackages.length} colis chargés${parcelCoverage?.historyComplete ? ' — historique complet' : ' — tous les colis actifs inclus'}`} actions={
                     <button type="button" disabled={readOnly} onClick={() => setShowCreateShipment(true)} className="ui-button ui-button-primary"><Plus size={18} aria-hidden="true" />Créer une expédition</button>
                 } />
                 <div className="space-y-3" aria-label="Rechercher et filtrer mes colis">
@@ -1509,7 +1534,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
 
                 {/* Liste des colis */}
 {expandedShipmentId && <div role="status" className="rounded-xl border border-indigo-200 bg-indigo-50 p-3 flex flex-wrap justify-between gap-3 text-sm text-brand-900">
-                      <p>{packagesError ? 'Le colis demandé ne peut pas être vérifié tant que le chargement a échoué.' : isLoadingPackages ? 'Chargement du colis demandé…' : clientPackages.some(parcel => parcel.id === expandedShipmentId) ? 'Colis ouvert depuis un lien. Les filtres précédents sont temporairement ignorés.' : 'Ce colis est indisponible dans votre compte ou n’existe plus.'}</p>
+                      <p>{packagesError ? 'Le colis demandé ne peut pas être vérifié tant que le chargement a échoué.' : isLoadingPackages || !parcelCoverage?.historyComplete ? 'Chargement du colis demandé dans tout l’historique…' : clientPackages.some(parcel => parcel.id === expandedShipmentId) ? 'Colis ouvert depuis un lien. Les filtres précédents sont temporairement ignorés.' : 'Ce colis est indisponible dans votre compte ou n’existe plus.'}</p>
                       <button type="button" onClick={() => updateUrlParams({ package: null, clientSearch: null, clientStatus: null })} className="ui-button ui-button-ghost underline min-h-11">Afficher tous mes colis</button>
                     </div>}
                                 {(() => {
@@ -1597,7 +1622,7 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                                         <div className="border-t border-slate-200 divide-y divide-slate-200">
                                                             <div className="px-4 py-3 flex flex-wrap gap-2 bg-slate-50">
                                                                 <button type="button" aria-label="Imprimer les étiquettes du destinataire" onClick={() => printShipmentLabels(pkgs)} className="ui-button ui-button-secondary"><Printer size={18} aria-hidden="true" />Étiquettes du destinataire</button>
-                                                                <button type="button" aria-label="Ouvrir le bon de livraison du destinataire" onClick={() => openDeliveryNote(rep as PackageType, clientPackages, { companyName: companyForm.companyName || currentUser?.companyName || rep.clientName, address: companyForm.companyAddress || undefined, siret: companyForm.companySiret || undefined, phone: companyForm.companyPhone || undefined, email: currentUser?.email })} className="ui-button ui-button-secondary"><FileText size={18} aria-hidden="true" />Bon de livraison</button>
+                                                                <button type="button" disabled={!parcelCoverage?.historyComplete} title={!parcelCoverage?.historyComplete ? 'Chargez tout l’historique pour un bon complet.' : undefined} aria-label="Ouvrir le bon de livraison du destinataire" onClick={() => openDeliveryNote(rep as PackageType, clientPackages, { companyName: companyForm.companyName || currentUser?.companyName || rep.clientName, address: companyForm.companyAddress || undefined, siret: companyForm.companySiret || undefined, phone: companyForm.companyPhone || undefined, email: currentUser?.email })} className="ui-button ui-button-secondary"><FileText size={18} aria-hidden="true" />Bon de livraison</button>
                                                             </div>
                                                             {pkgs.map(pkg => {
                                                                 const sc = PACKAGE_STATUS_COLORS[pkg.status] || { bg:'bg-slate-100', text:'text-slate-700' };
@@ -1614,12 +1639,12 @@ const ClientPortal: React.FC<ClientPortalProps> = ({ activeView, currentUser, qu
                                                                         <div className="flex flex-wrap gap-2 sm:max-w-64 sm:justify-end">
                                                                             <button type="button" aria-label={tOpen ? 'Masquer le suivi du colis' : 'Afficher le suivi du colis'} aria-expanded={tOpen} onClick={() => setExpandedShipmentId(tOpen ? null : pkg.id)} className="ui-button ui-button-secondary">{tOpen ? <ChevronUp size={18} aria-hidden="true" /> : <ChevronDown size={18} aria-hidden="true" />}{tOpen ? 'Masquer le suivi' : 'Voir le suivi'}</button>
                                                                             <button type="button" aria-label={`Imprimer l’étiquette du colis ${pkg.externalId || pkg.orderNumber}`} onClick={() => printShipmentLabels([pkg])} className="ui-button ui-button-ghost"><Printer size={18} aria-hidden="true" />Étiquette</button>
-                                                                            {pkg.status === PackageStatus.DELIVERED && pkg.pod && <button type="button" onClick={() => setViewingPOD({ pod: pkg.pod!, quote: { id: pkg.id, clientName: pkg.clientName, destination: pkg.city, destinationAddress: pkg.address, destinationContact: { name: pkg.contactName } } as any })} className="ui-button ui-button-ghost"><Eye size={18} aria-hidden="true" />Preuve de livraison</button>}
+                                                                            {getPackageProofs(pkg).map(proof => <button key={`${proof.missionId}_${proof.stopId}`} type="button" onClick={() => setViewingPOD({ pod: proof, quote: { id: pkg.id, clientName: pkg.clientName, destination: pkg.city, destinationAddress: pkg.address, destinationContact: { name: pkg.contactName } } as any })} className="ui-button ui-button-ghost"><Eye size={18} aria-hidden="true" />{proof.type === 'FAILURE' ? 'Preuve d’échec' : 'Preuve de livraison'}</button>)}
                                                                         </div>
                                                                     </div>
                                                                     {tOpen && (
                                                                         <div className="mt-2">
-                                                                            <PackageTimeline movements={pkg.movements || []} showActors pod={pkg.pod} />
+                                                                            <PackageTimeline movements={pkg.movements || []} showActors pod={pkg.pod} proofs={getPackageProofs(pkg)} />
                                                                         </div>
                                                                     )}
                                                                 </div>

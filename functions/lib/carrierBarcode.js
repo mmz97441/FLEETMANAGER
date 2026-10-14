@@ -36,26 +36,29 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.validatedCarrierBarcode = validatedCarrierBarcode;
 exports.checkCarrierBarcode = checkCarrierBarcode;
 exports.associateCarrierBarcodeHandler = associateCarrierBarcodeHandler;
+const parcelReferenceIndex_1 = require("./parcelReferenceIndex");
 const functions = __importStar(require("firebase-functions/v1"));
 const crypto_1 = require("crypto");
 const scanCode_1 = require("./scanCode");
-function validatedCarrierBarcode(value, reference) {
-    if (typeof value !== 'string')
-        throw new functions.https.HttpsError('invalid-argument', 'Le code Boiron doit être conservé comme texte, avec ses zéros initiaux.');
-    const code = (0, scanCode_1.normalizeScanCode)(value), order = (0, scanCode_1.orderReferenceHint)(code);
-    if (!order || order !== String(reference || '').trim())
-        throw new functions.https.HttpsError('invalid-argument', 'Le code Boiron doit comporter 22 chiffres et correspondre à la référence de commande du colis.');
-    return code;
+function validatedCarrierBarcode(value, reference, format = 'generic') {
+    if (!['generic', 'boiron'].includes(format))
+        throw new functions.https.HttpsError('invalid-argument', 'Format de code transporteur inconnu.');
+    const error = (0, scanCode_1.carrierBarcodeValidationError)(value, reference, format);
+    if (error || typeof value !== 'string' || !value.trim())
+        throw new functions.https.HttpsError('invalid-argument', error || 'Code transporteur manquant.');
+    return value.trim();
 }
 /** Read phase only. The registry serializes concurrent associations/imports. */
 async function checkCarrierBarcode(tx, db, code, packageId) {
+    code = (0, scanCode_1.normalizeScanCode)(code);
     const ref = db.collection('carrier_barcodes').doc((0, crypto_1.createHash)('sha256').update(code).digest('hex'));
     const [reservation, matches] = await Promise.all([
         tx.get(ref),
-        Promise.all(['carrierBarcode', 'barcode', 'externalId', 'orderNumber'].map(field => tx.get(db.collection('packages').where(field, '==', code).limit(2)))),
+        Promise.all([tx.get(db.collection('packages').where('scanCodes', 'array-contains', code).limit(2)),
+            ...['carrierBarcode', 'barcode', 'externalId', 'orderNumber'].map(field => tx.get(db.collection('packages').where(field, 'in', [...new Set([code, code.toLowerCase()])]).limit(2)))]),
     ]);
     if (reservation.exists && reservation.data().packageId !== packageId)
-        throw new functions.https.HttpsError('already-exists', 'Ce code Boiron est déjà associé à un autre colis. Faites vérifier les étiquettes.');
+        throw new functions.https.HttpsError('already-exists', 'Ce code transporteur est déjà associé à un autre colis. Faites vérifier les étiquettes.');
     for (const existing of matches) {
         if (existing.docs.some(d => d.id !== packageId))
             throw new functions.https.HttpsError('already-exists', 'Ce code identifie déjà un autre colis. Aucune association modifiée.');
@@ -72,20 +75,22 @@ async function associateCarrierBarcodeHandler(data, context, deps) {
         const ref = deps.db.collection('packages').doc(data.packageId), snap = await tx.get(ref), pkg = snap.data();
         if (!pkg)
             throw new functions.https.HttpsError('not-found', 'Colis introuvable.');
-        const code = validatedCarrierBarcode(data.code, pkg.clientReference);
-        if (pkg.carrierBarcode && pkg.carrierBarcode !== code)
-            throw new functions.https.HttpsError('already-exists', 'Ce colis possède déjà un autre code Boiron. Faites vérifier le carton.');
+        const code = validatedCarrierBarcode(data.code, pkg.clientReference, data.carrierBarcodeFormat || 'generic');
+        if (pkg.carrierBarcode && (0, scanCode_1.normalizeScanCode)(pkg.carrierBarcode) !== (0, scanCode_1.normalizeScanCode)(code))
+            throw new functions.https.HttpsError('already-exists', 'Ce colis possède déjà un autre code transporteur. Faites vérifier le carton.');
         const reservation = await checkCarrierBarcode(tx, deps.db, code, ref.id);
-        if (reservation.exists && pkg.carrierBarcode === code)
+        const references = await (0, parcelReferenceIndex_1.readIndividualReferenceReservations)(tx, deps.db, [{ id: ref.id, parcel: { carrierBarcode: code } }]);
+        if (reservation.exists && (0, scanCode_1.normalizeScanCode)(pkg.carrierBarcode || '') === (0, scanCode_1.normalizeScanCode)(code))
             return { success: true, replayed: true };
         const at = new Date().toISOString();
+        (0, parcelReferenceIndex_1.writeIndividualReferenceReservations)(tx, references, caller.id, at);
         tx.set(reservation.ref, { packageId: ref.id, code, createdAt: at, createdBy: caller.id });
-        tx.update(ref, { carrierBarcode: code, updatedAt: at });
+        tx.update(ref, { carrierBarcode: code, carrierBarcodeFormat: data.carrierBarcodeFormat || 'generic', scanCodes: (0, scanCode_1.parcelScanCodes)({ ...pkg, carrierBarcode: code }), updatedAt: at });
         tx.create(deps.db.collection('activity_logs').doc(), {
             userId: caller.id, userName: `${caller.firstName || ''} ${caller.lastName || ''}`.trim(), userRole: caller.role,
             action: 'PACKAGE_BARCODE_ASSOCIATED', category: 'Livraison', targetType: 'package', targetId: ref.id,
             targetName: pkg.externalId || pkg.barcode || '', description: 'Correspondance des deux étiquettes du carton vérifiée par le bureau.',
-            outcome: 'success', details: { carrierBarcode: code, clientReference: pkg.clientReference }, createdAt: at,
+            outcome: 'success', details: { carrierBarcode: code, ...(pkg.clientReference ? { clientReference: pkg.clientReference } : {}) }, createdAt: at,
         });
         return { success: true, replayed: false };
     });

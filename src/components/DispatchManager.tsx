@@ -18,7 +18,7 @@ import { todayISO } from '../utils/date';
 import { formatDistance, formatDuration } from '../utils/format';
 import { dispatchMissionsCF } from '../services/cloudFunctions';
 import { startUxTask } from '../utils/uxMetrics';
-import { placeKey } from '../utils/address';
+import { groupPackagesByStop } from '../services/gmproService';
 import Modal from './shared/Modal';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import {
@@ -59,6 +59,9 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
   const [selectedZone, setSelectedZone] = useState<Zone | null>(null);
   const [selectedDriverIds, setSelectedDriverIds] = useState<Set<string>>(new Set());
   const [selectedHubId, setSelectedHubId] = useState<string>('');
+  const [allowDifferentDate, setAllowDifferentDate] = useState(false);
+  const [planningReason, setPlanningReason] = useState('');
+  const departureHub = useMemo(() => hubs.find(h => h.isActive && h.id === selectedHubId) || hubs.find(h => h.isActive) || null, [selectedHubId, hubs]);
 
   // Heure minimum = heure actuelle arrondie au quart d'heure supérieur
   const getMinDepartureTime = () => {
@@ -81,7 +84,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
   const closePreparation = () => void requestClose(() => setShowDispatchModal(false));
   const dispatchLock = useRef(false);
   const optimizationVersion = useRef(0);
-  const dispatchAttempt = useRef<{ result: OptimizationResult; requestId: string; missions: Array<Omit<Mission, 'id' | 'createdAt' | 'updatedAt'>> } | null>(null);
+  const dispatchAttempt = useRef<{ zoneStats: ZoneStats; result: OptimizationResult; requestId: string; missions: Array<Omit<Mission, 'id' | 'createdAt' | 'updatedAt'>>; planningChanges?: Parameters<typeof dispatchMissionsCF>[0]['planningChanges'] } | null>(null);
 
   // Créneaux de livraison modifiés (packageId → { start, end })
   const [packageTimeWindows, setPackageTimeWindows] = useState<Record<string, { start: string; end: string }>>({});
@@ -89,12 +92,14 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
   // Option pour ignorer les créneaux (force inclusion de tous les arrêts)
   const [ignoreTimeWindows, setIgnoreTimeWindows] = useState(false);
 
+  const planningFingerprint = JSON.stringify(packages.filter(p => p.zone === selectedZone && p.currentHubId === departureHub?.id).map(p => [p.id, p.status, p.missionId, p.stopId, p.currentDriverId, p.returnDisposition, p.pickupMissing, p.contactName, p.address, p.city, p.postalCode, p.floor, p.timeWindowStart, p.timeWindowEnd, p.requestedDeliveryDate, p.serviceTime]).sort((a,b) => String(a[0]).localeCompare(String(b[0]))));
   useEffect(() => {
+    if (dispatchAttempt.current) return; // Retry the exact request after an uncertain acknowledgement.
     optimizationVersion.current++;
     setOptimResult(null);
     setStep(previous => previous === 3 ? 2 : previous);
     dispatchAttempt.current = null;
-  }, [selectedDate, selectedZone, selectedDriverIds, selectedHubId, plannedDepartureTime, ignoreTimeWindows, packageTimeWindows]);
+  }, [selectedDate, selectedZone, selectedDriverIds, selectedHubId, plannedDepartureTime, ignoreTimeWindows, packageTimeWindows, allowDifferentDate, planningReason, planningFingerprint]);
 
   // Filtrer les colis au hub — prêts à être dispatchés
   // FIX v3.7.10: Exclure les colis déjà assignés à une mission (anti-double dispatch)
@@ -102,7 +107,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
     packages.filter(p =>
       (p.status === PackageStatus.AT_HUB || p.status === PackageStatus.SORTED) &&
       !p.missionId &&
-      !p.currentDriverId
+      !p.currentDriverId && !p.stopId && p.returnDisposition !== 'AWAITING_DECISION'
     ),
     [packages]
   );
@@ -112,8 +117,9 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
     const stats: ZoneStats[] = [];
 
     for (const zone of Object.values(Zone)) {
-      const zonePackages = pendingPackages.filter(p => p.zone === zone);
-      const uniqueStops = new Set(zonePackages.map(placeKey));
+      const zonePackages = pendingPackages.filter(p => p.zone === zone && p.currentHubId === departureHub?.id &&
+        (allowDifferentDate || !p.requestedDeliveryDate || p.requestedDeliveryDate === selectedDate));
+      const uniqueStops = groupPackagesByStop(zonePackages);
 
       let hub = hubs.find(h => h.zone === zone && h.isActive) || null;
       if (!hub) {
@@ -140,7 +146,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
       stats.push({
         zone,
         packageCount: zonePackages.length,
-        stopCount: uniqueStops.size,
+        stopCount: uniqueStops.length,
         packages: zonePackages,
         hub,
         availableDrivers
@@ -148,17 +154,11 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
     }
 
     return stats.filter(s => s.packageCount > 0);
-  }, [pendingPackages, hubs, users]);
+  }, [pendingPackages, hubs, users, departureHub, allowDifferentDate, selectedDate]);
 
-  const selectedZoneStats = useMemo(() =>
-    zoneStats.find(s => s.zone === selectedZone) || null,
-    [zoneStats, selectedZone]
-  );
-
-  const departureHub = useMemo(() => {
-    if (selectedHubId) return hubs.find(h => h.id === selectedHubId) || null;
-    return hubs.find(h => h.isActive) || null;
-  }, [selectedHubId, hubs]);
+  // Keep the review visible when the server committed the parcels but its
+  // acknowledgement was lost and the live list no longer has that zone.
+  const selectedZoneStats = dispatchAttempt.current?.zoneStats || zoneStats.find(s => s.zone === selectedZone) || null;
 
   const activeHubs = useMemo(() => hubs.filter(h => h.isActive), [hubs]);
 
@@ -205,6 +205,19 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
       .filter(Boolean) as DriverVehicle[];
   }, [selectedDriverIds, selectedZoneStats, vehicles]);
 
+  const planningChangesFor = (ids?: Set<string>) => {
+    const selected = (selectedZoneStats?.packages || []).filter(p => !ids || ids.has(p.id));
+    const parcels = selected.flatMap(pkg => {
+      const window = packageTimeWindows[pkg.id];
+      const start = ignoreTimeWindows ? null : window ? window.start || null : pkg.timeWindowStart || null;
+      const end = ignoreTimeWindows ? null : window ? window.end || null : pkg.timeWindowEnd || null;
+      return start !== (pkg.timeWindowStart || null) || end !== (pkg.timeWindowEnd || null)
+        ? [{ packageId: pkg.id, timeWindowStart: start, timeWindowEnd: end }] : [];
+    });
+    const differentDate = selected.some(p => p.requestedDeliveryDate && p.requestedDeliveryDate !== selectedDate);
+    return parcels.length || differentDate ? { reason: planningReason.trim(), allowDifferentDate, parcels } : undefined;
+  };
+
   // ============================================================================
   // OPTIMISER LES TOURNÉES
   // ============================================================================
@@ -223,6 +236,9 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
       }
     }
 
+    if (!selectedZoneStats.packages.length) { setPlanError('Aucun colis disponible pour ce hub et cette date.'); return; }
+    const changes = planningChangesFor();
+    if (changes && changes.reason.length < 5) { setPlanError('Précisez le motif des changements de date ou de créneau avant de planifier.'); return; }
     const optimizationRun = optimizationVersion.current;
     setPlanError('');
     setIsOptimizing(true);
@@ -295,17 +311,20 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
   // ============================================================================
 
   const handleDispatchAll = async () => {
-    if (!optimResult || optimResult.tours.length === 0 || !selectedZoneStats) return;
+    if (!optimResult || optimResult.tours.length === 0 || (!dispatchAttempt.current && !selectedZoneStats)) return;
 
     if (dispatchLock.current || !departureHub || !selectedZone) return;
     const observation = startUxTask('dispatch', String(currentUser.role));
     dispatchLock.current = true;
     setIsDispatching(true);
     try {
-      if (dispatchAttempt.current?.result !== optimResult) {
+      if (!dispatchAttempt.current) {
+        if (!selectedZoneStats) return;
         dispatchAttempt.current = {
+          zoneStats: selectedZoneStats,
           result: optimResult,
           requestId: crypto.randomUUID(),
+          planningChanges: planningChangesFor(new Set(optimResult.tours.flatMap(tour => tour.stops.flatMap(stop => stop.packageIds)))),
           missions: optimResult.tours.map(tour => ({
             date: selectedDate, zone: selectedZone, hubId: departureHub.id, hubName: departureHub.name,
             type: MissionType.DELIVERY, status: MissionStatus.DISPATCHED, plannedDepartureTime,
@@ -319,7 +338,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
         };
       }
       const attempt = dispatchAttempt.current;
-      await dispatchMissionsCF({ requestId: attempt.requestId, missions: attempt.missions });
+      await dispatchMissionsCF({ requestId: attempt.requestId, missions: attempt.missions, planningChanges: attempt.planningChanges });
       observation.finish('success', { items: attempt.missions.length });
       dispatchAttempt.current = null;
       setShowDispatchModal(false);
@@ -331,6 +350,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
     } catch (error) {
       console.error('Dispatch error:', error);
       observation.finish('error', { errors: 1 });
+      if (['functions/invalid-argument', 'functions/failed-precondition', 'functions/permission-denied', 'functions/not-found'].includes(String((error as any)?.code))) dispatchAttempt.current = null;
       setPlanError(error instanceof Error ? error.message : 'L’affectation n’a pas pu être confirmée. Réessayez : la même demande ne créera pas de doublon.');
     } finally {
       dispatchLock.current = false;
@@ -340,15 +360,14 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
 
   // Ouvrir le modal
   const openDispatchModal = (zone: Zone) => {
+    if (dispatchAttempt.current) { setStep(3); setShowDispatchModal(true); return; }
     setStep(1);
     setPlanError('');
     setSelectedZone(zone);
     const zStat = zoneStats.find(s => s.zone === zone);
     // Pré-sélectionner tous les chauffeurs
     setSelectedDriverIds(new Set(zStat?.availableDrivers.map(d => d.id) || []));
-    const zoneHub = hubs.find(h => h.zone === zone && h.isActive);
-    const firstHub = hubs.find(h => h.isActive);
-    setSelectedHubId(zoneHub?.id || firstHub?.id || '');
+    setSelectedHubId(departureHub?.id || '');
     setOptimResult(null);
     setExpandedTour(null);
 
@@ -490,6 +509,22 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
         </div>
       )}
 
+      <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+        <label className="block text-sm font-bold">Préparer les colis présents au hub
+          <select disabled={!!dispatchAttempt.current} aria-label="Hub physique de départ" value={departureHub?.id || ''} onChange={event => setSelectedHubId(event.target.value)} className="ml-2 min-h-11 border rounded-lg p-2">
+            {activeHubs.map(hub => <option key={hub.id} value={hub.id}>{hub.name}</option>)}
+          </select>
+        </label>
+        <p className="text-sm text-slate-600">Les colis d’un autre hub doivent être scannés à leur arrivée. Les retours en attente de décision restent dans la file de reprise.</p>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" disabled={!!dispatchAttempt.current} checked={allowDifferentDate} onChange={e => setAllowDifferentDate(e.target.checked)} /> Inclure les colis demandés à une autre date (dérogation motivée)</label>
+        {allowDifferentDate && <input disabled={!!dispatchAttempt.current} aria-label="Motif de la dérogation de date" value={planningReason} onChange={e => setPlanningReason(e.target.value)} placeholder="Motif convenu avec le destinataire" className="w-full min-h-11 border rounded-lg p-2" />}
+      </div>
+
+      {dispatchAttempt.current && !showDispatchModal && <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-2">
+        <p>La confirmation de l’affectation est en attente. Reprendre cette demande vérifie son résultat sans créer de doublon.</p>
+        <button type="button" onClick={() => { setStep(3); setShowDispatchModal(true); }} className="ui-button ui-button-primary min-h-11">Reprendre la confirmation d’affectation</button>
+      </div>}
+
       {/* Modal Dispatch Multi-tournées */}
       <Modal
       mobileFullscreen
@@ -505,7 +540,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
             <nav aria-label="Étapes de préparation" className="grid grid-cols-3 gap-2">
               {(['Sélectionner', 'Planifier', 'Vérifier et affecter'] as const).map((label, index) => <button
                 key={label} type="button" aria-current={step === index + 1 ? 'step' : undefined}
-                disabled={(index === 1 && !!cannotPlan) || (index === 2 && !optimResult?.tours.length)}
+                disabled={!!dispatchAttempt.current || (index === 1 && !!cannotPlan) || (index === 2 && !optimResult?.tours.length)}
                 onClick={() => setStep((index + 1) as 1 | 2 | 3)}
                 aria-pressed={step === index + 1} className="ui-filter min-w-0 px-2"
               >{index + 1}. {label}</button>)}
@@ -515,6 +550,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
               <p>Départ prévu : {plannedDepartureTime} · {selectedDriverIds.size} chauffeur{selectedDriverIds.size > 1 ? 's' : ''} · {ignoreTimeWindows ? 'Créneaux demandés ignorés' : 'Créneaux demandés conservés'}</p>
               {step === 3 && <p>{routedIds.size} colis à affecter · {excludedPackages.length} colis exclus, conservés dans la liste des colis disponibles.</p>}
             </div>
+            <label className="block text-sm">Motif des changements de date ou de créneau (si nécessaire)<input aria-label="Motif de la correction de planification" disabled={!!dispatchAttempt.current} value={planningReason} onChange={e => setPlanningReason(e.target.value)} className="mt-1 w-full min-h-11 border rounded-lg p-2" placeholder="Accord destinataire, replanification…" /></label>
             {planError && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-900">{planError}</p>}
             {/* Résumé zone */}
             <div className="grid grid-cols-3 gap-3">
@@ -690,7 +726,7 @@ const DispatchManager: React.FC<DispatchManagerProps> = ({
                   Créneaux de livraison ({selectedZoneStats?.packages.length || 0} colis)
                 </h4>
                 <p className="text-sm text-slate-400 mt-0.5">
-                  Modifiez les créneaux si nécessaire avant l'optimisation
+                  Une correction de créneau exige un motif et sera enregistrée sur les colis lors de l’affectation
                 </p>
               </div>
               <div className="max-h-64 overflow-y-auto divide-y divide-slate-100">

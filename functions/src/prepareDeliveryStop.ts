@@ -1,6 +1,7 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import * as functions from 'firebase-functions/v1';
 import { deliveryStopGroup, sameDeliveryRecipient } from './deliveryGroup';
+import { visitContainsParcelWindow } from './deliveryAddress';
 import { scanBusinessDay } from './scanPackage';
 
 const validId = (id: unknown): id is string => typeof id === 'string' && !!id && id.length <= 200 && !id.includes('/');
@@ -32,6 +33,7 @@ export async function prepareDeliveryStopHandler(data: any, context: functions.h
     const parcels = await Promise.all(ids.map(id => tx.get(db.collection('packages').doc(id))));
     const targetIds = new Set<string>(target.packageIds || []);
     const incoming = new Set(ids.filter(id => !targetIds.has(id)));
+    if (target.status !== 'En attente' && incoming.size) refuse('Une remise a déjà commencé. Aucun nouveau colis ne peut être ajouté à cet arrêt.');
     const affected = stops.filter(s => s.id === target.id || s.packageIds?.some((id: string) => incoming.has(id)) || group.some(g => g.id === s.id));
     const proofSnaps = await Promise.all(affected.map(s => tx.get(db.collection('proofs_of_delivery').doc(`${ref.id}_${s.id}`))));
     if (proofSnaps.some(p => p.exists) || affected.some(s => s.proofSyncPending ||
@@ -39,11 +41,11 @@ export async function prepareDeliveryStopHandler(data: any, context: functions.h
       refuse('Une remise a déjà commencé sur un autre arrêt. Terminez ou faites vérifier cette livraison avant de regrouper.');
     for (const parcel of parcels) {
       const p = parcel.data();
-      if (!p || ['Livré', 'Retourné', 'À retourner', 'Échec'].includes(p.status) || p.pod ||
+      if (!p || p.pickupMissing || ['AWAITING_DECISION', 'SENDER_RETURNED'].includes(p.returnDisposition) || ['Livré', 'Retourné', 'À retourner', 'Échec'].includes(p.status) || p.pod ||
           (p.currentDriverId && p.currentDriverId !== caller.id) || (p.missionId && p.missionId !== ref.id))
         refuse('Un colis a été livré, transféré ou retourné. Actualisez la tournée.');
-      if (incoming.has(parcel.id) && !sameDeliveryRecipient(target, p!))
-        refuse('Un colis correspond à un autre destinataire ou à une autre adresse. Faites vérifier son affectation par le bureau.');
+      if (!sameDeliveryRecipient(target, p!) || !visitContainsParcelWindow(target, p!))
+        refuse('Un colis correspond à un autre destinataire, étage, adresse ou créneau. Faites vérifier son affectation par le bureau.');
       const owners = stops.filter(s => s.packageIds?.includes(parcel.id));
       if (owners.some(s => !affected.includes(s)) || (p!.stopId && !owners.some(s => s.id === p!.stopId)) ||
           (p!.missionId === ref.id && !owners.length)) refuse('L’affectation d’un colis a changé. Actualisez la tournée.');

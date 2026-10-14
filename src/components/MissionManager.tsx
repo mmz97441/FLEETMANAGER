@@ -1,3 +1,7 @@
+import { getPackageProofs } from '../services/podService';
+import { subscribeParcelFeed, type ParcelCoverage, type ParcelFeedController } from '../services/parcelFeed';
+import RecoveryPanel from './RecoveryPanel';
+import ReturnHubModal from './ReturnHubModal';
 import PackageScanInfo from './PackageScanInfo';
 import { escapeHtml } from '../utils/html';
 import { useUrlParam, updateUrlParams } from '../hooks/useUrlState';
@@ -22,10 +26,10 @@ import {
   subscribeToMissions,
   subscribeToHubs,
   subscribeToPackages,
+  getMissionById,
   subscribeToDispatchablePackages,
   subscribeToImportBatches,
   getPackagesByIds,
-  getMissionById,
   calculateMissionStats,
   getAvailableDriversForZone,
   getDriversWithVehicles,
@@ -100,6 +104,11 @@ const MissionManager: React.FC<MissionManagerProps> = ({
     );
   }, [absences]);
   // États
+  const parcelFeed = useRef<ParcelFeedController | null>(null);
+  const [parcelCoverage, setParcelCoverage] = useState<ParcelCoverage | null>(null);
+  const [analyticsReady, setAnalyticsReady] = useState(false);
+  const [showRecovery, setShowRecovery] = useState(false);
+  const [returningPackage, setReturningPackage] = useState<Package | null>(null);
   const [activeTab, setActiveTab] = useUrlParam<TabType>('tab', 'dashboard', ['dashboard', 'dispatch', 'imports', 'missions', 'packages', 'hubs']);
   const [missions, setMissions] = useState<Mission[]>([]);
   const [packages, setPackages] = useState<Package[]>([]);
@@ -280,16 +289,30 @@ const MissionManager: React.FC<MissionManagerProps> = ({
     let active = true;
     setSourceState('packages', { status: 'loading', error: undefined });
     const measurement = startUxTask('load_packages', currentUser.role);
-    const unsubscribe = subscribeToPackages(value => {
+    setParcelCoverage(null);
+    const feed = subscribeParcelFeed({ onChange: (value, coverage) => {
       if (!active) return;
-      setPackages(value);
+      setPackages(value); setParcelCoverage(coverage);
       measurement.finish('success', { items: value.length });
       setSourceState('packages', { status: 'ready', receivedAt: new Date().toISOString(), error: undefined });
-    }, undefined, error => {
+    }, onCoverage: coverage => { if (active) setParcelCoverage(coverage); }, onError: error => {
       if (active) { measurement.finish('error', { errors: 1 }); setSourceState('packages', { status: 'error', error: error.message || 'Lecture indisponible' }); }
-    });
-    return () => { active = false; unsubscribe(); };
+    } });
+    parcelFeed.current = feed;
+    return () => { active = false; feed.unsubscribe(); if (parcelFeed.current === feed) parcelFeed.current = null; };
   }, [sourceRetries.packages, setSourceState]);
+
+  useEffect(() => {
+    let active = true;
+    setAnalyticsReady(false);
+    if (sourceStates.packages.status !== 'ready' || !parcelFeed.current) return;
+    const needsFull = activeTab === 'dashboard' || activeTab === 'missions' || !!searchTerm || !!packageParam;
+    if (!needsFull) return;
+    void parcelFeed.current.loadAll().then(items => { if (active) { setPackages(items); setAnalyticsReady(true); } }).catch(error => {
+      if (active) setSourceState('packages', { status: 'error', error: error instanceof Error ? error.message : 'Historique incomplet.' });
+    });
+    return () => { active = false; };
+  }, [activeTab, sourceStates.packages.status, sourceRetries.packages, searchTerm, packageParam, setSourceState]);
 
   useEffect(() => {
     let active = true;
@@ -1318,36 +1341,12 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                                 )}
 
                                 {/* POD Status — pour stops traités */}
-                                {stop.status === 'Terminé' && (() => {
-                                  if (sourceStates.packages.status !== 'ready') return <p className="mt-2 text-sm text-slate-600">{sourceStates.packages.status === 'error' ? 'Preuve momentanément inaccessible — réessayez le chargement des colis.' : 'Chargement de la preuve…'}</p>;
-                                  // Chercher le colis correspondant pour voir s'il a un POD
-                                  const stopPkg = todayPackages.find(p =>
-                                    stop.packageIds?.includes(p.id) && p.pod
-                                  );
-                                  return stopPkg?.pod ? (
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); setViewingPOD({ pod: stopPkg.pod!, pkg: stopPkg }); }}
-                                      className="ui-button ui-button-primary inline-flex items-center gap-1.5 mt-2 text-sm cursor-pointer"
-                                    >
-                                      <Eye size={18} />
-                                      {stopPkg.pod?.signatureUrl ? 'Signé' : 'Photo'} — Voir la preuve
-                                    </button>
-                                  ) : (
-                                    <span className="inline-flex items-center gap-1 mt-2 px-2 py-0.5 bg-amber-50 text-amber-800 rounded text-sm font-medium">
-                                      Preuve de livraison manquante
-                                    </span>
-                                  );
+                                {['Terminé', 'Échec'].includes(stop.status) && (() => {
+                                  if (sourceStates.packages.status !== 'ready' || !analyticsReady) return <p className="mt-2 text-sm text-slate-600">Chargement des preuves de cette tournée…</p>;
+                                  const evidence = packages.flatMap(pkg => getPackageProofs(pkg).filter(proof => proof.missionId === mission.id && proof.stopId === stop.id).map(proof => ({ pkg, proof })));
+                                  return evidence.length ? <div className="flex flex-wrap gap-2 mt-2">{evidence.map(({ pkg, proof }) => <button key={pkg.id} type="button" onClick={event => { event.stopPropagation(); setViewingPOD({ pod: proof, pkg }); }} className="ui-button ui-button-secondary text-sm"><Eye size={16} />{proof.type === 'FAILURE' ? 'Preuve d’échec' : 'Preuve de remise'} · {pkg.externalId || pkg.orderNumber}</button>)}</div> : <span className="inline-flex mt-2 rounded bg-amber-50 px-2 py-1 text-sm text-amber-900">Preuve non synchronisée — vérifier le téléphone d’origine</span>;
                                 })()}
-                                {stop.status === 'Échec' && (() => {
-                                  const hasFailurePhotos = todayPackages.some(p =>
-                                    stop.packageIds?.includes(p.id)
-                                  );
-                                  return (
-                                    <span className="inline-flex items-center gap-1 mt-2 px-2 py-0.5 bg-red-50 text-red-500 rounded text-sm font-medium">
-                                      Échec · {stop.completionTime ? new Date(stop.completionTime).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : 'Échec'}
-                                    </span>
-                                  );
-                                })()}
+
                               </div>
 
                               {/* === BOUTONS D'ACTION STOP (admin) === */}
@@ -1444,7 +1443,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
       );
       setStatusChangePkg(null);
     } catch (err) {
-      notifyError('Le statut n’a pas été modifié. Vérifiez les conditions de cette action puis réessayez.');
+      notifyError(err instanceof Error ? err.message : 'Le statut n’a pas été modifié. Utilisez le parcours de réception ou de reprise.');
     }
     setIsChangingStatus(false);
   };
@@ -1452,34 +1451,8 @@ const MissionManager: React.FC<MissionManagerProps> = ({
   // Transitions autorisées par statut (pour l'admin)
   const getAllowedTransitions = (status: PackageStatus): { status: PackageStatus; label: string; color: string }[] => {
     const transitions: Record<string, { status: PackageStatus; label: string; color: string }[]> = {
-      [PackageStatus.PENDING]: [
-        { status: PackageStatus.COLLECTED, label: 'Collecté', color: 'bg-blue-100 text-blue-700' },
-        { status: PackageStatus.AT_HUB, label: 'Au hub', color: 'bg-indigo-100 text-indigo-700' },
-      ],
-      [PackageStatus.COLLECTED]: [
-        { status: PackageStatus.AT_HUB, label: 'Au hub', color: 'bg-indigo-100 text-indigo-700' },
-        { status: PackageStatus.PENDING, label: '↩ En attente', color: 'bg-slate-100 text-slate-700' },
-      ],
-      [PackageStatus.AT_HUB]: [
-        { status: PackageStatus.SORTED, label: 'Trié', color: 'bg-purple-100 text-purple-700' },
-        { status: PackageStatus.PENDING, label: '↩ En attente', color: 'bg-slate-100 text-slate-700' },
-      ],
-      [PackageStatus.SORTED]: [
-        { status: PackageStatus.LOADED, label: 'Chargé', color: 'bg-amber-100 text-amber-700' },
-        { status: PackageStatus.AT_HUB, label: '↩ Au hub', color: 'bg-indigo-100 text-indigo-700' },
-      ],
-      [PackageStatus.LOADED]: [
-        { status: PackageStatus.IN_DELIVERY, label: 'En livraison', color: 'bg-orange-100 text-orange-700' },
-        { status: PackageStatus.SORTED, label: '↩ Trié', color: 'bg-purple-100 text-purple-700' },
-      ],
-      [PackageStatus.IN_DELIVERY]: [
-        { status: PackageStatus.DELIVERED, label: 'Livré', color: 'bg-green-100 text-green-700' },
-        { status: PackageStatus.FAILED, label: 'Échec', color: 'bg-red-100 text-red-700' },
-      ],
-      [PackageStatus.FAILED]: [
-        { status: PackageStatus.PENDING, label: '↩ Remettre en attente', color: 'bg-slate-100 text-slate-700' },
-      ],
-      [PackageStatus.DELIVERED]: [],
+      [PackageStatus.AT_HUB]: [{ status: PackageStatus.SORTED, label: 'Trié', color: 'bg-purple-100 text-purple-700' }],
+      [PackageStatus.SORTED]: [{ status: PackageStatus.AT_HUB, label: 'Défaire le tri', color: 'bg-indigo-100 text-indigo-700' }],
     };
     return transitions[status] || [];
   };
@@ -1708,7 +1681,8 @@ const MissionManager: React.FC<MissionManagerProps> = ({
             <button
               onClick={() => {
                 // Pré-sélectionner le premier hub actif
-                const firstHub = hubs.find(h => h.isActive);
+                const selectedHub = packages.find(p => selectedPackageIds.has(p.id))?.currentHubId;
+                const firstHub = hubs.find(h => h.id === selectedHub && h.isActive) || hubs.find(h => h.isActive);
                 setQuickDispatchHubId(firstHub?.id || '');
                 // Mettre à jour l'heure
                 const now = new Date();
@@ -1728,7 +1702,6 @@ const MissionManager: React.FC<MissionManagerProps> = ({
 
             <span className="text-sm text-slate-500">Statut :</span>
             {[
-              { status: PackageStatus.PENDING, label: 'En attente', color: 'bg-slate-100 text-slate-700' },
               { status: PackageStatus.AT_HUB, label: 'Au hub', color: 'bg-indigo-100 text-indigo-700' },
               { status: PackageStatus.SORTED, label: 'Trié', color: 'bg-purple-100 text-purple-700' },
             ].map(({ status, label, color }) => (
@@ -1900,7 +1873,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                             onChange={async (e) => {
                               e.stopPropagation();
                               try {
-                                await updatePackageFields(pkg.id, { timeWindowStart: e.target.value || undefined });
+                                setEditingPkg(pkg); setEditPkgForm({ ...pkg, timeWindowStart: e.target.value || '', timeWindowEnd: pkg.timeWindowEnd || '' });
                               } catch (err) {
                                 notifyError('Le créneau n’a pas été enregistré. Réessayez dans la fiche du colis.');
                               }
@@ -1917,7 +1890,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                             onChange={async (e) => {
                               e.stopPropagation();
                               try {
-                                await updatePackageFields(pkg.id, { timeWindowEnd: e.target.value || undefined });
+                                setEditingPkg(pkg); setEditPkgForm({ ...pkg, timeWindowStart: pkg.timeWindowStart || '', timeWindowEnd: e.target.value || '' });
                               } catch (err) {
                                 notifyError('Le créneau n’a pas été enregistré. Réessayez dans la fiche du colis.');
                               }
@@ -2056,7 +2029,8 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                               Suivi du colis {pkg.externalId || pkg.barcode || pkg.orderNumber}
                             </p>
                             <PackageScanInfo pkg={pkg} />
-                            <PackageTimeline movements={pkg.movements || []} showActors showInternalDetails pod={pkg.pod} />
+                            <PackageTimeline movements={pkg.movements || []} showActors showInternalDetails pod={pkg.pod} proofs={getPackageProofs(pkg)} />
+                            <div className="mt-2 flex flex-wrap gap-2">{getPackageProofs(pkg).map(proof => <button key={`${proof.missionId}_${proof.stopId}`} type="button" onClick={() => setViewingPOD({ pod: proof, pkg })} className="ui-button ui-button-secondary"><Eye size={16} />{proof.type === 'FAILURE' ? 'Consulter l’échec' : 'Consulter la remise'}</button>)}</div>
                           </td>
                         </tr>
                       )}
@@ -2166,7 +2140,7 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                     }
                     setEditingPkg(null);
                   } catch (err) {
-                    notifyError('Enregistrement impossible. Votre saisie est conservée ; réessayez.');
+                    notifyError(err instanceof Error ? err.message : 'Enregistrement impossible. Votre saisie est conservée ; réessayez.');
                   }
                   setIsSavingPkg(false);
                 }}
@@ -2447,7 +2421,18 @@ const MissionManager: React.FC<MissionManagerProps> = ({
         </div>)}
       </div>}
       {/* Content */}
-      {contentReady && activeTab === 'dashboard' && renderDashboard()}
+      <details className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3" open={showRecovery} onToggle={event => setShowRecovery(event.currentTarget.open)}>
+        <summary className="cursor-pointer min-h-11 font-semibold text-amber-950">Reprise des colis anciens, échecs et retours</summary>
+        {showRecovery && <RecoveryPanel currentUser={currentUser} onReplanify={() => setActiveTab('dispatch')} onReturn={setReturningPackage} onInspect={async (missionId) => {
+          try {
+            const mission = await getMissionById(missionId);
+            if (mission) { setSelectedDate(mission.date); setActiveTab('missions'); setExpandedMissionId(missionId); }
+            else notifyError('Cette tournée est introuvable.');
+          } catch (error) { notifyError(error instanceof Error ? error.message : 'Lecture impossible.'); }
+        }} />}
+      </details>
+      {returningPackage && <ReturnHubModal pkg={returningPackage} currentUser={currentUser} onClose={() => setReturningPackage(null)} />}
+      {contentReady && activeTab === 'dashboard' && (analyticsReady ? renderDashboard() : <p role="status">Chargement de l’historique complet pour calculer les indicateurs…</p>)}
       {contentReady && activeTab === 'dispatch' && canDispatch && (
         <DispatchManager
           packages={dispatchablePackages}
@@ -2498,7 +2483,14 @@ const MissionManager: React.FC<MissionManagerProps> = ({
         />
       )}
       {contentReady && activeTab === 'missions' && renderMissions()}
-      {contentReady && activeTab === 'packages' && renderPackages()}
+      {contentReady && activeTab === 'packages' && <>
+        <div className="mb-3 rounded-lg bg-blue-50 p-3 text-sm text-blue-950">
+          <p>Tous les colis actifs · {parcelCoverage?.historyCount || 0} colis terminés chargés. {parcelCoverage?.historyComplete ? 'Historique complet.' : 'Les filtres portent sur l’historique chargé ; la recherche charge tout l’historique.'}</p>
+          {!parcelCoverage?.historyComplete && <div className="flex flex-wrap gap-2 mt-2">
+            <button disabled={parcelCoverage?.historyLoading} onClick={() => void parcelFeed.current?.loadMore().catch(error => notifyError(error.message))} className="ui-button ui-button-secondary">{parcelCoverage?.historyLoading ? 'Chargement…' : 'Charger la suite de l’historique'}</button>
+            <button disabled={parcelCoverage?.historyLoading} onClick={() => void parcelFeed.current?.loadAll().catch(error => notifyError(error.message))} className="ui-button ui-button-secondary">Charger tout l’historique</button>
+          </div>}
+        </div>{searchTerm && !parcelCoverage?.historyComplete ? <p role="status">Recherche dans tout l’historique en cours…</p> : renderPackages()}</>}
       {contentReady && activeTab === 'hubs' && canManageHubs && renderHubs()}
 
       {/* Modal Import */}
@@ -3030,6 +3022,8 @@ const MissionManager: React.FC<MissionManagerProps> = ({
                     }
                     // Récupérer les colis sélectionnés
                     const selectedPkgs = packages.filter(p => selectedPackageIds.has(p.id));
+                    if (selectedPkgs.some(p => p.currentHubId !== quickDispatchHubId)) throw new Error('La sélection contient des colis d’un autre hub. Scannez leur arrivée au hub de départ ou séparez la sélection.');
+                    if (selectedPkgs.some(p => p.requestedDeliveryDate && p.requestedDeliveryDate !== selectedDate)) throw new Error('La sélection contient des colis demandés à une autre date. Choisissez cette date ou utilisez Dispatch pour enregistrer une dérogation motivée.');
                     if (selectedPkgs.length === 0) {
                       notifyError('Aucun colis sélectionné');
                       setIsQuickDispatching(false);

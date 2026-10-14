@@ -10,7 +10,8 @@ import { escapeHtml } from '../utils/html';
  * 5. Traçabilité complète (PackageMovement)
  */
 
-import { db, storage } from '../firebaseConfig';
+import app, { db, storage, auth } from '../firebaseConfig';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { doc, runTransaction, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { ref, uploadString, getDownloadURL } from 'firebase/storage';
 import { Package, PackageStatus, Mission, MissionStatus, StopStatus } from '../types';
@@ -111,99 +112,26 @@ export const finalizePickup = async (params: {
   missingPackageIds: string[];
   unknownBarcodes: string[];
   signatureBase64?: string;
+  recordedAt?: string;
 }): Promise<PickupManifest | null> => {
-  const {
-    missionId, stopId, clientId, clientName,
-    driverId, driverName, vehicleId, vehiclePlate,
-    address, coordinates, expectedPackageIds,
-    scannedPackageIds, missingPackageIds, unknownBarcodes,
-    signatureBase64
-  } = params;
-
-  try {
-    const timestamp = new Date().toISOString();
-    const manifestId = `${missionId}_${stopId}`;
-    const existing = await getDoc(doc(db, PICKUPS_COLLECTION, manifestId));
-    const sameManifest = (saved: PickupManifest) => {
-      if (saved.driverId !== driverId || [...saved.scannedPackageIds].sort().join('|') !== [...scannedPackageIds].sort().join('|')) {
-        throw new Error('Un autre enlèvement a déjà été enregistré pour cet arrêt.');
-      }
-      return saved;
-    };
-    if (existing.exists()) return sameManifest(existing.data() as PickupManifest);
-    if (new Set(scannedPackageIds).size !== scannedPackageIds.length || scannedPackageIds.length > 450 || scannedPackageIds.some(id => !expectedPackageIds.includes(id))) {
-      throw new Error('Liste de colis scannés invalide.');
-    }
-
-    // 1. Upload signature client
-    let clientSignatureUrl: string | undefined;
-    if (signatureBase64) {
-      const sigRef = ref(storage, `pickups/${missionId}/${stopId}/${crypto.randomUUID()}/client-signature.png`);
-      const sigData = signatureBase64.includes(',') ? signatureBase64 : `data:image/png;base64,${signatureBase64}`;
+  if (auth.currentUser?.uid !== params.driverId) throw new Error('Reconnectez le compte ayant enregistré cet enlèvement.');
+  let clientSignatureUrl: string | undefined;
+  if (params.signatureBase64) {
+    const sigRef = ref(storage, `pickups/${params.missionId}/${params.stopId}/client-signature.png`);
+    const sigData = params.signatureBase64.includes(',') ? params.signatureBase64 : `data:image/png;base64,${params.signatureBase64}`;
+    try { clientSignatureUrl = await getDownloadURL(sigRef); }
+    catch (error) {
+      if ((error as { code?: string }).code !== 'storage/object-not-found') throw error;
       await uploadString(sigRef, sigData, 'data_url');
       clientSignatureUrl = await getDownloadURL(sigRef);
     }
-
-    // 3. Créer le manifeste
-    const manifest: PickupManifest = {
-      id: manifestId,
-      missionId,
-      stopId,
-      clientId,
-      clientName,
-      driverId,
-      driverName,
-      vehicleId,
-      vehiclePlate,
-      address,
-      coordinates,
-      timestamp,
-      expectedPackageIds,
-      scannedPackageIds,
-      missingPackageIds,
-      unknownBarcodes,
-      clientSignatureUrl,
-      expectedCount: expectedPackageIds.length,
-      scannedCount: scannedPackageIds.length,
-      missingCount: missingPackageIds.length,
-      createdAt: timestamp
-    };
-
-    return await runTransaction(db, async tx => {
-      const manifestRef = doc(db, PICKUPS_COLLECTION, manifestId);
-      const saved = await tx.get(manifestRef);
-      if (saved.exists()) return sameManifest(saved.data() as PickupManifest);
-      const missionRef = doc(db, 'missions', missionId);
-      const missionSnap = await tx.get(missionRef);
-      if (!missionSnap.exists()) throw new Error('Tournée introuvable.');
-      const mission = missionSnap.data() as Mission;
-      const stop = mission.stops.find(s => s.id === stopId);
-      if (!stop || mission.driverId !== driverId || [MissionStatus.COMPLETED, MissionStatus.CANCELLED].includes(mission.status) || [StopStatus.COMPLETED, StopStatus.FAILED, StopStatus.SKIPPED].includes(stop.status)) throw new Error('Cet enlèvement n’est plus disponible.');
-      const packages = await Promise.all(scannedPackageIds.map(id => tx.get(doc(db, PACKAGES_COLLECTION, id))));
-      for (const snap of packages) {
-        if (!snap.exists() || !stop.packageIds.includes(snap.id)) throw new Error('Un colis ne fait plus partie de cet enlèvement.');
-        const pkg = snap.data() as Package;
-        if ((pkg.missionId && pkg.missionId !== missionId) || (pkg.currentDriverId && pkg.currentDriverId !== driverId) || [PackageStatus.DELIVERED, PackageStatus.RETURNED].includes(pkg.status)) throw new Error('Un colis a été transféré ou clôturé.');
-      }
-      for (const snap of packages) {
-        const pkg = snap.data() as Package;
-        tx.update(snap.ref, cleanUndefined({status: PackageStatus.COLLECTED, currentDriverId: driverId, currentVehicleId: vehicleId,
-          movements: [...(pkg.movements || []), {timestamp, action: 'COLLECTED', driverId, driverName, vehicleId, vehiclePlate, location: coordinates, notes: `Enlevé chez ${clientName}`}], updatedAt: timestamp}));
-      }
-      const stops = mission.stops.map(s => s.id === stopId ? {...s, status: StopStatus.COMPLETED, completionTime: timestamp, ...(coordinates ? {arrivalCoordinates: coordinates} : {})} : s);
-      tx.update(missionRef, {stops, completedStops: stops.filter(s => s.status === StopStatus.COMPLETED).length,
-        collectedPackages: Number((mission as any).collectedPackages || 0) + scannedPackageIds.length, updatedAt: timestamp});
-      tx.set(manifestRef, cleanUndefined(manifest));
-      return manifest;
-    });
-
-  } catch (err) {
-    reportError('pickup.finalize', err, {
-      userMessage: "L'enlèvement n'a pas pu être finalisé. Vos scans ne sont pas perdus, réessayez.",
-      extra: { missionId, stopId, clientName, scannedCount: scannedPackageIds.length }
-    });
-    throw err;
   }
+  if (auth.currentUser?.uid !== params.driverId) throw new Error('La session a changé ; enlèvement conservé sur ce téléphone.');
+  const { signatureBase64: _signature, ...payload } = params;
+  const result = await httpsCallable<typeof payload & { clientSignatureUrl?: string }, PickupManifest>(getFunctions(app, 'europe-west1'), 'finalizePickup')(
+    cleanUndefined({ ...payload, clientSignatureUrl }),
+  );
+  return result.data;
 };
 
 // ============================================================================

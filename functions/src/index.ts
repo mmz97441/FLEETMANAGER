@@ -1,15 +1,23 @@
 import { prepareDeliveryStopHandler } from './prepareDeliveryStop';
 import { createAdHocPackageHandler } from './adhocPackage';
 import { importReference, validateImportManifest } from './importManifest';
-import { receivePackagesAtHubHandler } from './hubReception';
+import { receivePackagesAtHubHandler, receiveTransferredPackageAtHubHandler } from './hubReception';
+import { publishDeliveryProofHandler } from './publishDeliveryProof';
+import { reconcileDeliveryProofsHandler } from './reconcileDeliveryProofs';
 import { associateCarrierBarcodeHandler, validatedCarrierBarcode, checkCarrierBarcode } from './carrierBarcode';
 import { recordClientErrorsHandler } from './clientErrors';
 import { votingHandler } from './voting';
 import { getStorage } from 'firebase-admin/storage';
 import { scanPackageHandler } from './scanPackage';
 import { finishMissionHandler } from './missionLifecycle';
-import { placeKey } from './deliveryAddress';
+import { sameDeliveryVisit, sameDeliveryRecipient, visitContainsParcelWindow, intersectDeliveryWindows } from './deliveryAddress';
+import { parcelScanCodes, normalizeScanCode, individualReferenceError } from './scanCode';
+import { readIndividualReferenceReservations, writeIndividualReferenceReservations, repairParcelScanCodes } from './parcelReferenceIndex';
 import { dispatchMissionsTransaction } from './dispatchMissions';
+import { correctDeliveryPlanHandler, setParcelSortingHandler } from './deliveryPlan';
+import { returnPackageHandler, resolveReturnedPackageHandler } from './returnPackage';
+import { finalizePickupHandler, replanPickupHandler } from './finalizePickup';
+import { commitDeliveryOutcomeHandler } from './commitStopOutcome';
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { getAuth } from "firebase-admin/auth";
 import { randomBytes, createHash } from "crypto";
@@ -1080,10 +1088,18 @@ export const recordUserPresence = functions.region('europe-west1').https.onCall(
     if (!user || user.isDisabled || (user.sessionsRevokedAt && authTime <= user.sessionsRevokedAt))
       throw new functions.https.HttpsError('permission-denied', 'Session inactive.');
     const now = Date.now(), iso = new Date(now).toISOString();
-    if (data.login || !user.lastSeenAt || now - Date.parse(user.lastSeenAt) >= 45000) {
-      const appVersion = typeof data.appVersion === 'string' && /^\d+\.\d+\.\d+$/.test(data.appVersion) ? data.appVersion : null;
-      const buildId = typeof data.buildId === 'string' && /^\d{1,20}$/.test(data.buildId) ? data.buildId : null;
-      tx.update(ref, { lastSeenAt: iso, ...(data.login ? { lastLoginAt: iso } : {}), ...(appVersion && buildId ? { appVersion, appBuildId: buildId } : {}) });
+    const appVersion = typeof data.appVersion === 'string' && /^\d+\.\d+\.\d+$/.test(data.appVersion) ? data.appVersion : null;
+    const buildId = typeof data.buildId === 'string' && /^\d{1,20}$/.test(data.buildId) ? data.buildId : null;
+    const deviceId = typeof data.deviceId === 'string' && /^[a-zA-Z0-9-]{8,80}$/.test(data.deviceId) ? data.deviceId : null;
+    const devices = Array.isArray(user.appDevices) ? user.appDevices : [];
+    const device = deviceId ? devices.find((entry: any) => entry.id === deviceId) : null;
+    if (data.login || !user.lastSeenAt || now - Date.parse(user.lastSeenAt) >= 45000 ||
+        (appVersion && buildId && (user.appVersion !== appVersion || user.appBuildId !== buildId)) ||
+        (deviceId && (!device || now - Date.parse(device.lastSeenAt) >= 45000 || device.buildId !== buildId))) {
+      const appDevices = deviceId && appVersion && buildId ? [{ id: deviceId, appVersion, buildId, lastSeenAt: iso,
+        label: String(data.deviceLabel || 'Appareil').slice(0, 80) }, ...devices.filter((entry: any) => entry.id !== deviceId)].slice(0, 12) : null;
+      tx.update(ref, { lastSeenAt: iso, ...(data.login ? { lastLoginAt: iso } : {}),
+        ...(appVersion && buildId ? { appVersion, appBuildId: buildId } : {}), ...(appDevices ? { appDevices } : {}) });
     }
     return { success: true };
   });
@@ -1508,6 +1524,8 @@ export const transferPackages = functions
       const snaps = await Promise.all(
         ids.map((id) => tx.get(db.collection('packages').doc(id))),
       );
+      if (snaps.some(p => !p.exists || ['Livré', 'Retourné', 'Échec', 'À retourner'].includes(p.data()?.status) || p.data()?.returnDisposition === 'AWAITING_DECISION' || p.data()?.pickupMissing))
+        throw new functions.https.HttpsError('failed-precondition', 'Un colis est indisponible ou nécessite un retour et une décision du bureau. Aucun transfert effectué.');
       const packages = snaps
         .filter(
           (p) => p.exists && !['Livré', 'Retourné'].includes(p.data()?.status),
@@ -1534,6 +1552,18 @@ export const transferPackages = functions
         packageIds: [...s.packageIds],
       }));
       const inTour = new Set(toStops.flatMap((s: any) => s.packageIds));
+      const pendingDestinations = toStops.filter((stop: any) => stop.type === 'DELIVERY' && stop.status === 'En attente');
+      const existingIds = [...new Set<string>(pendingDestinations.flatMap((stop: any) => stop.packageIds))];
+      if (existingIds.length > 400 || inTour.size !== toStops.flatMap((stop: any) => stop.packageIds).length)
+        throw new functions.https.HttpsError('failed-precondition', 'La liste des colis de destination doit être corrigée par le bureau.');
+      const existingParcels = await Promise.all(existingIds.map(id => tx.get(db.collection('packages').doc(id))));
+      const existingById = new Map(existingParcels.map(doc => [doc.id, doc.data()]));
+      if (pendingDestinations.some((stop: any) => stop.packageIds.some((id: string) => {
+        const parcel = existingById.get(id);
+        return !parcel || parcel.missionId !== toRef.id || parcel.stopId !== stop.id ||
+          (parcel.currentDriverId && parcel.currentDriverId !== to.driverId) ||
+          !sameDeliveryRecipient(stop, parcel) || !visitContainsParcelWindow(stop, parcel);
+      }))) throw new functions.https.HttpsError('failed-precondition', 'Un arrêt de destination contient un destinataire, étage ou créneau incohérent. Faites corriger la tournée avant le transfert.');
       const add = packages.filter((p) => !inTour.has(p.id));
       const added = new Set(add.map((p) => p.id));
       const counts = (stops: any[], previous: any) => ({
@@ -1547,12 +1577,11 @@ export const transferPackages = functions
       const now = new Date().toISOString();
       let seq = Math.max(0, ...toStops.map((s: any) => s.sequence || 0));
       for (const p of add) {
-        const key = placeKey(p);
         let stop = toStops.find(
           (s: any) =>
             s.type === 'DELIVERY' &&
-            !['Terminé', 'Échec', 'Passé'].includes(s.status) &&
-            placeKey(s) === key,
+            s.status === 'En attente' && !s.proofSyncPending &&
+            sameDeliveryVisit(s, p),
         );
         if (!stop) {
           stop = {
@@ -1568,10 +1597,17 @@ export const transferPackages = functions
             packageIds: [],
             packageCount: 0,
             serviceTime: p.serviceTime || 5,
+            ...(p.floor !== undefined ? { floor: p.floor } : {}),
+            ...(p.hasElevator !== undefined ? { hasElevator: p.hasElevator } : {}),
+            ...(p.timeWindowStart ? { timeWindowStart: p.timeWindowStart } : {}),
+            ...(p.timeWindowEnd ? { timeWindowEnd: p.timeWindowEnd } : {}),
             ...(p.coordinates ? { coordinates: p.coordinates } : {}),
           };
           toStops.push(stop);
         }
+        const window = intersectDeliveryWindows([stop, p]);
+        if (window) Object.assign(stop, window);
+        if (stop.packageIds.length) stop.serviceTime = Number(stop.serviceTime || 5) + Number(p.serviceTime || 5);
         stop.packageIds.push(p.id);
         stop.packageCount = stop.packageIds.length;
         tx.update(db.collection('packages').doc(p.id), {
@@ -1925,6 +1961,7 @@ export const importPackages = functions
         'orderNumber',
         'barcode',
         'carrierBarcode',
+        'carrierBarcodeFormat',
         'address',
         'city',
         'postalCode',
@@ -1951,7 +1988,23 @@ export const importPackages = functions
       ];
       const p: any = {};
       for (const key of allowed) if (raw[key] !== undefined) p[key] = raw[key];
-      if (p.carrierBarcode) p.carrierBarcode = validatedCarrierBarcode(p.carrierBarcode, p.clientReference);
+      if (p.carrierBarcode) p.carrierBarcode = validatedCarrierBarcode(p.carrierBarcode, p.clientReference, p.carrierBarcodeFormat || 'generic');
+      for (const field of ['externalId', 'barcode', 'carrierBarcode', 'orderNumber']) {
+        if (p[field] && individualReferenceError(p[field])) throw new functions.https.HttpsError('invalid-argument', individualReferenceError(p[field])!);
+      }
+      if (p.carrierBarcodeFormat && !['generic', 'boiron'].includes(p.carrierBarcodeFormat))
+        throw new functions.https.HttpsError('invalid-argument', 'Format du code transporteur invalide.');
+      if (p.requestedDeliveryDate) {
+        const day = p.requestedDeliveryDate;
+        if (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day) || !Number.isFinite(Date.parse(`${day}T00:00:00Z`)) || new Date(`${day}T00:00:00Z`).toISOString().slice(0, 10) !== day)
+          throw new functions.https.HttpsError('invalid-argument', 'Date de livraison souhaitée invalide.');
+      }
+      for (const field of ['timeWindowStart', 'timeWindowEnd']) if (p[field] && (typeof p[field] !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(p[field])))
+        throw new functions.https.HttpsError('invalid-argument', 'Créneau invalide : utilisez le format HH:MM.');
+      if (!intersectDeliveryWindows([p])) throw new functions.https.HttpsError('invalid-argument', 'La fin du créneau doit suivre son début.');
+      if (p.serviceTime != null && (typeof p.serviceTime !== 'number' || !Number.isFinite(p.serviceTime) || p.serviceTime <= 0 || p.serviceTime > 480))
+        throw new functions.https.HttpsError('invalid-argument', 'La durée de service doit être comprise entre 1 et 480 minutes.');
+      p.scanCodes = parcelScanCodes(p);
       p.movements = [
         {
           action: 'IMPORTED',
@@ -2007,21 +2060,17 @@ export const importPackages = functions
       );
       // Recognize historical documents whose IDs predate deterministic imports.
       const legacy = await Promise.all(
-        rows.map((r: any, i: number) =>
-          snapshots[i].exists
-            ? Promise.resolve(null)
-            : tx.get(
-                db
-                  .collection('packages')
-                  .where('clientId', '==', r.p.clientId)
-                  .where(
-                    r.p.externalId ? 'externalId' : 'orderNumber',
-                    '==',
-                    r.p.externalId || r.p.orderNumber || r.code,
-                  )
-                  .limit(2),
-              ),
-        ),
+        rows.map(async (r: any, i: number) => {
+          if (snapshots[i].exists) return null;
+          const field = r.p.externalId ? 'externalId' : r.p.orderNumber ? 'orderNumber' : 'barcode';
+          const base = db.collection('packages').where('clientId', '==', r.p.clientId);
+          const matches = await Promise.all([
+            tx.get(base.where(field, '==', r.p[field] || r.code).limit(2)),
+            tx.get(base.where('scanCodes', 'array-contains', normalizeScanCode(r.code)).limit(2)),
+          ]);
+          const docs = [...new Map(matches.flatMap(result => result.docs).filter(doc => normalizeScanCode(String(doc.data()[field] || '')) === normalizeScanCode(r.code)).map(doc => [doc.id, doc])).values()];
+          return { docs, size: docs.length };
+        }),
       );
       if (legacy.some((result: any) => result && result.size > 1))
         throw new functions.https.HttpsError(
@@ -2036,12 +2085,12 @@ export const importPackages = functions
         const row = rows[i], code = row.p.carrierBarcode;
         if (!code) continue;
         const target = legacy[i]?.docs[0] || snapshots[i], id = target.exists ? target.id : row.id;
-        if (codes.has(code) && codes.get(code) !== id) throw new functions.https.HttpsError('already-exists', 'Deux colis du fichier portent le même code Boiron.');
-        if (codesByPackage.has(id) && codesByPackage.get(id) !== code) throw new functions.https.HttpsError('already-exists', 'Un colis ne peut pas recevoir deux codes Boiron dans le même import.');
+        if (codes.has(code) && codes.get(code) !== id) throw new functions.https.HttpsError('already-exists', 'Deux colis du fichier portent le même code transporteur.');
+        if (codesByPackage.has(id) && codesByPackage.get(id) !== code) throw new functions.https.HttpsError('already-exists', 'Un colis ne peut pas recevoir deux codes transporteur dans le même import.');
         for (let j = 0; j < rows.length; j++) {
           const other = legacy[j]?.docs[0] || snapshots[j], otherId = other.exists ? other.id : rows[j].id;
           if (otherId !== id && ['barcode', 'externalId', 'orderNumber'].some(field => rows[j].p[field] === code))
-            throw new functions.https.HttpsError('already-exists', 'Un code Boiron correspond aussi à un autre colis du fichier.');
+            throw new functions.https.HttpsError('already-exists', 'Un code transporteur correspond aussi à un autre colis du fichier.');
         }
         if (codes.has(code)) continue;
         codesByPackage.set(id, code);
@@ -2050,6 +2099,9 @@ export const importPackages = functions
           throw new functions.https.HttpsError('failed-precondition', 'Ce colis existe déjà. Vérifiez et associez son code depuis les opérations du hub.');
         carrierReservations.push(await checkCarrierBarcode(tx, db, code, id));
       }
+      const reservations = await readIndividualReferenceReservations(tx, db, rows.filter((_row: any, i: number) => !snapshots[i].exists && !legacy[i]?.docs[0]).map((row: any) => ({ id: row.id, parcel: row.p })));
+      if (reservations.length + codes.size + rows.length + 1 > 490) throw new functions.https.HttpsError('invalid-argument', 'Lot trop volumineux. Mettez à jour l’application et relancez l’import par lots de 75.');
+      writeIndividualReferenceReservations(tx, reservations, caller.id, new Date().toISOString());
       for (const [code, id] of codes) {
         const reservation = carrierReservations.shift()!;
         if (!reservation.exists) tx.create(reservation.ref, { code, packageId: id, createdAt: new Date().toISOString(), createdBy: caller.id });
@@ -2177,108 +2229,13 @@ export const deleteAbsence = functions
     });
   });
 
-export const returnPackage = functions
-  .region('europe-west1')
-  .https.onCall(async (data, context) => {
-    const caller = await requireActiveCaller(context),
-      manager = isAdminCaller(caller.role);
-    const id = String(data?.packageId || ''),
-      proof = data?.extra?.returnProof;
-    if (
-      !id ||
-      id.includes('/') ||
-      !proof ||
-      !Array.isArray(proof.photoUrls) ||
-      !proof.photoUrls.length ||
-      proof.photoUrls.some(
-        (url: unknown) =>
-          typeof url !== 'string' || !url.startsWith('https://'),
-      )
-    )
-      throw new functions.https.HttpsError(
-        'invalid-argument',
-        'Une preuve photographique du retour est obligatoire.',
-      );
-    return db.runTransaction(async (tx) => {
-      const ref = db.collection('packages').doc(id),
-        snap = await tx.get(ref);
-      if (!snap.exists)
-        throw new functions.https.HttpsError('not-found', 'Colis introuvable.');
-      const pkg = snap.data()!;
-      if (
-        pkg.status === 'Retourné' &&
-        !pkg.missionId &&
-        pkg.returnProof?.driverId === caller.id
-      )
-        return { success: true };
-      if (
-        !manager &&
-        (!['chauffeur', 'chauffeuse'].includes(normalizeRole(caller.role)) ||
-          pkg.currentDriverId !== caller.id)
-      )
-        throw new functions.https.HttpsError(
-          'permission-denied',
-          'Ce colis ne vous est pas affecté.',
-        );
-      if (!['À retourner', 'Échec', 'Retourné'].includes(pkg.status))
-        throw new functions.https.HttpsError(
-          'failed-precondition',
-          'Ce colis n’est pas en attente de retour.',
-        );
-      const missionRef = pkg.missionId
-        ? db.collection('missions').doc(pkg.missionId)
-        : null;
-      const mission = missionRef ? await tx.get(missionRef) : null;
-      const now = new Date().toISOString();
-      if (mission?.exists) {
-        if (mission.data()?.stops?.some((stop: any) => stop.proofSyncPending === true && (stop.id === pkg.stopId || stop.packageIds?.includes(id))))
-          throw new functions.https.HttpsError('failed-precondition', 'Synchronisez la preuve de cet arrêt avant de déplacer ce colis.');
-        const stops = (mission.data()?.stops || [])
-          .map((s: any) => {
-            const packageIds = s.packageIds.filter((pid: string) => pid !== id);
-            return { ...s, packageIds, packageCount: packageIds.length };
-          })
-          .filter(
-            (s: any) =>
-              s.packageIds.length ||
-              ['Terminé', 'Échec', 'Passé'].includes(s.status),
-          );
-        const totalPackages = Math.max(stops.reduce((sum: number, stop: any) => sum + stop.packageIds.length, 0),
-          (mission.data()?.deliveredPackages || 0) + (mission.data()?.failedPackages || 0) +
-          new Set(stops.filter((stop: any) => !['Terminé', 'Échec', 'Passé'].includes(stop.status)).flatMap((stop: any) => stop.packageIds)).size);
-        tx.update(mission!.ref, { stops, totalPackages, updatedAt: now });
-      }
-      tx.update(ref, {
-        status: 'Retourné',
-        missionId: null,
-        stopId: null,
-        currentDriverId: null,
-        currentVehicleId: null,
-        currentHubId: mission?.data()?.hubId || pkg.currentHubId || null,
-        returnProof: {
-          ...proof,
-          packageId: id,
-          driverId: caller.id,
-          timestamp: now,
-        },
-        movements: [
-          ...(pkg.movements || []),
-          {
-            timestamp: now,
-            action: 'RETURNED',
-            driverId: caller.id,
-            driverName:
-              `${caller.firstName || ''} ${caller.lastName || ''}`.trim(),
-            notes: 'Retour au hub confirmé',
-          },
-        ],
-        updatedAt: now,
-      });
-      return { success: true };
-    });
-  });
+export const returnPackage = functions.region('europe-west1').https.onCall((data, context) => returnPackageHandler(data, context, { db, requireActiveCaller, isAdminCaller }));
+export const resolveReturnedPackage = functions.region('europe-west1').https.onCall((data, context) => resolveReturnedPackageHandler(data, context, { db, requireActiveCaller, isAdminCaller }));
+export const finalizePickup = functions.region('europe-west1').https.onCall((data, context) => finalizePickupHandler(data, context, { db, requireActiveCaller, isAdminCaller }));
+export const commitDeliveryOutcome = functions.region('europe-west1').https.onCall((data, context) => commitDeliveryOutcomeHandler(data, context, { db, requireActiveCaller }));
+export const correctDeliveryPlan = functions.region('europe-west1').https.onCall((data, context) => correctDeliveryPlanHandler(data, context, { db, requireActiveCaller, isAdminCaller }));
+export const setParcelSorting = functions.region('europe-west1').https.onCall((data, context) => setParcelSortingHandler(data, context, { db, requireActiveCaller, isAdminCaller }));
 
-// A deterministic event ID makes retries of the Firestore trigger harmless.
 export const notifyPackageStatus = functions
   .region('europe-west1')
   .firestore.document('packages/{packageId}')
@@ -2375,6 +2332,7 @@ export const getTeamDirectory = functions
             lastSeenAt: u.lastSeenAt || null,
             appVersion: u.appVersion || null,
             appBuildId: u.appBuildId || null,
+            appDevices: isAdminCaller(caller.role) ? u.appDevices || [] : [],
           };
         }),
     };
@@ -2493,8 +2451,12 @@ export const acceptQuote = functions
       const existing = await tx.get(packageRef),
         now = new Date().toISOString(),
         parts = destination.split(',').map((s) => s.trim());
+      const quoteCodes = { externalId: id, orderNumber: 'Q' + id.slice(-10), barcode: 'Q' + id.slice(-10) };
+      const quoteReservations = !existing.exists ? await readIndividualReferenceReservations(tx, db, [{ id: packageRef.id, parcel: quoteCodes }]) : [];
+      writeIndividualReferenceReservations(tx, quoteReservations, caller.id, now);
       if (!existing.exists)
         tx.create(packageRef, {
+          scanCodes: parcelScanCodes(quoteCodes),
           clientId: quote.clientId,
           clientName: quote.clientName || '',
           externalId: id,
@@ -2653,3 +2615,12 @@ Exemple : {"metric":"deliveryRate","dimension":"zone","period":"month","chart":"
 
 export const createAdHocPackage = functions.region('europe-west1').https.onCall((data, context) => createAdHocPackageHandler(data, context, { db, requireActiveCaller, isAdminCaller }));
 export const prepareDeliveryStop = functions.region('europe-west1').https.onCall((data, context) => prepareDeliveryStopHandler(data, context, { db, requireActiveCaller }));
+
+export const indexPackageScanCodes = functions.region('europe-west1').firestore.document('packages/{packageId}').onWrite(async (_change, context) => repairParcelScanCodes(db, context.params.packageId));
+
+export const receiveTransferredPackageAtHub = functions.region('europe-west1').https.onCall((data, context) => receiveTransferredPackageAtHubHandler(data, context, { db, requireActiveCaller, isAdminCaller }));
+export const publishDeliveryProof = functions.region('europe-west1').https.onCall((data, context) => publishDeliveryProofHandler(data, context, { db, requireActiveCaller }));
+
+export const replanPickup = functions.region('europe-west1').https.onCall((data, context) => replanPickupHandler(data, context, { db, requireActiveCaller, isAdminCaller }));
+
+export const reconcileDeliveryProofs = functions.region('europe-west1').runWith({timeoutSeconds: 540}).https.onCall((data, context) => reconcileDeliveryProofsHandler(data, context, {db, requireActiveCaller, isAdminCaller}));

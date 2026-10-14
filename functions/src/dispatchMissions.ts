@@ -1,7 +1,7 @@
 import { createHash } from 'crypto';
 import { Firestore } from 'firebase-admin/firestore';
 import { https } from 'firebase-functions/v1';
-import { placeKey } from './deliveryAddress';
+import { sameDeliveryRecipient, visitContainsParcelWindow } from './deliveryAddress';
 
 const bad = (message: string): never => { throw new https.HttpsError('invalid-argument', message); };
 const unavailable = (message: string): never => { throw new https.HttpsError('failed-precondition', message); };
@@ -52,7 +52,8 @@ export async function dispatchMissionsTransaction(db: Firestore, data: any, call
         packageIds: s.packageIds, packageCount: s.packageIds.length,
         serviceTime: nonnegative(s.serviceTime, Math.max(5, s.packageIds.length * 5)),
       };
-      if (!stop.address || !stop.city || !stop.postalCode) bad('Adresse de livraison incomplète.');
+      if (stop.serviceTime <= 0) bad('La durée de service doit être positive.');
+      if (!stop.contactName || !stop.address || !stop.city || !stop.postalCode) bad('Adresse de livraison incomplète.');
       if (s.coordinates) {
         const { lat, lng } = s.coordinates;
         if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) bad('Coordonnées invalides.');
@@ -87,7 +88,20 @@ export async function dispatchMissionsTransaction(db: Firestore, data: any, call
   // 450 packages + 20 missions + 20 notifications + 1 receipt = 491 writes maximum.
   if (parcelIds.size > 450 || Buffer.byteLength(JSON.stringify(missions), 'utf8') > 800000)
     bad('Dispatch trop volumineux : 450 colis maximum. Répartissez les envois.');
-  const fingerprint = createHash('sha256').update(stable(missions)).digest('hex');
+  const planning = data.planningChanges;
+  const changes = new Map<string, any>();
+  if (planning !== undefined) {
+    if (typeof planning.reason !== 'string' || planning.reason.trim().length < 5 || planning.reason.length > 1000 ||
+      !Array.isArray(planning.parcels) || planning.parcels.length > 450 || typeof planning.allowDifferentDate !== 'boolean')
+      bad('Précisez le motif de la dérogation de date ou de la correction des créneaux.');
+    for (const change of planning.parcels) {
+      if (!parcelIds.has(change.packageId) || changes.has(change.packageId)) bad('Correction de créneau incohérente.');
+      const start = change.timeWindowStart || null, end = change.timeWindowEnd || null;
+      if ((start && !time(start)) || (end && !time(end)) || (start && end && start >= end)) bad('Créneau corrigé invalide.');
+      changes.set(change.packageId, { timeWindowStart: start, timeWindowEnd: end });
+    }
+  }
+  const fingerprint = createHash('sha256').update(stable({ missions, planning: planning || null })).digest('hex');
   const receiptId = createHash('sha256').update(caller.id + ':' + data.requestId).digest('hex');
   const receiptRef = db.collection('dispatch_requests').doc(receiptId);
   return db.runTransaction(async tx => {
@@ -126,12 +140,27 @@ export async function dispatchMissionsTransaction(db: Firestore, data: any, call
         unavailable('Le véhicule a changé d’affectation ou n’est plus disponible.');
       const driverName = `${driver!.firstName || ''} ${driver!.lastName || ''}`.trim();
       for (const stop of m.stops) {
+        const expectedServiceTime = stop.packageIds.reduce((sum: number, parcelId: string) => sum + (Number(packageMap.get(parcelId)?.serviceTime) > 0 ? Number(packageMap.get(parcelId)!.serviceTime) : 5), 0);
+        if (Math.abs(stop.serviceTime - expectedServiceTime) > 0.01) unavailable('La durée de service a changé. Relancez l’optimisation pour conserver le temps prévu chez le destinataire.');
         for (const parcelId of stop.packageIds) {
           const pkg = packageMap.get(parcelId);
-          if (!pkg || !['Au hub', 'Trié'].includes(pkg.status) || pkg.missionId || pkg.stopId || pkg.currentDriverId)
+          if (!pkg || !['Au hub', 'Trié'].includes(pkg.status) || pkg.missionId || pkg.stopId || pkg.currentDriverId || pkg.returnDisposition === 'AWAITING_DECISION' || pkg.pickupMissing)
             unavailable(`Le colis ${parcelId} n’est plus disponible. Aucun colis n’a été affecté ; actualisez et relancez l’optimisation.`);
-          if (placeKey(pkg!) !== placeKey(stop)) unavailable(`L’adresse du colis ${parcelId} a changé. Relancez l’optimisation.`);
+          if (pkg!.currentHubId !== m.hubId) unavailable(`Le colis ${parcelId} n’est pas réceptionné dans le hub de départ. Réceptionnez son transfert physique avant l’affectation.`);
+          const differentDate = pkg!.requestedDeliveryDate && pkg!.requestedDeliveryDate !== m.date;
+          if (differentDate && !planning?.allowDifferentDate) unavailable(`Le colis ${parcelId} est demandé le ${pkg!.requestedDeliveryDate}. Choisissez cette date ou renseignez une dérogation motivée.`);
+          const correction = changes.get(parcelId);
+          if (!sameDeliveryRecipient(pkg!, stop) || !visitContainsParcelWindow(stop, { ...pkg, ...correction }))
+            unavailable(`Le destinataire, l’étage ou le créneau du colis ${parcelId} a changé. Relancez l’optimisation.`);
           tx.update(db.collection('packages').doc(parcelId), {
+            ...(correction || {}),
+            ...((correction || differentDate) ? { planningHistory: [...(pkg!.planningHistory || []), {
+              recordedAt: now, recordedBy: caller.id, reason: planning.reason.trim(), missionId: missionIds[index],
+              requestedDeliveryDate: pkg!.requestedDeliveryDate || null, plannedDeliveryDate: m.date,
+              previousTimeWindowStart: pkg!.timeWindowStart || null, previousTimeWindowEnd: pkg!.timeWindowEnd || null,
+              timeWindowStart: correction ? correction.timeWindowStart : pkg!.timeWindowStart || null,
+              timeWindowEnd: correction ? correction.timeWindowEnd : pkg!.timeWindowEnd || null,
+            }] } : {}),
             status: 'Trié', missionId: missionIds[index], stopId: stop.id, currentDriverId: m.driverId,
             currentVehicleId: m.vehicleId || null,
             movements: [...(Array.isArray(pkg!.movements) ? pkg!.movements : []), {

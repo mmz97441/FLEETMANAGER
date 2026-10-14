@@ -142,6 +142,7 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
       case 'timeWindowEnd':
       case 'externalId':
       case 'orderNumber':
+        if (field === 'externalId' || field === 'orderNumber') row._referenceNumeric = false;
         (row as any)[field] = editValue;
         break;
       case 'floor':
@@ -297,7 +298,7 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
     const worksheet = XLSX.utils.json_to_sheet(rejected.map(row => ({
       Id: row.externalId, Order_Number: row.orderNumber, Contact: row.contactName, Address: `${row.address} ${row.postalCode} ${row.city}`.trim(), Telephone: row.contactPhone,
       Floor: row.floor, Elevator: row.hasElevator ? 1 : 0, Start: row.timeWindowStart, End: row.timeWindowEnd, Service_Time: row.serviceTime, Volume: row.volume, Weight: row.weight, Comment: row.comment,
-      'Code Boiron': row.carrierBarcode || '', Référence: row.clientReference || '',
+      'Code transporteur': row.carrierBarcode || '', 'Format transporteur': row.carrierBarcodeFormat || 'generic', Référence: row.clientReference || '',
       'Ligne source': row._rowIndex, Motif: importResult ? importResult.errors.filter(error => error.row === row._rowIndex).map(error => error.message).join(' ; ') : row._errors.join(' ; '),
     })));
     const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, worksheet, 'Lignes à corriger'); XLSX.writeFile(workbook, 'import-lignes-a-corriger.xlsx');
@@ -555,8 +556,8 @@ const ImportReviewTable: React.FC<ImportReviewTableProps> = ({
                     {/* N° commande */}
                     <td className="px-2 py-2 font-mono">
                       {renderEditableCell({ rowIdx: realIdx, field: "orderNumber", value: row.orderNumber })}
-                      <div className="text-sm mt-2">Référence Boiron : {renderEditableCell({ rowIdx: realIdx, field: 'clientReference', value: row.clientReference || '' })}</div>
-                      <div className="text-sm mt-2">Code Boiron : {renderEditableCell({ rowIdx: realIdx, field: 'carrierBarcode', value: row.carrierBarcode || '' })}</div>
+                      <div className="text-sm mt-2">Référence de commande : {renderEditableCell({ rowIdx: realIdx, field: 'clientReference', value: row.clientReference || '' })}</div>
+                      <div className="text-sm mt-2">Code transporteur : {renderEditableCell({ rowIdx: realIdx, field: 'carrierBarcode', value: row.carrierBarcode || '' })}</div>
                     </td>
 
                     {/* Contact */}

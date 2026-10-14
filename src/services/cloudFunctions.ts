@@ -432,7 +432,7 @@ export const sendLeaveDecisionEmail = async (
 
 /** Crée toutes les tournées et leurs affectations dans une transaction serveur. */
 export const dispatchMissionsCF = async (
-  request: { requestId: string; missions: Array<Omit<import('../types').Mission, 'id' | 'createdAt' | 'updatedAt'>> },
+  request: { requestId: string; missions: Array<Omit<import('../types').Mission, 'id' | 'createdAt' | 'updatedAt'>>; planningChanges?: { reason: string; allowDifferentDate: boolean; parcels: Array<{packageId: string; timeWindowStart: string | null; timeWindowEnd: string | null}> } },
 ): Promise<{ missionIds: string[]; packageCount: number; replayed: boolean }> => {
   const call = httpsCallable<typeof request, { missionIds: string[]; packageCount: number; replayed: boolean }>(functions, 'dispatchMissions');
   // Callable encoding turns undefined object fields into null; optional stop
@@ -448,3 +448,5 @@ export const receivePackagesAtHubCF = async (hubId: string, packageIds: string[]
   }>(functions, 'receivePackagesAtHub');
   return (await call({ hubId, packageIds })).data;
 };
+
+export const receiveTransferredPackageAtHubCF = async (data: { packageId: string; hubId: string; code: string; confirmedPhysicalReception: true; reason: string }): Promise<{success: boolean; alreadyReceived: boolean}> => (await httpsCallable<typeof data, {success: boolean; alreadyReceived: boolean}>(functions, 'receiveTransferredPackageAtHub')(data)).data;

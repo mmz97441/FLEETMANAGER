@@ -1,4 +1,4 @@
-// Characterization of audit findings, not regression expectations for corrected behavior.
+// Regression checks for the corrected audit findings; original observations remain in docs/validation.
 // Run only inside firebase emulators:exec with the demo project (see audit report).
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
@@ -18,7 +18,7 @@ const now = '2026-10-14T05:00:00Z', day = '2026-10-14';
 const context = uid => ({ auth: { uid, token: { email_verified: true } } });
 const deps = { db, now: () => new Date(now), isAdminCaller: role => role === 'Admin', requireActiveCaller: async ctx => ({ ...(await db.collection('users').doc(ctx.auth.uid).get()).data(), id: ctx.auth.uid }) };
 const findings = [];
-const record = (id, observation) => { findings.push({ id, observation }); console.log('REPRODUCED', id, JSON.stringify(observation)); };
+const record = (id, observation) => { findings.push({ id, observation }); console.log('PASS', id, JSON.stringify(observation)); };
 const parcel = async (suffix, extra = {}) => {
   const id = prefix + '-' + suffix;
   await db.collection('packages').doc(id).set({ externalId: id, barcode: id, clientId: 'synthetic-client', clientName: 'Expéditeur fictif', status: 'En attente', address: '1 rue Fictive', city: 'Saint-Denis', postalCode: '97400', contactName: 'Pharmacie A', zone: 'Nord', movements: [], ...extra });
@@ -36,57 +36,56 @@ const dispatch = (id, suffix, extra = {}) => service.dispatchMissions.run({ requ
     db.collection('users').doc(admin).set({ role: 'Admin' }),
     db.collection('hubs').doc(hub).set({ name: 'Hub fictif A', isActive: true }),
   ]);
-  // Claim -> arrival -> delivery verification: the initial grouping bypasses
-  // the stricter recipient check, which only applies to incoming parcels.
+  // Claim, arrival and verification share strict recipient identity.
   const a = await parcel('recipient-a', { floor: 0, timeWindowStart: '08:00', timeWindowEnd: '09:00' });
   const b = await parcel('recipient-b', { contactName: 'Cabinet B', floor: 2, timeWindowStart: '14:00', timeWindowEnd: '15:00' });
   const first = await scan(a), second = await scan(b);
-  assert.equal(first.stopId, second.stopId);
+  assert.notEqual(first.stopId, second.stopId);
   const prepared = await prepareDeliveryStopHandler({ missionId: first.missionId, stopId: first.stopId, arrive: true }, context(driver), deps);
   const verification = await scan(b, { source: 'driver-delivery', targetMissionId: first.missionId, stopId: first.stopId });
-  assert.equal(verification.accepted, true);
+  assert.equal(verification.accepted, false);
   record('LOG-02', { recipients: ['Pharmacie A', 'Cabinet B'], stopCount: prepared.mission.stops.length, displayedRecipient: prepared.mission.stops[0].contactName, secondParcelVerified: verification.accepted, retainedWindow: [prepared.mission.stops[0].timeWindowStart, prepared.mission.stops[0].timeWindowEnd] });
 
-  const c = await parcel('added-after-arrival');
+  const c = await parcel('added-after-arrival', { floor: 0, timeWindowStart: '08:00', timeWindowEnd: '09:00' });
   const late = await scan(c);
-  assert.equal(late.stopId, first.stopId);
-  record('LOG-02-arrived', { parcelAddedToAlreadyArrivedStop: true });
+  assert.notEqual(late.stopId, first.stopId);
+  record('LOG-02-arrived', { parcelAddedToAlreadyArrivedStop: false });
 
   const distant = await parcel('other-hub', { status: 'Au hub', currentHubId: prefix + '-hub-b', requestedDeliveryDate: '2026-10-16' });
-  const dispatched = await dispatch(distant, 'wrong-hub');
-  assert.equal(dispatched.packageCount, 1);
-  record('LOG-03', { parcelHub: 'B', departureHub: 'A', desiredDate: '2026-10-16', dispatchedDate: day, accepted: true });
+  await assert.rejects(dispatch(distant, 'wrong-hub'), e => e.code === 'failed-precondition');
+  record('LOG-03', { parcelHub: 'B', departureHub: 'A', desiredDate: '2026-10-16', dispatchedDate: day, accepted: false });
 
   const orphanMission = prefix + '-removed-stop';
   await db.collection('missions').doc(orphanMission).set({ driverId: driver, status: 'En cours', date: day, stops: [] });
   const returning = await parcel('return-orphan', { status: 'À retourner', missionId: orphanMission, stopId: 'removed', currentDriverId: driver });
-  await service.finishMission.run({ missionId: orphanMission }, context(driver));
+  await assert.rejects(service.finishMission.run({ missionId: orphanMission }, context(driver)), e => e.code === 'failed-precondition');
   assert.equal((await db.collection('packages').doc(returning).get()).data().status, 'À retourner');
-  assert.equal((await db.collection('missions').doc(orphanMission).get()).data().status, 'Terminé');
-  record('LOG-06', { missionClosedWithOutstandingReturnOutsideStops: true });
+  assert.equal((await db.collection('missions').doc(orphanMission).get()).data().status, 'En cours');
+  record('LOG-06', { missionClosedWithOutstandingReturnOutsideStops: false });
 
-  await service.returnPackage.run({ packageId: returning, extra: { returnProof: { photoUrls: ['https://example.invalid/synthetic-photo'] } } }, context(driver));
+  await service.returnPackage.run({ packageId: returning, requestId: randomUUID(), expectedMissionId: orphanMission, extra: { returnProof: { hubId: hub, photoUrls: ['https://firebasestorage.googleapis.com/v0/b/demo-fleet-production-audit.appspot.com/o/' + encodeURIComponent(`pod/returns/${returning}/photo.jpg`) + '?alt=media'] } } }, context(driver));
   const returnedScan = await scan(returning);
-  assert.equal(returnedScan.outcome, 'terminal');
-  await assert.rejects(service.receivePackagesAtHub.run({ hubId: hub, packageIds: [returning] }, context(admin)), e => e.code === 'failed-precondition');
+  assert.equal(returnedScan.outcome, 'blocked');
+  await service.receivePackagesAtHub.run({ hubId: hub, packageIds: [returning] }, context(admin));
+  assert.equal((await db.collection('packages').doc(returning).get()).data().returnDisposition, 'AWAITING_DECISION');
   await assert.rejects(dispatch(returning, 'returned-again'), e => e.code === 'failed-precondition');
-  record('LOG-05', { returnedParcel: 'Retourné', scan: returnedScan.outcome, hubReception: 'refused', redispatch: 'refused' });
+  record('LOG-05', { returnedParcel: 'Au hub / décision attendue', scan: returnedScan.outcome, hubReception: 'already-at-hub / still awaiting decision', redispatch: 'refused' });
 
-  // An import stores identifiers as entered, whereas lookup only queries the
-  // scanned spelling and its uppercase equivalent.
-  const lower = await parcel('lowercase', { externalId: 'br-audit-lowercase', barcode: 'gfl-audit-lowercase' });
+  // Original spelling is retained while the derived index recognizes uppercase scans.
+  const lower = await parcel('lowercase', { externalId: 'br-audit-lowercase', barcode: 'gfl-audit-lowercase', scanCodes: ['BR-AUDIT-LOWERCASE', 'GFL-AUDIT-LOWERCASE'] });
   const upperScan = await scan('BR-AUDIT-LOWERCASE');
   const literalScan = await scan('br-audit-lowercase');
-  assert.equal(upperScan.outcome, 'not_found'); assert.equal(literalScan.accepted, true);
+  assert.equal(upperScan.accepted, true); assert.equal(literalScan.accepted, true);
   record('LOG-08', { stored: 'br-audit-lowercase', uppercaseScan: upperScan.outcome, exactCaseScan: literalScan.outcome });
 
   const pickupMission = prefix + '-partial-pickup', missing = await parcel('missing', { missionId: pickupMission, stopId: 'pickup', currentDriverId: driver });
-  await db.collection('missions').doc(pickupMission).set({ driverId: driver, date: day, type: 'Collecte', status: 'En cours', stops: [{ id: 'pickup', type: 'PICKUP', status: 'Terminé', packageIds: [missing], packageCount: 1 }] });
-  await db.collection('pickups').doc(pickupMission + '_pickup').set({ missionId: pickupMission, stopId: 'pickup', driverId: driver, scannedPackageIds: [], missingPackageIds: [missing] });
+  await db.collection('missions').doc(pickupMission).set({ driverId: driver, date: day, type: 'Collecte', status: 'En cours', stops: [{ id: 'pickup', type: 'PICKUP', status: 'En attente', packageIds: [missing], packageCount: 1 }] });
+  await service.finalizePickup.run({ missionId: pickupMission, stopId: 'pickup', driverId: driver, expectedPackageIds: [missing], scannedPackageIds: [], missingPackageIds: [missing] }, context(driver));
   await assert.rejects(service.receivePackagesAtHub.run({ hubId: hub, packageIds: [missing] }, context(admin)), e => e.code === 'failed-precondition');
   await service.finishMission.run({ missionId: pickupMission }, context(driver));
-  assert.equal((await db.collection('packages').doc(missing).get()).data().missionId, pickupMission);
-  record('LOG-11', { missingPickupRemainsAssignedToClosedMission: true, hubReception: 'refused' });
+  assert.equal((await db.collection('packages').doc(missing).get()).data().missionId, null);
+  record('LOG-11', { missingPickupRemainsAssignedToClosedMission: false, hubReception: 'refused' });
 
-  writeFileSync('/private/tmp/fleet-logistics-server-findings.json', JSON.stringify({ demoProject: process.env.GCLOUD_PROJECT, findings }, null, 2));
+  writeFileSync('/private/tmp/fleet-logistics-server-regressions.json', JSON.stringify({ demoProject: process.env.GCLOUD_PROJECT, findings }, null, 2));
+  await db.terminate();
 })().catch(error => { console.error(error); process.exitCode = 1; });

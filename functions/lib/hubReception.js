@@ -33,8 +33,50 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.receiveTransferredPackageAtHubHandler = receiveTransferredPackageAtHubHandler;
 exports.receivePackagesAtHubHandler = receivePackagesAtHubHandler;
 const functions = __importStar(require("firebase-functions/v1"));
+const scanCode_1 = require("./scanCode");
+const carrierBarcode_1 = require("./carrierBarcode");
+/** Destination staff acknowledge a physical transfer; this never moves a
+ * parcel still carried by a driver or waiting for a return decision. */
+async function receiveTransferredPackageAtHubHandler(data, context, { db, requireActiveCaller, isAdminCaller }) {
+    const caller = await requireActiveCaller(context);
+    if (!isAdminCaller(caller.role))
+        throw new functions.https.HttpsError('permission-denied', 'Réception inter-dépôts réservée au bureau.');
+    if (!validId(data?.packageId) || !validId(data?.hubId) || typeof data.code !== 'string' ||
+        data.confirmedPhysicalReception !== true || !String(data.reason || '').trim())
+        throw new functions.https.HttpsError('invalid-argument', 'Scannez le carton au dépôt de destination et indiquez le motif du transfert.');
+    return db.runTransaction(async (tx) => {
+        const ref = db.collection('packages').doc(data.packageId), snap = await tx.get(ref);
+        const hub = await tx.get(db.collection('hubs').doc(data.hubId)), pkg = snap.data();
+        if (!pkg || !hub.exists || !hub.data()?.isActive)
+            refuse('Colis ou dépôt de destination indisponible.');
+        if (!['Au hub', 'Trié'].includes(pkg.status) || pkg.missionId || pkg.stopId || pkg.currentDriverId || pkg.currentVehicleId ||
+            pkg.returnDisposition === 'AWAITING_DECISION' || pkg.returnDisposition === 'SENDER_RETURNED')
+            refuse('Ce colis n’est pas disponible pour une réception inter-dépôts.');
+        if (!validId(pkg.currentHubId))
+            refuse('Le dépôt de départ du colis doit être vérifié.');
+        const code = (0, scanCode_1.normalizeScanCode)(data.code);
+        if (!(0, scanCode_1.parcelScanCodes)(pkg).includes(code))
+            refuse('Ce code ne correspond pas au carton choisi.');
+        await (0, carrierBarcode_1.checkCarrierBarcode)(tx, db, code, snap.id);
+        if (pkg.currentHubId === hub.id)
+            return { success: true, alreadyReceived: true };
+        const source = await tx.get(db.collection('hubs').doc(pkg.currentHubId));
+        if (!source.exists)
+            refuse('Le dépôt de départ est introuvable.');
+        const now = new Date().toISOString();
+        tx.update(ref, { status: 'Au hub', currentHubId: hub.id, updatedAt: now,
+            hubReceivedBy: caller.id, hubReceivedAt: now,
+            movements: [...(pkg.movements || []), { action: 'HUB_TRANSFER', timestamp: now, receivedAt: now,
+                    recordedBy: caller.id, fromHubId: source.id, fromHubName: source.data()?.name || '',
+                    hubId: hub.id, hubName: hub.data()?.name || '', notes: String(data.reason).trim() }] });
+        tx.create(db.collection('audit_logs').doc(), { action: 'HUB_TRANSFER_RECEIVED', performedBy: caller.id,
+            performedAt: now, packageId: snap.id, fromHubId: source.id, hubId: hub.id });
+        return { success: true, alreadyReceived: false };
+    });
+}
 const validId = (id) => typeof id === 'string' && id.length > 0 && id.length <= 200 && !id.includes('/');
 const refuse = (message) => { throw new functions.https.HttpsError('failed-precondition', message); };
 /** Reception atomically releases a completed pickup's operational assignment.
@@ -63,8 +105,11 @@ async function receivePackagesAtHubHandler(data, context, { db, requireActiveCal
         const pickupKeys = new Set();
         for (const snap of packageSnaps) {
             const pkg = snap.data();
-            if (!['En attente', 'Collecté', 'Au hub'].includes(pkg.status))
+            const legacyLocation = manager && ['Au hub', 'Trié'].includes(pkg.status) && !pkg.currentHubId && !pkg.missionId && !pkg.stopId && !pkg.currentDriverId && !pkg.currentVehicleId;
+            if (!['En attente', 'Collecté', 'Au hub'].includes(pkg.status) && !legacyLocation)
                 refuse(`Le colis ${snap.id} ne peut pas être réceptionné depuis le statut ${pkg.status}.`);
+            if (pkg.pickupMissing && pkg.status === 'En attente')
+                refuse('Ce colis a été déclaré manquant à l’enlèvement. Replanifiez et confirmez sa collecte avant la réception au dépôt.');
             const alreadyReceived = pkg.status === 'Au hub' && pkg.currentHubId === data.hubId && !pkg.missionId && !pkg.stopId && !pkg.currentDriverId && !pkg.currentVehicleId;
             if (!manager && pkg.currentDriverId !== caller.id && !(alreadyReceived && pkg.hubReceivedBy === caller.id))
                 throw new functions.https.HttpsError('permission-denied', 'Un colis de ce lot ne vous est pas affecté.');
@@ -81,7 +126,7 @@ async function receivePackagesAtHubHandler(data, context, { db, requireActiveCal
             }
             else if (pkg.stopId)
                 refuse('Un colis conserve un arrêt sans tournée. Faites vérifier son affectation par le bureau.');
-            if (pkg.status === 'Au hub' && !pkg.missionId && !pkg.stopId && !pkg.currentDriverId && !pkg.currentVehicleId && pkg.currentHubId !== data.hubId)
+            if (pkg.status === 'Au hub' && pkg.currentHubId && !pkg.missionId && !pkg.stopId && !pkg.currentDriverId && !pkg.currentVehicleId && pkg.currentHubId !== data.hubId)
                 refuse('Ce colis est déjà réceptionné dans un autre hub. Vérifiez le hub sélectionné.');
         }
         const pickupSnaps = await Promise.all([...pickupKeys].map(key => tx.get(db.collection('pickups').doc(key))));
@@ -109,7 +154,7 @@ async function receivePackagesAtHubHandler(data, context, { db, requireActiveCal
                 movements: [...(Array.isArray(pkg.movements) ? pkg.movements : []), {
                         action: 'HUB_ARRIVAL', timestamp: now, hubId: data.hubId, hubName: hubSnap.data().name || '',
                         recordedBy: caller.id, driverId: pkg.currentDriverId || caller.id,
-                        notes: `Réceptionné au ${hubSnap.data().name || 'hub'}`,
+                        notes: `Réceptionné au ${hubSnap.data().name || 'hub'}${!pkg.currentHubId && ['Au hub', 'Trié'].includes(pkg.status) ? ' — ancien emplacement inconnu, présence physique vérifiée' : ''}`,
                     }],
             });
         }

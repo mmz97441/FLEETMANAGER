@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normAddr, normPhone, placeKey, phoneSignal, sameDeliveryPoint } from './address';
+import { normAddr, normPhone, placeKey, phoneSignal, sameDeliveryPoint, sameDeliveryRecipient, sameDeliveryVisit, intersectDeliveryWindows, visitContainsParcelWindow } from './address';
 
 describe('normAddr', () => {
   it('met en minuscules, enlève accents et réduit les espaces/ponctuation', () => {
@@ -20,7 +20,7 @@ describe('normPhone', () => {
   });
 });
 
-describe('placeKey — regroupement par point de livraison', () => {
+describe('placeKey — géocodage du point physique', () => {
   // Scénario Boiron : 4 colis à la MÊME pharmacie, mais adresses écrites
   // légèrement différemment dans le fichier Excel. Ils DOIVENT partager la clé.
   it('regroupe des adresses « à l’œil » identiques malgré casse/espaces/accents', () => {
@@ -57,19 +57,19 @@ describe('phoneSignal', () => {
 describe('sameDeliveryPoint', () => {
   it('vrai si adresse normalisée identique', () => {
     expect(sameDeliveryPoint(
-      { address: '28 RUE JOSEPH BEDIER', postalCode: '97490', city: 'Sainte Clotilde' },
-      { address: '28  rue joseph bédier', postalCode: '97490', city: 'SAINTE CLOTILDE' }
+      { contactName: 'Pharmacie', address: '28 RUE JOSEPH BEDIER', postalCode: '97490', city: 'Sainte Clotilde' },
+      { contactName: 'PHARMACIE', address: '28  rue joseph bédier', postalCode: '97490', city: 'SAINTE CLOTILDE' }
     )).toBe(true);
   });
 
-  it('repli téléphone : même n° (formaté différemment) + même CP rattrape une adresse mal saisie', () => {
+  it('un téléphone partagé ne suffit jamais pour autoriser une remise commune', () => {
     // NB : le repli compare les CHIFFRES bruts. Il rattrape les différences de
     // formatage (espaces/points/tirets) mais PAS l'indicatif pays (+262 ≠ 0692) —
     // comportement existant conservé tel quel par la factorisation.
     expect(sameDeliveryPoint(
       { address: '28 rue Joseph Bedier', postalCode: '97490', city: 'Ste Clotilde', contactPhone: '0692 30 33 33' },
       { address: 'Pharmacie Ker Chaudron', postalCode: '97490', city: 'Ste Clotilde', contactPhone: '0692-30.33.33' }
-    )).toBe(true);
+    )).toBe(false);
   });
 
   it('faux si adresses différentes et pas de téléphone commun', () => {
@@ -84,5 +84,24 @@ describe('sameDeliveryPoint', () => {
       { address: 'a', postalCode: '97400', city: 'X', contactPhone: '0692303333' },
       { address: 'b', postalCode: '97490', city: 'Y', contactPhone: '0692303333' }
     )).toBe(false);
+  });
+});
+
+describe('identité et fenêtres de remise', () => {
+  const recipient = { contactName: 'Pharmacie A', address: '1 rue A', city: 'Saint Denis', postalCode: '97400', floor: 0 };
+  it('sépare destinataire et étage, même si adresse et téléphone sont identiques', () => {
+    expect(sameDeliveryRecipient(recipient, { ...recipient, contactName: 'Cabinet B' })).toBe(false);
+    expect(sameDeliveryRecipient(recipient, { ...recipient, floor: 2 })).toBe(false);
+    expect(sameDeliveryRecipient(recipient, { ...recipient, floor: undefined })).toBe(false);
+    expect(sameDeliveryRecipient({}, {})).toBe(false);
+  });
+  it('intersecte les fenêtres compatibles sans fusion transitive des fenêtres disjointes', () => {
+    const morning = { ...recipient, timeWindowStart: '08:00', timeWindowEnd: '09:00' };
+    const afternoon = { ...recipient, timeWindowStart: '14:00', timeWindowEnd: '15:00' };
+    expect(sameDeliveryVisit(morning, afternoon)).toBe(false);
+    expect(intersectDeliveryWindows([morning, recipient, afternoon])).toBeNull();
+    expect(visitContainsParcelWindow(morning, recipient)).toBe(true);
+    expect(visitContainsParcelWindow(recipient, morning)).toBe(false);
+    expect(intersectDeliveryWindows([{ timeWindowStart: '99:00' }])).toBeNull();
   });
 });

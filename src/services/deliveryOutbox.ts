@@ -1,5 +1,5 @@
 import { auth } from '../firebaseConfig';
-import { MissionStop, StopStatus } from '../types';
+import { MissionStop, StopStatus, PackageStatus } from '../types';
 import { commitStopOutcome } from './missionService';
 import { uploadAndCreatePOD, uploadFailurePOD } from './podService';
 
@@ -113,7 +113,14 @@ async function perform(entry: PendingDelivery) {
   if (!navigator.onLine) throw new Error('En attente du réseau');
   if (auth.currentUser?.uid !== entry.userId)
     throw new Error('Reconnectez le compte ayant enregistré cette livraison.');
-  const result = await commitStopOutcome(entry.action);
+  const result = await commitStopOutcome({ ...entry.action, recordedAt: entry.createdAt,
+    packageOutcomes: entry.action.packageOutcomes?.map(outcome => ({ ...outcome,
+      ...(outcome.status === PackageStatus.FAILED ? {
+        failureReason: outcome.failureReason || (entry.kind === 'failure' ? entry.proof.failureReason : 'Colis non remis'),
+        failureNotes: outcome.failureNotes || (entry.kind === 'failure' ? entry.proof.failureNotes : 'Colis déclaré non remis lors de la remise partielle'),
+      } : {}),
+    })),
+  });
   if (!entry.committed) {
     entry = { ...entry, committed: true };
     await write(entry);

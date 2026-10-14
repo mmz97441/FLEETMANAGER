@@ -21,8 +21,9 @@ import {
   filterPackages,
   computeClientMetrics,
   MetricPeriod,
-  MetricsFilters,
+  MetricsFilters, metricsRange,
 } from './clientMetrics';
+import { summarizeLogistics, logisticsDay, outcomeEventsInRange, LogisticsRange } from './logisticsMetrics';
 
 // ----------------------------------------------------------------------------
 // Grammaire fermée (seules ces valeurs sont valides)
@@ -30,6 +31,7 @@ import {
 
 type Metric =
   | 'volume'
+  | 'delivered'
   | 'deliveryRate'
   | 'punctualityRate'
   | 'avgDelayHours'
@@ -42,6 +44,7 @@ type ChartType = 'kpi' | 'line' | 'bar' | 'donut' | 'table';
 
 const METRICS: readonly Metric[] = [
   'volume',
+  'delivered',
   'deliveryRate',
   'punctualityRate',
   'avgDelayHours',
@@ -97,7 +100,8 @@ const ERROR_CLARIFY =
 // ----------------------------------------------------------------------------
 
 const METRIC_LABEL: Record<Metric, string> = {
-  volume: 'Volume',
+  volume: 'Colis créés',
+  delivered: 'Colis livrés',
   deliveryRate: 'Taux de livraison',
   punctualityRate: 'Ponctualité',
   avgDelayHours: 'Délai moyen',
@@ -185,81 +189,17 @@ function formatInt(n: number): string {
 // Renvoie null quand la métrique n'est pas définie (dénominateur nul, etc.).
 // ----------------------------------------------------------------------------
 
-function computeMetricValue(list: Package[], metric: Metric): number | null {
-  const pkgs = Array.isArray(list) ? list.filter((p): p is Package => !!p) : [];
-  const total = pkgs.length;
-
+function computeMetricValue(list: Package[], metric: Metric, range?: LogisticsRange): number | null {
+  const summary = summarizeLogistics(list, range);
   switch (metric) {
-    case 'volume':
-      return total;
-
-    case 'weight': {
-      let sum = 0;
-      for (const p of pkgs) {
-        if (typeof p.weight === 'number' && Number.isFinite(p.weight)) sum += p.weight;
-      }
-      return round1(sum);
-    }
-
-    case 'deliveryRate': {
-      let delivered = 0;
-      let failed = 0;
-      let inDelivery = 0;
-      for (const p of pkgs) {
-        if (p.status === PackageStatus.DELIVERED) delivered++;
-        else if (p.status === PackageStatus.FAILED) failed++;
-        else if (p.status === PackageStatus.IN_DELIVERY) inDelivery++;
-      }
-      const denom = delivered + failed + inDelivery;
-      return denom > 0 ? Math.round((delivered / denom) * 100) : null;
-    }
-
-    case 'failRate': {
-      if (total === 0) return null;
-      let ko = 0;
-      for (const p of pkgs) {
-        if (p.status === PackageStatus.FAILED || p.status === PackageStatus.RETURNED) ko++;
-      }
-      return Math.round((ko / total) * 100);
-    }
-
-    case 'punctualityRate': {
-      let denom = 0;
-      let num = 0;
-      for (const p of pkgs) {
-        const dm = deliveredMovement(p);
-        if (!dm) continue;
-        const dmTs = toDate(dm.timestamp);
-        const eta = toDate(p.estimatedDeliveryAt);
-        if (eta && dmTs) {
-          denom++;
-          if (dmTs <= eta) num++;
-        }
-      }
-      return denom > 0 ? Math.round((num / denom) * 100) : null;
-    }
-
-    case 'avgDelayHours': {
-      let sum = 0;
-      let count = 0;
-      for (const p of pkgs) {
-        const dm = deliveredMovement(p);
-        if (!dm) continue;
-        const dmTs = toDate(dm.timestamp);
-        const startTs = toDate(firstMovementTs(p));
-        if (dmTs && startTs) {
-          const hours = (dmTs.getTime() - startTs.getTime()) / (1000 * 60 * 60);
-          if (hours >= 0 && hours <= 720) {
-            sum += hours;
-            count++;
-          }
-        }
-      }
-      return count > 0 ? round1(sum / count) : null;
-    }
-
-    default:
-      return null;
+    case 'volume': return summary.total;
+    case 'delivered': return summary.delivered;
+    case 'weight': return round1(summary.created.reduce((sum, p) => sum + (Number.isFinite(p.weight) ? p.weight! : 0), 0));
+    case 'deliveryRate': return summary.resolved ? Math.round(summary.deliveryRate) : null;
+    case 'failRate': return summary.resolved ? Math.round(100 - summary.deliveryRate) : null;
+    case 'punctualityRate': return summary.punctualityRate === null ? null : Math.round(summary.punctualityRate);
+    case 'avgDelayHours': return summary.avgDelayHours === null ? null : round1(summary.avgDelayHours);
+    default: return null;
   }
 }
 
@@ -279,7 +219,7 @@ function groupKey(p: Package, dimension: Dimension): string | null {
       return (p.status as string) || '—';
     case 'day': {
       const d = toDate(p.createdAt);
-      return d ? dayKey(d) : null;
+      return d ? logisticsDay(d) : null;
     }
     default:
       return null;
@@ -320,7 +260,9 @@ function executeSpec(packages: Package[], spec: AnalyticsSpec): ExecOutput {
     zone: spec.zone,
   };
 
-  const filtered = filterPackages(packages, filters);
+  const range = metricsRange(spec.period);
+  const dimensional = packages.filter(p => (!spec.pharmacy || p.contactName === spec.pharmacy) && (!spec.zone || p.zone === spec.zone));
+  const filtered = ['volume', 'weight'].includes(spec.metric) ? filterPackages(packages, filters) : dimensional;
 
   // --- KPI (dimension none) : on s'appuie sur computeClientMetrics ---
   if (spec.dimension === 'none') {
@@ -332,8 +274,11 @@ function executeSpec(packages: Package[], spec: AnalyticsSpec): ExecOutput {
       case 'volume':
         kpi = { label, value: formatInt(m.total), suffix: 'colis' };
         break;
+      case 'delivered':
+        kpi = { label, value: formatInt(m.delivered), suffix: 'colis' };
+        break;
       case 'deliveryRate':
-        kpi = { label, value: String(Math.round(m.deliveryRate)), suffix: '%' };
+        kpi = m.resolved ? { label, value: String(Math.round(m.deliveryRate)), suffix: '%' } : { label, value: '—' };
         break;
       case 'punctualityRate':
         kpi =
@@ -345,7 +290,7 @@ function executeSpec(packages: Package[], spec: AnalyticsSpec): ExecOutput {
         kpi = { label, value: formatDelay(m.avgDelayHours) };
         break;
       case 'failRate': {
-        const v = computeMetricValue(filtered, 'failRate');
+        const v = computeMetricValue(filtered, 'failRate', range);
         kpi = { label, value: v === null ? '—' : String(v), suffix: v === null ? undefined : '%' };
         break;
       }
@@ -361,9 +306,20 @@ function executeSpec(packages: Package[], spec: AnalyticsSpec): ExecOutput {
 
   // --- Regroupement (pharmacy / zone / status / day) -> series[] ---
   const groups = new Map<string, Package[]>();
-  for (const p of filtered) {
+  const eventMetric = !['volume', 'weight'].includes(spec.metric);
+  const groupingList = spec.dimension === 'day' && eventMetric
+    ? outcomeEventsInRange(dimensional, range).filter(event => event.timestamp).map(event => ({
+        ...event.package,
+        movements: (event.package.movements || []).filter(movement => !['DELIVERED', 'FAILED'].includes(movement.action)),
+        pod: undefined, failurePod: undefined,
+        status: event.outcome === 'SUCCESS' ? PackageStatus.DELIVERED : PackageStatus.FAILED,
+        deliveryAttempts: [{ id: event.id, missionId: '', stopId: '', driverId: event.driverId || '',
+          outcome: event.outcome, recordedAt: event.timestamp!, failureReason: event.reason,
+          promisedDeliveryAt: event.promisedDeliveryAt, estimatedDeliveryAt: event.estimatedDeliveryAt }],
+      })) : filtered;
+  for (const p of groupingList) {
     if (!p) continue;
-    const key = groupKey(p, spec.dimension);
+    const key = spec.dimension === 'day' && eventMetric ? logisticsDay(p.deliveryAttempts![0].recordedAt) : groupKey(p, spec.dimension);
     if (key === null) continue;
     const arr = groups.get(key);
     if (arr) arr.push(p);
@@ -372,7 +328,7 @@ function executeSpec(packages: Package[], spec: AnalyticsSpec): ExecOutput {
 
   let series: { name: string; value: number }[] = [];
   for (const [name, pkgs] of groups.entries()) {
-    const value = computeMetricValue(pkgs, spec.metric);
+    const value = computeMetricValue(pkgs, spec.metric, range);
     if (value === null) continue; // métrique non définie pour ce groupe
     series.push({ name, value });
   }
@@ -409,12 +365,13 @@ function buildNarrative(spec: AnalyticsSpec, out: ExecOutput): string {
     const valueStr = kpi.suffix ? `${kpi.value}${kpi.suffix === '%' ? '%' : ' ' + kpi.suffix}` : kpi.value;
     switch (spec.metric) {
       case 'volume':
+      case 'delivered':
         return `${valueStr} ${periodPhrase}.`;
       case 'deliveryRate':
         return `Taux de livraison : ${valueStr} ${periodPhrase}.`;
       case 'punctualityRate':
         return kpi.value === '—'
-          ? `Ponctualité : donnée indisponible ${periodPhrase} (aucune heure de passage prévue).`
+          ? `Ponctualité : donnée indisponible ${periodPhrase} (aucune échéance client connue).`
           : `Ponctualité : ${valueStr} ${periodPhrase}.`;
       case 'avgDelayHours':
         return kpi.value === '—'
@@ -469,7 +426,11 @@ function buildTitle(spec: AnalyticsSpec): string {
 }
 
 function buildExplain(spec: AnalyticsSpec): string {
-  return `${METRIC_LABEL[spec.metric]} · ${DIMENSION_LABEL[spec.dimension]} · ${PERIOD_SHORT[spec.period]}`;
+  const method = ['volume', 'weight'].includes(spec.metric) ? 'Date de création'
+    : spec.metric === 'punctualityRate' ? 'Heure terrain comparée au jour/créneau promis (hors ETA)'
+    : 'Heure terrain des tentatives ; succès / (succès + échecs décidés), hors colis en cours';
+  return `${METRIC_LABEL[spec.metric]} · ${DIMENSION_LABEL[spec.dimension]} · ${PERIOD_SHORT[spec.period]} · ${method} · fuseau La Réunion`;
+
 }
 
 // ----------------------------------------------------------------------------

@@ -6,6 +6,7 @@ vi.mock('firebase/functions', () => ({
   httpsCallable: () => calls.invoke,
 }));
 import { runQuery } from './aiAnalytics';
+import { Package, PackageStatus } from '../types';
 const spec = {
   metric: 'volume',
   dimension: 'none',
@@ -48,4 +49,31 @@ it('reports unavailable service without asking the user to rewrite a valid quest
     zones: [],
   });
   expect((result as any).error).toContain('indisponible');
+});
+
+it('uses the same resolved-attempt denominator for the global KPI and zone groups', async () => {
+  const packages = [PackageStatus.DELIVERED, PackageStatus.RETURNED, PackageStatus.RETURNED, PackageStatus.IN_DELIVERY]
+    .map((status, i) => ({ id: String(i), status, createdAt: '2020-01-01', zone: 'Nord', movements: [] })) as unknown as Package[];
+  calls.invoke.mockResolvedValue(response({ ...spec, metric: 'deliveryRate' }));
+  expect(await runQuery(packages, 'Taux global', { pharmacies: [], zones: ['Nord'] })).toHaveProperty('kpi.value', '33');
+  calls.invoke.mockResolvedValue(response({ ...spec, metric: 'deliveryRate', dimension: 'zone', chart: 'bar' }));
+  expect(await runQuery(packages, 'Taux par zone', { pharmacies: [], zones: ['Nord'] })).toHaveProperty('series', [{ name: 'Nord', value: 33 }]);
+});
+
+it('groups delivered volume by the field handover day, independently of creation', async () => {
+  calls.invoke.mockResolvedValue(response({ ...spec, metric: 'delivered', dimension: 'day', chart: 'line' }));
+  const packages = [{ id: 'old', status: PackageStatus.DELIVERED, createdAt: '2020-01-01',
+    movements: [{ action: 'DELIVERED', timestamp: '2026-10-13T20:01:00Z' }],
+  }] as Package[];
+  expect(await runQuery(packages, 'Livrés par jour', { pharmacies: [], zones: [] })).toHaveProperty('series', [{ name: '2026-10-14', value: 1 }]);
+});
+
+it('retains the actual collection time when grouping delivery delays by handover day', async () => {
+  const packages = [{ id: 'old', status: PackageStatus.DELIVERED, createdAt: '2020-01-01',
+    movements: [{ action: 'COLLECTED', timestamp: '2026-10-14T07:00:00Z' }, { action: 'DELIVERED', timestamp: '2026-10-14T09:00:00Z' }],
+  }] as Package[];
+  calls.invoke.mockResolvedValue(response({ ...spec, metric: 'avgDelayHours' }));
+  expect(await runQuery(packages, 'Délai moyen', { pharmacies: [], zones: [] })).toHaveProperty('kpi.value', '2h');
+  calls.invoke.mockResolvedValue(response({ ...spec, metric: 'avgDelayHours', dimension: 'day', chart: 'line' }));
+  expect(await runQuery(packages, 'Délai moyen par jour', { pharmacies: [], zones: [] })).toHaveProperty('series', [{ name: '2026-10-14', value: 2 }]);
 });

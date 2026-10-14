@@ -11,7 +11,7 @@ module.exports = async ({ service, db, context, check }) => {
   const receive = (ids, uid = manager, targetHub = hubId) => service.receivePackagesAtHub.run({ hubId: targetHub, packageIds: ids }, context(uid));
   const seed = async (name, status = 'Collecté', stopStatus = 'Terminé') => {
     const id = prefix + '-' + name, missionId = id + '-pickup', stopId = 'pickup-stop';
-    const pkg = { status, address: '1 rue Test', city: 'Saint Denis', postalCode: '97400', zone: 'Nord',
+    const pkg = { status, contactName: 'Pharmacie test', address: '1 rue Test', city: 'Saint Denis', postalCode: '97400', zone: 'Nord',
       missionId, stopId, currentDriverId: driver, currentVehicleId: 'van', movements: [] };
     await db.collection('packages').doc(id).set(pkg);
     await db.collection('missions').doc(missionId).set({ driverId: driver, status: 'En cours', totalPackages: 1,
@@ -35,7 +35,7 @@ module.exports = async ({ service, db, context, check }) => {
     await service.finishMission.run({ missionId }, context(driver));
     const dispatch = await service.dispatchMissions.run({ requestId: prefix + '-dispatch-chain', missions: [{
       date: '2026-09-12', zone: 'Nord', hubId, driverId: driver, plannedDepartureTime: '08:00', stops: [{
-        id: 'delivery', type: 'DELIVERY', address: pkg.address, city: pkg.city, postalCode: pkg.postalCode, packageIds: [id], serviceTime: 5,
+        id: 'delivery', type: 'DELIVERY', contactName: pkg.contactName, address: pkg.address, city: pkg.city, postalCode: pkg.postalCode, packageIds: [id], serviceTime: 5,
       }], totalDistance: 10, estimatedDuration: 30,
     }] }, context(manager));
     const dispatched = (await db.collection('packages').doc(id).get()).data();
@@ -77,7 +77,7 @@ module.exports = async ({ service, db, context, check }) => {
     assert.equal((await db.collection('packages').doc(finalId).get()).data().status, 'Livré');
   });
   await check('hub reception never replaces a delivery failure or return with at-hub status', async () => {
-    for (const status of ['Échec', 'Retourné', 'À retourner', 'En livraison', 'Trié']) {
+    for (const status of ['Échec', 'Retourné', 'À retourner', 'En livraison']) {
       const id = prefix + '-protected-' + status; await db.collection('packages').doc(id).set({ status, movements: [] });
       await assert.rejects(receive([id]), error => error.code === 'failed-precondition');
       assert.equal((await db.collection('packages').doc(id).get()).data().status, status);

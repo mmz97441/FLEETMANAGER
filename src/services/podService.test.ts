@@ -8,62 +8,66 @@ const state = vi.hoisted(() => ({
   download: vi.fn(),
   beforeTransaction: undefined as (() => void) | undefined,
 }));
-vi.mock('../firebaseConfig', () => ({ db: {}, storage: {} }));
+vi.mock('../firebaseConfig', () => ({ default: {}, db: {}, storage: {} }));
 vi.mock('firebase/storage', () => ({
   ref: (_storage: unknown, path: string) => path,
   uploadString: state.upload,
   getDownloadURL: state.download,
 }));
-vi.mock('firebase/firestore', () => {
-  const snapshot = (path: string) => ({
-    exists: () => state.documents.has(path),
-    data: () => structuredClone(state.documents.get(path)),
-  });
-  return {
-    doc: (_db: unknown, collection: string, id: string) => `${collection}/${id}`,
-    getDoc: vi.fn(async (path: string) => snapshot(path)),
-    collection: vi.fn(), query: vi.fn(), where: vi.fn(), getDocs: vi.fn(),
-    runTransaction: async (_db: unknown, callback: (tx: any) => Promise<unknown>) => {
-      state.beforeTransaction?.();
-      const writes: typeof state.transactions[number] = [];
-      const result = await callback({
-        get: async (path: string) => snapshot(path),
-        set: (path: string, patch: Record<string, any>) => writes.push({ path, patch, create: true }),
-        update: (path: string, patch: Record<string, any>) => writes.push({ path, patch, create: false }),
-      });
-      for (const write of writes) {
-        state.documents.set(write.path, write.create
-          ? write.patch : { ...state.documents.get(write.path), ...write.patch });
-      }
-      state.transactions.push(writes);
-      return result;
-    },
-  };
-});
+vi.mock('firebase/firestore', () => ({
+  doc: (_db: unknown, collection: string, id: string) => `${collection}/${id}`,
+  getDoc: vi.fn(async (path: string) => ({ exists: () => state.documents.has(path), data: () => structuredClone(state.documents.get(path)) })),
+  collection: vi.fn(), query: vi.fn(), where: vi.fn(), getDocs: vi.fn(),
+}));
+vi.mock('firebase/functions', () => ({
+  getFunctions: () => ({}),
+  httpsCallable: () => async (data: unknown) => {
+    const { publishDeliveryProofHandler } = await import('../../functions/src/publishDeliveryProof');
+    const db = {
+      collection: (name: string) => ({ doc: (id: string) => ({ path: `${name}/${id}` }) }),
+      runTransaction: async (callback: (tx: any) => Promise<unknown>) => {
+        state.beforeTransaction?.();
+        const writes: typeof state.transactions[number] = [];
+        const result = await callback({
+          get: async (ref: any) => ({ exists: state.documents.has(ref.path), ref, data: () => structuredClone(state.documents.get(ref.path)) }),
+          create: (ref: any, patch: any) => writes.push({ path: ref.path, patch, create: true }),
+          update: (ref: any, patch: any) => writes.push({ path: ref.path, patch, create: false }),
+        });
+        writes.forEach(write => state.documents.set(write.path, write.create ? write.patch : { ...state.documents.get(write.path), ...write.patch }));
+        state.transactions.push(writes);
+        return result;
+      },
+    };
+    return { data: await publishDeliveryProofHandler(data, {} as any, { db: db as any,
+      requireActiveCaller: async () => ({ id: 'driver', role: 'Chauffeur', firstName: 'Chauffeur' }),
+    }) };
+  },
+}));
 
 import { uploadAndCreatePOD, uploadFailurePOD } from './podService';
 
 const base = {
   missionId: 'mission', stopId: 'stop', packageIds: ['parcel'],
   driverId: 'driver', driverName: 'Chauffeur', vehicleId: 'vehicle', vehiclePlate: 'TEST',
-  photosBase64: ['data:image/jpeg;base64,photo'],
+  photosBase64: ['data:image/jpeg;base64,photo'], recordedAt: '2026-09-10T08:00:00Z',
 };
-const failure = () => ({ ...base, failureReason: 'Absent', coordinates: null });
+const failure = () => { const pkg = state.documents.get('packages/parcel'); if (pkg) pkg.status = PackageStatus.FAILED; const mission = state.documents.get('missions/mission'); if (mission) mission.stops[0].status = StopStatus.FAILED; return { ...base, failureReason: 'Absent', coordinates: null }; };
 const success = () => ({ ...base, recipientName: 'Client', signatureBase64: 'signature', coordinates: { lat: -21, lng: 55 } });
 const proofPath = 'proofs_of_delivery/mission_stop';
 const mission = () => state.documents.get('missions/mission')!;
 const parcel = () => state.documents.get('packages/parcel')!;
 
 beforeEach(() => {
+  process.env.GCLOUD_PROJECT = 'demo-fleet-production-audit';
   state.documents.clear();
   state.transactions.length = 0;
   state.beforeTransaction = undefined;
   state.upload.mockReset().mockResolvedValue(undefined);
-  state.download.mockReset().mockImplementation(async (path: string) => `https://storage.test/${path}`);
+  state.download.mockReset().mockImplementation(async (path: string) => `https://firebasestorage.googleapis.com/v0/b/demo-fleet-production-audit.appspot.com/o/${encodeURIComponent(path)}?token=test`);
   state.documents.set('missions/mission', {
     driverId: 'driver',
     stops: [
-      { id: 'stop', status: StopStatus.COMPLETED, proofSyncPending: true, packageIds: ['parcel'] },
+      { id: 'stop', type: 'DELIVERY', completionTime: base.recordedAt, status: StopStatus.COMPLETED, proofSyncPending: true, packageIds: ['parcel'] },
       { id: 'other-stop', status: StopStatus.PENDING, packageIds: ['other-parcel'] },
     ],
   });
@@ -92,7 +96,7 @@ it('records missing GPS honestly and saves the failure proof before allowing clo
   expect(mission().stops[0].proofSyncPending).toBe(false);
   expect(mission().stops[1]).toEqual({ id: 'other-stop', status: StopStatus.PENDING, packageIds: ['other-parcel'] });
   expect(state.transactions).toHaveLength(1);
-  expect(state.transactions[0].map((write) => write.path)).toEqual([proofPath, 'missions/mission']);
+  expect(state.transactions[0].map((write) => write.path)).toEqual([proofPath, 'packages/parcel', 'missions/mission']);
 });
 
 it('retains a captured failure position without inventing a fallback', async () => {
@@ -122,7 +126,7 @@ it('keeps the closure guard if photo upload fails, including its retry', async (
 it('publishes the delivered parcel proof and removes the closure guard together', async () => {
   expect(await uploadAndCreatePOD(success())).toMatchObject({ packageId: 'parcel' });
   expect(parcel().pod.photoUrls).toHaveLength(1);
-  expect(parcel().pod.signatureUrl).toContain('https://storage.test/');
+  expect(parcel().pod.signatureUrl).toContain('https://firebasestorage.googleapis.com/');
   expect(mission().stops[0].proofSyncPending).toBe(false);
   expect(state.transactions).toHaveLength(1);
   expect(state.transactions[0].map((write) => write.path)).toEqual([proofPath, 'packages/parcel', 'missions/mission']);
@@ -147,7 +151,7 @@ it.each(['SUCCESS', 'FAILURE'] as const)('releases a stale guard when the %s pro
   expect(state.upload).not.toHaveBeenCalled();
   expect(state.documents.get(proofPath)).toEqual(existing);
   expect(mission().stops[0].proofSyncPending).toBe(false);
-  expect(state.transactions[0].map((write) => write.path)).toEqual(['missions/mission']);
+  expect(state.transactions[0].map((write) => write.path)).toEqual(['packages/parcel', 'missions/mission']);
 });
 
 it('preserves changes to other stops made while media upload is in progress', async () => {

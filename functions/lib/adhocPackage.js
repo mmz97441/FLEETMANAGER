@@ -34,19 +34,21 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createAdHocPackageHandler = createAdHocPackageHandler;
+const parcelReferenceIndex_1 = require("./parcelReferenceIndex");
+const scanCode_1 = require("./scanCode");
 const functions = __importStar(require("firebase-functions/v1"));
 const crypto_1 = require("crypto");
-const scanCode_1 = require("./scanCode");
+const scanCode_2 = require("./scanCode");
 const scanPackage_1 = require("./scanPackage");
 async function createAdHocPackageHandler(data, context, deps) {
     const caller = await deps.requireActiveCaller(context);
     if (!['chauffeur', 'chauffeuse'].includes(String(caller.role).trim().toLowerCase()))
         throw new functions.https.HttpsError('permission-denied', 'Création terrain réservée au chauffeur connecté.');
-    const code = typeof data?.code === 'string' ? (0, scanCode_1.normalizeScanCode)(data.code) : '';
+    const code = typeof data?.code === 'string' ? (0, scanCode_2.normalizeScanCode)(data.code) : '';
     if (data?.verifiedMissing !== true || !code || code.length > 200 ||
         !['clientId', 'contactName', 'address', 'city', 'postalCode'].every(key => typeof data?.[key] === 'string' && data[key].trim() && data[key].length <= 300) || data.clientId.includes('/'))
         throw new functions.https.HttpsError('invalid-argument', 'Vérifiez avec le bureau que le colis est absent de l’import, puis complétez les coordonnées du carton.');
-    if ((0, scanCode_1.orderReferenceHint)(code))
+    if ((0, scanCode_2.orderReferenceHint)(code))
         throw new functions.https.HttpsError('failed-precondition', 'Scannez le code individuel BR du carton. Une étiquette de commande ne permet pas de créer un colis.');
     const { db } = deps;
     const id = `adhoc-${(0, crypto_1.createHash)('sha256').update(`adhoc/${data.clientId}/${code}`).digest('hex')}`;
@@ -63,6 +65,7 @@ async function createAdHocPackageHandler(data, context, deps) {
             throw new functions.https.HttpsError('already-exists', 'Ce code existe déjà. Reprenez le scan ou faites vérifier l’étiquette par le bureau. Aucun nouveau colis créé.');
         if (existing.exists)
             return { package: { ...existing.data(), id } };
+        const references = await (0, parcelReferenceIndex_1.readIndividualReferenceReservations)(tx, db, [{ id, parcel: { externalId: code } }]);
         const now = new Date().toISOString(), name = `${caller.firstName || ''} ${caller.lastName || ''}`.trim();
         const pkg = { clientId: data.clientId, clientName: client.companyName || '', externalId: code, barcode: code, orderNumber: code,
             importBatchId: `MANUEL-${(0, scanPackage_1.scanBusinessDay)(new Date(now))}`, contactName: data.contactName.trim(), address: data.address.trim(),
@@ -72,7 +75,8 @@ async function createAdHocPackageHandler(data, context, deps) {
             comment: 'Créé après vérification déclarée avec le bureau — à réconcilier avec l’import.',
             movements: [{ action: 'IMPORTED', timestamp: now, driverId: caller.id, driverName: name, notes: 'Absence dans l’import vérifiée avec le bureau, selon le chauffeur.' }],
             createdAt: now, updatedAt: now };
-        tx.create(db.collection('packages').doc(id), pkg);
+        (0, parcelReferenceIndex_1.writeIndividualReferenceReservations)(tx, references, caller.id, now);
+        tx.create(db.collection('packages').doc(id), { ...pkg, scanCodes: (0, scanCode_1.parcelScanCodes)(pkg) });
         tx.create(db.collection('activity_logs').doc(), { userId: caller.id, userName: name, userRole: caller.role,
             action: 'PACKAGE_CREATED_ADHOC', category: 'Livraison', targetType: 'package', targetId: id, targetName: code,
             description: `${name} a créé ${code} après vérification déclarée avec le bureau. Réconciliation nécessaire.`, outcome: 'success',

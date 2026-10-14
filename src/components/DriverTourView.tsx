@@ -108,7 +108,7 @@ const DriverTourView: React.FC<DriverTourViewProps> = ({ currentUser, vehicles }
 
   useEffect(() => {
     const unsub1 = subscribeToMissions(setMissions, { date: today, driverId: currentUser.id });
-    const unsub2 = subscribeToPackages(setPackages);
+    const unsub2 = subscribeToPackages(setPackages, { driverId: currentUser.id });
     return () => { unsub1(); unsub2(); };
   }, [today, currentUser.id]);
 

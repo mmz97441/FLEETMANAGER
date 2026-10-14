@@ -1,5 +1,6 @@
+import { decodeClientCsv } from '../utils/clientImportFile';
 import { importReference } from '../utils/importManifest';
-import { carrierBarcodeError } from '../utils/carrierBarcodeValidation';
+import { carrierBarcodeError, individualReferenceError, type CarrierBarcodeFormat } from '../utils/carrierBarcodeValidation';
 import { indexImportedPackageIds } from '../utils/importedPackageIds';
 /**
  * SERVICE D'IMPORT EXCEL
@@ -21,7 +22,7 @@ import {
   getPackagesByIds
 } from './missionService';
 // Source de vérité UNIQUE du regroupement par point de livraison (cf. address.ts).
-import { placeKey, phoneSignal, sameDeliveryPoint } from '../utils/address';
+import { recipientKey, sameDeliveryRecipient, intersectDeliveryWindows } from '../utils/address';
 
 /**
  * Génère un suffixe de barcode collision-résistant (10 chars base36 = ~3.7e15 combinaisons).
@@ -47,6 +48,8 @@ function generateBarcodeSuffix(length = 10): string {
 // Structure attendue du fichier client
 interface ClientFileRow {
   Carrier_Barcode?: string | number;
+  Carrier_Barcode_Format?: CarrierBarcodeFormat;
+  _referenceNumeric?: boolean;
   Client_Reference?: string;
   Id: string;                    // "C0004911-15087911"
   Address: string;               // "6 RUE DE L ETANG ZI BEL AIR,97450,SAINT LOUIS"
@@ -95,6 +98,7 @@ async function reconcileImportedPackages(result: ImportResult, packageIds: strin
 // espaces au lieu d'underscores, libellés français). Clé = en-tête en minuscules.
 const HEADER_ALIASES: Record<string, keyof ClientFileRow> = {
   'code boiron': 'Carrier_Barcode',
+  'format transporteur': 'Carrier_Barcode_Format',
   'code transporteur': 'Carrier_Barcode',
   'carrierbarcode': 'Carrier_Barcode',
   'référence': 'Client_Reference',
@@ -141,6 +145,8 @@ const HEADER_ALIASES: Record<string, keyof ClientFileRow> = {
  * Sans ça, le chauffeur appelle un numéro injoignable. On ne touche pas aux formats
  * internationaux explicites (+262…, 00…).
  */
+const parseServiceTime = (value: unknown): number => value === '' || value == null ? 5 : Number(value);
+
 const normalizeImportedPhone = (raw: unknown): string => {
   if (raw == null) return '';
   const s = String(raw).trim();
@@ -154,11 +160,13 @@ const canonicalizeRow = (row: Record<string, unknown>): ClientFileRow => {
   const normalized: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(row)) {
     const canonical = HEADER_ALIASES[key.trim().toLowerCase()] || key;
+    if (['code boiron', 'barcode boiron'].includes(key.trim().toLowerCase()) && value) normalized.Carrier_Barcode_Format = 'boiron';
     // Ne pas écraser une valeur déjà présente par une valeur vide (colonnes dupliquées)
     if (!(canonical in normalized) || normalized[canonical] === '') {
       normalized[canonical] = value;
     }
   }
+  if (typeof normalized.Carrier_Barcode_Format === 'string') normalized.Carrier_Barcode_Format = normalized.Carrier_Barcode_Format.toLowerCase();
   // Restaurer le 0 initial des téléphones perdu par le typage numérique du tableur.
   if (normalized.Telephone != null) normalized.Telephone = normalizeImportedPhone(normalized.Telephone);
   return normalized as unknown as ClientFileRow;
@@ -174,7 +182,9 @@ export const parseExcelFile = async (file: File): Promise<ClientFileRow[]> => {
     reader.onload = (e) => {
       try {
         const data = e.target?.result;
-        const workbook = XLSX.read(data, { type: 'binary' });
+        const workbook = /\.csv$/i.test(file.name)
+          ? XLSX.read(decodeClientCsv(Uint8Array.from(String(data), char => char.charCodeAt(0)).buffer), { type: 'string', raw: true })
+          : XLSX.read(data, { type: 'binary' });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
 
@@ -188,6 +198,7 @@ export const parseExcelFile = async (file: File): Promise<ClientFileRow[]> => {
         resolve(jsonData.map((data, i) => {
           const row = canonicalizeRow(data), original = canonicalizeRow(originals[i] || {});
           if (typeof original.Carrier_Barcode === 'number') row.Carrier_Barcode = original.Carrier_Barcode;
+          row._referenceNumeric = typeof original.Id === 'number' || (!original.Id && typeof original.Order_Number === 'number');
           return row;
         }));
       } catch (error) {
@@ -258,15 +269,14 @@ const rowToPackage = async (
   importBatchId: string
 ): Promise<{ package: Omit<Package, 'id' | 'createdAt' | 'updatedAt'> | null; error: ImportBatchError | null }> => {
   
-  const carrierError = carrierBarcodeError(row.Carrier_Barcode, row.Client_Reference || row.Order_Number);
-  if (carrierError) return { package: null, error: { row: rowIndex, field: 'Code Boiron', message: carrierError } };
+  const carrierError = carrierBarcodeError(row.Carrier_Barcode, row.Client_Reference || row.Order_Number, row.Carrier_Barcode_Format);
+  if (carrierError) return { package: null, error: { row: rowIndex, field: 'Code transporteur', message: carrierError } };
   // Validation des champs obligatoires
   if (!row.Address) {
     return { package: null, error: { row: rowIndex, field: 'Address', message: 'Adresse manquante' } };
   }
-  if (!row.Order_Number) {
-    return { package: null, error: { row: rowIndex, field: 'Order_Number', message: 'Numéro de commande manquant' } };
-  }
+  const referenceError = individualReferenceError(row._referenceNumeric ? 1 : row.Id || String(row.Order_Number || ''));
+  if (referenceError) return { package: null, error: { row: rowIndex, field: 'Id', message: referenceError } };
   if (!row.Contact) {
     return { package: null, error: { row: rowIndex, field: 'Contact', message: 'Contact manquant' } };
   }
@@ -289,8 +299,9 @@ const rowToPackage = async (
   const hasElevator = row.Elevator === '1' || row.Elevator === 1 || row.Elevator === 'true';
   const volume = typeof row.Volume === 'string' ? parseFloat(row.Volume) || 0 : row.Volume || 0;
   const weight = typeof row.Weight === 'string' ? parseFloat(row.Weight) || 0 : row.Weight || 0;
-  const serviceTime = typeof row.Service_Time === 'string' ? parseInt(row.Service_Time) || 5 : row.Service_Time || 5;
-  const orderNumber = String(row.Order_Number);
+  const serviceTime = parseServiceTime(row.Service_Time);
+  if (!Number.isFinite(serviceTime) || serviceTime <= 0 || !intersectDeliveryWindows([{ timeWindowStart: row.Start, timeWindowEnd: row.End }])) return { package: null, error: { row: rowIndex, message: 'Durée de service positive et créneau horaire valide requis.' } };
+  const orderNumber = String(row.Order_Number || row.Id);
   
   // Générer un tracking number unique FleetGenius
   // Format : GFL-YYMMDD-XXXXXXXXXX (10 chars CSPRNG, ~3.7e15 combinaisons)
@@ -311,7 +322,7 @@ const rowToPackage = async (
     externalId: row.Id || '',
     orderNumber,
     clientReference: row.Client_Reference || String(row.Order_Number || ''),
-    ...(row.Carrier_Barcode ? { carrierBarcode: String(row.Carrier_Barcode).trim() } : {}),
+    ...(row.Carrier_Barcode ? { carrierBarcode: String(row.Carrier_Barcode).trim(), carrierBarcodeFormat: row.Carrier_Barcode_Format || 'generic' } : {}),
     barcode: trackingNumber, // Tracking FleetGenius unique (GFL-YYMMDD-XXXXX)
     address,
     city,
@@ -454,17 +465,11 @@ export const groupPackagesByAddress = (
   packages: Package[]
 ): Map<string, Package[]> => {
   const groups = new Map<string, Package[]>();
-  
   for (const pkg of packages) {
-    // Clé = adresse normalisée (source de vérité unique : utils/address.ts)
-    const key = placeKey(pkg);
-
-    if (!groups.has(key)) {
-      groups.set(key, []);
-    }
-    groups.get(key)?.push(pkg);
+    const group = [...groups.values()].find(items => sameDeliveryRecipient(items[0], pkg) && intersectDeliveryWindows([...items, pkg]) !== null);
+    if (group) group.push(pkg); else groups.set(`${recipientKey(pkg)}|${groups.size}`, [pkg]);
   }
-  
+
   return groups;
 };
 
@@ -484,7 +489,8 @@ export const validateExcelFormat = async (file: File): Promise<{ valid: boolean;
     
     // Vérifier les colonnes obligatoires
     const firstRow = rows[0];
-    const requiredFields = ['Address', 'Order_Number', 'Contact'];
+    const requiredFields = ['Address', 'Contact'];
+    if (!('Id' in firstRow) && !('Order_Number' in firstRow)) errors.push('Colonne obligatoire manquante : Id (numéro individuel du colis)');
 
     const missing = requiredFields.filter(field => !(field in firstRow));
     for (const field of missing) {
@@ -532,8 +538,10 @@ export interface ReviewRow {
 
   // Champs éditables
   carrierBarcode?: string;
+  carrierBarcodeFormat?: CarrierBarcodeFormat;
   clientReference?: string;
   _carrierNumeric?: boolean;
+  _referenceNumeric?: boolean;
   externalId: string;
   orderNumber: string;
   address: string;
@@ -582,9 +590,10 @@ export const parseExcelForReview = async (file: File): Promise<ReviewResult> => 
 
     // Validations
     if (!raw.Address) errors.push('Adresse manquante');
-    if (!raw.Order_Number) errors.push('N° commande manquant');
+    const referenceError = individualReferenceError(raw._referenceNumeric ? 1 : raw.Id || String(raw.Order_Number || ''));
+    if (referenceError) errors.push(referenceError);
     if (!raw.Contact) errors.push('Contact manquant');
-    const carrierError = carrierBarcodeError(raw.Carrier_Barcode, raw.Client_Reference || raw.Order_Number);
+    const carrierError = carrierBarcodeError(raw.Carrier_Barcode, raw.Client_Reference || raw.Order_Number, raw.Carrier_Barcode_Format);
     if (carrierError) errors.push(carrierError);
 
     if (!postalCode && raw.Address) errors.push('Code postal non détecté');
@@ -603,7 +612,9 @@ export const parseExcelForReview = async (file: File): Promise<ReviewResult> => 
     // Warnings non bloquants
     if (!raw.Telephone) warnings.push('Pas de téléphone');
     if (!raw.Start && !raw.End) warnings.push('Pas de créneau horaire');
-    const svcTime = typeof raw.Service_Time === 'string' ? parseInt(raw.Service_Time) || 5 : raw.Service_Time || 5;
+    const svcTime = parseServiceTime(raw.Service_Time);
+    if (!Number.isFinite(svcTime) || svcTime <= 0) errors.push('Durée de service positive requise.');
+    if (!intersectDeliveryWindows([{ timeWindowStart: raw.Start, timeWindowEnd: raw.End }])) errors.push('Créneau invalide : fin après début, au format HH:MM.');
     if (svcTime > 60) warnings.push(`Temps de service élevé (${svcTime} min)`);
 
     const status = errors.length > 0 ? 'error' : warnings.length > 0 ? 'warning' : 'valid';
@@ -614,10 +625,12 @@ export const parseExcelForReview = async (file: File): Promise<ReviewResult> => 
       _errors: errors,
       _warnings: warnings,
       carrierBarcode: String(raw.Carrier_Barcode || '').trim(),
+      carrierBarcodeFormat: raw.Carrier_Barcode_Format || 'generic',
       clientReference: raw.Client_Reference || String(raw.Order_Number || ''),
       _carrierNumeric: typeof raw.Carrier_Barcode === 'number',
+      _referenceNumeric: raw._referenceNumeric,
       externalId: raw.Id || '',
-      orderNumber: String(raw.Order_Number || ''),
+      orderNumber: String(raw.Order_Number || raw.Id || ''),
       address,
       postalCode,
       city,
@@ -648,54 +661,16 @@ export const parseExcelForReview = async (file: File): Promise<ReviewResult> => 
   };
 };
 
-// ── Regroupement par POINT DE LIVRAISON (secure le nombre de colis à déposer) ──
-// Objectif : tous les colis destinés au MÊME point physique comptent ensemble
-// (ex. pharmacie qui reçoit 6 cartons sur 2 commandes) → le chauffeur voit le
-// bon total. On NE se base PAS sur le n° de commande (2 commandes = 1 point) ni
-// sur le nom (trop variable entre imports : "SARL PHCIE" vs "PHARMACIE" → ça
-// scinderait le groupe et sous-compterait). Clé fiable = adresse + CP + ville.
-// Renfort : même téléphone + même CP = même client (rattrape les fautes de
-// frappe dans l'adresse).
-
-// normAddr / normPhone / placeKey / phoneSignal / sameDeliveryPoint sont
-// désormais importés depuis utils/address.ts (source de vérité unique).
-// addrKey (adresse+CP+ville normalisés) == placeKey.
-
+// A shared count denotes one compatible visit for the same named recipient.
 const annotateMultiColisAndDuplicates = (reviewRows: ReviewRow[]): void => {
   const active = reviewRows.filter(r => r._status !== 'deleted');
-
-  // Union-Find : on relie les lignes qui partagent l'adresse OU le téléphone,
-  // pour former les composantes = points de livraison réels.
-  const parent = active.map((_, i) => i);
-  const find = (i: number): number => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
-  const union = (i: number, j: number) => { const ri = find(i), rj = find(j); if (ri !== rj) parent[ri] = rj; };
-
-  const byAddr = new Map<string, number>();
-  const byPhone = new Map<string, number>();
-  active.forEach((r, i) => {
-    const ak = placeKey(r);
-    if (byAddr.has(ak)) union(i, byAddr.get(ak)!); else byAddr.set(ak, i);
-    const pk = phoneSignal(r);
-    if (pk) {
-      const pcKey = `${pk}|${(r.postalCode || '').trim()}`;
-      if (byPhone.has(pcKey)) union(i, byPhone.get(pcKey)!); else byPhone.set(pcKey, i);
-    }
-  });
-
-  // Regrouper par composante
-  const groups = new Map<number, ReviewRow[]>();
-  active.forEach((r, i) => {
-    const root = find(i);
-    if (!groups.has(root)) groups.set(root, []);
-    groups.get(root)!.push(r);
-  });
-
-  for (const group of groups.values()) {
-    if (group.length > 1) {
-      group.forEach((r, i) => { r._multiColis = { index: i + 1, total: group.length }; });
-    } else {
-      group[0]._multiColis = undefined;
-    }
+  const groups: ReviewRow[][] = [];
+  for (const row of active) {
+    const group = groups.find(items => sameDeliveryRecipient(items[0], row) && intersectDeliveryWindows([...items, row]) !== null);
+    if (group) group.push(row); else groups.push([row]);
+  }
+  for (const group of groups) {
+    group.forEach((row, index) => { row._multiColis = group.length > 1 ? { index: index + 1, total: group.length } : undefined; });
   }
 
   // Vrai doublon = le même N° colis présent sur plusieurs lignes
@@ -721,12 +696,13 @@ const annotateMultiColisAndDuplicates = (reviewRows: ReviewRow[]): void => {
  */
 export const revalidateRow = async (row: ReviewRow, allRows: ReviewRow[]): Promise<ReviewRow> => {
   const errors: string[] = [];
-  const carrierError = carrierBarcodeError(row._carrierNumeric ? 1 : row.carrierBarcode, row.clientReference || row.orderNumber);
+  const carrierError = carrierBarcodeError(row._carrierNumeric ? 1 : row.carrierBarcode, row.clientReference || row.orderNumber, row.carrierBarcodeFormat);
   if (carrierError) errors.push(carrierError);
   const warnings: string[] = [];
 
   if (!row.address) errors.push('Adresse manquante');
-  if (!row.orderNumber) errors.push('N° commande manquant');
+  const referenceError = individualReferenceError(row._referenceNumeric ? 1 : row.externalId || row.orderNumber);
+  if (referenceError) errors.push(referenceError);
   if (!row.contactName) errors.push('Contact manquant');
   if (!row.postalCode) errors.push('Code postal manquant');
 
@@ -742,6 +718,8 @@ export const revalidateRow = async (row: ReviewRow, allRows: ReviewRow[]): Promi
 
   if (!row.contactPhone) warnings.push('Pas de téléphone');
   if (!row.timeWindowStart && !row.timeWindowEnd) warnings.push('Pas de créneau horaire');
+  if (!Number.isFinite(row.serviceTime) || row.serviceTime <= 0) errors.push('Durée de service positive requise.');
+  if (!intersectDeliveryWindows([row])) errors.push('Créneau invalide : fin après début, au format HH:MM.');
   if (row.serviceTime > 60) warnings.push(`Temps de service élevé (${row.serviceTime} min)`);
 
   // Vrai doublon = même N° colis qu'une autre ligne
@@ -755,17 +733,10 @@ export const revalidateRow = async (row: ReviewRow, allRows: ReviewRow[]): Promi
     if (dup) warnings.push(`Doublon : N° colis ${row.externalId} aussi présent ligne ${dup._rowIndex}`);
   }
 
-  // Multi-colis : même POINT DE LIVRAISON (adresse+CP+ville, ou tél+CP) — quel
-  // que soit le n° de commande. Aligné sur annotateMultiColisAndDuplicates.
   const updated = { ...row, zone };
-  const groupRowIndexes = allRows
-    .filter(r => r._rowIndex !== row._rowIndex && r._status !== 'deleted' && sameDeliveryPoint(r, updated))
-    .map(r => r._rowIndex)
-    .concat(row._rowIndex)
-    .sort((a, b) => a - b);
-  const multiColis = groupRowIndexes.length > 1
-    ? { index: groupRowIndexes.indexOf(row._rowIndex) + 1, total: groupRowIndexes.length }
-    : undefined;
+  const copies = allRows.map(item => item._rowIndex === row._rowIndex ? { ...updated, _warnings: [...warnings] } : { ...item, _warnings: [...item._warnings] });
+  annotateMultiColisAndDuplicates(copies);
+  const multiColis = copies.find(item => item._rowIndex === row._rowIndex)?._multiColis;
 
   return {
     ...updated,
@@ -847,7 +818,7 @@ export const confirmReviewedImport = async (
       externalId: row.externalId,
       orderNumber: row.orderNumber,
       clientReference: row.clientReference || row.orderNumber,
-      ...(row.carrierBarcode ? { carrierBarcode: row.carrierBarcode } : {}),
+      ...(row.carrierBarcode ? { carrierBarcode: row.carrierBarcode, carrierBarcodeFormat: row.carrierBarcodeFormat || 'generic' } : {}),
       barcode: `GFL-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${generateBarcodeSuffix()}`,
       address: row.address,
       city: row.city,

@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.prepareDeliveryStopHandler = prepareDeliveryStopHandler;
 const functions = __importStar(require("firebase-functions/v1"));
 const deliveryGroup_1 = require("./deliveryGroup");
+const deliveryAddress_1 = require("./deliveryAddress");
 const scanPackage_1 = require("./scanPackage");
 const validId = (id) => typeof id === 'string' && !!id && id.length <= 200 && !id.includes('/');
 async function prepareDeliveryStopHandler(data, context, deps) {
@@ -68,6 +69,8 @@ async function prepareDeliveryStopHandler(data, context, deps) {
         const parcels = await Promise.all(ids.map(id => tx.get(db.collection('packages').doc(id))));
         const targetIds = new Set(target.packageIds || []);
         const incoming = new Set(ids.filter(id => !targetIds.has(id)));
+        if (target.status !== 'En attente' && incoming.size)
+            refuse('Une remise a déjà commencé. Aucun nouveau colis ne peut être ajouté à cet arrêt.');
         const affected = stops.filter(s => s.id === target.id || s.packageIds?.some((id) => incoming.has(id)) || group.some(g => g.id === s.id));
         const proofSnaps = await Promise.all(affected.map(s => tx.get(db.collection('proofs_of_delivery').doc(`${ref.id}_${s.id}`))));
         if (proofSnaps.some(p => p.exists) || affected.some(s => s.proofSyncPending ||
@@ -75,11 +78,11 @@ async function prepareDeliveryStopHandler(data, context, deps) {
             refuse('Une remise a déjà commencé sur un autre arrêt. Terminez ou faites vérifier cette livraison avant de regrouper.');
         for (const parcel of parcels) {
             const p = parcel.data();
-            if (!p || ['Livré', 'Retourné', 'À retourner', 'Échec'].includes(p.status) || p.pod ||
+            if (!p || p.pickupMissing || ['AWAITING_DECISION', 'SENDER_RETURNED'].includes(p.returnDisposition) || ['Livré', 'Retourné', 'À retourner', 'Échec'].includes(p.status) || p.pod ||
                 (p.currentDriverId && p.currentDriverId !== caller.id) || (p.missionId && p.missionId !== ref.id))
                 refuse('Un colis a été livré, transféré ou retourné. Actualisez la tournée.');
-            if (incoming.has(parcel.id) && !(0, deliveryGroup_1.sameDeliveryRecipient)(target, p))
-                refuse('Un colis correspond à un autre destinataire ou à une autre adresse. Faites vérifier son affectation par le bureau.');
+            if (!(0, deliveryGroup_1.sameDeliveryRecipient)(target, p) || !(0, deliveryAddress_1.visitContainsParcelWindow)(target, p))
+                refuse('Un colis correspond à un autre destinataire, étage, adresse ou créneau. Faites vérifier son affectation par le bureau.');
             const owners = stops.filter(s => s.packageIds?.includes(parcel.id));
             if (owners.some(s => !affected.includes(s)) || (p.stopId && !owners.some(s => s.id === p.stopId)) ||
                 (p.missionId === ref.id && !owners.length))

@@ -35,6 +35,10 @@ const PODViewer: React.FC<PODViewerProps> = ({
   packageInfo,
   showDriverInfo = true
 }) => {
+  const isFailure = pod.type === 'FAILURE';
+  const proofTitle = isFailure ? 'Preuve de tentative non aboutie' : 'Preuve de livraison';
+  const destination = pod.destination ? { ...pod.destination, city: `${pod.destination.postalCode} ${pod.destination.city}` } : packageInfo;
+  const addressLabel = pod.destination ? 'Adresse lors de la tentative' : 'Adresse actuelle (preuve historique sans adresse figée)';
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState(0);
 
@@ -89,20 +93,21 @@ const PODViewer: React.FC<PODViewerProps> = ({
         hr { border: none; border-top: 1px dashed #ccc; margin: 15px 0; }
         @media print { body { padding: 10px; } }
       </style></head><body>
-        <h1>Preuve de Livraison</h1>
-        ${packageInfo ? `
-          <div class="row"><span class="label">Commande :</span><span class="value">${escapeHtml(packageInfo.orderNumber)}</span></div>
-          <div class="row"><span class="label">Destinataire :</span><span class="value">${escapeHtml(packageInfo.contactName)}</span></div>
-          <div class="row"><span class="label">Adresse :</span><span class="value">${escapeHtml(packageInfo.address)}, ${escapeHtml(packageInfo.city)}</span></div>
+        <h1>${proofTitle}</h1>
+        ${destination ? `
+          <div class="row"><span class="label">Commande :</span><span class="value">${escapeHtml(packageInfo?.orderNumber || pod.packageId)}</span></div>
+          <div class="row"><span class="label">Destinataire :</span><span class="value">${escapeHtml(destination.contactName)}</span></div>
+          <div class="row"><span class="label">${addressLabel} :</span><span class="value">${escapeHtml(destination.address)}, ${escapeHtml(destination.city)}</span></div>
         ` : ''}
         <hr />
-        <div class="row"><span class="label">Réceptionné par :</span><span class="value">${escapeHtml(pod.recipientName || 'Non renseigné')}</span></div>
+        ${!isFailure ? `<div class="row"><span class="label">Réceptionné par :</span><span class="value">${escapeHtml(pod.recipientName || 'Non renseigné')}</span></div>` : ''}
         ${pod.deliveryLocation ? `<div class="row"><span class="label">Lieu de remise :</span><span class="value">${escapeHtml(pod.deliveryLocation)}</span></div>` : ''}
         <div class="row"><span class="label">Date / Heure :</span><span class="value">${formatDate(pod.timestamp)}</span></div>
         <div class="row"><span class="label">Chauffeur :</span><span class="value">${escapeHtml(pod.driverName)}</span></div>
         <div class="row"><span class="label">Véhicule :</span><span class="value">${escapeHtml(pod.vehiclePlate)}</span></div>
-        <div class="row"><span class="label">Coordonnées GPS :</span><span class="value">${pod.coordinates.lat.toFixed(6)}, ${pod.coordinates.lng.toFixed(6)}</span></div>
+        <div class="row"><span class="label">Coordonnées GPS :</span><span class="value">${pod.coordinates ? `${pod.coordinates.lat.toFixed(6)}, ${pod.coordinates.lng.toFixed(6)}` : 'Position non disponible'}</span></div>
         ${pod.notes ? `<div class="row"><span class="label">Notes :</span><span class="value">${escapeHtml(pod.notes)}</span></div>` : ''}
+        ${isFailure ? `<div class="row"><span class="label">Motif :</span><span class="value">${escapeHtml(pod.failureReason || 'Non renseigné')}</span></div>${pod.failureNotes ? `<p>${escapeHtml(pod.failureNotes)}</p>` : ''}` : ''}
         <hr />
         ${pod.signatureUrl ? `
           <div class="signature-block">
@@ -128,7 +133,7 @@ const PODViewer: React.FC<PODViewerProps> = ({
           {/* Header */}
           <div className="sticky top-0 bg-white z-10 flex items-center justify-between px-5 py-3 border-b border-slate-200 rounded-t-2xl">
             <div>
-              <h3 className="font-bold text-slate-800 text-sm">Preuve de livraison</h3>
+              <h3 className="font-bold text-slate-800 text-sm">{proofTitle}</h3>
               {packageInfo && (
                 <p className="text-xs text-slate-500">Commande {packageInfo.orderNumber}</p>
               )}
@@ -151,30 +156,38 @@ const PODViewer: React.FC<PODViewerProps> = ({
           <div className="p-5 space-y-4">
 
             {/* Badge statut */}
-            <div className="flex items-center gap-3 bg-emerald-50 rounded-xl p-3 border border-emerald-200">
-              <div className="bg-emerald-100 p-2 rounded-full">
-                <PenTool size={18} className="text-emerald-600" />
+            <div className={`flex items-center gap-3 rounded-xl p-3 border ${isFailure ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'}`}>
+              <div className={`p-2 rounded-full ${isFailure ? 'bg-red-100' : 'bg-emerald-100'}`}>
+                {isFailure ? <AlertTriangle size={18} className="text-red-600" /> : <PenTool size={18} className="text-emerald-600" />}
               </div>
               <div>
-                <p className="text-sm font-bold text-emerald-800">Livré avec succès</p>
+                <p className={`text-sm font-bold ${isFailure ? 'text-red-800' : 'text-emerald-800'}`}>{isFailure ? 'Colis non remis' : 'Livré avec succès'}</p>
                 <p className="text-xs text-emerald-600">
                   {formatDate(pod.timestamp)}
                 </p>
               </div>
             </div>
 
+            {isFailure && <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+              <p className="font-bold">{pod.failureReason || 'Motif non renseigné'}</p>
+              {pod.failureNotes && <p className="mt-1">{pod.failureNotes}</p>}
+              {!pod.coordinates && <p className="mt-1 text-xs">Position non disponible lors de la tentative.</p>}
+            </div>}
             {/* Destinataire */}
-            {packageInfo && (
+            {destination && (
               <div className="space-y-1">
                 <p className="text-xs font-bold text-slate-400 uppercase">Destinataire</p>
-                <p className="font-bold text-slate-800">{packageInfo.contactName}</p>
-                <p className="text-sm text-slate-600">{packageInfo.address}</p>
-                <p className="text-sm text-slate-600">{packageInfo.city}</p>
+                <p className="font-bold text-slate-800">{destination.contactName}</p>
+                <p className="text-xs text-slate-500">{addressLabel}</p>
+                <p className="text-sm text-slate-600">{destination.address}</p>
+                <p className="text-sm text-slate-600">{destination.city}</p>
+                {pod.destination?.floor != null && <p className="text-xs text-slate-500">Étage {pod.destination.floor}</p>}
+                {(pod.destination?.timeWindowStart || pod.destination?.timeWindowEnd) && <p className="text-xs text-slate-500">Créneau : {pod.destination.timeWindowStart || '—'} – {pod.destination.timeWindowEnd || '—'}</p>}
               </div>
             )}
 
             {/* Réceptionné par */}
-            <div className="flex items-center gap-3 bg-slate-50 rounded-xl p-3">
+            {!isFailure && <div className="flex items-center gap-3 bg-slate-50 rounded-xl p-3">
               <User size={16} className="text-slate-400" />
               <div className="flex-1">
                 <p className="text-xs text-slate-500">Réceptionné par</p>
@@ -192,7 +205,7 @@ const PODViewer: React.FC<PODViewerProps> = ({
                   {' '}{pod.deliveryLocation}
                 </span>
               )}
-            </div>
+            </div>}
 
             {/* État de la marchandise à la réception */}
             {typeof pod.merchandiseGoodCondition === 'boolean' && (
