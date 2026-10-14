@@ -13,10 +13,10 @@ const point = { address: '28 rue Joseph Bédier', city: 'Saint-Denis', postalCod
 const read = async (col, id) => (await db.collection(col).doc(id).get()).data();
 let count = 0, sequence = 0;
 const check = async (name, task) => { await task(); console.log('PASS', name); count++; };
-async function seed() {
-  const missionId = prefix + '-' + (++sequence), ids = [1, 2, 3].map(n => missionId + '-p' + n);
+async function seed(parcelCount = 3) {
+  const missionId = prefix + '-' + (++sequence), ids = Array.from({ length: parcelCount }, (_, n) => missionId + '-p' + n);
   const stops = ids.map((id, i) => ({ ...point, id: 's' + i, type: 'DELIVERY', status: 'En attente', sequence: i + 1, packageIds: [id], packageCount: 1, serviceTime: 5 }));
-  await db.collection('missions').doc(missionId).set({ driverId: driver, date: scanBusinessDay(new Date()), status: 'En cours', type: 'Livraison', stops, totalPackages: 3 });
+  await db.collection('missions').doc(missionId).set({ driverId: driver, date: scanBusinessDay(new Date()), status: 'En cours', type: 'Livraison', stops, totalPackages: parcelCount });
   await Promise.all(ids.map((id, i) => db.collection('packages').doc(id).set({ ...point, externalId: 'BR' + sequence + i, orderNumber: 'ORDER' + i,
     status: 'En livraison', currentDriverId: driver, missionId, stopId: 's' + i, movements: [] })));
   const prepare = (options = {}, who = driver) => service.prepareDeliveryStop.run({ missionId, stopId: 's0', ...options }, ctx(who));
@@ -45,6 +45,17 @@ async function seed() {
     await Promise.all([prepare({ arrive: true }), prepare({ arrive: true })]);
     assert.equal((await read('missions', missionId)).stops.length, 1);
     assert.equal((await db.collection('activity_logs').where('targetId', '==', missionId).get()).size, 1);
+  });
+  for (const parcelCount of [1, 10]) await check(`${parcelCount} parcels for one recipient are prepared and individually verified`, async () => {
+    const { prepare, ids, missionId } = await seed(parcelCount);
+    const { mission } = await prepare({ arrive: true });
+    assert.equal(mission.stops.length, 1);
+    assert.equal(mission.stops[0].packageCount, parcelCount);
+    assert.deepEqual(mission.stops[0].packageIds, ids);
+    for (const packageId of ids) {
+      const receipt = await service.scanPackage.run({ requestId: randomUUID(), source: 'driver-delivery', packageId, targetMissionId: missionId, stopId: 's0' }, ctx(driver));
+      assert.equal(receipt.accepted, true);
+    }
   });
   await check('a duplicate parcel left in two pending stops is counted only once and has one owner', async () => {
     const { prepare, missionId, ids, stops } = await seed();
